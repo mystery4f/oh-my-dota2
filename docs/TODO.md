@@ -65,14 +65,15 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
     剩余部分继续排队，代价是多写一个帧头解析器。
   - 涉及文件：`src/main/services/voice/edge.ts`、`src/main/services/voice/speech.ts`、
     `src/shared/ipc.ts`（`SpeakPayload` 需要 chunk 形态）、`src/renderer/src/`（播放侧）。
-- `#20` 离线引擎（**已完成**，2026-11）：实测 5 个模型后先用 `matcha-icefall-zh-baker`
-  （RTF 0.09–0.13，每句 81–193 ms），但用户当场否掉音色，已换成 **`vits-melo-tts-zh_en`**（44.1 kHz，0.37–0.80 s/句）；Kokoro int8 最慢（RTF 1.3–2.7）且要 jieba + 词典 + FST，`vits-zh-aishell3` 只有 8 kHz，均已否决。
-  - 运行时：`sherpa-onnx-node`，但**必须跑在系统 node.exe 子进程里**——Electron 的任何运行时都会抛
-    `External buffers are not allowed`（N-API 外部缓冲被禁），换版本、换 `ELECTRON_RUN_AS_NODE` 都无效。
-  - 交付：`resources/tts-offline-worker.cjs`（常驻子进程，引擎只加载一次）+ `extraResources`；
-    `offlineNodeBinary()` 探测 node，没有就把面板「本地模型」置灰并注明原因。
-  - 模型可选下载到 `data/tts-models/`（163 MB；MeloTTS 为 MIT，不进安装包只为体积）。
-  - 验收：`--tts-offline-probe` 3/3，首句 ≈2.4 s（含加载），之后 p50 111–249 ms。
+- `#20` 离线引擎（**已完成**，2026-11）：最终形态见上面「离线朗读（2026-11 定案）」一节——四个音色 `melo` / `baker` / `xiao_ya` / `eula`，`sherpa-onnx-node` 跑在系统 node 子进程里。
+  - 选型过程留档，别再重复试：`vits-zh-aishell3` 只有 8 kHz；`kokoro-multi-lang-v1_1` 要 jieba + 词典 + FST，RTF 1.3–2.7 最慢；`baker` 先因音色被否、后又被留用；`melo` 44.1 kHz 最好听但每句重载 183 MB，冷启动 5 s。
+  - 运行时铁律：Electron 的任何运行时（包括 `ELECTRON_RUN_AS_NODE`）都会抛 `External buffers are not allowed`，只有系统 `node.exe` 子进程能跑 sherpa。
+  - 模型不进安装包（只为体积），首次选音色时下载到 `data/tts-models/`。
+- `#21` baker 的声码器在**安装版**首次下载没验证过：`vocos-22khz-univ.onnx`（53 MB，放 `tts-models/` 根目录，四个音色共用）只在 dev 用户态跑过，安装版写的是 `G:\oh-my-dota2-data\tts-models\`。
+  - 验收：安装版把引擎切「本地模型」选 baker，看到下载日志 → 模型就绪 → 出声；弱网可先手动把 onnx 丢进该目录，程序检测到就不下。
+- `#22` Edge **分句流式**已实现但没测过数字：`splitForSpeech`（≤20 字按标点切）+ 并行合成 + 顺序播放（commit `fb496da`），`SPEAK_QUEUE_MAX` 已从 3 提到 6。
+  - 缺的是基线：首段延迟、整句延迟、失败率都还没跑（`--tts-bench` 要独占实例，dev 应用持有单实例锁）。
+  - 验收：关掉 dev 应用后 `npx electron out/main/index.js --tts-bench`，首段 p50 应明显低于整句 p50。
 
 ## 离线朗读（2026-11 定案，别再按模型名瞎试）
 
