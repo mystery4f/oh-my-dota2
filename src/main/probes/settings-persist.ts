@@ -16,7 +16,8 @@ const PERSISTED_FIELDS = [
   'overlayOpacity',
   'ttsEngine',
   'ttsVoice',
-  'ttsPitch'
+  'ttsPitch',
+  'ttsReadOwn',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -39,6 +40,8 @@ function sentinelFor(
       return 0.2 as AppSettings[typeof key]
     case 'overlayLocked':
       return !current.overlayLocked as AppSettings[typeof key]
+    case 'ttsReadOwn':
+      return !current.ttsReadOwn as AppSettings[typeof key]
     case 'ttsEngine':
       return (current.ttsEngine === 'edge' ? 'system' : 'edge') as AppSettings[typeof key]
     case 'ttsVoice':

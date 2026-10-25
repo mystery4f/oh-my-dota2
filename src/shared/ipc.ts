@@ -120,6 +120,12 @@ export interface AppSettings {
    * 走 Chromium 的 speechSynthesis，全离线、不花 token、不联网。
    */
   ttsReadAloud: boolean
+  /**
+   * 自己也念：默认关。自己刚打完的字不必再听一遍，而且真对局里自己那句「::」
+   * 会被念成「司夜刺客说，」紧接敌方的「基地」，听成「司夜刺客说基地」。
+   * 想核对发音、或单人练英雄时打开它。
+   */
+  ttsReadOwn: boolean
   /** 朗读语速，1 = 正常；超过 2 会听不清，低于 0.6 会跟不上聊天节奏。 */
   ttsRate: number
   /**
@@ -166,6 +172,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayText: 'translated',
   crossToneLookup: true,
   ttsReadAloud: false,
+  ttsReadOwn: false,
   ttsRate: 1,
   ttsPitch: 1,
   ttsVoice: '',

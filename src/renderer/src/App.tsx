@@ -396,6 +396,7 @@ function SendCard(): React.ReactElement {
 function OverlayCard(): React.ReactElement {
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
   const [readAloud, setReadAloud] = useState(false)
+  const [readOwn, setReadOwn] = useState(false)
   const [engine, setEngine] = useState<'system' | 'edge' | 'offline'>('edge')
   const [offline, setOffline] = useState<{ ready: boolean; bytes: number; downloading: boolean; progress: number; error: string | null } | null>(null)
   useEffect(() => {
@@ -412,6 +413,7 @@ function OverlayCard(): React.ReactElement {
     // 面板要显示真值而不是初值：朗读默认关，浮层状态平时只靠广播。
     void window.api.getSettings().then((next) => {
       setReadAloud(next.ttsReadAloud)
+      setReadOwn(next.ttsReadOwn)
       setEngine(next.ttsEngine)
       setVoice(next.ttsVoice || DEFAULT_EDGE_VOICE)
       setOfflineVoice(next.ttsOfflineVoice ?? 'keqing')
@@ -507,6 +509,20 @@ function OverlayCard(): React.ReactElement {
             title="把新消息念出来。中文原话、英文译文都会念，只念内容不念「谁说的」"
           >
             朗读：{readAloud ? '开' : '关'}
+          </Button>
+          {/* 自己发的也念：默认关。开着时会把自己的话念出来，配合语音核对发音很顺手，
+              代价是自己那句和紧接着的译文会连读成一句话（「司夜刺客说，基地」）。 */}
+          <Button
+            variant={readOwn ? 'secondary' : 'outline'}
+            disabled={!readAloud}
+            onClick={() => {
+              const next = !readOwn
+              setReadOwn(next)
+              void window.api.setSettings({ ttsReadOwn: next })
+            }}
+            title="自己发的消息也念出来。默认关：自己刚打完的字不必再听一遍"
+          >
+            自己的话：{readOwn ? '念' : '不念'}
           </Button>
           {/* 两个下拉：左边选路子（分类），右边选具体嗓子（选项）。
               分类只有三种，选项随分类变；系统嗓子没有选项，右侧控件保持禁用而不是消失——

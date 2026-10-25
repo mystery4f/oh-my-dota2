@@ -38,6 +38,7 @@ export async function runTtsPlayProbe(): Promise<void> {
   const engineRows = (['system', 'edge', 'offline'] as const).map((engine) => {
     const options = speakOptionsFromSettings({
       ttsReadAloud: true,
+      ttsReadOwn: false,
       ttsRate: 1,
       ttsPitch: 1,
       ttsVoice: '',
@@ -51,6 +52,34 @@ export async function runTtsPlayProbe(): Promise<void> {
   })
   const engineOk = engineRows.every((row) => row.ok)
   console.log('TTS_SPEAK_ENGINE_CASES', JSON.stringify({ engineOk, rows: engineRows }))
+  // 「自己的话也念」这个开关必须真的传到 decideSpeak：默认关（自己的话不念），
+  // 打开后同一句要念出来。两行都断言，免得开关变成面板上的摆设。
+  const ownEntry = {
+    id: '9',
+    ts: 0,
+    pending: false,
+    own: true,
+    original: '[nyx_assassin] [我] [Balance(Bot)] ⚔ push top',
+    translated: '推上路',
+    speaker: 'nyx_assassin'
+  }
+  const ownSession = (readOwn: boolean) =>
+    decideSpeak(ownEntry as never, {
+      ...speakOptionsFromSettings({
+        ttsReadAloud: true,
+        ttsReadOwn: readOwn,
+        ttsRate: 1,
+        ttsPitch: 1,
+        ttsVoice: '',
+        ttsEngine: 'edge'
+      })
+    })
+  const ownRows = [
+    { name: '默认：自己的话不念', want: null, got: ownSession(false)?.text ?? null },
+    { name: '开关打开：自己的话照念', want: '司夜刺客说，推上路', got: ownSession(true)?.text ?? null }
+  ].map((row) => ({ ...row, ok: row.got === row.want }))
+  const ownOk = ownRows.every((row) => row.ok)
+  console.log('TTS_SPEAK_OWN_CASES', JSON.stringify({ ownOk, rows: ownRows }))
 
   const text = '小心中路，他们可能在打肉山'
   const audio = await synthesizeEdge(text, DEFAULT_EDGE_VOICE, 1)
@@ -127,7 +156,7 @@ export async function runTtsPlayProbe(): Promise<void> {
   console.log(
     'TTS_PLAY_RESULT',
     JSON.stringify({
-      ok: speakOk && engineOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      ok: speakOk && engineOk && ownOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
       speakOk,
       engineOk,
       playOkCount,

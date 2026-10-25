@@ -69,6 +69,8 @@ export interface SpeakOptions {
   /** 朗读引擎：edge 用神经语音，system 用系统嗓子。默认 edge。 */
   engine?: 'system' | 'edge' | 'offline'
   readAloud: boolean
+  /** 自己发的也念；缺省关闭（见 AppSettings.ttsReadOwn）。 */
+  readOwn?: boolean
   rate: number
   /** 音高倍率，1 = 原声；只有 Edge 引擎认这个参数。 */
   pitch: number
@@ -85,7 +87,7 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
   // 自己说的话不念：出声只为了听懂别人；真对局实测（2026-10-25, match 9060903477），
   // 自己那句「::」被念成「司夜刺客说，」、紧接着敌方的 BASE 译文「基地」到达，
   // 两句连听就成了「司夜刺客说基地」——own 正是为这个跳过而存在的字段。
-  if (entry.own === true) return null
+  if (entry.own === true && options.readOwn !== true) return null
   if (entry.pending) return null
   // 念之前先剥掉 `[昵称] ⚔` 这类装饰；剥空了就退回原文正文，别念一串标签。
   const body = speakText(entry.translated ?? '') || speakText(entry.original)
@@ -113,6 +115,7 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
  */
 export function speakOptionsFromSettings(settings: {
   ttsReadAloud: boolean
+  ttsReadOwn: boolean
   ttsRate: number
   ttsPitch: number
   ttsVoice: string
@@ -121,6 +124,7 @@ export function speakOptionsFromSettings(settings: {
   return {
     engine: settings.ttsEngine,
     readAloud: settings.ttsReadAloud,
+    readOwn: settings.ttsReadOwn,
     rate: settings.ttsRate,
     pitch: settings.ttsPitch,
     voice: settings.ttsVoice
