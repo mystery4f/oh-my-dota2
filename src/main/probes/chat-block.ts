@@ -38,9 +38,9 @@ export async function runChatBlockProbe(): Promise<void> {
     { body: 'g', want: false },
     { body: '啥', want: false },
     { body: '  ...  ', want: false },
-    { body: 'gg', want: true },
+    { body: 'gg', want: false },
     { body: 'gg wp', want: true },
-    { body: '中路', want: true },
+    { body: '中路', want: false },
     { body: 'push 中路', want: true },
     { body: '? go ?', want: true }
   ].map((item) => ({ ...item, got: worthTranslating(item.body) }))

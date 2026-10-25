@@ -30,14 +30,14 @@ export function hasHan(text: string): boolean {
 /**
  * 这条正文值不值得翻。两种行不值得，都不该进模型队列：
  * 没有字母也没有汉字（`???`、`。。。`、`666`、纯 emoji）——没有可翻的文字；
- * 只剩一个字符（`G`、`?`、`嗯`）——单字没有上下文，模型只会把原样吐回来。
+ * 少于三个字符（`G`、`gg`、`ok`、`嗯`）——一两个字没有上下文，模型只会把原样吐回来。
  * 与 `hasHan` 的分工：hasHan 判「已经是目标语言」，这里判「根本没有可翻的文字」。
  */
 export function worthTranslating(body: string): boolean {
   const trimmed = body.replace(/\s+/gu, ' ').trim()
   if (trimmed.length === 0) return false
   if (!/[A-Za-z]/.test(trimmed) && !hasHan(trimmed)) return false
-  return [...trimmed].length > 1
+  return [...trimmed].length > 2
 }
 
 export function chatBody(text: string): string {
