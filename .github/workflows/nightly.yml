@@ -1,0 +1,81 @@
+name: Nightly
+
+# Every push to main produces a downloadable pre-release whose name carries the
+# build timestamp, so two nightlies from the same day never look identical.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  nightly:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The version string is the only thing that survives into an installed build,
+      # so it has to carry the channel: the app reads "-nightly." to switch the
+      # updater onto nightly.yml. Without this a nightly install offers v1.0.0.
+      - name: Stamp the version
+        id: stamp
+        shell: bash
+        run: |
+          STAMP=$(date -u +%Y%m%d-%H%M%S)
+          BASE=$(node -p "require('./package.json').version.split('-')[0]")
+          node -e "const fs=require('fs');const p=require('./package.json');p.version='$BASE-nightly.$STAMP';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+String.fromCharCode(10))"
+          node -p "require('./package.json').version"
+          echo "value=$STAMP" >> "$GITHUB_OUTPUT"
+
+      - name: Build and package
+        env:
+          # Nothing here is signed; without this electron-builder tries to find a
+          # certificate and fails the run.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run pack:win -- --config.publish.channel=nightly
+
+      - name: Publish pre-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STAMP: ${{ steps.stamp.outputs.value }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Tag MUST be semver: electron-updater's GitHub provider walks the
+          # releases.atom feed and skips any tag that semver.valid() rejects, then
+          # throws "No published versions on GitHub" when nothing is left. A tag
+          # like `nightly-20261024-194835` fails that check outright; the version
+          # string (1.0.0-nightly.20261024-194835) is what the provider wants —
+          # its prerelease identifier "nightly" is also how the nightly.yml
+          # channel file gets picked.
+          VERSION=$(node -p "require('./package.json').version")
+          gh release create "v$VERSION" dist/*.exe dist/*.zip dist/*.yml dist/*.blockmap \
+            --prerelease \
+            --title "Nightly $STAMP" \
+            --notes "Automatic build of \`$SHA\` on $(date -u +'%Y-%m-%d %H:%M UTC')."
+
+      - name: Delete every nightly but the newest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 100 --json tagName,createdAt,isPrerelease \
+            --jq '[.[] | select(.isPrerelease)] | sort_by(.createdAt) | reverse | .[1:] | .[].tagName' \
+            > old-nightlies.txt
+          while read -r tag; do
+            [ -n "$tag" ] && gh release delete "$tag" --yes --cleanup-tag
+          done < old-nightlies.txt

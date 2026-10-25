@@ -1,0 +1,62 @@
+{
+  "name": "oh-my-dota2",
+  "version": "1.1.0",
+  "description": "Zero-injection Dota 2 teammate communication tool: chat OCR translation overlay, voice transcription, mic language conversion",
+  "main": "./out/main/index.js",
+  "author": "mystery4f <40482524+mystery4f@users.noreply.github.com>",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "lint": "eslint .",
+    "probe": "electron out/main/index.js",
+    "pack": "npm run guard && npm run build && electron-builder --publish never",
+    "pack:win": "npm run guard && npm run build && electron-builder --win --x64 --publish never",
+    "dev:stop": "powershell -NoProfile -Command \"Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force\"",
+    "dev:restart": "npm run dev:stop && npm run dev",
+    "guard": "node scripts/guard-secrets.mjs"
+  },
+  "dependencies": {
+    "@andresaya/edge-tts": "^1.9.1",
+    "@earendil-works/chord": "^1.4.0",
+    "@earendil-works/pi-ai": "^1.4.0",
+    "@earendil-works/pi-durable": "^1.4.0",
+    "electron-updater": "^6.8.11",
+    "global-agent": "^4.1.3",
+    "https-proxy-agent": "^9.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "@types/node": "^22.15.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.5.0",
+    "autoprefixer": "^10.4.21",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^3.1.0",
+    "eslint": "^9.28.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "lucide-react": "^0.510.0",
+    "postcss": "^8.5.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rollup": "npm:@rollup/wasm-node@^4.65.0",
+    "sherpa-onnx-node": "^1.13.8",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.33.0",
+    "vite": "^6.3.5"
+  },
+  "allowScripts": {
+    "sharp@0.34.5": true
+  }
+}

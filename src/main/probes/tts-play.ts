@@ -1,0 +1,88 @@
+import { BrowserWindow } from 'electron'
+import { join } from 'node:path'
+import { IPC } from '@shared/ipc'
+import { DEFAULT_EDGE_VOICE, synthesizeEdge } from '../services/voice/edge'
+import { decideSpeak } from '../services/voice/speech'
+
+/**
+ * 朗读播放探针（--tts-play-probe）：把「主进程合成 + 浮层真的出声」拆开验。
+ *
+ * 为什么要这个探针：朗读失效时，合成成功和播放成功在日志里长得一样——
+ * 都是「什么都没发生」。这里把浮层的控制台日志抓回来，明确说出是播放被拒、
+ * 音频解码失败，还是整条链路根本没走到。
+ */
+export async function runTtsPlayProbe(): Promise<void> {
+  // 先验「该不该念、念什么」这条纯逻辑：它坏了，合成和播放再正常也是静音。
+  const speakCases = [
+    { name: '中文原话（不翻译也要念）', entry: { id: '1', ts: 0, pending: false, original: '[All] 队友甲: 小心中路，他们可能在打肉山', translated: null }, want: '小心中路，他们可能在打肉山' },
+    { name: '英文译文优先', entry: { id: '2', ts: 0, pending: false, original: '[Team] X: push top', translated: '推上路' }, want: '推上路' },
+    { name: '有英雄名就念「谁说」', entry: { id: '5', ts: 0, pending: false, original: '[lina] [队友] [队友甲] ⚔ push top', translated: '推上路', speaker: 'lina' }, want: '莉娜说，推上路' },
+    { name: '中文原话也带英雄名', entry: { id: '6', ts: 0, pending: false, original: '[pudge] [敌方] [敌人乙] 🌐 中路没人', translated: null, speaker: 'nevermore' }, want: '影魔说，中路没人' },
+    { name: '还没翻完不念', entry: { id: '3', ts: 0, pending: true, original: '[Team] X: push top' }, want: null },
+    { name: '整行只有符号不念', entry: { id: '4', ts: 0, pending: false, original: '[All] ⚔ 🌐' }, want: null }
+  ]
+  const speakRows = speakCases.map((item) => {
+    const got = decideSpeak(item.entry as never, { readAloud: true, voice: '', rate: 1, pitch: 1 })
+    return { name: item.name, want: item.want, got: got ? got.text : null, ok: (got ? got.text : null) === item.want }
+  })
+  const speakOk = speakRows.every((row) => row.ok)
+  console.log('TTS_SPEAK_CASES', JSON.stringify({ speakOk, rows: speakRows }))
+
+  const text = '小心中路，他们可能在打肉山'
+  const audio = await synthesizeEdge(text, DEFAULT_EDGE_VOICE, 1)
+  console.log('TTS_PLAY_SYNTH', JSON.stringify({ bytes: audio?.length ?? 0 }))
+
+  const win = new BrowserWindow({
+    show: false,
+    width: 420,
+    height: 200,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true
+    }
+  })
+
+  const logs: string[] = []
+  win.webContents.on('console-message', (_event, _level, message) => {
+    logs.push(message)
+    console.log('RENDERER_LOG', message)
+  })
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    await win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/overlay.html`)
+  } else {
+    await win.loadFile(join(__dirname, '../renderer/overlay.html'))
+  }
+
+  if (audio) {
+    win.webContents.send(IPC.VOICE_SPEAK, {
+      text,
+      lang: 'zh',
+      rate: 1,
+      voice: DEFAULT_EDGE_VOICE,
+      audio: audio.toString('base64')
+    })
+  }
+  // 没有音频也发一次：这条走系统嗓子，用来区分「合成没成」还是「播放被拒」。
+  else {
+    win.webContents.send(IPC.VOICE_SPEAK, {
+      text,
+      lang: 'zh',
+      rate: 1,
+      voice: DEFAULT_EDGE_VOICE
+    })
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 4000))
+  const played = logs.some((line) => line.includes('VOICE_PLAY_OK'))
+  const failed = logs.filter((line) => line.includes('VOICE_PLAY_FAILED'))
+  const broken = logs.filter((line) => line.includes('VOICE_AUDIO_ERROR'))
+  console.log(
+    'TTS_PLAY_RESULT',
+    JSON.stringify({ ok: speakOk && (played || Boolean(audio)), speakOk, played, failed, broken })
+  )
+  win.destroy()
+  const { app } = await import('electron')
+  app.exit(0)
+}

@@ -1,0 +1,12 @@
+node_modules/
+out/
+dist/
+*.log
+.env
+
+# pi agent session state
+.pi/
+.DS_Store
+.tmp/
+
+data/

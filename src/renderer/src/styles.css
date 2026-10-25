@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 20 14% 4%;
+    --foreground: 36 40% 92%;
+    --card: 24 10% 8%;
+    --card-foreground: 36 40% 92%;
+    --primary: 14 80% 52%;
+    --primary-foreground: 20 14% 4%;
+    --secondary: 24 8% 14%;
+    --secondary-foreground: 36 30% 88%;
+    --muted: 24 8% 14%;
+    --muted-foreground: 30 10% 62%;
+    --accent: 40 70% 48%;
+    --accent-foreground: 20 14% 4%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 24 8% 18%;
+    --input: 24 8% 18%;
+    --ring: 14 80% 52%;
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  }
+}
+
+/* 覆盖式标题栏要的可拖动/不可拖动区域。 */
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 深色界面上原生滚动条像一条白杠，压窄并染上边框色。 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: hsl(var(--border));
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(24 8% 26%);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 卡片描边在纯黑底上过亮，压一档让它退到背景里。 */
+@layer components {
+  .card-tight {
+    @apply rounded-xl border border-border/70 bg-card shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset];
+  }
+}

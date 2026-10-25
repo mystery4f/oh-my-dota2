@@ -1,0 +1,54 @@
+appId: com.mystery4f.oh-my-dota2
+productName: oh-my-dota2
+copyright: Copyright © 2026 mystery4f
+
+# 只打中文和英文的 Electron 语言包：43 MB 的 locales 目录能砍掉一大半。
+electronLanguages:
+  - zh-CN
+  - en-US
+
+directories:
+  output: dist
+  buildResources: build
+
+# Only the compiled bundle ships; sources, probes' fixtures and docs stay out of the archive.
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.{map,md,ts,tsx}'
+
+# Native addons cannot be loaded from inside an asar archive.
+asarUnpack:
+  - '**/*.node'
+  - '**/node_modules/sharp/**'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# 自动更新靠这份 publish 配置：打包时写进 resources/app-update.yml，
+# 安装包旁边还会多出 latest.yml，供 electron-updater 比对版本。
+publish:
+  provider: github
+  owner: mystery4f
+  repo: oh-my-dota2
+
+extraResources:
+  - from: resources/tts-offline-worker.cjs
+    to: tts-offline-worker.cjs
+
+nsis:
+  # 卸载时保住 data（设置/账本/日志）：自定义卸载段定义在 build/installer.nsh。
+  include: build/installer.nsh
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: oh-my-dota2
+  # Settings and the translation ledger live in %APPDATA%; an upgrade must not wipe them.
+  deleteAppDataOnUninstall: false
