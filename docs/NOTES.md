@@ -97,6 +97,17 @@
 ## 翻译会话
 
 ### 「加个术语表」先看清原提示词已经写了什么
+### 词库「读得到、写不进」——索引坏了
+- 症状：面板上「词库 N 对 · 命中 M 次」不涨，浮层也不再有「词」标，看起来像词库丢了；日志里
+  `TRANSLATE_CACHE_WRITE_FAILED database disk image is malformed`。
+- 根因：sqlite 的索引损坏后 `SELECT` 仍能返回旧行，但每次 `INSERT` 都抛错。查库走 `idx_pair_b`，
+  一抛异常就按「没命中」处理，于是每句都变成现翻——两个症状其实是同一个原因。
+- 修法：打开库时跑一次 `PRAGMA quick_check(1)`，不是 `ok` 就把文件（连同 `-wal`/`-shm`）改名隔离再重建；
+  写失败若是 `malformed/not a database`，隔离后重试一次，仍失败才降级到内存 Map。
+- 教训：缓存层必须自带体检。它坏掉时永远不报错给用户，只表现为「功能悄悄不工作」。
+- 手工修库要小心：WAL 模式下重建后务必 `wal_checkpoint(TRUNCATE)` 再关闭、把 `-wal`/`-shm` 一起处理，
+  否则挪走的只是一个没写完的主文件。另外 `--xxx-probe` 用的是同一个 `data/` 目录，会往真账本里写
+  `origin='probe'` 的测试行——这不是丢数据，但看起来很像。
 - 症状：想提升黑话译法，于是新建 `glossary.ts` 装了一张 100 条的中英对照表，再挂到 `buildSystemPrompt` 后面。
 - 根因：`SYSTEM_PROMPTS` 里已经有 `JARGON_KEEP`（明确要求 `gg`/`wp`/`ss`/`b` **保留不译**）和逐条译法（ward → 插眼、gank → gank/抓人）。新表把 `gg` 映射成「打得好」、`ss` 映射成「消失」，与既有规则直接打架，模型只会随机选一边。
 - 修法：删掉独立模块，只把**原提示词没覆盖的**几条追加进既有那行 Style（hex → 变羊、root → 定身、silence → 沉默、slow → 减速、stun → 眩晕、initiate → 先手、courier → 信使、tango → 吃树、low → 残血、out of mana → 没蓝），反向补 hex/root/silence/slow/initiate/courier/tango/low/oom。
