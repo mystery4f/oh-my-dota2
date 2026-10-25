@@ -58,7 +58,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ]
 
 
-export type OfflineVoiceId = 'keqing'
+export type OfflineVoiceId = 'melo'
 
 export interface OfflineVoice {
   id: OfflineVoiceId
@@ -71,12 +71,13 @@ export interface OfflineVoice {
 }
 
 /**
- * 本地音色只有一个：刻晴 #70。
- * 多说话人模型靠 sid 选嗓子，这里把 sid 固化成编号而不是留一个滑杆——
- * 用户只会记住「哪个好听」，不会记住 804 个编号里哪个是自己挑的。
+ * 本地音色只有一个：MeloTTS（vits-melo-tts-zh_en）。
+ * 为什么是它：实测里唯一 44.1 kHz 的，单说话人、中英混读、0.4–0.8 s 一句；
+ * 那批 804 说话人的角色微调（keqing/theresa/eula…）听感像业余配音，用户听完全否了。
+ * sid 固定 0——它只有一个嗓子，没有可挑的。
  */
 export const OFFLINE_VOICES: OfflineVoice[] = [
-  { id: 'keqing', label: '刻晴 #70', note: '22.05 kHz，语速偏慢', speed: 0.8, pitch: 1, sid: 70 }
+  { id: 'melo', label: 'MeloTTS', note: '44.1 kHz，自然', speed: 1, pitch: 1, sid: 0 }
 ]
 
 export function offlineVoicePreset(id: OfflineVoiceId): OfflineVoice {
@@ -163,7 +164,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsRate: 1,
   ttsPitch: 1,
   ttsVoice: '',
-  ttsOfflineVoice: 'keqing',
+  ttsOfflineVoice: 'melo',
   ttsEngine: 'edge',
   overlayLocked: true,
   overlayOpacity: 0.34,

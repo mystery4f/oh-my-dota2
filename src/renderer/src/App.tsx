@@ -402,7 +402,7 @@ function OverlayCard(): React.ReactElement {
     void window.api.ttsOfflineState().then(setOffline)
   }, [])
   const [voice, setVoice] = useState(DEFAULT_EDGE_VOICE)
-  const [offlineVoice, setOfflineVoice] = useState<OfflineVoiceId>('keqing')
+  const [offlineVoice, setOfflineVoice] = useState<OfflineVoiceId>('melo')
   const [rate, setRate] = useState(1)
   const [pitch, setPitch] = useState(1)
   const [nicknames, setNicknames] = useState('')

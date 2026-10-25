@@ -69,6 +69,15 @@ vits-zh-hf-fanchen-{C,unity,wnj,ZhiHuiLaoZhe}
 - 语速不是线性的：keqing 在 `speed=0.7` 出来的时长比 `0.8` 还短。往低处压之前必须量时长，别凭感觉。
 - 804 个说话人 ≠ 804 种好声音。同一模型里 sid 差异很大，扫一遍挑编号比换模型有效。
 
+
+## 选型收尾（2026-11）
+
+把 sherpa-onnx 上 16 个中文包全下下来、用同一句话各合成一遍试听后，用户**全否了**——那批 804 说话人的角色微调（keqing / theresa / eula / fanchen…）听感接近业余配音。结论：
+
+- 本地音色只保留 **vits-melo-tts-zh_en**（44.1 kHz、单说话人、稳定 0.25–0.5 s/句），刻晴 #70 已从代码与数据目录移除。
+- 试听结论不能靠模型名推断，必须真听；角色名只表示微调目标。
+- 包里若同时有  与 ，**取体积最大的**——int8 那个常常只是 133 字节的 Git LFS 指针，指过去会直接崩进程。
+
 ## 试听工具（临时，不进仓库）
 
 `.tmp/tts/` 下的脚本（`compare.cjs` / `sids.cjs` / `speed.cjs`）都是「一个模型 → 若干 WAV」的薄壳，用 `sherpa-onnx-node` 直接在纯 Node 里跑（Electron 运行时不能用，见 docs/NOTES.md 的 `External buffers are not allowed`）。试听用 PowerShell 的 `System.Windows.Media.MediaPlayer`，不必装播放器。

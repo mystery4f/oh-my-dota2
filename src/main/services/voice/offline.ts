@@ -27,24 +27,26 @@ interface ModelFiles {
 }
 
 const MODEL_FILES: Record<OfflineVoiceId, ModelFiles> = {
-  keqing: {
-    dir: 'vits-zh-hf-keqing',
-    archive: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-zh-hf-keqing.tar.bz2',
-    required: ['keqing.onnx', 'tokens.txt', 'lexicon.txt'],
-    sid: 70
+  melo: {
+    dir: 'vits-melo-tts-zh_en',
+    archive: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-melo-tts-zh_en.tar.bz2',
+    // 只认 model.onnx（fp32）。同一个包里还有 model.int8.onnx，那只是 133 字节的
+    // Git LFS 指针，指过去加载会直接崩进程。required 里不列它，顺带当完整性断言。
+    required: ['model.onnx', 'tokens.txt', 'lexicon.txt'],
+    sid: 0
   }
 }
 
 function modelFiles(voice: OfflineVoiceId): ModelFiles {
-  return MODEL_FILES[voice] ?? MODEL_FILES.keqing
+  return MODEL_FILES[voice] ?? MODEL_FILES.melo
 }
 
 
-export function offlineModelDir(voice: OfflineVoiceId = 'keqing'): string {
+export function offlineModelDir(voice: OfflineVoiceId = 'melo'): string {
   return join(app.getPath('userData'), 'tts-models', modelFiles(voice).dir)
 }
 
-export function offlineReady(voice: OfflineVoiceId = 'keqing'): boolean {
+export function offlineReady(voice: OfflineVoiceId = 'melo'): boolean {
   const dir = offlineModelDir(voice)
   if (!modelFiles(voice).required.every((name) => existsSync(join(dir, name)))) return false
   return existsSync(join(dir, 'dict'))
@@ -77,7 +79,7 @@ let state: OfflineStatus = {
   error: null
 }
 
-export function offlineStatus(voice: OfflineVoiceId = 'keqing'): OfflineStatus {
+export function offlineStatus(voice: OfflineVoiceId = 'melo'): OfflineStatus {
   state = {
     ...state,
     available: offlineNodeBinary() !== null,
@@ -165,7 +167,7 @@ function untar(archive: string, into: string): Promise<void> {
  * 下载并解压模型。重复调用会复用同一次下载（`downloading` 期间直接返回现状）。
  * 失败只把错误写进状态，不抛给调用方——朗读功能可以降级，不能因此崩掉主进程。
  */
-export async function ensureOfflineModel(voice: OfflineVoiceId = 'keqing'): Promise<OfflineStatus> {
+export async function ensureOfflineModel(voice: OfflineVoiceId = 'melo'): Promise<OfflineStatus> {
   const files = modelFiles(voice)
   if (offlineReady(voice)) return offlineStatus(voice)
   if (state.downloading) return state
@@ -301,7 +303,7 @@ function ensureWorker(): ChildProcess {
 /** 合成一句，返回 WAV。模型没装好或推理失败都返回 null（调用方负责「这句不念」）。 */
 export async function synthesizeOffline(
   text: string,
-  voice: OfflineVoiceId = 'keqing',
+  voice: OfflineVoiceId = 'melo',
   rate = 1
 ): Promise<Buffer | null> {
   // 预设的语速再乘用户的总语速滑杆：预设定「气质」，滑杆定「快慢」。
@@ -332,7 +334,7 @@ export async function synthesizeOffline(
           pitch,
           sid: preset.sid ?? modelFiles(voice).sid,
           dir: offlineModelDir(voice),
-          // 每个模型的 onnx 文件名都不一样（keqing.onnx / model.onnx），由注册表给出，
+          // 每个模型的 onnx 文件名都不一样（melo 是 model.onnx，keqing 是 keqing.onnx），由注册表给出，
           // 不能让 worker 猜——猜错就是 'vits-model ... does not exist'。
           model: modelFiles(voice).required.find((name) => name.endsWith('.onnx')) ?? 'model.onnx',
           out
