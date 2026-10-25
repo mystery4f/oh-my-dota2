@@ -180,9 +180,14 @@ export interface ChatLine {
 function recordChatEvents(payload: GsiPayload): ChatLine[] {
   const events = payload.events
   if (!Array.isArray(events)) return []
-  const mySlot = payload.player?.player_slot
+  // player 块不保证每帧都来（GSI 各数据块独立推送，带聊天事件的帧常常只有 events）：
+  // 当帧没有就用上一帧缓存的槽位/阵营，own 判定才不会把自己的话判成别人
+  // （真对局 2026-10-25 第四局实测：slot 8 名字缓存正确、own 却是 false，就是这帧缺 player 块）。
+  const mySlot = payload.player?.player_slot ?? mySlotCache
   const myTeam =
-    typeof payload.player?.team_name === 'string' ? payload.player.team_name.trim().toLowerCase() : ''
+    typeof payload.player?.team_name === 'string'
+      ? payload.player.team_name.trim().toLowerCase()
+      : myTeamCache.trim().toLowerCase()
   const accepted: ChatLine[] = []
   for (const event of events) {
     if (event?.event_type !== 'chat_message') continue
@@ -400,6 +405,7 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
   const decision = decideGsi(runtime.live, payload)
   runtime.live = decision.live
   // 脏包/不带 map 的帧只影响 live 判定，不该把上一次读到的对局状态抹掉。
+  const prevMatchId = runtime.matchId
   if (decision.gameState !== null) {
     runtime.gameState = decision.gameState
     runtime.matchId = decision.matchId
@@ -408,7 +414,13 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
   // 每一帧都记进小结账本：真对局时不可能去抢 32123 端口，只能在应用里攒。
   recordFrameSummary(payload)
   // 一局结束就清掉 slot→昵称：下一局同号位换人，缓存着旧名字会张冠李戴。
-  if (decision.drive === 'stop') {
+  // matchid 变了同样算「一局结束」：没等到 POST_GAME 就进下一局（秒排/重连）时，
+  // 光靠 drive=stop 清不掉，旧名字和新号位对不上就是假情报。
+  const matchIdChanged =
+    decision.matchId !== null &&
+    prevMatchId !== null &&
+    decision.matchId !== prevMatchId
+  if (decision.drive === 'stop' || matchIdChanged) {
     slotNames.clear()
     // 英雄/阵营也要一起清：下一局同一个槽位换了人和英雄，留着就是错的情报。
     slotHeroes.clear()
