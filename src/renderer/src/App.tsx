@@ -559,18 +559,27 @@ function OverlayCard(): React.ReactElement {
             <Button
               size="sm"
               variant="outline"
-              disabled={Boolean(offline?.downloading) || Boolean(offline?.ready)}
+              disabled={Boolean(offline?.downloading)}
               onClick={() => {
                 void window.api.ttsOfflineDownload().then(setOffline)
               }}
-              title="模型约 130 MB，下载后离线可用；存在数据目录 tts-models/ 下"
+              title={
+                offline?.ready
+                  ? '模型已在本地：再点一次会重新下载（文件损坏时用这个自救）'
+                  : '模型约 130 MB，下载后离线可用；存在数据目录 tts-models/ 下'
+              }
             >
-              {offline?.ready
-                ? '本地模型已就绪'
-                : offline?.downloading
-                  ? `下载中 ${Math.round((offline.progress ?? 0) * 100)}%`
+              {offline?.downloading
+                ? `下载中 ${Math.round((offline.progress ?? 0) * 100)}%`
+                : offline?.ready
+                  ? '重新下载模型'
                   : '下载模型（130 MB）'}
             </Button>
+          )}
+          {engine === 'offline' && offline?.ready && (
+            <span className="text-xs text-muted-foreground" title="模型文件在数据目录 tts-models/vits-zh-hf-keqing 下">
+              已就绪 {Math.round((offline.bytes ?? 0) / 1048576)} MB
+            </span>
           )}
           {engine === 'offline' && offline?.error !== undefined && offline?.error !== null && !offline?.ready && (
             <span className="text-xs text-destructive" title={offline.error}>
