@@ -58,7 +58,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ]
 
 
-export type OfflineVoiceId = 'melo'
+export type OfflineVoiceId = 'melo' | 'baker' | 'xiao_ya' | 'eula'
 
 export interface OfflineVoice {
   id: OfflineVoiceId
@@ -71,13 +71,18 @@ export interface OfflineVoice {
 }
 
 /**
- * 本地音色只有一个：MeloTTS（vits-melo-tts-zh_en）。
- * 为什么是它：实测里唯一 44.1 kHz 的，单说话人、中英混读、0.4–0.8 s 一句；
- * 那批 804 说话人的角色微调（keqing/theresa/eula…）听感像业余配音，用户听完全否了。
- * sid 固定 0——它只有一个嗓子，没有可挑的。
+ * 本地音色留下这四个（用户试听后钦定）：
+ * - melo：44.1 kHz，本组唯一高采样率，中英混读，音色偏中性。
+ * - baker：Matcha icefall，22.05 kHz，最快（200 ms 级），声音闷一点但最跟得上节奏。
+ * - xiao_ya：piper 小雅，22.05 kHz，包最小（60 MB），音色偏温柔。
+ * - eula：hf 角色微调，22.05 kHz，804 个说话人，sid 挑嗓子。
+ * 名字给人的错觉要说清：eula/baker 这些是「训练目标」，不代表听感；听感由模型 + sid 决定。
  */
 export const OFFLINE_VOICES: OfflineVoice[] = [
-  { id: 'melo', label: 'MeloTTS', note: '44.1 kHz，自然', speed: 1, pitch: 1, sid: 0 }
+  { id: 'melo', label: 'MeloTTS', note: '44.1 kHz，中英混读', speed: 1, pitch: 1, sid: 0 },
+  { id: 'baker', label: 'Baker（最快）', note: '22.05 kHz，200 ms 级', speed: 1, pitch: 1, sid: 0 },
+  { id: 'xiao_ya', label: '小雅', note: '22.05 kHz，包最小', speed: 1, pitch: 1, sid: 0 },
+  { id: 'eula', label: 'Eula #5', note: '22.05 kHz，804 人表', speed: 1, pitch: 1, sid: 5 }
 ]
 
 export function offlineVoicePreset(id: OfflineVoiceId): OfflineVoice {

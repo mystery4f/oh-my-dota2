@@ -19,21 +19,65 @@ import { offlineVoicePreset, type OfflineVoiceId } from '../../../shared/ipc'
  */
 
 interface ModelFiles {
+  /** 解压后的目录名（也是 tts-models 下的子目录名）。 */
   dir: string
-  archive: string
+  /** 要下载的压缩包；matcha 还要单独下一个声码器，所以这里是数组。 */
+  archives: string[]
+  /** vits = 单 onnx；matcha = 声学模型 + 声码器，字段名不一样，worker 里分支处理。 */
+  kind: 'vits' | 'matcha'
+  /** 注册表直接给出 onnx 文件名——让 worker 猜过两次，都是猜错才发现的。 */
+  model: string
   required: string[]
+  /** 这个包自带 dict（中文分词/多音字）才去查它，piper 的包就没有。 */
+  dict: boolean
+  /** 声码器文件名（只需要下一个，放在 tts-models 根目录共用）。 */
+  vocoder?: string
   /** 多说话人模型固定用哪一个嗓子；单说话人模型恒为 0。 */
   sid: number
 }
 
+const TTS_MODELS = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models'
+const VOCODERS = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models'
+
 const MODEL_FILES: Record<OfflineVoiceId, ModelFiles> = {
   melo: {
     dir: 'vits-melo-tts-zh_en',
-    archive: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-melo-tts-zh_en.tar.bz2',
+    archives: [`${TTS_MODELS}/vits-melo-tts-zh_en.tar.bz2`],
+    kind: 'vits',
     // 只认 model.onnx（fp32）。同一个包里还有 model.int8.onnx，那只是 133 字节的
     // Git LFS 指针，指过去加载会直接崩进程。required 里不列它，顺带当完整性断言。
+    model: 'model.onnx',
     required: ['model.onnx', 'tokens.txt', 'lexicon.txt'],
+    dict: true,
     sid: 0
+  },
+  baker: {
+    dir: 'matcha-icefall-zh-baker',
+    archives: [`${TTS_MODELS}/matcha-icefall-zh-baker.tar.bz2`],
+    kind: 'matcha',
+    model: 'model-steps-3.onnx',
+    required: ['model-steps-3.onnx', 'tokens.txt', 'lexicon.txt'],
+    dict: true,
+    vocoder: 'vocos-22khz-univ.onnx',
+    sid: 0
+  },
+  xiao_ya: {
+    dir: 'vits-piper-zh_CN-xiao_ya-medium',
+    archives: [`${TTS_MODELS}/vits-piper-zh_CN-xiao_ya-medium.tar.bz2`],
+    kind: 'vits',
+    model: 'zh_CN-xiao_ya-medium.onnx',
+    required: ['zh_CN-xiao_ya-medium.onnx', 'tokens.txt', 'lexicon.txt'],
+    dict: false,
+    sid: 0
+  },
+  eula: {
+    dir: 'vits-zh-hf-eula',
+    archives: [`${TTS_MODELS}/vits-zh-hf-eula.tar.bz2`],
+    kind: 'vits',
+    model: 'eula.onnx',
+    required: ['eula.onnx', 'tokens.txt', 'lexicon.txt'],
+    dict: true,
+    sid: 5
   }
 }
 
@@ -46,10 +90,23 @@ export function offlineModelDir(voice: OfflineVoiceId = 'melo'): string {
   return join(app.getPath('userData'), 'tts-models', modelFiles(voice).dir)
 }
 
+function vocoderFile(name: string): string {
+  return join(app.getPath('userData'), 'tts-models', name)
+}
+
+/** 声码器的绝对路径；vits 模型没有声码器就返回 undefined（worker 只看 matcha 那支）。 */
+function vocoderPath(voice: OfflineVoiceId): string | undefined {
+  const name = modelFiles(voice).vocoder
+  return name ? vocoderFile(name) : undefined
+}
+
 export function offlineReady(voice: OfflineVoiceId = 'melo'): boolean {
+  const files = modelFiles(voice)
   const dir = offlineModelDir(voice)
-  if (!modelFiles(voice).required.every((name) => existsSync(join(dir, name)))) return false
-  return existsSync(join(dir, 'dict'))
+  if (!files.required.every((name) => existsSync(join(dir, name)))) return false
+  if (files.dict && !existsSync(join(dir, 'dict'))) return false
+  if (files.vocoder && !existsSync(vocoderFile(files.vocoder))) return false
+  return true
 }
 
 function dirBytes(dir: string): number {
@@ -177,14 +234,23 @@ export async function ensureOfflineModel(voice: OfflineVoiceId = 'melo'): Promis
   try {
     mkdirSync(staging, { recursive: true })
     const archive = join(staging, 'model.tar.bz2')
-    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archive, mirrors: MIRRORS.length - 1 }))
-    await download(files.archive, archive, (ratio) => {
-      state = { ...state, progress: ratio * 0.95 }
+    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archives[0], mirrors: MIRRORS.length - 1 }))
+    await download(files.archives[0], archive, (ratio) => {
+      state = { ...state, progress: ratio * 0.9 }
     })
     console.log('TTS_OFFLINE_DOWNLOAD_SAVED', JSON.stringify({ bytes: statSync(archive).size }))
     await untar(archive, staging)
     const extracted = join(staging, files.dir)
     if (!existsSync(extracted)) throw new Error('archive layout unexpected')
+    // matcha 的声码器是独立文件，官方单独发在 vocoder-models 下。
+    if (files.vocoder && !existsSync(vocoderFile(files.vocoder))) {
+      const target = vocoderFile(files.vocoder)
+      mkdirSync(join(target, '..'), { recursive: true })
+      await download(`${VOCODERS}/${files.vocoder}`, target, (ratio) => {
+        state = { ...state, progress: 0.9 + ratio * 0.05 }
+      })
+      console.log('TTS_OFFLINE_VOCODER_SAVED', JSON.stringify({ file: target, bytes: statSync(target).size }))
+    }
     mkdirSync(join(dir, '..'), { recursive: true })
     // 解压结果复制到正式目录：robocopy 只在目录之间工作，退出码 0–7 都算正常。
     await new Promise<void>((resolve, reject) => {
@@ -334,9 +400,11 @@ export async function synthesizeOffline(
           pitch,
           sid: preset.sid ?? modelFiles(voice).sid,
           dir: offlineModelDir(voice),
-          // 每个模型的 onnx 文件名都不一样（melo 是 model.onnx，keqing 是 keqing.onnx），由注册表给出，
-          // 不能让 worker 猜——猜错就是 'vits-model ... does not exist'。
-          model: modelFiles(voice).required.find((name) => name.endsWith('.onnx')) ?? 'model.onnx',
+          // onnx 文件名与架构都由注册表给出：猜错就是 'vits-model ... does not exist'，
+          // 或者 matcha 包被当成 vits 加载直接报 config 错。
+          kind: modelFiles(voice).kind,
+          model: modelFiles(voice).model,
+          vocoder: vocoderPath(voice),
           out
         })}\n`
       )

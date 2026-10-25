@@ -74,6 +74,15 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
   - 模型可选下载到 `data/tts-models/`（163 MB；MeloTTS 为 MIT，不进安装包只为体积）。
   - 验收：`--tts-offline-probe` 3/3，首句 ≈2.4 s（含加载），之后 p50 111–249 ms。
 
+## 离线朗读（2026-11 定案，别再按模型名瞎试）
+
+- 本地音色**只剩四个**：`melo` / `baker` / `xiao_ya` / `eula`。定义在 `src/shared/ipc.ts` 的 `OFFLINE_VOICES`，模型注册表在 `src/main/services/voice/offline.ts` 的 `MODEL_FILES`；加/换音色只改这两处。
+- **baker 是 matcha 架构**：要单独的声码器 `vocos-22khz-univ.onnx`（`MODEL_FILES[id].vocoder`），下载流程会自动补；`resources/tts-offline-worker.cjs` 按 `request.kind` 分支构配置。
+- 体检：`npx electron out/main/index.js --tts-offline-probe <melo|baker|xiao_ya|eula>`。判据是**预热后 p50 < 1.5 s**——首句含引擎加载，单独打成 `coldMs`，别混进 p50（混进去会随机红）。
+- 实测 p50：baker 90 ms / xiao_ya 111 ms / eula 362 ms / melo 496 ms。
+- 选型是听感说了算：这四个是用户亲耳挑的，804 人表的角色名（keqing / theresa）已被否，别再当卖点。
+- 数据目录里现在有四个模型（`.tmp/tts/m` 那份是试听用的临时副本，可删）。
+
 ## 交接必须知道的几件事
 
 - **数据目录已便携化**：安装版写 exe 同级 `data/`，`npm run dev` 与探针写项目根 `data/`；

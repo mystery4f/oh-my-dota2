@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { offlineModelDir, offlineReady, offlineStatus, synthesizeOffline } from '../services/voice/offline'
+import type { OfflineVoiceId } from '../../shared/ipc'
 
 /**
  * 离线朗读引擎的体检：模型在不在、装在哪、每句多快。
@@ -17,10 +18,12 @@ function percentile(values: number[], ratio: number): number {
 }
 
 export async function runTtsOfflineProbe(): Promise<void> {
-  const status = offlineStatus('melo')
-  console.log('TTS_OFFLINE_PROBE_STATUS', JSON.stringify({ ...status, userData: app.getPath('userData') }))
-  if (!offlineReady()) {
-    console.log('TTS_OFFLINE_PROBE_MISSING', JSON.stringify({ dir: offlineModelDir(), hint: '首次使用请在面板点「下载模型」' }))
+  // 想测哪一个本地音色就把它的 id 跟在探针名后面：--tts-offline-probe baker
+  const VOICE = (['melo', 'baker', 'xiao_ya', 'eula'].find((id) => process.argv.includes(id)) ?? 'melo') as OfflineVoiceId
+  const status = offlineStatus(VOICE)
+  console.log('TTS_OFFLINE_PROBE_STATUS', JSON.stringify({ voice: VOICE, ...status, userData: app.getPath('userData') }))
+  if (!offlineReady(VOICE)) {
+    console.log('TTS_OFFLINE_PROBE_MISSING', JSON.stringify({ voice: VOICE, dir: offlineModelDir(VOICE), hint: '首次使用请在面板点「下载模型」' }))
     console.log('TTS_OFFLINE_PROBE_RESULT', JSON.stringify({ ok: false, reason: 'model-missing' }))
     app.exit(1)
     return
@@ -28,7 +31,7 @@ export async function runTtsOfflineProbe(): Promise<void> {
   const rows: { ok: boolean; ms: number; bytes: number; secs: number }[] = []
   for (const line of LINES) {
     const at = Date.now()
-    const audio = await synthesizeOffline(line, 'melo', 1)
+    const audio = await synthesizeOffline(line, VOICE, 1)
     const ms = Date.now() - at
     // 44 字节 WAV 头 + 16 bit 单声道 → 秒数。采样率必须跟着模型走（melo 是 44.1 kHz），
     // 写死 22050 会让秒数虚高一倍。
@@ -38,9 +41,9 @@ export async function runTtsOfflineProbe(): Promise<void> {
   }
   // 语速必须真的传到合成器：同一句话用 1.0 / 0.85 / 0.7 各合成一次，字节数不能撞车。
   // 三个一样长就说明 speed 被吞了——那面板上的语速滑杆就是摆样子。
-  const base = await synthesizeOffline(LINES[0], 'melo', 1)
-  const slower = await synthesizeOffline(LINES[0], 'melo', 0.85)
-  const slowest = await synthesizeOffline(LINES[0], 'melo', 0.7)
+  const base = await synthesizeOffline(LINES[0], VOICE, 1)
+  const slower = await synthesizeOffline(LINES[0], VOICE, 0.85)
+  const slowest = await synthesizeOffline(LINES[0], VOICE, 0.7)
   const speedOk = Boolean(
     base &&
       slower &&

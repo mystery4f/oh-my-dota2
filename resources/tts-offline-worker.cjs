@@ -13,34 +13,55 @@ const path = require('node:path')
 
 let sherpa = null
 let engine = null
-let engineDir = null
+let engineKey = null
 
-function loadEngine(dir, modelName) {
-  if (engine && engineDir === dir) return engine
+function loadEngine(request) {
+  const dir = request.dir
+  const kind = request.kind === 'matcha' ? 'matcha' : 'vits'
+  const key = `${dir}|${kind}|${request.model ?? ''}|${request.vocoder ?? ''}`
+  if (engine && engineKey === key) return engine
   if (!sherpa) sherpa = require('sherpa-onnx-node')
-  // MeloTTS 是 VITS 架构：单个 model.onnx（fp32；官方包的 .int8.onnx 只是 133 字节的
-  // Git LFS 指针，加载会直接崩进程，所以别指过去）。dict 目录给中文分词/多音字用。
-  // ruleFsts 负责「19 → 十九」「10:30 → 十点半」这类数字与时间读法。
+
+  // 两套架构，字段名不一样：
+  // - vits（MeloTTS / piper / hf-eula…）：单个 onnx + tokens + lexicon，中文分词靠 dict 目录。
+  // - matcha（icefall baker…）：声学模型 + 单独一个声码器（vocos/hifigan），少一个都建不起引擎。
+  // 中文单语模型没有 espeak-ng-data，dataDir 一律不传——传了 sherpa 会去找 phontab 然后报错。
+  const shared = { tokens: path.join(dir, 'tokens.txt') }
+  const lexicon = path.join(dir, 'lexicon.txt')
+  if (fs.existsSync(lexicon)) shared.lexicon = lexicon
+  const dictDir = path.join(dir, 'dict')
+  if (fs.existsSync(dictDir)) shared.dictDir = dictDir
+
+  const model =
+    kind === 'matcha'
+      ? {
+          matcha: {
+            acousticModel: path.join(dir, request.model || 'model-steps-3.onnx'),
+            vocoder: request.vocoder,
+            ...shared
+          }
+        }
+      : {
+          vits: {
+            model: path.join(dir, request.model || 'model.onnx'),
+            ...shared,
+            lengthScale: 1
+          }
+        }
+
+  // 数字/时间读法：这几个 .fst 不是每个包都有，缺哪个就少传哪个，别给不存在的路径。
+  const ruleFsts = ['phone.fst', 'date.fst', 'number.fst']
+    .map((name) => path.join(dir, name))
+    .filter((file) => fs.existsSync(file))
+
   engine = new sherpa.OfflineTts({
-    model: {
-      vits: {
-        model: path.join(dir, modelName || 'model.onnx'),
-        lexicon: path.join(dir, 'lexicon.txt'),
-        tokens: path.join(dir, 'tokens.txt'),
-        dictDir: path.join(dir, 'dict'),
-        lengthScale: 1
-      },
-      numThreads: 2,
-      provider: 'cpu'
-    },
-    ruleFsts: [
-      path.join(dir, 'phone.fst'),
-      path.join(dir, 'date.fst'),
-      path.join(dir, 'number.fst')
-    ].join(','),
+    model,
+    ruleFsts: ruleFsts.join(','),
+    numThreads: 2,
+    provider: 'cpu',
     maxNumSentences: 1
   })
-  engineDir = dir
+  engineKey = key
   return engine
 }
 
@@ -88,7 +109,7 @@ function handle(line) {
   }
   if (!request || typeof request.text !== 'string') return
   try {
-    const tts = loadEngine(request.dir, request.model)
+    const tts = loadEngine(request)
     const pitch = request.pitch ?? 1
     // 多说话人模型靠 sid 选嗓子；单说话人模型传任何值都一样。
     const audio = tts.generate({

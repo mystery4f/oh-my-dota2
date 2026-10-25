@@ -70,13 +70,24 @@ vits-zh-hf-fanchen-{C,unity,wnj,ZhiHuiLaoZhe}
 - 804 个说话人 ≠ 804 种好声音。同一模型里 sid 差异很大，扫一遍挑编号比换模型有效。
 
 
-## 选型收尾（2026-11）
+## 最终保留的四款（2026-11 定案）
 
-把 sherpa-onnx 上 16 个中文包全下下来、用同一句话各合成一遍试听后，用户**全否了**——那批 804 说话人的角色微调（keqing / theresa / eula / fanchen…）听感接近业余配音。结论：
+用户把 16 个候选全部听过一遍后只留下这四个，**其余从代码与数据目录都已删除**（theresa / kokoro / keqing / fanchen / aishell3 / piper-chaowen 等）。下表是应用内实测（预热后 p50，跑 `--tts-offline-probe <id>`）：
 
-- 本地音色只保留 **vits-melo-tts-zh_en**（44.1 kHz、单说话人、稳定 0.25–0.5 s/句），刻晴 #70 已从代码与数据目录移除。
-- 试听结论不能靠模型名推断，必须真听；角色名只表示微调目标。
-- 包里若同时有  与 ，**取体积最大的**——int8 那个常常只是 133 字节的 Git LFS 指针，指过去会直接崩进程。
+| id | 名称 | 采样率 | 架构 | 包大小 | p50 一句 | 说明 |
+|---|---|---|---|---|---|---|
+| `melo` | MeloTTS | 44.1 kHz | vits | 183 MB | 0.47–0.50 s | 本组唯一高采样率，中英混读 |
+| `baker` | Matcha icefall | 22.05 kHz | matcha + 声码器 | 100 MB + 53 MB | 0.09 s | 最快，声音偏闷 |
+| `xiao_ya` | piper 小雅 | 22.05 kHz | vits | 60 MB | 0.11 s | 包最小，音色偏温柔 |
+| `eula` | hf 角色微调 | 22.05 kHz | vits | 120 MB | 0.36 s | 804 个说话人，默认 sid 5 |
+
+要点：
+
+- **matcha 与 vits 不是换文件名就能换的**。vits 是「单个 onnx + tokens + lexicon + dict」；matcha 是「声学模型 + 独立声码器」，配置字段叫 `acousticModel` / `vocoder`，少一个都建不起引擎。代码里由 `MODEL_FILES[id].kind` 分派，worker 那侧也有对应分支。
+- 声码器只下一次，放在 `tts-models/` 根目录共用：`vocos-22khz-univ.onnx`（vocoder-models 发布）。
+- **中文单语包没有 espeak-ng-data**，别给 sherpa 传 `dataDir`——传了它去找 `phontab`，直接报 config 错。中文分词靠 `dict` 目录（`dictDir`）；piper 的包连 dict 都没有，注册表里用 `dict: false` 标出来。
+- 包里若同时有 `model.onnx` 与 `model.int8.onnx`，**取体积最大的**——int8 那个常常只是 133 字节的 Git LFS 指针，指过去会直接崩进程。
+- 试听结论不能靠模型名推断，必须真听；角色名（eula / theresa / keqing）只表示微调目标。
 
 ## 试听工具（临时，不进仓库）
 
