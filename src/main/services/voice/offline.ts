@@ -88,19 +88,68 @@ export function offlineStatus(voice: OfflineVoiceId = 'keqing'): OfflineStatus {
   return state
 }
 
-/** 流式下载并落盘；拿到 Content-Length 才报百分比，拿不到就只报字节数。 */
-async function download(url: string, target: string, onProgress: (ratio: number) => void): Promise<void> {
-  const response = await fetch(url)
-  if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
-  const total = Number(response.headers.get('content-length') ?? 0)
-  const chunks: Uint8Array[] = []
-  let received = 0
-  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-    chunks.push(chunk)
-    received += chunk.length
-    if (total > 0) onProgress(received / total)
+/**
+ * GitHub release 在国内经常「连得上、没有字节」——fetch 会一直挂着不报错，
+ * 界面就一直停在 0%，看起来像点了没反应。所以这里做三件事：
+ *   1. 每个镜像都有停滞超时：15 秒没有新数据就判死，换下一个源；
+ *   2. 依次尝试直连与几个已知的 GitHub 加速前缀；
+ *   3. 每 2 MB 打一行日志，下载卡在哪一目了然。
+ */
+const MIRRORS = ['', 'https://gh-proxy.com/', 'https://ghfast.top/']
+const STALL_MS = 15_000
+
+async function downloadOnce(url: string, target: string, onProgress: (ratio: number) => void): Promise<void> {
+  const controller = new AbortController()
+  let stall = setTimeout(() => controller.abort(), STALL_MS)
+  const started = Date.now()
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
+    const total = Number(response.headers.get('content-length') ?? 0)
+    const chunks: Uint8Array[] = []
+    let received = 0
+    let reported = 0
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk)
+      received += chunk.length
+      clearTimeout(stall)
+      stall = setTimeout(() => controller.abort(), STALL_MS)
+      if (total > 0) onProgress(received / total)
+      if (received - reported >= 2 * 1024 * 1024) {
+        reported = received
+        console.log(
+          'TTS_OFFLINE_DOWNLOAD_PROGRESS',
+          JSON.stringify({ mb: Math.round(received / 1024 / 1024), totalMb: Math.round(total / 1024 / 1024) })
+        )
+      }
+    }
+    if (received === 0) throw new Error('no bytes')
+    writeFileSync(target, Buffer.concat(chunks.map((c) => Buffer.from(c))))
+    console.log(
+      'TTS_OFFLINE_DOWNLOAD_DONE',
+      JSON.stringify({ bytes: received, ms: Date.now() - started })
+    )
+  } finally {
+    clearTimeout(stall)
   }
-  writeFileSync(target, Buffer.concat(chunks.map((c) => Buffer.from(c))))
+}
+
+/** 依次试直连与镜像；全失败时抛出最后一个原因。 */
+async function download(url: string, target: string, onProgress: (ratio: number) => void): Promise<void> {
+  let lastError = 'unknown'
+  for (const prefix of MIRRORS) {
+    const candidate = prefix === '' ? url : `${prefix}${url}`
+    try {
+      console.log('TTS_OFFLINE_DOWNLOAD_TRY', JSON.stringify({ url: candidate }))
+      await downloadOnce(candidate, target, onProgress)
+      if (prefix !== '') console.log('TTS_OFFLINE_DOWNLOAD_MIRROR', JSON.stringify({ prefix }))
+      return
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err)
+      console.log('TTS_OFFLINE_DOWNLOAD_RETRY', JSON.stringify({ url: candidate, err: lastError }))
+    }
+  }
+  throw new Error(`下载失败：${lastError}`)
 }
 
 function untar(archive: string, into: string): Promise<void> {
@@ -126,11 +175,11 @@ export async function ensureOfflineModel(voice: OfflineVoiceId = 'keqing'): Prom
   try {
     mkdirSync(staging, { recursive: true })
     const archive = join(staging, 'model.tar.bz2')
-    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archive }))
+    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archive, mirrors: MIRRORS.length - 1 }))
     await download(files.archive, archive, (ratio) => {
       state = { ...state, progress: ratio * 0.95 }
     })
-    console.log('TTS_OFFLINE_DOWNLOAD_DONE', JSON.stringify({ bytes: statSync(archive).size }))
+    console.log('TTS_OFFLINE_DOWNLOAD_SAVED', JSON.stringify({ bytes: statSync(archive).size }))
     await untar(archive, staging)
     const extracted = join(staging, files.dir)
     if (!existsSync(extracted)) throw new Error('archive layout unexpected')

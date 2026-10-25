@@ -397,7 +397,7 @@ function OverlayCard(): React.ReactElement {
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
   const [readAloud, setReadAloud] = useState(false)
   const [engine, setEngine] = useState<'system' | 'edge' | 'offline'>('edge')
-  const [offline, setOffline] = useState<{ ready: boolean; bytes: number; downloading: boolean; progress: number } | null>(null)
+  const [offline, setOffline] = useState<{ ready: boolean; bytes: number; downloading: boolean; progress: number; error: string | null } | null>(null)
   useEffect(() => {
     void window.api.ttsOfflineState().then(setOffline)
   }, [])
@@ -508,19 +508,47 @@ function OverlayCard(): React.ReactElement {
           >
             朗读：{readAloud ? '开' : '关'}
           </Button>
+          {/* 一个下拉管所有嗓子：联网模式、本地模型、系统嗓子。
+              以前拆成「引擎」+「音色」两个下拉，选本地模型要先换引擎再换音色，
+              两个控件互相依赖，没有任何信息量。 */}
           <select
             className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-            value={engine}
+            value={engine === 'offline' ? `offline:${offlineVoice}` : engine === 'system' ? 'system' : `edge:${voice}`}
             onChange={(e) => {
-              const next = e.target.value as 'system' | 'edge' | 'offline'
-              setEngine(next)
-              void window.api.setSettings({ ttsEngine: next })
+              const next = e.target.value
+              if (next === 'system') {
+                setEngine('system')
+                void window.api.setSettings({ ttsEngine: 'system' })
+                return
+              }
+              if (next.startsWith('offline:')) {
+                setEngine('offline')
+                void window.api.setSettings({ ttsEngine: 'offline' })
+                return
+              }
+              setEngine('edge')
+              setVoice(next.slice('edge:'.length))
+              void window.api.setSettings({ ttsEngine: 'edge', ttsVoice: next.slice('edge:'.length) })
             }}
-            title="神经语音好听但需要联网：合成不出来的那句直接跳过，不会突然换成另一个嗓子"
+            title="联网嗓子最好听但需要网络；本地模型离线可用、语速偏慢；系统嗓子仅作兜底"
           >
-            <option value="edge">神经语音（联网）</option>
-            <option value="offline">本地模型</option>
-            <option value="system">系统嗓子</option>
+            <optgroup label="联网（推荐）">
+              {EDGE_VOICES.map((option) => (
+                <option key={option.id} value={`edge:${option.id}`}>
+                  {option.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="本地（不联网，需先下载模型）">
+              {OFFLINE_VOICES.map((option) => (
+                <option key={option.id} value={`offline:${option.id}`}>
+                  {option.label} · {option.note}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="兜底">
+              <option value="system">系统嗓子</option>
+            </optgroup>
           </select>
           {engine === 'offline' && (
             <Button
@@ -530,49 +558,20 @@ function OverlayCard(): React.ReactElement {
               onClick={() => {
                 void window.api.ttsOfflineDownload().then(setOffline)
               }}
-              title="本地模型走 CPU 推理，实测每句 0.9–1.2 s，44.1 kHz，不联网；模型 163 MB，存放在 data/tts-models/"
+              title="模型约 130 MB，下载后离线可用；存在数据目录 tts-models/ 下"
             >
               {offline?.ready
                 ? '本地模型已就绪'
                 : offline?.downloading
                   ? `下载中 ${Math.round((offline.progress ?? 0) * 100)}%`
-                  : '下载模型（160 MB）'}
+                  : '下载模型（130 MB）'}
             </Button>
           )}
-          {engine === 'offline' && (
-            <select
-              className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-              value={offlineVoice}
-              onChange={(e) => {
-                const next = e.target.value as OfflineVoiceId
-                setOfflineVoice(next)
-                void window.api.setSettings({ ttsOfflineVoice: next })
-              }}
-              title="本地模型只有一个嗓子，「音色」是同一嗓子的语速与音高变体：舒缓更慢更低，轻快偏高"
-            >
-              {OFFLINE_VOICES.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label} · {option.note}
-                </option>
-              ))}
-            </select>
+          {engine === 'offline' && offline?.error !== undefined && offline?.error !== null && !offline?.ready && (
+            <span className="text-xs text-destructive" title={offline.error}>
+              下载失败：{offline.error}
+            </span>
           )}
-          <select
-            className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-            value={voice}
-            disabled={engine !== 'edge'}
-            onChange={(e) => {
-              setVoice(e.target.value)
-              void window.api.setSettings({ ttsVoice: e.target.value })
-            }}
-            title="挑一个喜欢的嗓子；不满意就到语音页试听当场换"
-          >
-            {EDGE_VOICES.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
           <label className="flex items-center gap-2 text-xs text-muted-foreground" title="语速：1.0 正常">
             语速
             <input
@@ -581,7 +580,7 @@ function OverlayCard(): React.ReactElement {
               max={1.6}
               step={0.05}
               value={rate}
-              disabled={engine !== 'edge'}
+              disabled={engine === 'system'}
               className="h-1 w-24 accent-primary"
               onChange={(e) => {
                 const next = Number(e.target.value)
