@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, synthesizeEdge } from '../services/voice/edge'
-import { decideSpeak, speakOptionsFromSettings } from '../services/voice/speech'
+import { decideSpeak, speakOptionsFromSettings, speakSkipReason } from '../services/voice/speech'
 import { offlineReady, synthesizeOffline } from '../services/voice/offline'
 import type { OfflineVoiceId } from '../../shared/ipc'
 
@@ -83,6 +83,22 @@ export async function runTtsPlayProbe(): Promise<void> {
   const ownOk = ownRows.every((row) => row.ok)
   console.log('TTS_SPEAK_OWN_CASES', JSON.stringify({ ownOk, rows: ownRows }))
 
+// 跳过原因也单独钉住：TTS_SPEAK_SKIP 日志读的就是这个函数，判据漂了日志就在撒谎。
+const skipOptions = { readAloud: true, voice: '', rate: 1, pitch: 1 }
+const skipRows = [
+  { name: '朗读总开关关', entry: { pending: false, original: '[All] X: push top' }, options: { ...skipOptions, readAloud: false }, want: 'mute' },
+  { name: '自己的话（开关关）', entry: { pending: false, own: true, original: '[我] [Me] ⚔ push top' }, options: skipOptions, want: 'own' },
+  { name: '还没翻完', entry: { pending: true, original: '[All] X: push top' }, options: skipOptions, want: 'pending' },
+  { name: '剥完只剩符号', entry: { pending: false, original: '[All] ⚔ 🌐' }, options: skipOptions, want: 'empty' },
+  { name: '正常行不跳', entry: { pending: false, original: '[All] X: push top' }, options: skipOptions, want: null }
+].map((row) => ({
+  ...row,
+  got: speakSkipReason(row.entry as never, row.options),
+  ok: speakSkipReason(row.entry as never, row.options) === row.want
+}))
+const skipOk = skipRows.every((row) => row.ok)
+console.log('TTS_SPEAK_SKIP_CASES', JSON.stringify({ skipOk, rows: skipRows }))
+
   const text = '小心中路，他们可能在打肉山'
   const audio = await synthesizeEdge(text, DEFAULT_EDGE_VOICE, 1)
   console.log('TTS_PLAY_SYNTH', JSON.stringify({ bytes: audio?.length ?? 0 }))
@@ -158,7 +174,7 @@ export async function runTtsPlayProbe(): Promise<void> {
   console.log(
     'TTS_PLAY_RESULT',
     JSON.stringify({
-      ok: speakOk && engineOk && ownOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      ok: speakOk && engineOk && ownOk && skipOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
       speakOk,
       engineOk,
       playOkCount,

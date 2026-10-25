@@ -51,7 +51,13 @@ export function gsiChatLogPath(): string {
 const CHAT_LOG_MAX_BYTES = 256_000
 let chatLogSize = -1
 
-function recordChatEvent(event: GsiEvent, mySlot: number | undefined, label: string): void {
+function recordChatEvent(
+  event: GsiEvent,
+  mySlot: number | undefined,
+  label: string,
+  hero: string,
+  relation: string
+): void {
   const slot = event.player_id
   const record = {
     at: new Date().toISOString(),
@@ -59,6 +65,9 @@ function recordChatEvent(event: GsiEvent, mySlot: number | undefined, label: str
     slot: slot ?? null,
     name: label,
     own: slot !== undefined && slotIsSelf(slot, mySlot),
+    // 英雄/关系当时拿没拿到，直接记进证据文件——「这句为什么没带英雄名」从 jsonl 就能答。
+    hero: hero || null,
+    relation,
     gameTime: event.game_time ?? null,
     text: typeof event.message === 'string' ? event.message : null
   }
@@ -201,10 +210,11 @@ function recordChatEvents(payload: GsiPayload): ChatLine[] {
         break
       }
     const label = slotLabel(event.player_id, mySlot)
-    recordChatEvent(event, mySlot, label)
-    // 行格式：[英雄] [关系] [昵称] 频道符号 正文，一眼看清谁发的、哪边的、谁看得见。
+    // 英雄/关系在行组装前先算好：落盘记录里带上它们，对账时一眼看出这条当时有没有英雄名。
     const hero = slotHero(event.player_id)
     const relation = slotRelation(event.player_id, mySlot, myTeam, event.channel_type)
+    recordChatEvent(event, mySlot, label, hero, relation)
+    // 行格式：[英雄] [关系] [昵称] 频道符号 正文，一眼看清谁发的、哪边的、谁看得见。
     const symbol = event.channel_type === 11 ? ALL_CHAT_SYMBOL : TEAM_CHAT_SYMBOL
     const head = `${hero ? `[${hero}] ` : ''}[${relation}] [${label}] ${symbol}`
     if (typeof event.message === 'string' && event.message.trim())

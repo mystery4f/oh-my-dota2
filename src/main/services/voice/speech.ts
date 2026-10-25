@@ -81,6 +81,22 @@ export interface SpeakOptions {
  * 决定「这一条要不要念」。纯函数，探针直接喂数据断言，不依赖窗口与音频。
  * 返回 null 表示这条不该出声；返回 payload 就是浮层要念的内容。
  */
+/**
+ * 这条为什么不念。decideSpeak 只答 null，排查「怎么没出声」时五种静默路径在界面上长得
+ * 一样——own/pending/empty 谁拦的要能从日志直接读出来，所以把判据单独抽成纯函数。
+ */
+export function speakSkipReason(entry: CaptureEntry, options: SpeakOptions): 'mute' | 'own' | 'pending' | 'empty' | null {
+  if (!options.readAloud) return 'mute'
+  // 自己说的话不念：出声只为了听懂别人；真对局实测（2026-10-25, match 9060903477），
+  // 自己那句「::」被念成「司夜刺客说，」、紧接着敌方的 BASE 译文「基地」到达，
+  // 两句连听就成了「司夜刺客说基地」——own 正是为这个跳过而存在的字段。
+  if (entry.own === true && options.readOwn !== true) return 'own'
+  // 还在翻译 / 翻译失败 / 没有译文的，都不念：念出来只是噪音。
+  if (entry.pending) return 'pending'
+  if (!speakText(entry.translated ?? '') && !speakText(entry.original)) return 'empty'
+  return null
+}
+
 /** GSI 行前缀里的 [关系]（我/队友/敌方）：英雄名拿不到时退而求其次，至少念出是哪边在说。 */
 function relationFromLine(raw: string): string | null {
   const head = raw.split(/[⚔🌐]/u)[0] ?? ''
@@ -89,16 +105,9 @@ function relationFromLine(raw: string): string | null {
 }
 
 export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPayload | null {
-  if (!options.readAloud) return null
-  // 还在翻译 / 翻译失败 / 没有译文的，都不念：念出来只是噪音。
-  // 自己说的话不念：出声只为了听懂别人；真对局实测（2026-10-25, match 9060903477），
-  // 自己那句「::」被念成「司夜刺客说，」、紧接着敌方的 BASE 译文「基地」到达，
-  // 两句连听就成了「司夜刺客说基地」——own 正是为这个跳过而存在的字段。
-  if (entry.own === true && options.readOwn !== true) return null
-  if (entry.pending) return null
+  if (speakSkipReason(entry, options) !== null) return null
   // 念之前先剥掉 `[昵称] ⚔` 这类装饰；剥空了就退回原文正文，别念一串标签。
   const body = speakText(entry.translated ?? '') || speakText(entry.original)
-  if (!body) return null
   // 有英雄名就念成「某某 说 ……」：听的人需要知道是谁在说话，但不需要听方括号和频道符号。
   // 「说」不能省：没有它听起来像两个不相干的短语被连读；用逗号接住，
   // 句号会让引擎在「说」后面停一拍，就是用户抱怨的那个卡顿。
@@ -157,7 +166,26 @@ export function announceEntries(entries: CaptureEntry[]): void {
   lastSpeakAt = Date.now()
   for (const entry of entries) {
     const payload = decideSpeak(entry, options)
-    if (!payload) continue
+    if (!payload) {
+      // 静默路径留痕：own / pending / 空正文三种跳过在浮层上都一样（没声音），
+      // 没有 TTS_SPEAK_SKIP 的话「怎么没念」只能靠翻代码猜。
+      console.log(
+        'TTS_SPEAK_SKIP',
+        JSON.stringify({ reason: speakSkipReason(entry, options), own: entry.own === true, text: entry.original.slice(0, 30) })
+      )
+      continue
+    }
+    // 前缀来源留痕：speaker=英雄名（现实中只有自己的话有）；relation=退回的 [关系]；
+    // 两者皆空=光念内容。英雄名消失这类问题，有这条日志就不用考古了。
+    console.log(
+      'TTS_SPEAK_PICK',
+      JSON.stringify({
+        engine: payload.engine,
+        speaker: entry.speaker ?? null,
+        relation: entry.speaker ? null : relationFromLine(entry.original),
+        text: payload.text.slice(0, 40)
+      })
+    )
     // 合成先并行跑，投递仍按顺序：串行合成会让「一句 = 一次网络往返」累加成几秒的延迟，
     // 连发三句就要等三次，听起来就是「反应慢半拍」。
     // 离线引擎在本地推理（实测 81–193 ms），不需要等网络；它同样是「先合成、再按序投递」。
