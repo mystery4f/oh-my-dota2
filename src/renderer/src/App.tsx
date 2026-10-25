@@ -508,47 +508,52 @@ function OverlayCard(): React.ReactElement {
           >
             朗读：{readAloud ? '开' : '关'}
           </Button>
-          {/* 一个下拉管所有嗓子：联网模式、本地模型、系统嗓子。
-              以前拆成「引擎」+「音色」两个下拉，选本地模型要先换引擎再换音色，
-              两个控件互相依赖，没有任何信息量。 */}
+          {/* 两个下拉：左边选路子（分类），右边选具体嗓子（选项）。
+              分类只有三种，选项随分类变；系统嗓子没有选项，右侧控件保持禁用而不是消失——
+              消失会让布局跳动，用户也会以为刚选的东西丢了。 */}
           <select
             className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-            value={engine === 'offline' ? `offline:${offlineVoice}` : engine === 'system' ? 'system' : `edge:${voice}`}
+            value={engine}
             onChange={(e) => {
-              const next = e.target.value
-              if (next === 'system') {
-                setEngine('system')
-                void window.api.setSettings({ ttsEngine: 'system' })
-                return
-              }
-              if (next.startsWith('offline:')) {
-                setEngine('offline')
-                void window.api.setSettings({ ttsEngine: 'offline' })
-                return
-              }
-              setEngine('edge')
-              setVoice(next.slice('edge:'.length))
-              void window.api.setSettings({ ttsEngine: 'edge', ttsVoice: next.slice('edge:'.length) })
+              const next = e.target.value as 'system' | 'edge' | 'offline'
+              setEngine(next)
+              void window.api.setSettings({ ttsEngine: next })
             }}
-            title="联网嗓子最好听但需要网络；本地模型离线可用、语速偏慢；系统嗓子仅作兜底"
+            title="语音来源：联网最自然、本地不依赖网络、系统嗓子仅兜底"
           >
-            <optgroup label="联网（推荐）">
-              {EDGE_VOICES.map((option) => (
-                <option key={option.id} value={`edge:${option.id}`}>
-                  {option.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="本地（不联网，需先下载模型）">
-              {OFFLINE_VOICES.map((option) => (
-                <option key={option.id} value={`offline:${option.id}`}>
-                  {option.label} · {option.note}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="兜底">
-              <option value="system">系统嗓子</option>
-            </optgroup>
+            <option value="edge">联网 · 神经语音</option>
+            <option value="offline">本地 · 离线模型</option>
+            <option value="system">兜底 · 系统嗓子</option>
+          </select>
+          <select
+            className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+            value={engine === 'offline' ? offlineVoice : voice}
+            disabled={engine === 'system'}
+            onChange={(e) => {
+              if (engine === 'offline') {
+                const next = e.target.value as OfflineVoiceId
+                setOfflineVoice(next)
+                void window.api.setSettings({ ttsOfflineVoice: next })
+                return
+              }
+              setVoice(e.target.value)
+              void window.api.setSettings({ ttsVoice: e.target.value })
+            }}
+            title="挑一个喜欢的嗓子；不满意就到语音页试听当场换"
+          >
+            {engine === 'offline'
+              ? OFFLINE_VOICES.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label} · {option.note}
+                  </option>
+                ))
+              : engine === 'system'
+                ? <option value="system">系统嗓子</option>
+                : EDGE_VOICES.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
           </select>
           {engine === 'offline' && (
             <Button
@@ -572,7 +577,14 @@ function OverlayCard(): React.ReactElement {
               下载失败：{offline.error}
             </span>
           )}
-          <label className="flex items-center gap-2 text-xs text-muted-foreground" title="语速：1.0 正常">
+          <label
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+            title={
+              engine === 'offline'
+                ? '语速：本地模型 1.0 正常，0.8 更慢（实测 0.8 以下会变得拖沓）'
+                : '语速：1.0 正常'
+            }
+          >
             语速
             <input
               type="range"
@@ -590,7 +602,14 @@ function OverlayCard(): React.ReactElement {
             />
             <span className="tabular-nums">{rate.toFixed(2)}</span>
           </label>
-          <label className="flex items-center gap-2 text-xs text-muted-foreground" title="音高：1.00 原声，1.10 更尖，0.90 更沉">
+          <label
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+            title={
+              engine === 'edge'
+                ? '音高：1.00 原声，1.10 更尖，0.90 更沉'
+                : '音高只对联网嗓子可用：本地模型音高固定，系统嗓子由系统控制'
+            }
+          >
             音高
             <input
               type="range"
@@ -598,7 +617,7 @@ function OverlayCard(): React.ReactElement {
               max={1.3}
               step={0.05}
               value={pitch}
-              disabled={engine === 'system'}
+              disabled={engine !== 'edge'}
               className="h-1 w-24 accent-primary"
               onChange={(e) => {
                 const next = Number(e.target.value)
