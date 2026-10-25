@@ -320,7 +320,15 @@ void window.api.overlayReplyState().then((state) => {
 // speechSynthesis 只在渲染进程可用：主进程决定「这句该念」，这里负责真的出声。
 // 队列很短：话说得比嘴快时宁可漏掉旧的，也不要越念越落后（落后的话反而误导）。
 const SPEAK_QUEUE_MAX = 6
-const speakQueue: { text: string; lang: 'zh' | 'en'; rate: number; voice: string; audio?: string }[] = []
+const speakQueue: {
+  text: string
+  lang: 'zh' | 'en'
+  rate: number
+  voice: string
+  engine?: 'system' | 'edge' | 'offline'
+  audio?: string
+  audioMime?: string
+}[] = []
 let speaking = false
 
 function pickVoice(lang: 'zh' | 'en', wanted: string): SpeechSynthesisVoice | null {
@@ -337,40 +345,36 @@ function pumpSpeech(): void {
   if (speaking) return
   const next = speakQueue.shift()
   if (!next) return
-  // 引擎选了神经语音，但这一句没合成成功：宁可这句不出声，也不要突然换成另一个嗓子。
+  // edge / offline 合成没出音频就整句跳过：宁可这句不出声，也不要突然换成另一个嗓子。
   // 用户对「一下这个声音一下那个声音」的反馈就是这么来的——音色跳变比漏一句更刺耳。
-  if (next.engine === 'edge' && !next.audio) {
+  if (next.engine !== 'system' && !next.audio) {
     console.log('VOICE_SKIP_NO_AUDIO', next.text)
     speaking = false
     pumpSpeech()
     return
   }
-  // Edge 神经语音已经在主进程合成好了 mp3：直接播，音色比系统嗓子好听一个时代。
+  // 主进程合成好的音频（edge=mp3，offline=wav）：直接播，音色比系统嗓子好听一个时代。
   if (next.audio) {
     speaking = true
     const player = new Audio(`data:${next.audioMime ?? 'audio/mpeg'};base64,${next.audio}`)
+    // onerror 和 play() 拒绝可能接连都来：只认第一次，第二次会提前泵下一句造成双声道。
+    let settled = false
     const done = (): void => {
+      if (settled) return
+      settled = true
       speaking = false
       pumpSpeech()
     }
-    const speakWithSystem = (): void => {
-      const utter = new SpeechSynthesisUtterance(next.text)
-      utter.lang = next.lang === 'zh' ? 'zh-CN' : 'en-US'
-      utter.rate = next.rate
-      utter.onend = done
-      utter.onerror = done
-      window.speechSynthesis.speak(utter)
-    }
     player.onended = done
     player.onerror = () => {
-      // mp3 解不开（数据坏了）也算失败：退回系统嗓子，别让这一句彻底消失。
+      // 解不开（mime 标错或数据坏了）就整句跳过，不换嗓子出声。
       console.log('VOICE_AUDIO_ERROR', next.text)
-      speakWithSystem()
+      done()
     }
     void player.play().then(() => console.log('VOICE_PLAY_OK', next.text)).catch((err: unknown) => {
       // 播不出来绝不能静默：Chromium 的 autoplay 策略拒绝时会走到这里。
       console.log('VOICE_PLAY_FAILED', err instanceof Error ? err.message : String(err))
-      speakWithSystem()
+      done()
     })
     return
   }

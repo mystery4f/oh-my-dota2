@@ -103,16 +103,30 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
 }
 
 /** 把本拍新到达的译文交给浮层去念。手动那张照不念——点一下就冒出声会很惊吓。 */
-export function announceEntries(entries: CaptureEntry[]): void {
-  if (entries.length === 0) return
-  const settings = loadSettings()
-  if (!settings.ttsReadAloud) return
-  const options: SpeakOptions = {
+/**
+ * 从设置组装 decideSpeak 的入参。engine 必须显式带进来：漏掉时 decideSpeak 会默认
+ * edge，离线分支合成出的 WAV 在 deliver 里就被标成 audio/mpeg，浮层按 mp3 解不开。
+ */
+export function speakOptionsFromSettings(settings: {
+  ttsReadAloud: boolean
+  ttsRate: number
+  ttsPitch: number
+  ttsVoice: string
+  ttsEngine: 'system' | 'edge' | 'offline'
+}): SpeakOptions {
+  return {
+    engine: settings.ttsEngine,
     readAloud: settings.ttsReadAloud,
     rate: settings.ttsRate,
     pitch: settings.ttsPitch,
     voice: settings.ttsVoice
   }
+}
+export function announceEntries(entries: CaptureEntry[]): void {
+  if (entries.length === 0) return
+  const settings = loadSettings()
+  if (!settings.ttsReadAloud) return
+  const options = speakOptionsFromSettings(settings)
   const engine = settings.ttsEngine
   // 连接池会凉：距离上次朗读超过一分钟就重新握手一次，别让下一句替用户等那 1–21 秒。
   if (engine === 'edge' && Date.now() - lastSpeakAt > 60_000) warmEdge()
@@ -151,7 +165,7 @@ async function deliver(payload: SpeakPayload, audioPromise: Promise<Buffer | nul
   let packet = payload
   if (audioPromise) {
     const audio = await audioPromise
-    // 合成失败就原样下发：渲染层没有 audio 时会用系统嗓子念，不会静音。
+    // 合成失败就不带 audio 下发：渲染层对 edge/offline 一律整句跳过，不临时换系统嗓子。
     if (audio) packet = { ...payload, audio: audio.toString('base64'), audioMime: payload.engine === 'offline' ? 'audio/wav' : 'audio/mpeg' }
   }
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IPC.VOICE_SPEAK, packet)
