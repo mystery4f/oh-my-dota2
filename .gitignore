@@ -10,3 +10,6 @@ dist/
 .tmp/
 
 data/
+
+# cmd redirect accident from POSIX shells: `foo > nul` creates a real file named nul
+/nul
