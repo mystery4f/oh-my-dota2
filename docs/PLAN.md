@@ -98,8 +98,8 @@ Dota 2 跨语言沟通工具（Electron，零注入、VAC 安全）：
 
 - [x] #35 M9a 逐拍遥测（已完成，2026-11）：新增 `src/main/services/capture/telemetry.ts` + 探针 `--capture-telemetry-probe [秒数]`。自动模式每一拍往 `logs/capture-ticks.jsonl` 写一行（`at/mode/act/grabMs/src/chg/need/ocrMs/lines/msgs/fresh/dup/own/streak/err`），单文件上限 1 MB、超限清空重写，所以磁盘占用恒定（回应用户「日志太多伤磁盘」的顾虑）；`act` 把每一拍归类成 `ocr | same | gap | idle | error | busy`，`src` 记下这一帧是常驻流还是 `desktopCapturer` 兜底。桌面实测：40 拍里 cadence p50 = 809 ms（目标 800）、抓屏 p50 72 ms、`busy` 0 次、静止画面 34 拍全被指纹判掉，唯一短板是 OCR 单次中位 2.2 s。
 - [x] #36 M9b 真对局定位（已完成，2026-11）：用户真实对局采到 383 拍 / 15.6 分钟（面板「自动捕获」）。`src=stream` 383/383（常驻流没掉）、`cadence p50 801`、抓屏 p50 185 ms、OCR p50 216 ms、新消息 29 条、`dup` 0、`own` 0、`brk` 从未触发、`err` 0 —— 「自动轮询在实机不稳定」这句话到此为止是**没有据实**的：真正坏的是 `busy`（75 次，两条定时器链），已单独记账进 #37。顺带纠正了桌面上那个「OCR 中位 2.2 s」的悲观结论：对局里 OCR 只要 216 ms，慢的是捕获区里的字有多少。数字进 `docs/BENCH.md`「真对局」节，根因写进 `docs/NOTES.md`。
-- [ ] #1 M9b' 真对局（试用英雄场景已采 45 拍 / 72 s，见 BENCH）：`src=stream` 45/45，常驻流在游戏前台没掉；抓屏 p50 202 ms（桌面 72 ms）成新瓶颈；`same` 0 次 —— 指纹在半透明 HUD 上失效，实际节流全靠 `ocrGap` 退避。剩下要真对局才能答的：一屏滚动时会不会漏行、`brk` 会不会误判清屏、`fresh` 长期为 0 的时段占比。
-- [ ] #2 M9c 按数据修（第一轮已做，2026-11）：真对局数据先暴露的是 `busy` —— `tick()` 的 `busy` 分支和 `finally` 各排程一次，每撞一次 busy 就多出一条定时器链，两条链交错跑（同毫秒成对落日志），383 拍里 75 拍是 busy。已修：`scheduleNext()` 开头 `clearTimeout` 兜底 + 删掉重复排程，重启复测 busy 30/60 → 0、cadence p50 0 → 801。**仍待数据**的候选：间隔跟着 OCR 实测耗时长走（而不是固定 800）、`sources` 兜底时排空一拍的退避、把「行已滚出可见区」与「行被裁半」分开处理。
+- ~~#1 M9b' 真对局补测~~ **已关闭（2026-10-25）**：抓屏 OCR 链路已整条移除，`src=stream` / `same` / `brk` / `fresh` 这些指标失去对象。编号 `#1` 已在 `docs/TODO.md` 重新定义为「GSI 正文可靠性真对局复核」，见 M13 待办。
+- ~~#2 M9c 按数据修~~ **已关闭（2026-10-25）**：`busy` 修复已实装；其余候选（间隔跟 OCR 耗时走、`sources` 兜底退避、滚出/裁半区分）全部是 OCR 时代指标，随 OCR 链路移除失去对象。编号 `#2` 已在 `docs/TODO.md` 重新定义为「账本覆盖率口径复核」，见 M13 待办。
 - [x] #38 M9d 显示语义定稿（已完成，2026-11）：手动是「此刻屏幕的快照」，覆盖式重建；自动是「这一局的累积」，追加式，两者共用 `CAPTURE_REPLACE` / `CAPTURE_ENTRIES` 两条通道。累积上限浮层 40 行、面板 50 条，满了挤掉最早的。自动的终止条件由 `src/main/services/capture/session.ts` 判：屏幕 ≥3 行全是没见过的、且历史 ≥10 条、连续 3 拍如此，才认定换局，然后清空去重窗口 + 广播空 `CAPTURE_REPLACE` 清屏，同一拍的整屏内容随即作为新行重新上屏。OCR 期间滚过去的行不补（迟到消息插进中间比少一句更糟）。探针 `--session-break-probe`。
 
 ### M10 对局状态源（GSI，验收：进对局自动开始、打完自动停）
@@ -107,7 +107,7 @@ Dota 2 跨语言沟通工具（Electron，零注入、VAC 安全）：
 捕获循环只能看到屏幕，回答不了「现在到底在不在对局里」——聊天区没人说话和不在游戏里，在 OCR 眼里是同一张图。Valve 官方的 Game State Integration 把 `map.game_state` 直接推到本地 HTTP 端口，正好补上这个缺口；顺带能拿到 `player.name`（自己说的话不该被翻译）。注意正文默认拿不到——但 cfg 的 `data` 段加 `"events" "1"` 之后 Dota 会把对局内聊天推进 `payload.events[]`（`event_type: "chat_message"`，带 `player_id` / `channel_type` / `message`），见候选「用 GSI events 读聊天正文」；我们当前只开 provider/map/player，所以正文仍靠屏幕 OCR。
 
 - [x] #40 M10a 监听 + cfg 自愈（已完成，2026-11）：`src/main/services/gsi.ts` 在 `127.0.0.1:32123` 起监听，`src/main/services/gsi-config.ts` 按注册表 `HKCU\Software\Valve\Steam` → `libraryfolders.vdf` 找出所有 Steam 库，把 `steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration/gamestate_integration_ohmydota2.cfg` 写好（内容有变化才重写；罗技那份 `gamestate_integration_logitech.cfg` 走 3002，各工具一份互不冲突）。判定只认翻转：`PRE_GAME`/`GAME_IN_PROGRESS` 开一次、`POST_GAME`/`DISCONNECT` 停一次，90 s 没推送且有 `startedByGsi` 标记才停（游戏关了不让捕获空转）；用户中途手动停掉捕获不会被后续心跳又拉起来，`autoStartCapture` 关掉时 GSI 也不替他开。面板「捕获循环」卡显示当前 `game_state` 或「监听 :32123 · 等 Dota 推送」。GSI 只按**当前配置的模式**启动捕获：自动模式下才是真的开始翻译，手动模式下只是保持就绪（不替用户改模式）。探针 `--gsi-probe`（9 个纯判定用例 + 真实 HTTP 推一串 payload）。
-- [ ] #3 M10b 实测：重启一次 Dota 让 cfg 生效，进一局确认推送到达、自动开/停各发生一次（面板上 `GSI` 从「等 Dota 推送」变成 `PRE_GAME` → `GAME_IN_PROGRESS` → `POST_GAME`）。
+- [x] #3 M10b 实测（已验证，2026-10-25）：cfg 已落地 Dota 目录且推送真实到达——真对局 9060804477 / 9061130332 全程帧不断（后者 3499 帧，provider/map/player/hero/events 每帧都到），`gsi-chat.jsonl` 收到全部聊天、own 判定正确；`gsi-summary.json` 在 `POST_GAME` 终落，局间 matchid 翻转清缓存（commit 9d91f0b 的依据就是这两局的实测数据）。
 - [x] #42 M10c 闸门升级（已完成，2026-11）：捕获循环两处都从「有没有开」改成问「该不该开」。抓屏前加前台闸门 `gameFocused()`——走常驻输入桥新增的 `focus` op（`Get-Process dota2` + `GetForegroundWindow` 比对），不在前台只记一条 `act:"idle"`，抓屏和 OCR 全省；结果缓存 900 ms，查询失败放行并冷却 30 s（闸门坏了不能反过来把捕获关死）。停捕获去掉 `startedByGsi` 前置条件，改由 `shouldStopCaptureOnMatchEnd(mode)` 决定：自动模式随对局结束停（下一局 GSI 再拉起），手动模式不动（那个开关是用户的）。看门狗走同一规则。新增探针 `--gsi-dump [秒数]`：把 Dota 真实推来的每个字段路径（类型/次数/示例值）摊开写 `logs/gsi-frames.json`，扩 `data` 段之前先看真实密度。
 - [x] #43 M10e 正文来源可选（已完成，2026-11）：`chatSource: 'ocr' | 'gsi'` 两条并列的自动路线，面板上是一个「正文：屏幕识别（OCR）／正文：游戏推送（GSI）」选择器。GSI 路在 `start()` 里就不建抓屏流、不排定时器，也不需要聊天区域；正文由 `gsi.ts` 去重后经 `pushChat` → `pushMessages()` 直接进渲染层与翻译队列，自己的消息照常显示。`--gsi-probe` 增加 `pushChat` 断言（仍 9/9），`--settings-persist-probe` 扩到 15 项全绿。
 
@@ -127,6 +127,20 @@ Dota 2 跨语言沟通工具（Electron，零注入、VAC 安全）：
 - [x] #14 M12f 行内信息：英雄头像（127 张打包进仓库，Steam CDN 国内不可靠）、词库命中的译文标淡黄「词」、翻译失败标红报错——「未翻译」不再同时表示「还没翻」和「翻不成」。
 - [x] #15 M12g 安静的状态行：正常捕获时 pill 整块隐藏；只有 `捕获出错 → 没选区域 → 捕获暂停 → 等待进入对局` 四种情况出现一行淡橙字（纯函数 `captureHint` 判定，错误优先级最高）。
 - [x] #16 M12h 少动手：解锁后 5 秒无操作自动锁回穿透（`armIdle`，渲染层 1 秒节流 `keepAlive` 推后它）；新行 400ms 淡黄闪；超过 12 行的旧行降到 55% 不透明度；浮层上所有 `title` 删除（鼠标划过弹提示在游戏里碍事）。
+
+## M13 v1.1.x 朗读修复与可观测（2026-10-25）
+
+验收标准：真对局里离线/联网朗读都出声且引擎不串、自己的话默认不念但可开关、每句的前缀来源与跳过原因都能从日志直接读出。
+
+- [x] 修复离线朗读静默失效：`announceEntries` 组装 `SpeakOptions` 漏传 `engine`，`decideSpeak` 默认 `edge` → 离线 WAV 被标成 `audio/mpeg` 投递、浮层按 mp3 解不开（commit 48a6f61，`--tts-play-probe` 加离线 WAV 腿后 `ok:true playOkCount:2`）
+- [x] 朗读跳过自己那句（`e99a304`，真对局 9060903477 发现「司夜刺客说基地」连听）+ `ttsReadOwn` 开关（`982898e`，面板「自己的话：念/不念」，默认不念）
+- [x] GSI own 判定加固 + matchid 翻转清槽位缓存（`9d91f0b`，真对局 9060804477 实测：chat 帧常缺 player 块，回退 `mySlotCache`）
+- [x] 翻译门槛提高到正文 ≥3 字符（`4600e7d`，`gg`/`ok` 不再进模型队列）
+- [x] 朗读前缀三级化：英雄名 → `[关系]`（队友说/敌方说）→ 光念内容（`feafdd2`）。事实基础：真对局 3499 帧 `allplayers` 一帧未到，别人的英雄名从 GSI 拿不到（见变更记录）
+- [x] 朗读可观测：`TTS_SPEAK_PICK` / `TTS_SPEAK_SKIP`（判据抽成纯函数 `speakSkipReason()`）+ `gsi-chat.jsonl` 记录加 `hero`/`relation` 字段（`48c940b`）
+- [x] 版本控制切 jj：`jj git init --colocate`，此后提交走 `jj commit` + `jj git push`（jj v0.46.0 装在 `%USERPROFILE%\bin`）
+- [ ] #1（TODO.md 编号）GSI 正文可靠性真对局复核：一局真实天梯里 `gsi-chat.jsonl` 行数/去重后条数与浮层实际上屏对账（`--match-report` 已有骨架：近 600 分钟实测 183 句 / 187 帧、重复中位 1 最大 2）
+- [ ] #2（TODO.md 编号）账本覆盖率口径复核：`--match-report` 的 `missRate` 目前把 by-design 跳过（`b`/`g`/`。。`/中文直通）算成漏行，36% 是虚高；要排除设计内跳过后再看真实漏行（现存唯一可疑：`need gank, pos 5`），口径没意义就删掉这段
 
 ## 候选方案（未排期）
 
@@ -163,6 +177,7 @@ Dota 2 跨语言沟通工具（Electron，零注入、VAC 安全）：
 
 ## 变更记录
 
+- 2026-10-25（M13）：朗读修复与可观测一批。① 离线朗读静默失效根因是 `engine` 未透传（WAV 被标 `audio/mpeg`）；② 真对局实锤 `allplayers` 一帧不推（match 9061130332，3499 帧；另一局 796 帧；cfg 明确开着）——别人的英雄名/昵称从 GSI 拿不到，`allplayers` 是 CS:GO 的块名，Dota 2 GSI 只推本机玩家的 `player`/`hero`，NOTES.md 已修正旧观测；朗读前缀因此退化为「英雄名 → [关系] → 光念内容」三级；③ `TTS_SPEAK_PICK`/`TTS_SPEAK_SKIP`/`gsi-chat.jsonl` 新增 `hero`/`relation` 字段，排查「怎么没念/为什么没英雄名」不再考古；④ 版本控制切 jj（colocate）。GSI 进阶玩法组（#12/#13/#14/#17）的 allplayers 前提不成立，整组挂起。
 - 2026-11：抓屏 OCR 整条链路移除（用户决定：GSI 已实测可用，不再需要第二只手）。删掉 PaddleOCR + onnxruntime-node + Windows OCR 桥、区域选择/高亮两个窗口、逐拍抓屏遥测、手动拍照模式与 11 个 OCR 探针；正文唯一来源是 GSI 的 events 块。安装包从 198 MB 降到约 30 MB。代价明说：GSI 不可用时没有兜底，cfg 没写进去或 Dota 没重启就一条字都收不到。剩下的纯逻辑判据（前缀拆分、翻不翻、同形、英雄名）挪进 --chat-block-probe。
 - **2026-11 · v1 收尾**：M1–M12 全部达成，功能面冻结在 v1。本轮把「浮层」从一块能显示字的透明窗做成可操作的对象：几何归用户（拖 / 拉宽 / 方向键微调 / 贴边吸附 / 还原）、锁定语义收敛成一条纯函数、收起成小图标、朗读换 Edge 神经语音并加连接池与预热（10/10、p50 1186 ms）、行内补头像与「词」标、状态行只在四种异常时出现。数字与实测在 `docs/BENCH.md`，踩坑在 `docs/NOTES.md`，人工验收在 `docs/ACCEPTANCE.md`。探针：`--overlay-geometry-probe` 23 项、`--settings-persist-probe` 20 项、`--translate-cache-probe` 22 项、`--tts-bench` 10/10，全绿。
 - 2026-11：发版与自动更新（v1.0.0）。electron-builder 出 NSIS 安装包 + 免安装 zip，`publish` 指向 GitHub，打包时顺手写出 `latest.yml` 与 `resources/app-update.yml`；三条流水线：`ci.yml`（每次 push/PR 跑 typecheck/lint/build）、`nightly.yml`（push main 自动打包成 `Nightly <UTC 时间戳>` 预发布，只留最新一个，旧的全删）、`release.yml`（推 `v*` 标签即出正式版）。应用内更新走 `electron-updater` 只跟正式通道（`allowPrerelease = false`），开机静默查一次、下完不自动重启——面板把按钮变成「重启并更新」，正在打局时绝不自己关窗口。
