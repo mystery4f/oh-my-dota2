@@ -81,6 +81,13 @@ export interface SpeakOptions {
  * 决定「这一条要不要念」。纯函数，探针直接喂数据断言，不依赖窗口与音频。
  * 返回 null 表示这条不该出声；返回 payload 就是浮层要念的内容。
  */
+/** GSI 行前缀里的 [关系]（我/队友/敌方）：英雄名拿不到时退而求其次，至少念出是哪边在说。 */
+function relationFromLine(raw: string): string | null {
+  const head = raw.split(/[⚔🌐]/u)[0] ?? ''
+  const hit = /\[(我|队友|敌方)\]/u.exec(head)
+  return hit ? hit[1] : null
+}
+
 export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPayload | null {
   if (!options.readAloud) return null
   // 还在翻译 / 翻译失败 / 没有译文的，都不念：念出来只是噪音。
@@ -95,7 +102,16 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
   // 有英雄名就念成「某某 说 ……」：听的人需要知道是谁在说话，但不需要听方括号和频道符号。
   // 「说」不能省：没有它听起来像两个不相干的短语被连读；用逗号接住，
   // 句号会让引擎在「说」后面停一拍，就是用户抱怨的那个卡顿。
-  const text = entry.speaker ? `${heroChinese(entry.speaker)}说，${body}` : body
+  // 有英雄名就念「某某说，」；GSI 只推自己的 hero 块，别人的英雄（allplayers）真对局
+  // 实测一帧都没到过——拿不到英雄时退回行前缀里的 [关系]，念「队友说，/敌方说，」，
+  // 比光秃秃念内容至少多一层「谁在说话」；OCR 行没有关系标签就老老实实不加前缀。
+  const relation = entry.speaker ? null : relationFromLine(entry.original)
+  const prefix = entry.speaker
+    ? `${heroChinese(entry.speaker)}说，`
+    : relation
+      ? `${relation}说，`
+      : ''
+  const text = prefix ? `${prefix}${body}` : body
   const clipped = text.length > SPEAK_MAX_CHARS ? `${text.slice(0, SPEAK_MAX_CHARS)}…` : text
   return {
     text: clipped,

@@ -357,6 +357,13 @@
 - 修法：把记账搬进应用本身。`src/main/services/gsi-frames-summary.ts` 在内存里按 cfg 块和 `event_type` 归类（纯逻辑在 `gsi-dump-analysis.ts`，可离线复算），每 5 秒原子落盘 `logs/gsi-summary.json`，`map.matchid` 变了就清账（避免上一局的统计污染这一局），`POST_GAME` 时立刻终落。判读用只读探针 `--gsi-dump-report [文件]`，它只看文件，dev 应用开着也能跑。
 - 结论一句话就够：`真对局（matchid …）· allplayers 有数据（4210/4812 帧）· 事件类型 chat_message×146、player_connected×10`。训练场/人机/主菜单的 `matchid` 是 `0`，一眼能分开，不必再猜「为什么 allplayers 没来」。
 - 注意：探针直接跑 `out/main` 时 userData 是 `Electron`，dev 应用是 `oh-my-dota2`，所以判读会同时看两个目录并取最新的那份。
+
+### allplayers 一帧都没到——别人的英雄名从 GSI 拿不到
+- 症状：朗读只剩内容、没有「某某说」；浮层行英雄一栏为空，昵称退回「玩家N」。
+- 证据：真对局 9061130332（3499 帧）与同日另一局（796 帧）`allplayersFrames` 都是 0，而盘上 cfg 明确写了 `"allplayers" "1"`（mtime 10-24 02:38，Dota 在其后启动）；同一批帧里 provider/map/player/hero/events 每帧都到。社区口径一致（Dota2GSI issue #4、dota-gsi 库的示例 cfg）：Dota 2 GSI 只推本机玩家的 `player`/`hero`，`allplayers` 是 CS:GO 的块名。
+- 结论修正：上文「allplayers 有数据（4210/4812 帧）」是 v1.1.0 时期的历史观测，不能当「真对局一定有」的依据。以前能听到英雄名的其实只有自己的话（hero 块只含自己）；自己的话默认不念之后，英雄名就彻底消失了。
+- 修法：`decideSpeak` 拿不到英雄时退回行前缀里的 `[关系]`，念「队友说，/敌方说，」，OCR 行没有关系标签就不加前缀；自己的话（`ttsReadOwn` 打开）仍用 hero 块的英雄名。cfg 保留 `allplayers "1"`：哪天 Valve 又推了，代码本来就接得住（`refreshSlotNames` + `normalizeSlot` 一直在）。
+- 教训：观测结论要带日期和客户端版本。「官方不支持」和「这版不支持」在下次升级后可能是相反的答案，但都别替 Valve 乐观。
 ### 闸门永远判「不在前台」——客户端把答案字段吃了
 - 症状：真对局里自动模式连续 12 分钟全是 `act: idle`，一拍 OCR 都没跑；同时 `logs/gsi-chat.jsonl` 里已经有玩家自己发的聊天——人明明在游戏里，闸门却说不在前台。
 - 排查：桥本身是对的。手工起一份部署后的脚本、把游戏窗口调到前台后问一次，回答 `{"gameRunning":true,"focused":true}`。差别在客户端：`handleLine` 的**成功分支只白名单透传** `text`/`lookupMs`/`clipSetMs`/`keysMs`/`retried`，`focused`/`gameRunning` 直接被丢掉，于是 `res.focused === true` 恒为 false。同一处白名单还让 `fg`/`win` 在成功路径上永远缺失（它们只挂在失败分支上）。
