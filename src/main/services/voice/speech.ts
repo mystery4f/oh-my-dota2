@@ -82,6 +82,10 @@ export interface SpeakOptions {
 export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPayload | null {
   if (!options.readAloud) return null
   // 还在翻译 / 翻译失败 / 没有译文的，都不念：念出来只是噪音。
+  // 自己说的话不念：出声只为了听懂别人；真对局实测（2026-10-25, match 9060903477），
+  // 自己那句「::」被念成「司夜刺客说，」、紧接着敌方的 BASE 译文「基地」到达，
+  // 两句连听就成了「司夜刺客说基地」——own 正是为这个跳过而存在的字段。
+  if (entry.own === true) return null
   if (entry.pending) return null
   // 念之前先剥掉 `[昵称] ⚔` 这类装饰；剥空了就退回原文正文，别念一串标签。
   const body = speakText(entry.translated ?? '') || speakText(entry.original)

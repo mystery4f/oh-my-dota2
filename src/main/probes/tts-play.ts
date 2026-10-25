@@ -22,6 +22,7 @@ export async function runTtsPlayProbe(): Promise<void> {
     { name: '英文译文优先', entry: { id: '2', ts: 0, pending: false, original: '[Team] X: push top', translated: '推上路' }, want: '推上路' },
     { name: '有英雄名就念「谁说」', entry: { id: '5', ts: 0, pending: false, original: '[lina] [队友] [队友甲] ⚔ push top', translated: '推上路', speaker: 'lina' }, want: '莉娜说，推上路' },
     { name: '中文原话也带英雄名', entry: { id: '6', ts: 0, pending: false, original: '[pudge] [敌方] [敌人乙] 🌐 中路没人', translated: null, speaker: 'nevermore' }, want: '影魔说，中路没人' },
+    { name: '自己说的不念（哪怕带英雄名）', entry: { id: '8', ts: 0, pending: false, own: true, original: '[nyx_assassin] [我] [Balance(Bot)] 🌐 ::', translated: null, speaker: 'nyx_assassin' }, want: null },
     { name: '还没翻完不念', entry: { id: '3', ts: 0, pending: true, original: '[Team] X: push top' }, want: null },
     { name: '整行只有符号不念', entry: { id: '4', ts: 0, pending: false, original: '[All] ⚔ 🌐' }, want: null }
   ]
