@@ -324,7 +324,20 @@ export async function synthesizeOffline(
         clearTimeout(timer)
         resolve(value)
       })
-      child.stdin?.write(`${JSON.stringify({ id, text, speed, pitch, sid: preset.sid ?? modelFiles(voice).sid, dir: offlineModelDir(voice), out })}\n`)
+      child.stdin?.write(
+        `${JSON.stringify({
+          id,
+          text,
+          speed,
+          pitch,
+          sid: preset.sid ?? modelFiles(voice).sid,
+          dir: offlineModelDir(voice),
+          // 每个模型的 onnx 文件名都不一样（keqing.onnx / model.onnx），由注册表给出，
+          // 不能让 worker 猜——猜错就是 'vits-model ... does not exist'。
+          model: modelFiles(voice).required.find((name) => name.endsWith('.onnx')) ?? 'model.onnx',
+          out
+        })}\n`
+      )
     })
     if (!reply.ok) {
       console.log('TTS_OFFLINE_FAILED', JSON.stringify({ ms: Date.now() - started, err: reply.err ?? 'unknown' }))

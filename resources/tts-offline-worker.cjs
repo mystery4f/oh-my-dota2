@@ -15,7 +15,7 @@ let sherpa = null
 let engine = null
 let engineDir = null
 
-function loadEngine(dir) {
+function loadEngine(dir, modelName) {
   if (engine && engineDir === dir) return engine
   if (!sherpa) sherpa = require('sherpa-onnx-node')
   // MeloTTS 是 VITS 架构：单个 model.onnx（fp32；官方包的 .int8.onnx 只是 133 字节的
@@ -24,7 +24,7 @@ function loadEngine(dir) {
   engine = new sherpa.OfflineTts({
     model: {
       vits: {
-        model: path.join(dir, 'model.onnx'),
+        model: path.join(dir, modelName || 'model.onnx'),
         lexicon: path.join(dir, 'lexicon.txt'),
         tokens: path.join(dir, 'tokens.txt'),
         dictDir: path.join(dir, 'dict'),
@@ -88,7 +88,7 @@ function handle(line) {
   }
   if (!request || typeof request.text !== 'string') return
   try {
-    const tts = loadEngine(request.dir)
+    const tts = loadEngine(request.dir, request.model)
     const pitch = request.pitch ?? 1
     // 多说话人模型靠 sid 选嗓子；单说话人模型传任何值都一样。
     const audio = tts.generate({
