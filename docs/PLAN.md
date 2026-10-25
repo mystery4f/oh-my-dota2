@@ -177,6 +177,7 @@ Dota 2 跨语言沟通工具（Electron，零注入、VAC 安全）：
 
 ## 变更记录
 
+- 2026-10-25：关闭 #14（敌方关键装备提醒）。用户要求先实测再定夺：观战端当场抓 matchid 9061398205 共 11 帧，`allplayers` 仍为 0——「观战端有全量数据」的假设一并证伪（对局端此前已实证 3499 帧 + 46 帧均为 0）。敌方装备在零注入约束下没有任何被动数据源，#14 移入已关闭留档。顺带发现事件块新类型 `courier_killed` / `generic_event`（CHAT_MESSAGE_COURIER_LOST，带 `courier_team`/`killer_player_id`）：#13（事件提醒）的事件源比预想丰富，但对局端是否同样推送待真局确认。
 - 2026-10-25（M13）：朗读修复与可观测一批。① 离线朗读静默失效根因是 `engine` 未透传（WAV 被标 `audio/mpeg`）；② 真对局实锤 `allplayers` 一帧不推（match 9061130332，3499 帧；另一局 796 帧；cfg 明确开着）——别人的英雄名/昵称从 GSI 拿不到，`allplayers` 是 CS:GO 的块名，Dota 2 GSI 只推本机玩家的 `player`/`hero`，NOTES.md 已修正旧观测；朗读前缀因此退化为「英雄名 → [关系] → 光念内容」三级；③ `TTS_SPEAK_PICK`/`TTS_SPEAK_SKIP`/`gsi-chat.jsonl` 新增 `hero`/`relation` 字段，排查「怎么没念/为什么没英雄名」不再考古；④ 版本控制切 jj（colocate）。GSI 进阶玩法组（#12/#13/#14/#17）的 allplayers 前提不成立，整组挂起。
 - 2026-11：抓屏 OCR 整条链路移除（用户决定：GSI 已实测可用，不再需要第二只手）。删掉 PaddleOCR + onnxruntime-node + Windows OCR 桥、区域选择/高亮两个窗口、逐拍抓屏遥测、手动拍照模式与 11 个 OCR 探针；正文唯一来源是 GSI 的 events 块。安装包从 198 MB 降到约 30 MB。代价明说：GSI 不可用时没有兜底，cfg 没写进去或 Dota 没重启就一条字都收不到。剩下的纯逻辑判据（前缀拆分、翻不翻、同形、英雄名）挪进 --chat-block-probe。
 - **2026-11 · v1 收尾**：M1–M12 全部达成，功能面冻结在 v1。本轮把「浮层」从一块能显示字的透明窗做成可操作的对象：几何归用户（拖 / 拉宽 / 方向键微调 / 贴边吸附 / 还原）、锁定语义收敛成一条纯函数、收起成小图标、朗读换 Edge 神经语音并加连接池与预热（10/10、p50 1186 ms）、行内补头像与「词」标、状态行只在四种异常时出现。数字与实测在 `docs/BENCH.md`，踩坑在 `docs/NOTES.md`，人工验收在 `docs/ACCEPTANCE.md`。探针：`--overlay-geometry-probe` 23 项、`--settings-persist-probe` 20 项、`--translate-cache-probe` 22 项、`--tts-bench` 10/10，全绿。
