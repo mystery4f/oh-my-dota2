@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { normalizeLine } from '../capture/chat-lines'
@@ -72,6 +72,38 @@ export function translationCachePath(): string {
   return join(app.getPath('userData'), FILE_NAME)
 }
 
+/**
+ * 把坏掉的库挪走，下次 open() 重建一个空的。
+ *
+ * 为什么需要它：sqlite 的索引一旦损坏（断电、两个进程同时写、杀进程杀在提交中间），
+ * 每次写都会抛 "database disk image is malformed"，而缓存层是「尽力而为」的——
+ * 一直失败的缓存等于没有缓存，还会把日志刷满。挪走比原地修更划算：内容是可重建的翻译记忆。
+ */
+function healCorruptDatabase(reason: string): void {
+  const file = translationCachePath()
+  try {
+    if (db !== null) db.close()
+  } catch {
+    // 关不掉也要继续挪文件
+  }
+  db = null
+  dbFailed = false
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  for (const path of [file, `${file}-wal`, `${file}-shm`]) {
+    try {
+      if (existsSync(path)) renameSync(path, `${path}.corrupt-${stamp}`)
+    } catch {
+      // 挪不动就让 open() 继续报错，至少不在这里死循环
+    }
+  }
+  console.log('TRANSLATE_CACHE_QUARANTINED', reason)
+}
+
+function looksCorrupt(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return /malformed|not a database|disk image is malformed|database corruption/i.test(message)
+}
+
 function open(): DatabaseSync | null {
   if (db !== null) return db
   if (dbFailed) return null
@@ -116,6 +148,18 @@ function open(): DatabaseSync | null {
     `)
     next.exec('CREATE INDEX IF NOT EXISTS idx_pair_b ON pair(provider, tone, b)')
     next.exec('CREATE INDEX IF NOT EXISTS idx_pair_hits ON pair(hits DESC)')
+    // 索引损坏时 prepare/run 都会抛，但 SELECT 仍能读——所以必须在打开时查一次，
+    // 否则症状是「读得到旧行、写不进新行」，看起来像词库凭空停止增长。
+    const check = next.prepare('PRAGMA quick_check(1)').get() as { quick_check?: string } | undefined
+    if (check !== undefined && check.quick_check !== 'ok') {
+      try {
+        next.close()
+      } catch {
+        // 已经坏了，关闭失败无所谓
+      }
+      healCorruptDatabase(`quick_check: ${check.quick_check}`)
+      return open()
+    }
     db = next
     return db
   } catch (err) {
@@ -330,6 +374,16 @@ export function writeTranslation(
     stats.writes += 1
   } catch (err) {
     console.log('TRANSLATE_CACHE_WRITE_FAILED', err instanceof Error ? err.message : String(err))
+    // 坏库就挪走重建，再试一次；只重试一次，避免在真错误上打转。
+    if (looksCorrupt(err)) {
+      healCorruptDatabase(err instanceof Error ? err.message : String(err))
+      try {
+        const retry = open()
+        if (retry !== null) retry.prepare('SELECT 1').get()
+      } catch {
+        // 重建也失败就让它降级到内存 Map
+      }
+    }
   }
 }
 
