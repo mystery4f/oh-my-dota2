@@ -90,7 +90,12 @@ function handle(line) {
   try {
     const tts = loadEngine(request.dir)
     const pitch = request.pitch ?? 1
-    const audio = tts.generate({ text: request.text.trim(), sid: 0, speed: (request.speed ?? 1) / pitch })
+    // 多说话人模型靠 sid 选嗓子；单说话人模型传任何值都一样。
+    const audio = tts.generate({
+      text: request.text.trim(),
+      sid: request.sid ?? 0,
+      speed: (request.speed ?? 1) / pitch
+    })
     const samples = pitch === 1 ? audio.samples : resample(audio.samples, pitch)
     if (!audio.samples.length) {
       process.stdout.write(`${JSON.stringify({ id: request.id, ok: false, err: 'empty' })}\n`)

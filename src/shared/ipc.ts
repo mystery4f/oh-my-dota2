@@ -58,7 +58,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ]
 
 
-export type OfflineVoiceId = 'sweet' | 'lazy' | 'cute' | 'calm' | 'flirty'
+export type OfflineVoiceId = 'keqing'
 
 export interface OfflineVoice {
   id: OfflineVoiceId
@@ -66,18 +66,17 @@ export interface OfflineVoice {
   note: string
   speed: number
   pitch: number
+  /** 多说话人模型固定用这一个嗓子；单说话人模型为 0。 */
+  sid: number
 }
 
 /**
- * 本地音色：同一个人，不同气质。
- * 语速与音高都走合成参数，所以「换音色」是零成本（不额外下载、不额外推理）。
+ * 本地音色只有一个：刻晴 #70。
+ * 多说话人模型靠 sid 选嗓子，这里把 sid 固化成编号而不是留一个滑杆——
+ * 用户只会记住「哪个好听」，不会记住 804 个编号里哪个是自己挑的。
  */
 export const OFFLINE_VOICES: OfflineVoice[] = [
-  { id: 'sweet', label: '标准', note: '默认，正常语速', speed: 1, pitch: 1 },
-  { id: 'lazy', label: '慵懒', note: '慢一点、略低，听着松', speed: 0.86, pitch: 0.9 },
-  { id: 'cute', label: '轻快', note: '慢一点、音高偏高', speed: 0.92, pitch: 1.14 },
-  { id: 'calm', label: '播音', note: '稍快、稳，信息优先', speed: 1.08, pitch: 0.98 },
-  { id: 'flirty', label: '低沉', note: '最慢、音高最低', speed: 0.8, pitch: 0.84 }
+  { id: 'keqing', label: '刻晴 #70', note: '22.05 kHz，语速偏慢', speed: 0.8, pitch: 1, sid: 70 }
 ]
 
 export function offlineVoicePreset(id: OfflineVoiceId): OfflineVoice {
@@ -164,7 +163,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsRate: 1,
   ttsPitch: 1,
   ttsVoice: '',
-  ttsOfflineVoice: 'sweet',
+  ttsOfflineVoice: 'keqing',
   ttsEngine: 'edge',
   overlayLocked: true,
   overlayOpacity: 0.34,

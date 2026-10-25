@@ -18,19 +18,35 @@ import { offlineVoicePreset, type OfflineVoiceId } from '../../../shared/ipc'
  * 认 bz2），不额外引入解压依赖。
  */
 
-const MODEL_DIR_NAME = 'vits-melo-tts-zh_en'
-const MODEL_ARCHIVE =
-  'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-melo-tts-zh_en.tar.bz2'
-const REQUIRED = ['model.onnx', 'tokens.txt', 'lexicon.txt']
-
-
-export function offlineModelDir(): string {
-  return join(app.getPath('userData'), 'tts-models', MODEL_DIR_NAME)
+interface ModelFiles {
+  dir: string
+  archive: string
+  required: string[]
+  /** 多说话人模型固定用哪一个嗓子；单说话人模型恒为 0。 */
+  sid: number
 }
 
-export function offlineReady(): boolean {
-  const dir = offlineModelDir()
-  if (!REQUIRED.every((name) => existsSync(join(dir, name)))) return false
+const MODEL_FILES: Record<OfflineVoiceId, ModelFiles> = {
+  keqing: {
+    dir: 'vits-zh-hf-keqing',
+    archive: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-zh-hf-keqing.tar.bz2',
+    required: ['keqing.onnx', 'tokens.txt', 'lexicon.txt'],
+    sid: 70
+  }
+}
+
+function modelFiles(voice: OfflineVoiceId): ModelFiles {
+  return MODEL_FILES[voice] ?? MODEL_FILES.keqing
+}
+
+
+export function offlineModelDir(voice: OfflineVoiceId = 'keqing'): string {
+  return join(app.getPath('userData'), 'tts-models', modelFiles(voice).dir)
+}
+
+export function offlineReady(voice: OfflineVoiceId = 'keqing'): boolean {
+  const dir = offlineModelDir(voice)
+  if (!modelFiles(voice).required.every((name) => existsSync(join(dir, name)))) return false
   return existsSync(join(dir, 'dict'))
 }
 
@@ -61,13 +77,13 @@ let state: OfflineStatus = {
   error: null
 }
 
-export function offlineStatus(): OfflineStatus {
+export function offlineStatus(voice: OfflineVoiceId = 'keqing'): OfflineStatus {
   state = {
     ...state,
     available: offlineNodeBinary() !== null,
-    ready: offlineReady(),
-    bytes: dirBytes(offlineModelDir()),
-    dir: offlineModelDir()
+    ready: offlineReady(voice),
+    bytes: dirBytes(offlineModelDir(voice)),
+    dir: offlineModelDir(voice)
   }
   return state
 }
@@ -100,22 +116,23 @@ function untar(archive: string, into: string): Promise<void> {
  * 下载并解压模型。重复调用会复用同一次下载（`downloading` 期间直接返回现状）。
  * 失败只把错误写进状态，不抛给调用方——朗读功能可以降级，不能因此崩掉主进程。
  */
-export async function ensureOfflineModel(): Promise<OfflineStatus> {
-  if (offlineReady()) return offlineStatus()
+export async function ensureOfflineModel(voice: OfflineVoiceId = 'keqing'): Promise<OfflineStatus> {
+  const files = modelFiles(voice)
+  if (offlineReady(voice)) return offlineStatus(voice)
   if (state.downloading) return state
   state = { ...state, downloading: true, error: null, progress: 0 }
   const dir = offlineModelDir()
-  const staging = join(dir, '..', `${MODEL_DIR_NAME}.download`)
+  const staging = join(dir, '..', `${files.dir}.download`)
   try {
     mkdirSync(staging, { recursive: true })
     const archive = join(staging, 'model.tar.bz2')
-    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: MODEL_ARCHIVE }))
-    await download(MODEL_ARCHIVE, archive, (ratio) => {
+    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archive }))
+    await download(files.archive, archive, (ratio) => {
       state = { ...state, progress: ratio * 0.95 }
     })
     console.log('TTS_OFFLINE_DOWNLOAD_DONE', JSON.stringify({ bytes: statSync(archive).size }))
     await untar(archive, staging)
-    const extracted = join(staging, MODEL_DIR_NAME)
+    const extracted = join(staging, files.dir)
     if (!existsSync(extracted)) throw new Error('archive layout unexpected')
     mkdirSync(join(dir, '..'), { recursive: true })
     // 解压结果复制到正式目录：robocopy 只在目录之间工作，退出码 0–7 都算正常。
@@ -128,7 +145,7 @@ export async function ensureOfflineModel(): Promise<OfflineStatus> {
       copy.on('error', reject)
       copy.on('close', (code) => (code !== null && code <= 7 ? resolve() : reject(new Error('robocopy exit ' + String(code)))))
     })
-    state = { ...state, downloading: false, progress: 1, error: null, ready: offlineReady(), bytes: dirBytes(dir) }
+    state = { ...state, downloading: false, progress: 1, error: null, ready: offlineReady(voice), bytes: dirBytes(dir) }
     console.log('TTS_OFFLINE_READY', JSON.stringify({ dir, bytes: state.bytes }))
     return state
   } catch (err) {
@@ -235,14 +252,14 @@ function ensureWorker(): ChildProcess {
 /** 合成一句，返回 WAV。模型没装好或推理失败都返回 null（调用方负责「这句不念」）。 */
 export async function synthesizeOffline(
   text: string,
-  voice: OfflineVoiceId = 'sweet',
+  voice: OfflineVoiceId = 'keqing',
   rate = 1
 ): Promise<Buffer | null> {
   // 预设的语速再乘用户的总语速滑杆：预设定「气质」，滑杆定「快慢」。
   const preset = offlineVoicePreset(voice)
   const speed = preset.speed * rate
   const pitch = preset.pitch
-  if (!offlineReady()) return null
+  if (!offlineReady(voice)) return null
   if (!offlineNodeBinary()) return null
   const started = Date.now()
   const out = join(tmpdir(), `oh-my-dota2-tts-${process.pid}-${Date.now()}.wav`)
@@ -258,7 +275,7 @@ export async function synthesizeOffline(
         clearTimeout(timer)
         resolve(value)
       })
-      child.stdin?.write(`${JSON.stringify({ id, text, speed, pitch, dir: offlineModelDir(), out })}\n`)
+      child.stdin?.write(`${JSON.stringify({ id, text, speed, pitch, sid: preset.sid ?? modelFiles(voice).sid, dir: offlineModelDir(voice), out })}\n`)
     })
     if (!reply.ok) {
       console.log('TTS_OFFLINE_FAILED', JSON.stringify({ ms: Date.now() - started, err: reply.err ?? 'unknown' }))
