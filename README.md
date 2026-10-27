@@ -1,10 +1,12 @@
 # oh-my-dota2
 
+English | [简体中文](README.zh-CN.md)
+
 Zero-injection Dota 2 teammate communication tool (Electron + React).
 
 Communicate with foreign teammates without touching the game process:
 
-- **Chat translation** — read the in-game chat through Dota 2 Game State Integration, translate via a configurable LLM provider, show a bilingual transparent overlay. Replies are translated and copied to the clipboard for in-game paste.
+- **Chat translation** — read the in-game chat through Dota 2 Game State Integration, translate via a configurable LLM provider, show a bilingual transparent overlay. Replies are translated and typed back into the chat box in place (clipboard as fallback).
 - **Read-aloud** — speak each translation: Edge neural voices (default, ~1.2 s per line), a local Matcha model (76 MB, on-demand download, 111–249 ms, offline), or the system voice.
 - **Voice translation** (skeleton) — capture teammate voice via system loopback, transcribe locally with whisper.cpp.
 - **Mic language conversion** (skeleton) — speak Chinese, teammates hear English: mic, whisper.cpp, translation, TTS into a virtual audio cable.
@@ -17,7 +19,7 @@ Communicate with foreign teammates without touching the game process:
 
 ## Principles
 
-- Zero game injection (VAC-safe): GSI + clipboard only, no memory reads, no synthetic input.
+- Zero game injection (VAC-safe): GSI chat intake, keystroke/clipboard replies only; no game memory reads.
 - Provider-agnostic: any OpenAI-compatible endpoint (DeepSeek by default, OpenAI, Ollama, custom).
 
 ## Development
@@ -29,7 +31,7 @@ npm run typecheck
 npm run build
 ```
 
-Requires Node 20+, Windows 10/11 (Windows.Media.Ocr).
+Requires Node 20+, Windows 10/11.
 
 ## Roadmap
 
