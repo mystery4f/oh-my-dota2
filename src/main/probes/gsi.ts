@@ -9,6 +9,7 @@ import {
   type GsiEffects,
   type GsiPayload
 } from '../services/gsi'
+import { cfgBody } from '../services/gsi-config'
 
 /** 直接打本地端口：绕开全局 fetch（它被代理感知层换过，localhost 不该走代理）。 */
 function post(port: number, payload: unknown): Promise<number> {
@@ -90,6 +91,32 @@ export async function runGsiProbe(): Promise<void> {
   check('没开着时打完不乱停', false, state('DOTA_GAMERULES_STATE_POST_GAME'), 'none')
   check('掉线停', true, state('DOTA_GAMERULES_STATE_DISCONNECT'), 'stop')
   const matchIdPicked = decideGsi(false, state('DOTA_GAMERULES_STATE_PRE_GAME')).matchId === '42'
+  // cfg 形状：每一项都必须是「真 tab + 引号键」。九行写成字面 `\t` 时 Dota 只看到无意义 token，
+  // 配置看着齐全、实际 abilities/items/draft/minimap 一个都没请求——这种坏法肉眼读 cfg 看不出来。
+  const cfg = cfgBody(32123)
+  const cfgKeys = [
+    'provider',
+    'map',
+    'player',
+    'events',
+    'allplayers',
+    'hero',
+    'auth',
+    'abilities',
+    'items',
+    'league',
+    'draft',
+    'wearables',
+    'buildings',
+    'minimap',
+    'roshan',
+    'couriers',
+    'neutralitems',
+    'previously',
+    'added'
+  ]
+  const cfgMissing = cfgKeys.filter((key) => !cfg.includes(`\t\t"${key}"\t`)).concat(cfg.includes('\\') ? ['literal-backslash'] : [])
+  const cfgOk = cfgMissing.length === 0
 
   // 真实 HTTP 链路：端口给 0 让系统分配，探针不去碰 Dota 目录。
   const started = await startGsi({ port: 0, effects, writeConfig: false })
@@ -133,6 +160,20 @@ export async function runGsiProbe(): Promise<void> {
   }
   statuses.push(await post(port, chatFrame))
   statuses.push(await post(port, chatFrame))
+  // 座位空间回归（2026-10-25 正式局 9061601260 实测）：player_slot=1（lobby 加入序）
+  // 而 team_slot=0（记分板座位）。own 必须跟 team_slot 对齐：player_id 0 才是自己、
+  // player_id 1 是队友——旧代码用 player_slot 判 own 时这里会正好反过来。
+  const seatFrame = {
+    provider: { name: 'Dota 2' },
+    map: { game_state: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS', matchid: '7771', game_time: 80 },
+    player: { name: 'Mystery', player_slot: 1, team_slot: 0, team_name: 'radiant' },
+    hero: { id: 11, name: 'npc_dota_hero_nevermore' },
+    events: [
+      { event_type: 'chat_message', game_time: 80, player_id: 0, channel_type: 12, message: 'me line' },
+      { event_type: 'chat_message', game_time: 81, player_id: 1, channel_type: 12, message: 'mate line' }
+    ]
+  }
+  statuses.push(await post(port, seatFrame))
   // 阵容：allplayers 三个人，我方在前，敌方在后；英雄名要削掉 npc_dota_hero_ 前缀。
   const duringChat = gsiStatus()
   statuses.push(
@@ -164,7 +205,10 @@ export async function runGsiProbe(): Promise<void> {
   const chatWant = [
     '[lina] [队友] [队友A] ⚔ 别送我',
     '[nevermore] [我] [Mystery] ⚔ ok',
-    '[pudge] [敌方] [敌人B] 🌐 lol'
+    '[pudge] [敌方] [敌人B] 🌐 lol',
+    // seatFrame：player_id 0 = 自己（team_slot），带英雄名；player_id 1 = 队友。
+    '[nevermore] [我] [Mystery] ⚔ me line',
+    '[lina] [队友] [队友A] ⚔ mate line'
   ]
   const chatOk =
     events.pushed.length === chatWant.length && chatWant.every((line) => events.pushed.includes(line))
@@ -172,7 +216,7 @@ export async function runGsiProbe(): Promise<void> {
   const modeRuleOk = shouldStopCaptureOnMatchEnd('auto') && !shouldStopCaptureOnMatchEnd('manual')
   // 阵容与清理：局末清缓存后名单必须变空，否则下一局会看到上局的英雄。
   // 自己发的行必须带 own：朗读靠这个标记跳过，漏了就变成「念自己的话」。
-  const ownOk = ownLines.length === 1 && ownLines[0].includes('[我]')
+  const ownOk = ownLines.length === 2 && ownLines.every((line) => line.includes('[我]'))
   const rosterOk =
     duringChat.roster.length === 3 &&
     duringChat.roster[0].slot === 0 &&
@@ -188,6 +232,7 @@ export async function runGsiProbe(): Promise<void> {
     rosterOk &&
     ownOk &&
     chatOk &&
+    cfgOk &&
     matchIdPicked &&
     events.starts === 2 &&
     events.stops === 2 &&
@@ -209,6 +254,8 @@ export async function runGsiProbe(): Promise<void> {
       ok,
       port,
       decideCases: decideCases.map((item) => ({ name: item.name, got: item.got, want: item.want })),
+      cfgOk,
+      cfgMissing,
       matchIdPicked,
       chatOk,
       rosterOk,

@@ -21,8 +21,14 @@ export interface GsiConfigResult {
 const CFG_FILE = 'gamestate_integration_ohmydota2.cfg'
 const CFG_DIR = join('steamapps', 'common', 'dota 2 beta', 'game', 'dota', 'cfg', 'gamestate_integration')
 
-/** GSI 只推这几组：聊天工具用不到 abilities/items，开了只会把推送频率推高。 */
-function cfgBody(port: number): string {
+/**
+ * data 块全量开启：draft/buildings 等键一直没请求过，全开才能排除「配置漏请求」；Dota 会忽略不认识的键，无害。
+ * 但 `allplayers` 请求了也白搭——真对局实测（match 9061130332 3499 帧、9061444883 156 帧）
+ * 一帧都没推，Dota 2 GSI 在对局中只给本机 `player`/`hero`，全员数据只在观战/录像时到。
+ * 所以别人的英雄名拿不到是数据上限，不是配置问题，也不是代码 bug。
+ */
+/** 导出给 --gsi-probe 断言形状：曾经九行写成字面 `\t`，cfg 看着齐全、实际一个块都没请求。 */
+export function cfgBody(port: number): string {
   return [
     '"Oh-my-dota2 Game State Integration"',
     '{',
@@ -45,6 +51,23 @@ function cfgBody(port: number): string {
     '\t\t"allplayers"\t"1"',
     // 英雄同理：allplayers 里查不到自己那一份，只有开 hero 才拿得到自己的英雄名。
     '\t\t"hero"\t\t"1"',
+    // 以下这些块全都用真 tab：写成字面 `\t` 的话 KeyValues 只看到一串无意义 token，
+    // 等于没请求（2026-10-25 盘上 cfg 就长这样，九行全废）。
+    // 清单对齐 Dota2GSI `GenerateGSIConfigFile` 官方模板再补 previously/added/allplayers，
+    // 一次开全：Dota 忽略不认识的键，以后要用 neutralitems/league 时不必再改 cfg、再求用户重启游戏。
+    '\t\t"auth"\t\t\t"1"',
+    '\t\t"abilities"\t"1"',
+    '\t\t"items"\t\t"1"',
+    '\t\t"league"\t\t"1"',
+    '\t\t"draft"\t\t"1"',
+    '\t\t"wearables"\t"1"',
+    '\t\t"buildings"\t"1"',
+    '\t\t"minimap"\t"1"',
+    '\t\t"roshan"\t\t"1"',
+    '\t\t"couriers"\t"1"',
+    '\t\t"neutralitems"\t"1"',
+    '\t\t"previously"\t"1"',
+    '\t\t"added"\t\t"1"',
     '\t}',
     '}',
     ''

@@ -35,19 +35,6 @@ export interface DumpSummary {
   verdict: string
 }
 
-/** 已知的 cfg data 块；报告里逐块统计「出现过几帧」。 */
-export const KNOWN_BLOCKS = [
-  'provider',
-  'map',
-  'player',
-  'hero',
-  'abilities',
-  'items',
-  'draft',
-  'buildings',
-  'allplayers',
-  'events'
-] as const
 
 export function typeOf(value: unknown): string {
   if (value === null) return 'null'
@@ -119,8 +106,9 @@ export function createTally(): DumpTally {
 
 export function tallyFrame(tally: DumpTally, payload: GsiPayload): void {
   tally.frames += 1
-  for (const key of KNOWN_BLOCKS) {
-    if (payload[key as keyof GsiPayload] !== undefined) {
+  // 顶层对象/数组一律按块计数：只数白名单会漏记没见过的块，实验就白做。
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    if (value !== null && typeof value === 'object') {
       tally.blocks[key] = (tally.blocks[key] ?? 0) + 1
     }
   }

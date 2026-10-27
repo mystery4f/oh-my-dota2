@@ -86,6 +86,88 @@ function recordChatEvent(
   }
 }
 
+/**
+ * player 块证据（logs/gsi-player.jsonl）：name/player_slot/team_slot/steamid 每变化落一行。
+ * 2026-10-25 正式局 own 误判（slot 3 是 lion 却被判成自己，OpenDota 交叉验证坐实）暴露
+ * player_slot 语义未定；console.log 的 PlayerResource 行显示 lobby slot / PlayerID / team slot
+ * 是三个不同空间，bot 局三者重合所以从未露馅。有这份留痕，下一局就能定死 GSI 的
+ * player_slot 到底是哪个空间、own 判定该用哪个字段。
+ */
+const PLAYER_LOG_MAX_BYTES = 64_000
+let playerLogSize = -1
+let lastPlayerLine = ''
+
+function recordPlayer(payload: GsiPayload): void {
+  const p = payload.player
+  if (!p) return
+  const key = JSON.stringify({
+    matchId: payload.map?.matchid ?? null,
+    gameState: payload.map?.game_state ?? null,
+    name: p.name ?? null,
+    playerSlot: p.player_slot ?? null,
+    teamSlot: p.team_slot ?? null,
+    teamName: p.team_name ?? null,
+    steamid: p.steamid ?? null
+  })
+  // 去重键不含 at：player 块内容不变就不落行，否则每帧一条把留痕刷成流水账。
+  if (key === lastPlayerLine) return
+  lastPlayerLine = key
+  const line = `{"at":${JSON.stringify(new Date().toISOString())},${key.slice(1)}`
+  try {
+    const path = join(app.getPath('userData'), 'logs', 'gsi-player.jsonl')
+    if (playerLogSize < 0) playerLogSize = existsSync(path) ? statSync(path).size : 0
+    if (playerLogSize > PLAYER_LOG_MAX_BYTES) {
+      writeFileSync(path, '')
+      playerLogSize = 0
+    }
+    appendFileSync(path, `${line}\n`, 'utf8')
+    playerLogSize += Buffer.byteLength(line) + 1
+  } catch {
+    // 证据日志写不进去不能反过来影响对局
+  }
+}
+
+/**
+ * draft 块证据（logs/gsi-draft.jsonl）：唯一还没验证的「slot→英雄」候选来源。
+ * allplayers 真对局不推（三次实测 0 帧）、minimap 元素不带玩家槽位（试炼场+真局 dump 均确认），
+ * 剩下的可能只有选人阶段的 draft。它只在 HERO_SELECTION 附近有内容、且同内容连推几十帧，
+ * 所以去重后落盘、封顶 256 KB——打完一局直接读文件就能判「给不给、键长什么样」。
+ */
+const DRAFT_LOG_MAX_BYTES = 256_000
+const SEEN_DRAFT_MAX = 64
+let draftLogSize = -1
+const seenDraft = new Set<string>()
+
+function recordDraft(payload: GsiPayload): void {
+  const draft = payload.draft
+  if (!draft || typeof draft !== 'object' || Object.keys(draft).length === 0) return
+  const line = JSON.stringify({
+    at: new Date().toISOString(),
+    matchId: payload.map?.matchid ?? null,
+    gameState: payload.map?.game_state ?? null,
+    draft
+  })
+  if (seenDraft.has(line)) return
+  seenDraft.add(line)
+  if (seenDraft.size > SEEN_DRAFT_MAX)
+    for (const oldest of seenDraft.keys()) {
+      seenDraft.delete(oldest)
+      break
+    }
+  try {
+    const path = join(app.getPath('userData'), 'logs', 'gsi-draft.jsonl')
+    if (draftLogSize < 0) draftLogSize = existsSync(path) ? statSync(path).size : 0
+    if (draftLogSize > DRAFT_LOG_MAX_BYTES) {
+      writeFileSync(path, '')
+      draftLogSize = 0
+    }
+    appendFileSync(path, `${line}\n`, 'utf8')
+    draftLogSize += Buffer.byteLength(line) + 1
+  } catch {
+    // 证据日志写不进去不能反过来影响对局
+  }
+}
+
 /** 一帧里的聊天事件都落盘；自己说的那几条用 own 标出来，对账时好区分。 */
 /**
  * Dota 对同一条聊天会连着推二十多帧（实测每条重复 26–27 次），不记账就等于重复翻译 + 重复写盘。
@@ -136,10 +218,21 @@ function refreshSlotNames(payload: GsiPayload): void {
     }
   const self = payload.player
   const selfName = typeof self?.name === 'string' ? self.name.trim() : ''
-  if (selfName.length > 0 && typeof self?.player_slot === 'number') slotNames.set(self.player_slot, selfName)
-  if (typeof self?.player_slot === 'number') mySlotCache = self.player_slot
+  // 自己的座位用 team_slot（记分板座位），不用 player_slot：2026-10-25 两局实测坐实
+  // player_slot 是 lobby 加入序、team_slot 才是座位——正式局 9061601260 里两者当场分家
+  // （playerSlot 1 vs teamSlot 2），而聊天事件 player_id 用的是座位空间（9061521387 里
+  // lion 的 ggwp 带 player_id 3 = lion 的座位，OpenDota 对得上）。用 player_slot 判 own
+  // 会把「加入序恰好等于我座位号」的那个队友的话算成我的。
+  const selfSeat =
+    typeof self?.team_slot === 'number'
+      ? self.team_slot
+      : typeof self?.player_slot === 'number'
+        ? self.player_slot
+        : undefined
+  if (selfName.length > 0 && selfSeat !== undefined) slotNames.set(selfSeat, selfName)
+  if (selfSeat !== undefined) mySlotCache = selfSeat
   if (typeof self?.team_name === 'string' && self.team_name.trim().length > 0) myTeamCache = self.team_name.trim()
-  if (typeof self?.player_slot === 'number') rememberSide(self.player_slot, { hero: payload.hero?.name })
+  if (selfSeat !== undefined) rememberSide(selfSeat, { hero: payload.hero?.name })
 }
 
 /** 天辉 0–4 / 夜魇 128–132，同一个槽位两种写法都要能对上。 */
@@ -192,7 +285,9 @@ function recordChatEvents(payload: GsiPayload): ChatLine[] {
   // player 块不保证每帧都来（GSI 各数据块独立推送，带聊天事件的帧常常只有 events）：
   // 当帧没有就用上一帧缓存的槽位/阵营，own 判定才不会把自己的话判成别人
   // （真对局 2026-10-25 第四局实测：slot 8 名字缓存正确、own 却是 false，就是这帧缺 player 块）。
-  const mySlot = payload.player?.player_slot ?? mySlotCache
+  // 座位取 team_slot（聊天 player_id 是座位空间，见 refreshSlotNames 的注释）；
+  // player_slot 是 lobby 加入序，用它判 own 会张冠李戴。
+  const mySlot = payload.player?.team_slot ?? payload.player?.player_slot ?? mySlotCache
   const myTeam =
     typeof payload.player?.team_name === 'string'
       ? payload.player.team_name.trim().toLowerCase()
@@ -235,13 +330,26 @@ export interface GsiPayload {
     game_time?: number
     win_team?: string
   }
-  player?: { name?: string; team_name?: string; player_slot?: number }
+  /**
+   * player 块。注意 `player_slot` 与 `team_slot` 是两个字段：2026-10-25 正式局 own 误判
+   * （slot 3 是 lion 却被判成自己，OpenDota 交叉验证坐实）说明 player_slot 可能是
+   * lobby 加载序而非队伍座位，语义未定，见 recordPlayer 的留痕。
+   */
+  player?: {
+    name?: string
+    team_name?: string
+    player_slot?: number
+    team_slot?: number
+    steamid?: string
+  }
   /** cfg 开了 `"events" "1"` 才有：每条只带自己那种事件需要的字段。 */
   events?: GsiEvent[]
   /** cfg 开了 `"allplayers" "1"` 才有：key 是 slot，拿来把聊天事件里的 player_id 翻成昵称。 */
   allplayers?: Record<string, { name?: string; team?: number; hero?: string; hero_id?: number }>
   /** cfg 开了 `"hero" "1"` 才有：自己的英雄（自己那份在 allplayers 里查不到）。 */
   hero?: { id?: number; name?: string }
+  /** cfg 开了 `"draft" "1"` 才有：选人阶段的 BP 数据。是否带 slot→英雄映射未验证，见 recordDraft。 */
+  draft?: Record<string, unknown>
 }
 
 export interface GsiDrive {
@@ -423,6 +531,8 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
   runtime.lastAt = Date.now()
   // 每一帧都记进小结账本：真对局时不可能去抢 32123 端口，只能在应用里攒。
   recordFrameSummary(payload)
+  recordDraft(payload)
+  recordPlayer(payload)
   // 一局结束就清掉 slot→昵称：下一局同号位换人，缓存着旧名字会张冠李戴。
   // matchid 变了同样算「一局结束」：没等到 POST_GAME 就进下一局（秒排/重连）时，
   // 光靠 drive=stop 清不掉，旧名字和新号位对不上就是假情报。
