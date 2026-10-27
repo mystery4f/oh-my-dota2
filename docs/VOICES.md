@@ -70,14 +70,13 @@ vits-zh-hf-fanchen-{C,unity,wnj,ZhiHuiLaoZhe}
 - 804 个说话人 ≠ 804 种好声音。同一模型里 sid 差异很大，扫一遍挑编号比换模型有效。
 
 
-## 最终保留的四款（2026-11 定案）
+## 最终保留的三款（2026-11 定案；2026-10-25 裁掉 melo）
 
-用户把 16 个候选全部听过一遍后只留下这四个，**其余从代码与数据目录都已删除**（theresa / kokoro / keqing / fanchen / aishell3 / piper-chaowen 等）。下表是应用内实测（预热后 p50，跑 `--tts-offline-probe <id>`）：
+用户把 16 个候选全部听过一遍后只留下四个，**其余从代码与数据目录都已删除**（theresa / kokoro / keqing / fanchen / aishell3 / piper-chaowen 等）。2026-10-25 又裁掉 `melo`（延迟最高 ~0.5 s，OfflineVoiceId/MODEL_FILES/面板/探针已同步移除，两处 data 目录的模型已删）。下表是应用内实测（预热后 p50，跑 `--tts-offline-probe <id>`）：
 
 | id | 名称 | 采样率 | 架构 | 包大小 | p50 一句 | 说明 |
 |---|---|---|---|---|---|---|
-| `melo` | MeloTTS | 44.1 kHz | vits | 183 MB | 0.47–0.50 s | 本组唯一高采样率，中英混读 |
-| `baker` | Matcha icefall | 22.05 kHz | matcha + 声码器 | 100 MB + 53 MB | 0.09 s | 最快，声音偏闷 |
+| `baker` | Matcha icefall | 22.05 kHz | matcha + 声码器 | 100 MB + 53 MB | 0.09 s | **当前默认**；最快，声音偏闷 |
 | `xiao_ya` | piper 小雅 | 22.05 kHz | vits | 60 MB | 0.11 s | 包最小，音色偏温柔 |
 | `eula` | hf 角色微调 | 22.05 kHz | vits | 120 MB | 0.36 s | 804 个说话人，默认 sid 5 |
 

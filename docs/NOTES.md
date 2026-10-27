@@ -180,6 +180,15 @@
 - 踩坑：`msedge-tts` 这个库连上去回 401/200（协议改了，需要 `Sec-MS-GEC` 且旧 token 失效），同一个地址 `@andresaya/edge-tts` 能通，实测 19 KB mp3。**判断「接口还活着」要拿真实合成结果，不要拿 HTTP 状态码。**
 - 两个嗓子是两条路：`system` 全离线（断网可用）；`edge` 联网但好听。都保留了。
 
+
+### 第四引擎 GPT-SoVITS：零样本克隆 + 应用自动拉起 api_v2
+- 背景：sherpa-onnx 系离线模型全轮试听否决（vits 12 包、kokoro、melo「声音太弱」peak 0.10≈-20dB）；用户要「Edge 晓晓式温柔妹妹声」，最终路线 = GPT-SoVITS 官方整合包（`D:\AI\GPT-SoVITS-v2pro-20250604`，魔搭直链免代理）零样本克隆：用 `synthesizeEdge` 合成 5 秒晓晓样音当参考音频（`D:/AI/ohmydota2-ref/ref1.mp3`）+ 逐字转写，音色即克隆。
+- 修法：`sovits.ts` GET api_v2 `/tts`（失败 null 静默跳过，绝不回退系统嗓子）；`sovits-server.ts` 在 `ttsEngine === 'sovits'` 时 app ready 即拉起整合包 `runtime\python.exe api_v2.py`（TCP 轮询等就绪，实测 13.6s），退出 `will-quit` taskkill 树杀；端口已被占就复用外部实例。设置四件套：`ttsSovitsHome`（目录，自动拉起的开关）/`ttsSovitsUrl`/`ttsSovitsRefAudio`/`ttsSovitsPromptText`。
+- 踩坑（两个都 400/静默）：Windows GBK 控制台把真实异常吞成 `'gbk' codec can't encode '\ufffd'`，必须 `PYTHONIOENCODING=utf-8`；ffmpeg.exe 在整合包 `runtime\` 里，不进 PATH librosa 解不开 mp3 参考——spawn 时 PATH 前置 runtime。
+- 延迟（RTX 4060 Laptop）：模型加载 ~14-40s（应用启动即拉、不等第一句）；热句 2-5s/20 字。参考转写与音频对不上会明显劣化，转写必须逐字。
+- 慢在哪儿以及两个实测优化（2026-10-27，同一句 11 字用 curl 量 p50）：`batch_size=8` 让解码成批走 → 11 字 1.96→1.23 s、22 字 3.37→1.91 s；服务 READY 只代表端口开了，**第一句真实合成还要付一遍 CUDA/懒加载 4.6–5.5 s**，所以起服后立刻合成一句「预备」扔掉（`TTS_SOVITS_SERVER_WARMUP` 记耗时），把这笔代价挪到还没人说话的时候。
+- 参考音频硬限制：api_v2 要求 **3–10 秒**，否则 400 `参考音频在3~10秒范围外，请更换！`；把试听成品（1–2 s）当参考就是这条错误的来源。克隆的克隆还会让音质二次劣化。
+
 ### 朗读「只念别人说的」这条不能加
 - 症状：想让朗读跳过自己发的消息，于是给 `decideSpeak` 加了 `if (entry.own) return null`。
 - 根因：`own` 来自 `slotIsSelf(player_id, player_slot)`，而**英雄试炼场/训练场里所有 player_id 与自己的 slot 都是 0**，于是每条消息都被判成「我说的」——朗读彻底静音，看起来像功能坏了。
@@ -196,6 +205,18 @@
 - 修法：`recordChatEvents` 返回 `{ text, own }`，`pushMessages` 把 `own` 带到条目上，`decideSpeak` 第一道判断就是 `if (entry.own) return null`。上屏行为不变——用户要的是「只看一个地方」，自己的话仍要看得见。
 - 教训：「要不要显示」和「要不要朗读」是两套判据，别让一个布尔同时承担两件事；凡是决定输出方式（声音/通知）的地方，都要先问「这是谁产生的」。
 
+
+### 朗读前缀「某某说」三态：句首 / 句尾 / 不念（ttsSpeakPrefix）
+- 需求演进（2026-10-27–28）：先要「能关掉」，再要「[内容] 【玩家x/我】 说」——内容在前、说话人收尾。
+- 修法：`ttsSpeakPrefix: 'front' | 'back' | 'off'`。`decideSpeak` 里候选人照常算（我 / 英雄名 / 座位标签），`off` 时整体置空（和「没有标签」同一条路径，不多出逗号或半截停顿）；`back` 时拼 `${body}，${spoken}说`。面板一个循环按钮「说话人：前面 / 后面 / 不念」。
+- 类型迁移：字段从 boolean 改三态，`loadSettings` 里从 `parsed as Record<string, unknown>` 读原始值归一化（true→front、false→off）——直接在 merge 后的字段上比 boolean 会撞 TS2367，运行时又真可能躺着旧值。
+- 判据钉在探针 `TTS_SPEAK_PREFIX_CASES` 六用例：front（我说，/影魔说，）、back（推上路，我说 / 中路没人，影魔说）、off（推上路 / 为什么，座位标签也不念）。
+- 教训：这类开关要作用在**前缀整体**，不是逐个分支加条件——三个来源（own / speaker / 座位标签）漏一个，关掉后照样念得出「玩家2说」。
+
+### 浮层收起/锁定/隐藏要跨启动记住（overlayCollapsed / overlayVisible）
+- 需求（2026-10-28）：「记忆收起、锁定、隐藏，在下一次启动的时候按这个来」。
+- 修法：锁定本来就有 `overlayLocked` 持久化；补 `overlayCollapsed`（toggleCollapse 两个分支各自 saveSettings）和 `overlayVisible`（toggle 藏时写 false；show() 亮出后写 true）。启动时 `whenReady` 里 `startup.overlayVisible` 为真才 `show()`——浮层从不自动弹出，只还原用户上次的选择。收起态下 show() 先 reposition 再套 `miniGeometry`，重启见面也是小图标不是整块。
+- 教训：显示状态要在「用户动作发生的当下」持久化（toggle/show 里），而不是退出时快照——强制退出（dev:stop 的 Stop-Process）不走 will-quit，退出时快照必丢。
 ### 静音时 whisper 输出 `[BLANK_AUDIO]` 幻觉
 - 修法：录音段先算全段 RMS，低于 0.012 直接提示「没有检测到语音」；转写结果再过滤 `[BLANK_AUDIO]` 等标记。
 
@@ -364,6 +385,16 @@
 - 结论修正：上文「allplayers 有数据（4210/4812 帧）」是 v1.1.0 时期的历史观测，不能当「真对局一定有」的依据。以前能听到英雄名的其实只有自己的话（hero 块只含自己）；自己的话默认不念之后，英雄名就彻底消失了。
 - 修法：`decideSpeak` 拿不到英雄时退回行前缀里的 `[关系]`，念「队友说，/敌方说，」，OCR 行没有关系标签就不加前缀；自己的话（`ttsReadOwn` 打开）仍用 hero 块的英雄名。cfg 保留 `allplayers "1"`：哪天 Valve 又推了，代码本来就接得住（`refreshSlotNames` + `normalizeSlot` 一直在）。
 - 教训：观测结论要带日期和客户端版本。「官方不支持」和「这版不支持」在下次升级后可能是相反的答案，但都别替 Valve 乐观。
+- 二次实测（2026-10-25 14:17–14:20，match 9061444883，156 帧）：`allplayersFrames` 仍是 0；`blocks` 里只有 provider/map/player/events/hero 每帧都到，`added`/`previously` 分别出现 5/155 帧却一个人名也没带来。**「块出现」不等于「有数据」**——`tallyFrame` 只数键存在，空对象也算，所以判读必须看内容非空的计数（`allplayersFrames` 那一路才是可用的），别被块直方图骗了。同批 `gsi-chat.jsonl` 227 条里只有 6 条带 `hero`，全是有 `own: true` 的那 6 条自己的话。
+- 附带真 bug（同日修）：`gsi-config.ts` 有九行 data 块写成了 `'\\t\\t"abilities"\\t"1"'`，落到 cfg 里就是字面反斜杠+t，KeyValues 只看到一串无意义 token——cfg 打开看着齐全，实际上 `abilities/items/draft/buildings/minimap/roshan/couriers/previously/added` 一个都没请求。改成真 tab，并让 `--gsi-probe` 断言 cfg 形状（每个键都要 `\t\t"键"\t`、全文不许出现反斜杠），因为这种坏法肉眼读 cfg 看不出来。cfg 只在 Dota 启动时读，改完必须重启游戏才生效。
+- 他人英雄名调查终局（2026-10-25 正式天梯 9061521387 验证）：`draft` 块在 Ranked All Pick 的**选人阶段也不推内容**——应用全程在线、`recordDraft()` 记录器（`gsi.ts`，非空才落 `data/logs/gsi-draft.jsonl`）零输出。四条路全部死亡：allplayers（0 帧×4 局）、minimap（元素 `oN` 键只带 unitname/team，`name` 是英雄名重复，无槽位）、draft（选人空）、hero/player 的 `.Teams` 层（仅观战）。结论盖棺：**正式对局端他人英雄名在 GSI 无数据源**，「队友说/敌方说」是永久形态。记录器保留——打 CM/队长模式那天 `gsi-draft.jsonl` 会自动出证据。
+- 翻案线索（同日晚，dotabod 源码）：GSI 四路死亡 ≠ 别人英雄名拿不到。dotabod 的聊天翻译确实给每个说话人标英雄名，但 roster 来自 resolver 链（`packages/dota/src/dota/lib/matchData/resolvers/`）：SourceTV（连 GOTV 的 writer / 按需 **Steam Web API `GetRealTimeStats`**）→ 自家 CV 服务（看直播认 10 个头像，460 槽 45/46 准，用 GSI 自身英雄纠错）→ GSI-self 兜底（只有自己，即我们的现状）。要做「别人也念英雄名」，可行路线是 `GetRealTimeStats`（需要 server_steam_id：`server_log.txt` 的 `[A:1:xxx:yyy]` 行 + lobby 行按 slot 列 10 个 steamid，Dota 启动项加 `-condebug`）或 CV 识别记分板。详见 wiki `dotabod-roster-not-from-gsi`。
+- cfg 块清单的权威来源（2026-10-25 定）：antonpup/Dota2GSI 的 README 里 `GenerateGSIConfigFile` 生成的模板——
+  https://raw.githubusercontent.com/antonpup/Dota2GSI/master/README.md （GitHub 需代理）。模板开 15 块：
+  `auth/provider/map/player/hero/abilities/items/events/buildings/league/draft/wearables/minimap/roshan/couriers/neutralitems`
+  （数下来 16 项，auth 算 payload 回显不算数据块；我们额外保留 `allplayers/previously/added`）。据此补齐了
+  `auth/league/wearables/neutralitems` 四块，cfg 一次开全 19 项：Dota 忽略不认识的键，以后要用新块时
+  不必再改 cfg、再求用户重启游戏。以后「还有哪个块没开」这类问题先对着这份模板核，别凭记忆。
 ### 闸门永远判「不在前台」——客户端把答案字段吃了
 - 症状：真对局里自动模式连续 12 分钟全是 `act: idle`，一拍 OCR 都没跑；同时 `logs/gsi-chat.jsonl` 里已经有玩家自己发的聊天——人明明在游戏里，闸门却说不在前台。
 - 排查：桥本身是对的。手工起一份部署后的脚本、把游戏窗口调到前台后问一次，回答 `{"gameRunning":true,"focused":true}`。差别在客户端：`handleLine` 的**成功分支只白名单透传** `text`/`lookupMs`/`clipSetMs`/`keysMs`/`retried`，`focused`/`gameRunning` 直接被丢掉，于是 `res.focused === true` 恒为 false。同一处白名单还让 `fg`/`win` 在成功路径上永远缺失（它们只挂在失败分支上）。

@@ -5,6 +5,19 @@
 
 ## 刚完成并已验证
 
+**GPT-SoVITS 朗读引擎（第四个引擎，2026-10-27；真机验证通过）**
+
+- `src/main/services/voice/sovits.ts` 走本机 api_v2 `GET /tts`（`batch_size=8`、`speed_factor` 透传语速），失败一律 `null` 静默跳过，绝不回退系统嗓子。
+- `src/main/services/voice/sovits-server.ts` 托管 api_v2：选了引擎就 app ready 拉起、退出树杀、端口被占则复用；状态机 `off|starting|ready|external` + 300 行日志环形缓冲。
+- 起服后立刻合成一句「预备」丢弃（`TTS_SOVITS_SERVER_WARMUP`）：READY 只代表端口开，首句还要付 4.6–5.5 s 的 CUDA 懒加载。
+- 重启应用后那 15 秒里来的聊天，原本被 `net::ERR_CONNECTION_REFUSED` 直接吞掉；现在合成失败先等 `ensureSovitsServer` 就绪再**重试一次**（日志 `TTS_SOVITS_FAIL retry:true` 才是真失败），重启后的第一句话不再白丢。
+- `parallel_infer=false`：客户端已按标点切段，服务端再并行只会几路一起抢显存；游戏开着时短句 p50 2.20→1.87 s、长句 3.21→2.70 s。
+- 面板（浮层与朗读 → 本地 · GPT-SoVITS）：状态灯 + 详情 + PID + 包是否已装 + 日志折叠框（3 s 轮询）+ 一键安装按钮。
+- `sovits-install.ts`：`<userData>/gpt-sovits/` 下装包（魔搭直链 8.2 GB，`.part` 暂存、60 s 断流判死），或用户自己把 `.7z` 放进该目录后只解压；解压器 `resources/7zr.exe`（LGPL，electron-builder `extraResources`）。
+- 实测（RTX 4060 Laptop）：加载 10.5–19.8 s；每句 11 字 p50 1.23 s、22 字 1.91 s（`batch_size=8` 之前是 1.96 / 3.37 s）。
+- 参考音频硬限制 3–10 秒（越界 400），且必须是原始音频，别拿克隆产出的成品再当参考。
+- 未做：`installed` 判定与「换机器搬包」的迁移提示；一键下载/解压这条链只在真机上跑过手动放置路径，8.2 GB 下载未做端到端验证。
+
 **Nightly / 正式版更新通道分离**（提交 `a186609`；产物验证通过）
 
 - Nightly 流水线先改 `package.json` 版本为 `X.Y.Z-nightly.<UTC 时间戳>`，再用
@@ -77,6 +90,8 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
 | `#20` | 已完成 | 「已关闭」组末条，离线引擎四音色；细节见「离线朗读（2026-11 定案）」 |
 | `#21` `#22` | 待办·可离线 | 「朗读」组，baker 声码器下载 / Edge 分句基线 |
 | `#23` | 已完成 | 上表「朗读跳过自己那句」，2026-10-25 真对局 9060903477 发现 |
+| `#24` | 待办·没开始 | 「首次试用与安装」组，cfg 写入的可见性与兜底 |
+| `#25` | 已关闭 | 「他人英雄名（GetRealTimeStats）」组——路线被否决，key 加密不再需要 |
 
 历史遗留说明：`#4`/`#5`/`#6`/`#8` 这四条曾经只存在于会话的 todo 工具里、从没进过本文件，
 2026-11 清列表时一度被当成残留删掉，现已按原内容写回上表——**它们是真实做过的工作，不是噪音**。
@@ -147,6 +162,28 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
 - `#12` 局末战报：`POST_GAME` 时汇总本局数据
 - `#13` 事件提醒：击杀 / 肉山 / 符点用朗读播报
 - `#17` BP 阶段阵容中文名提示
+
+### 首次试用与安装
+
+- `#24` 第一次装上就能把 cfg 落进 Dota 目录，失败了要看得见、有手工兜底
+  - 已经会写：`ensureGsiConfig()` 在启动时把 `steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration/gamestate_integration_ohmydota2.cfg` 写进去（`src/main/services/gsi.ts:530` 调用，`src/main/index.ts:178` 触发）。Steam 目录靠 `HKCU\Software\Valve\Steam` 的 `SteamPath` + `libraryfolders.vdf` 找。**别重写成「新增写入能力」，它存在。**
+  - 真缺口一：面板从不读 `GsiStatusView.configPath` / `configError`（`src/shared/ipc.ts:296-297` 早就算好了），写失败就是静默——用户只看到「聊天天天不来」。
+  - 真缺口二：找不到 Steam（注册表没有 `SteamPath`、库在主目录之外、目录被改名）时没有手动兜底，也没办法把 cfg 内容拷出来自己放。
+  - 真缺口三：cfg 只在 Dota **启动时**读一次。先开游戏、后开软件的第一次试用，整局都不会有数据，而界面上没有任何提示。
+  - 验收：面板能看到「cfg 已写入 <路径>」或明确错误；失败能手动选 `dota 2 beta` 目录并立刻重写；写入那一刻 Dota 正在跑就提示「重启 Dota 2 才生效」；`Alt+Shift` 之外不需要用户记任何路径。
+  - 参考：2026-10-25 盘上那份 cfg 因为九行字面 `\t` 白写了九块（`docs/NOTES.md`「allplayers 一帧都没到」末两条），这类「写进去了但内容是废的」也应该在面板上暴露，而不是靠人去读文件。
+
+### 他人英雄名（GetRealTimeStats）
+
+> 2026-10-25 定调：GSI 四路（allplayers/minimap/draft/hero.Teams）全灭 + OpenDota 仅赛后有数（进行中 match 返回 `players: []` 实测），实时拿 10 人 `座位→英雄` 只剩 Steam 官方 `IDOTA2Match_570/GetRealTimeStats`（dotabod SourceTV 路线）。
+> **2026-10-25 否决：用户拍板不接这条路线**——要申请 key、按 server id 查、还得验证 pub 局是否真返回数据，成本高于收益；运行时维持纯 GSI。他人英雄名拿不到时朗读改念座位标签「玩家2说，」（见 `src/main/services/voice/speech.ts` decideSpeak 前缀规则），本组整体关闭。
+
+- `#25` Steam Web API key 加密存储（接 GetRealTimeStats 的前置条件）
+  - 背景：用户已认可走这条路线并接受 key 的风险边界（只读数据 key，不能交易/赠送饰品），但明确要求**不要明文落盘**。
+  - 现状：`settings.json` 里 provider 的 apiKey、以及将来的 `steamApiKey` 都是明文 JSON；本机磁盘可读的人/程序都能拿走。
+  - 方案要点：Windows 上用 Electron `safeStorage`（DPAPI 加密，按用户解密，进程外拿不走），存 `enc:v1:` 前缀 + base64；读设置时解密，旧明文值首次加载时静默升级为密文；`safeStorage.isEncryptionAvailable()` 为 false 时退回明文并在面板标注「未加密存储」；provider 的 key 顺带一起升级。**别引入自造加密**——没有可信密钥源，混淆等于没加密。
+  - 验收：`settings.json` 里 grep 不到任何明文 key；重启应用后翻译与（将来的）GetRealTimeStats 照常工作；换 Windows 账户/机器拷贝 data 目录后 key 失效应有明确报错而不是静默失败。
+  - 参考：`docs/NOTES.md`「他人英雄名」终局条目（server id 从 console.log `ServerID [A:1:x:y]` 解析，key 只发往 api.steampowered.com）。
 
 ### 发送与输入
 
