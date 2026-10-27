@@ -17,7 +17,8 @@ import {
   type TranslatorStatus,
   type VoiceProbeResult,
   OFFLINE_VOICES,
-  type OfflineVoiceId
+  type OfflineVoiceId,
+  type SovitsStatus
 } from '@shared/ipc'
 import type { UpdateState } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
@@ -397,15 +398,23 @@ function OverlayCard(): React.ReactElement {
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
   const [readAloud, setReadAloud] = useState(false)
   const [readOwn, setReadOwn] = useState(false)
-  const [engine, setEngine] = useState<'system' | 'edge' | 'offline'>('edge')
+  const [speakPrefix, setSpeakPrefix] = useState<'front' | 'back' | 'off'>('front')
+  const [speakFrontTpl, setSpeakFrontTpl] = useState('{who}说，{body}')
+  const [speakBackTpl, setSpeakBackTpl] = useState('{body}，{who}表示')
+  const [engine, setEngine] = useState<'system' | 'edge' | 'offline' | 'sovits'>('edge')
   const [offline, setOffline] = useState<{ ready: boolean; bytes: number; downloading: boolean; progress: number; error: string | null } | null>(null)
   useEffect(() => {
     void window.api.ttsOfflineState().then(setOffline)
   }, [])
   const [voice, setVoice] = useState(DEFAULT_EDGE_VOICE)
-  const [offlineVoice, setOfflineVoice] = useState<OfflineVoiceId>('melo')
+  const [offlineVoice, setOfflineVoice] = useState<OfflineVoiceId>('baker')
   const [rate, setRate] = useState(1)
   const [pitch, setPitch] = useState(1)
+  const [sovitsUrl, setSovitsUrl] = useState('http://127.0.0.1:9880')
+  const [sovitsRef, setSovitsRef] = useState('')
+  const [sovitsPrompt, setSovitsPrompt] = useState('')
+  const [sovitsHome, setSovitsHome] = useState('')
+  const [sovits, setSovits] = useState<SovitsStatus | null>(null)
   const [nicknames, setNicknames] = useState('')
   const [autoStart, setAutoStart] = useState(DEFAULT_SETTINGS.autoStartCapture)
 
@@ -414,17 +423,42 @@ function OverlayCard(): React.ReactElement {
     void window.api.getSettings().then((next) => {
       setReadAloud(next.ttsReadAloud)
       setReadOwn(next.ttsReadOwn)
+      setSpeakPrefix(next.ttsSpeakPrefix)
+      setSpeakFrontTpl(next.ttsSpeakFrontTpl)
+      setSpeakBackTpl(next.ttsSpeakBackTpl)
       setEngine(next.ttsEngine)
       setVoice(next.ttsVoice || DEFAULT_EDGE_VOICE)
-      setOfflineVoice(next.ttsOfflineVoice ?? 'keqing')
+      setOfflineVoice(next.ttsOfflineVoice ?? 'baker')
       setRate(next.ttsRate)
       setPitch(next.ttsPitch)
+      setSovitsUrl(next.ttsSovitsUrl)
+      setSovitsRef(next.ttsSovitsRefAudio)
+      setSovitsPrompt(next.ttsSovitsPromptText)
+      setSovitsHome(next.ttsSovitsHome)
       setNicknames(next.myNicknames.join(', '))
       setAutoStart(next.autoStartCapture)
     })
     void window.api.overlayReplyState().then(setOverlay)
     return window.api.onOverlayState(setOverlay)
   }, [])
+
+  useEffect(() => {
+    // 服务状态每 3 秒刷一次：拉模型、下 8GB、服务挂掉都在这条轮询里体现。
+    // 只在选了 GPT-SoVITS 时轮询，别的引擎不该为它多花一次 IPC。
+    if (engine !== 'sovits') return
+    let alive = true
+    const tick = (): void => {
+      void window.api.sovitsStatus().then((next) => {
+        if (alive) setSovits(next)
+      })
+    }
+    tick()
+    const timer = setInterval(tick, 3000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [engine])
 
   return (
     <Card>
@@ -524,6 +558,49 @@ function OverlayCard(): React.ReactElement {
           >
             自己的话：{readOwn ? '念' : '不念'}
           </Button>
+          {/* 「某某说」念在哪头。用下拉不用循环按钮：三个选项一眼看得全，
+              循环按钮的当前态（「说话人：不念」）曾被用户当成「没有前后那个设置」。 */}
+          <label
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+            title="说话人标签念在哪头：句首先知道是谁说的，句尾先听内容，不念只听内容"
+          >
+            说话人
+            <select
+              className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+              value={speakPrefix}
+              disabled={!readAloud}
+              onChange={(e) => {
+                const next = e.target.value as 'front' | 'back' | 'off'
+                setSpeakPrefix(next)
+                void window.api.setSettings({ ttsSpeakPrefix: next })
+              }}
+            >
+              <option value="front">句首「玩家9说，…」</option>
+              <option value="back">句尾「…，玩家9表示」</option>
+              <option value="off">不念</option>
+            </select>
+          </label>
+            {speakPrefix !== 'off' && (
+              <Input
+                className="w-52"
+                disabled={!readAloud}
+                value={speakPrefix === 'front' ? speakFrontTpl : speakBackTpl}
+                onChange={(e) => (speakPrefix === 'front' ? setSpeakFrontTpl(e.target.value) : setSpeakBackTpl(e.target.value))}
+                onBlur={() =>
+                  void window.api.setSettings(
+                    speakPrefix === 'front'
+                      ? { ttsSpeakFrontTpl: speakFrontTpl.trim() || '{who}说，{body}' }
+                      : { ttsSpeakBackTpl: speakBackTpl.trim() || '{body}，{who}表示' }
+                  )
+                }
+                placeholder="{body}，{who}表示"
+                title="朗读模板：{who}=说话人，{body}=内容。标点措辞随便改，但必须保留 {body}，否则回默认"
+              />
+            )}
+        </div>
+
+        <GroupLabel text="引擎与嗓子" />
+        <div className="flex flex-wrap items-center gap-2">
           {/* 两个下拉：左边选路子（分类），右边选具体嗓子（选项）。
               分类只有三种，选项随分类变；系统嗓子没有选项，右侧控件保持禁用而不是消失——
               消失会让布局跳动，用户也会以为刚选的东西丢了。 */}
@@ -531,7 +608,7 @@ function OverlayCard(): React.ReactElement {
             className="rounded-md border border-input bg-background px-2 py-1 text-xs"
             value={engine}
             onChange={(e) => {
-              const next = e.target.value as 'system' | 'edge' | 'offline'
+              const next = e.target.value as 'system' | 'edge' | 'offline' | 'sovits'
               setEngine(next)
               void window.api.setSettings({ ttsEngine: next })
             }}
@@ -539,12 +616,13 @@ function OverlayCard(): React.ReactElement {
           >
             <option value="edge">联网 · 神经语音</option>
             <option value="offline">本地 · 离线模型</option>
+            <option value="sovits">本地 · GPT-SoVITS</option>
             <option value="system">兜底 · 系统嗓子</option>
           </select>
           <select
             className="rounded-md border border-input bg-background px-2 py-1 text-xs"
             value={engine === 'offline' ? offlineVoice : voice}
-            disabled={engine === 'system'}
+            disabled={engine === 'system' || engine === 'sovits'}
             onChange={(e) => {
               if (engine === 'offline') {
                 const next = e.target.value as OfflineVoiceId
@@ -563,6 +641,8 @@ function OverlayCard(): React.ReactElement {
                     {option.label} · {option.note}
                   </option>
                 ))
+              : engine === 'sovits'
+                ? <option value="sovits">音色由参考音频决定</option>
               : engine === 'system'
                 ? <option value="system">系统嗓子</option>
                 : EDGE_VOICES.map((option) => (
@@ -653,6 +733,101 @@ function OverlayCard(): React.ReactElement {
             <span className="tabular-nums">{pitch.toFixed(2)}</span>
           </label>
         </div>
+
+        {engine === 'sovits' && (
+          <div className="flex w-full flex-col gap-2">
+            <GroupLabel text="GPT-SoVITS · 音色由参考音频决定" />
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                className="w-56"
+                value={sovitsHome}
+                onChange={(e) => setSovitsHome(e.target.value)}
+                onBlur={() => void window.api.setSettings({ ttsSovitsHome: sovitsHome.trim() })}
+                placeholder="D:\AI\GPT-SoVITS-v2pro-20250604"
+                title="整合包目录：填了应用启动时就自动拉起 api_v2（模型加载约 40 秒），退出时收掉"
+              />
+              <Input
+                className="w-44"
+                value={sovitsUrl}
+                onChange={(e) => setSovitsUrl(e.target.value)}
+                onBlur={() => void window.api.setSettings({ ttsSovitsUrl: sovitsUrl.trim() || 'http://127.0.0.1:9880' })}
+                placeholder="http://127.0.0.1:9880"
+                title="api_v2 服务地址：整合包 runtime 起的本地端口"
+              />
+              <Input
+                className="w-64"
+                value={sovitsRef}
+                onChange={(e) => setSovitsRef(e.target.value)}
+                onBlur={() => void window.api.setSettings({ ttsSovitsRefAudio: sovitsRef.trim() })}
+                placeholder="参考音频绝对路径，如 D:\AI\ref.wav"
+                title="参考音频：决定音色的那段声音，服务端磁盘上的绝对路径"
+              />
+              <Input
+                className="w-44"
+                value={sovitsPrompt}
+                onChange={(e) => setSovitsPrompt(e.target.value)}
+                onBlur={() => void window.api.setSettings({ ttsSovitsPromptText: sovitsPrompt })}
+                placeholder="参考音频的逐字转写"
+                title="转写：那段参考音频说了什么，一字不差；对不上音质会明显劣化"
+              />
+            </div>
+            <div className="flex w-full flex-col gap-1">
+              {/* 状态行：服务起没起、用的哪个目录、包装没装——一眼能看完，不用问人。 */}
+              {sovits === null ? (
+                <span className="text-xs text-muted-foreground">正在读取引擎状态…</span>
+              ) : (
+                <span className="flex flex-wrap items-center gap-2 text-xs" title={`引擎包目录：${sovits.home}\n数据目录：${sovits.installRoot}`}>
+                  <span
+                    className={
+                      sovits.server.phase === 'ready' || sovits.server.phase === 'external'
+                        ? 'inline-block h-2 w-2 rounded-full bg-emerald-500'
+                        : sovits.server.phase === 'starting'
+                          ? 'inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500'
+                          : 'inline-block h-2 w-2 rounded-full bg-destructive'
+                    }
+                  />
+                  <span className="text-foreground">
+                    {sovits.server.phase === 'ready'
+                      ? '服务运行中'
+                      : sovits.server.phase === 'external'
+                        ? '服务已在跑（外部实例）'
+                        : sovits.server.phase === 'starting'
+                          ? '正在拉起服务'
+                          : '服务未启动'}
+                  </span>
+                  <span className="text-muted-foreground">{sovits.server.detail}</span>
+                  {sovits.server.pid !== null && <span className="tabular-nums text-muted-foreground">PID {sovits.server.pid}</span>}
+                  <span className="text-muted-foreground">{sovits.installed ? '引擎包已安装' : '引擎包未安装'}</span>
+                </span>
+              )}
+              {sovits !== null && !sovits.installed && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="outline" disabled={sovits.install.phase === 'downloading' || sovits.install.phase === 'extracting'} onClick={() => void window.api.sovitsInstall().then(setSovits)}>
+                    {sovits.install.phase === 'downloading'
+                      ? `下载中 ${Math.round(sovits.install.progress * 100)}%`
+                      : sovits.install.phase === 'extracting'
+                        ? '解压中…'
+                        : sovits.archivePresent
+                          ? '解压已下载的压缩包'
+                          : '下载引擎包（8.2 GB）'}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    也可以自己下载 GPT-SoVITS-v2pro-20250604.7z 放进 {sovits.installRoot}，再点左边按钮
+                  </span>
+                </div>
+              )}
+              {sovits !== null && sovits.install.error !== null && (
+                <span className="text-xs text-destructive">安装失败：{sovits.install.error}</span>
+              )}
+              {sovits !== null && sovits.logs.length > 0 && (
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none">日志（最近 {sovits.logs.length} 行）</summary>
+                  <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-muted p-2 text-[11px] leading-4">{sovits.logs.join('\n')}</pre>
+                </details>
+              )}
+            </div>
+            </div>
+          )}
 
         <GroupLabel text="对局" />
         <div className="flex flex-wrap items-center gap-3">
@@ -1026,7 +1201,7 @@ export default function App(): React.ReactElement {
       const result = await window.api.ttsPreview('小心，他们可能在打肉山，快回来')
       setTtsResult(result)
       if (result.ok && result.audioBase64) {
-        const audio = new Audio(`data:audio/mp3;base64,${result.audioBase64}`)
+        const audio = new Audio(`data:${result.audioMime ?? 'audio/mp3'};base64,${result.audioBase64}`)
         void audio.play()
       }
     } catch (e) {

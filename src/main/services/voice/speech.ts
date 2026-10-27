@@ -4,6 +4,7 @@ import { loadSettings } from '../settings'
 import { heroChinese } from '../hero-names'
 import { synthesizeEdge, warmEdge } from './edge'
 import { synthesizeOffline } from './offline'
+import { synthesizeSovits } from './sovits'
 
 /** 单句上限：再长就不念了——一整段口播会把后面的消息全挤到后面。 */
 export const SPEAK_MAX_CHARS = 60
@@ -66,12 +67,18 @@ export function splitForSpeech(text: string, maxChars = 20): string[] {
 }
 
 export interface SpeakOptions {
-  /** 朗读引擎：edge 用神经语音，system 用系统嗓子。默认 edge。 */
-  engine?: 'system' | 'edge' | 'offline'
+  /** 朗读引擎：edge 用神经语音，system 用系统嗓子，sovits 走本机 GPT-SoVITS 服务。默认 edge。 */
+  engine?: 'system' | 'edge' | 'offline' | 'sovits'
   readAloud: boolean
   /** 自己发的也念；缺省关闭（见 AppSettings.ttsReadOwn）。 */
   readOwn?: boolean
   rate: number
+  /** 「某某说」念在哪头：front 句首（缺省）/ back 句尾 / off 不念。 */
+  prefix?: 'front' | 'back' | 'off'
+  /** 句首模板，{who}=说话人、{body}=内容；不给走缺省「{who}说，{body}」。 */
+  frontTpl?: string
+  /** 句尾模板，不给走缺省「{body}，{who}表示」。标点措辞全由模板说了算。 */
+  backTpl?: string
   /** 音高倍率，1 = 原声；只有 Edge 引擎认这个参数。 */
   pitch: number
   voice: string
@@ -116,13 +123,22 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
   // 别人有英雄念「英雄说，」（GSI 只推自己的 hero 块，allplayers 真对局一帧都没到过）；
   // 别人没英雄念行前缀里的座位标签「玩家2说，」，比笼统的「队友说」对得上屏幕上是谁在讲话；
   // 手动/快照行没有标签就老老实实不加前缀。
-  const spoken = entry.own === true
+  // 「某某说」的位置（ttsSpeakPrefix）：front=句首「影魔说，中路没人」（缺省）；
+  // 说话人怎么念由模板全权决定（含标点）：{who}=我/影魔/玩家9，{body}=内容。
+  // 缺省 front「{who}说，{body}」back「{body}，{who}表示」；没配 {body} 的模板在
+  // loadSettings 就被打回缺省，这里只兜底空值。off 与「没有标签」走同一条路径。
+  const candidate = entry.own === true
     ? '我'
     : entry.speaker
       ? heroChinese(entry.speaker)
       : speakerFromLine(entry.original)
-  const prefix = spoken ? `${spoken}说，` : ''
-  const text = prefix ? `${prefix}${body}` : body
+  const pos = options.prefix ?? 'front'
+  const spoken = pos === 'off' ? null : candidate
+  const tpl =
+    pos === 'back'
+      ? options.backTpl || '{body}，{who}表示'
+      : options.frontTpl || '{who}说，{body}'
+  const text = spoken ? tpl.replace('{who}', spoken).replace('{body}', body) : body
   const clipped = text.length > SPEAK_MAX_CHARS ? `${text.slice(0, SPEAK_MAX_CHARS)}…` : text
   return {
     text: clipped,
@@ -146,12 +162,18 @@ export function speakOptionsFromSettings(settings: {
   ttsRate: number
   ttsPitch: number
   ttsVoice: string
-  ttsEngine: 'system' | 'edge' | 'offline'
+  ttsEngine: 'system' | 'edge' | 'offline' | 'sovits'
+  ttsSpeakPrefix: 'front' | 'back' | 'off'
+  ttsSpeakFrontTpl: string
+  ttsSpeakBackTpl: string
 }): SpeakOptions {
   return {
     engine: settings.ttsEngine,
     readAloud: settings.ttsReadAloud,
     readOwn: settings.ttsReadOwn,
+    prefix: settings.ttsSpeakPrefix,
+    frontTpl: settings.ttsSpeakFrontTpl,
+    backTpl: settings.ttsSpeakBackTpl,
     rate: settings.ttsRate,
     pitch: settings.ttsPitch,
     voice: settings.ttsVoice
@@ -197,6 +219,17 @@ export function announceEntries(entries: CaptureEntry[]): void {
         .catch(() => undefined)
       continue
     }
+    // GPT-SoVITS：本机 api_v2，音色由参考音频决定。与 Edge 同样切段并行、按序投递；
+    // 服务不在 / 参考没配，合成得 null，浮层整句跳过——绝不回退系统嗓子。
+    if (engine === 'sovits') {
+      const segments = splitForSpeech(payload.text)
+      const audios = segments.map((segment) => synthesizeSovits(segment, payload.rate, payload.lang))
+      segments.forEach((segment, index) => {
+        const audio = audios[index]
+        speakChain = speakChain.then(() => deliver({ ...payload, text: segment }, audio)).catch(() => undefined)
+      })
+      continue
+    }
     if (engine !== 'edge') {
       speakChain = speakChain.then(() => deliver(payload, null)).catch(() => undefined)
       continue
@@ -219,8 +252,8 @@ async function deliver(payload: SpeakPayload, audioPromise: Promise<Buffer | nul
   let packet = payload
   if (audioPromise) {
     const audio = await audioPromise
-    // 合成失败就不带 audio 下发：渲染层对 edge/offline 一律整句跳过，不临时换系统嗓子。
-    if (audio) packet = { ...payload, audio: audio.toString('base64'), audioMime: payload.engine === 'offline' ? 'audio/wav' : 'audio/mpeg' }
+    // 合成失败就不带 audio 下发：渲染层对 edge/offline/sovits 一律整句跳过，不临时换系统嗓子。
+    if (audio) packet = { ...payload, audio: audio.toString('base64'), audioMime: payload.engine === 'offline' || payload.engine === 'sovits' ? 'audio/wav' : 'audio/mpeg' }
   }
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IPC.VOICE_SPEAK, packet)
 }

@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { runInputProbe } from './probes/input'
 import { captureHint } from '@shared/overlay-hint'
 import { warmEdge } from './services/voice/edge'
+import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-server'
 import { runTtsBenchProbe } from './probes/tts-bench'
 import { runTtsOfflineProbe } from './probes/tts-offline'
 import { runTtsVoicesProbe } from './probes/tts-voices'
@@ -172,10 +173,15 @@ app.whenReady().then(() => {
   if (!probeRun) void warmTranslator(startup.provider)
   // 朗读预热：实测冷握手 1–21 秒、热连接 1–2 秒，开机就把两条连接握好。
   if (!probeRun) warmEdge()
+  // GPT-SoVITS：模型加载约 40s，选了这个引擎就趁没人说话先把服务拉起来。
+  if (!probeRun && startup.ttsEngine === 'sovits') void ensureSovitsServer()
   // 原地直发要两次往返游戏窗口：常驻 PowerShell 桥在后台先起好，省掉每次 600ms 的启动与 Add-Type 编译。
   if (!probeRun) void getInPlaceSender().prewarm()
   // GSI：本地状态源，进对局自动开捕获、打完自动停，并把 player.name 记进 myNicknames。
   if (!probeRun) void startGsi()
+  // 浮层显示/收起/锁定跨启动还原（2026-10-28「记忆收起、锁定、隐藏」）：
+  // 锁定与收起由设置字段带回来；这里只补「上次退出时亮着」的那一半。
+  if (!probeRun && startup.overlayVisible) getOverlayManager().show()
   // 更新：装好的包里开机静默查一次，有就自己下，下完把「重启」挂在面板上等用户点。
   if (!probeRun) startUpdateCheck()
   globalShortcut.register('Alt+Shift+O', () => {
@@ -234,6 +240,7 @@ app.on('will-quit', () => {
   quitting = true
   globalShortcut.unregisterAll()
   stopGsi()
+  stopSovitsServer()
   destroyTray()
   getInPlaceSender().dispose()
   getOverlayManager().destroy()

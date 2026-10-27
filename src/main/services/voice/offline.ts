@@ -7,13 +7,13 @@ import { join } from 'node:path'
 import { offlineVoicePreset, type OfflineVoiceId } from '../../../shared/ipc'
 
 /**
- * 离线朗读引擎：sherpa-onnx + MeloTTS（vits-melo-tts-zh_en）。
+ * 离线朗读引擎：sherpa-onnx 本地 TTS（matcha/vits 三款模型，见 MODEL_FILES）。
  *
- * 为什么不是 Edge：Edge 每句都要一次跨境往返（实测 700–1639 ms）；离线模型在本机 0.9–1.2 s，
- * 44.1 kHz。选型实测见 docs/BENCH.md：Matcha-zh-baker 只有 22.05 kHz、音色发闷（用户当场否掉），
+ * 为什么不是 Edge：Edge 每句都要一次跨境往返（实测 700–1639 ms）；离线模型在本机 0.1–0.4 s，
+ * 22.05 kHz。选型实测见 docs/BENCH.md：MeloTTS 音色最正但延迟最高（~0.5 s，2026-10-25 移除），
  * vits-zh-aishell3 有 174 个说话人但采样率只有 8 kHz（电话音质），Kokoro int8 最慢。
  *
- * 模型不进安装包：MeloTTS 为 MIT，但 fp32 模型 163 MB，会推翻 93 MB 的安装包体积。
+ * 模型不进安装包：单个模型上百 MB，会推翻 93 MB 的安装包体积。
  * 首次选用离线引擎时才下载到 `data/tts-models/`，解压用系统自带的 tar.exe（Win10+ 是 bsdtar，
  * 认 bz2），不额外引入解压依赖。
  */
@@ -40,17 +40,6 @@ const TTS_MODELS = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-
 const VOCODERS = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models'
 
 const MODEL_FILES: Record<OfflineVoiceId, ModelFiles> = {
-  melo: {
-    dir: 'vits-melo-tts-zh_en',
-    archives: [`${TTS_MODELS}/vits-melo-tts-zh_en.tar.bz2`],
-    kind: 'vits',
-    // 只认 model.onnx（fp32）。同一个包里还有 model.int8.onnx，那只是 133 字节的
-    // Git LFS 指针，指过去加载会直接崩进程。required 里不列它，顺带当完整性断言。
-    model: 'model.onnx',
-    required: ['model.onnx', 'tokens.txt', 'lexicon.txt'],
-    dict: true,
-    sid: 0
-  },
   baker: {
     dir: 'matcha-icefall-zh-baker',
     archives: [`${TTS_MODELS}/matcha-icefall-zh-baker.tar.bz2`],
@@ -82,11 +71,10 @@ const MODEL_FILES: Record<OfflineVoiceId, ModelFiles> = {
 }
 
 function modelFiles(voice: OfflineVoiceId): ModelFiles {
-  return MODEL_FILES[voice] ?? MODEL_FILES.melo
+  return MODEL_FILES[voice] ?? MODEL_FILES.baker
 }
 
-
-export function offlineModelDir(voice: OfflineVoiceId = 'melo'): string {
+export function offlineModelDir(voice: OfflineVoiceId = 'baker'): string {
   return join(app.getPath('userData'), 'tts-models', modelFiles(voice).dir)
 }
 
@@ -100,7 +88,7 @@ function vocoderPath(voice: OfflineVoiceId): string | undefined {
   return name ? vocoderFile(name) : undefined
 }
 
-export function offlineReady(voice: OfflineVoiceId = 'melo'): boolean {
+export function offlineReady(voice: OfflineVoiceId = 'baker'): boolean {
   const files = modelFiles(voice)
   const dir = offlineModelDir(voice)
   if (!files.required.every((name) => existsSync(join(dir, name)))) return false
@@ -136,7 +124,7 @@ let state: OfflineStatus = {
   error: null
 }
 
-export function offlineStatus(voice: OfflineVoiceId = 'melo'): OfflineStatus {
+export function offlineStatus(voice: OfflineVoiceId = 'baker'): OfflineStatus {
   state = {
     ...state,
     available: offlineNodeBinary() !== null,
@@ -224,7 +212,7 @@ function untar(archive: string, into: string): Promise<void> {
  * 下载并解压模型。重复调用会复用同一次下载（`downloading` 期间直接返回现状）。
  * 失败只把错误写进状态，不抛给调用方——朗读功能可以降级，不能因此崩掉主进程。
  */
-export async function ensureOfflineModel(voice: OfflineVoiceId = 'melo'): Promise<OfflineStatus> {
+export async function ensureOfflineModel(voice: OfflineVoiceId = 'baker'): Promise<OfflineStatus> {
   const files = modelFiles(voice)
   if (offlineReady(voice)) return offlineStatus(voice)
   if (state.downloading) return state
@@ -369,7 +357,7 @@ function ensureWorker(): ChildProcess {
 /** 合成一句，返回 WAV。模型没装好或推理失败都返回 null（调用方负责「这句不念」）。 */
 export async function synthesizeOffline(
   text: string,
-  voice: OfflineVoiceId = 'melo',
+  voice: OfflineVoiceId = 'baker',
   rate = 1
 ): Promise<Buffer | null> {
   // 预设的语速再乘用户的总语速滑杆：预设定「气质」，滑杆定「快慢」。

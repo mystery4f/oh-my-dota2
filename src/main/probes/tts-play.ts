@@ -39,10 +39,13 @@ export async function runTtsPlayProbe(): Promise<void> {
 
   // engine 必须从设置一路传进 payload：漏掉时 decideSpeak 默认 edge，离线 WAV 会被标成
   // audio/mpeg 投递，浮层解不开就静音——「离线朗读无效、联网正常」就是这么来的。
-  const engineRows = (['system', 'edge', 'offline'] as const).map((engine) => {
+  const engineRows = (['system', 'edge', 'offline', 'sovits'] as const).map((engine) => {
     const options = speakOptionsFromSettings({
       ttsReadAloud: true,
       ttsReadOwn: false,
+      ttsSpeakPrefix: 'front',
+      ttsSpeakFrontTpl: '{who}说，{body}',
+      ttsSpeakBackTpl: '{body}，{who}表示',
       ttsRate: 1,
       ttsPitch: 1,
       ttsVoice: '',
@@ -72,6 +75,9 @@ export async function runTtsPlayProbe(): Promise<void> {
       ...speakOptionsFromSettings({
         ttsReadAloud: true,
         ttsReadOwn: readOwn,
+        ttsSpeakPrefix: 'front',
+        ttsSpeakFrontTpl: '{who}说，{body}',
+        ttsSpeakBackTpl: '{body}，{who}表示',
         ttsRate: 1,
         ttsPitch: 1,
         ttsVoice: '',
@@ -84,6 +90,63 @@ export async function runTtsPlayProbe(): Promise<void> {
   ].map((row) => ({ ...row, ok: row.got === row.want }))
   const ownOk = ownRows.every((row) => row.ok)
   console.log('TTS_SPEAK_OWN_CASES', JSON.stringify({ ownOk, rows: ownRows }))
+  // 「说话人：不念」开关必须真的把前缀拿掉，三条路径（我说/英雄说/玩家N说）都要干净收尾，
+  // 否则用户关掉后听到的只是「……说，」少一半、句子还是拖一节。
+  const prefixBase = {
+    ttsReadAloud: true,
+    ttsReadOwn: true,
+    ttsRate: 1,
+    ttsPitch: 1,
+    ttsVoice: '',
+    ttsEngine: 'edge' as const,
+    ttsSpeakFrontTpl: '{who}说，{body}',
+    ttsSpeakBackTpl: '{body}，{who}表示'
+  }
+  const prefixCase = (entry: Record<string, unknown>, prefix: 'front' | 'back' | 'off', backTpl?: string) =>
+    decideSpeak(entry as never, { ...speakOptionsFromSettings({ ...prefixBase, ttsSpeakPrefix: prefix }), backTpl })?.text ?? null
+  const prefixRows = [
+    {
+      name: 'front：自己念「我说，」',
+      want: '我说，推上路',
+      got: prefixCase({ id: 'p1', ts: 0, pending: false, own: true, original: '[我] [Me] ⚔ push top', translated: '推上路', speaker: 'nyx_assassin' }, 'front')
+    },
+    {
+      name: 'front：英雄念「影魔说，」',
+      want: '影魔说，中路没人',
+      got: prefixCase({ id: 'p2', ts: 0, pending: false, original: '[pudge] [敌方] [敌人乙] 🌐 中路没人', translated: null, speaker: 'nevermore' }, 'front')
+    },
+    {
+      name: 'back：内容在前，说话人收尾',
+      want: '推上路，我表示',
+      got: prefixCase({ id: 'p3', ts: 0, pending: false, own: true, original: '[我] [Me] ⚔ push top', translated: '推上路', speaker: 'nyx_assassin' }, 'back')
+    },
+    {
+      name: 'back：英雄名也收到句尾',
+      want: '中路没人，影魔表示',
+      got: prefixCase({ id: 'p5', ts: 0, pending: false, original: '[pudge] [敌方] [敌人乙] 🌐 中路没人', translated: null, speaker: 'nevermore' }, 'back')
+    },
+    {
+      name: 'back：句尾模板可自定义（含标点）',
+      want: '推上路——我如是说',
+      got: prefixCase(
+        { id: 'p7', ts: 0, pending: false, own: true, original: '[我] [Me] ⚔ push top', translated: '推上路', speaker: 'nyx_assassin' },
+        'back',
+        '{body}——{who}如是说'
+      )
+    },
+    {
+      name: 'off：只念内容',
+      want: '推上路',
+      got: prefixCase({ id: 'p6', ts: 0, pending: false, own: true, original: '[我] [Me] ⚔ push top', translated: '推上路', speaker: 'nyx_assassin' }, 'off')
+    },
+    {
+      name: 'off：座位标签也不念',
+      want: '为什么',
+      got: prefixCase({ id: 'p4', ts: 0, pending: false, original: '[队友] [玩家2] ⚔ why', translated: '为什么' }, 'off')
+    }
+  ].map((row) => ({ ...row, ok: row.got === row.want }))
+  const prefixOk = prefixRows.every((row) => row.ok)
+  console.log('TTS_SPEAK_PREFIX_CASES', JSON.stringify({ prefixOk, rows: prefixRows }))
 
 // 跳过原因也单独钉住：TTS_SPEAK_SKIP 日志读的就是这个函数，判据漂了日志就在撒谎。
 const skipOptions = { readAloud: true, voice: '', rate: 1, pitch: 1 }
@@ -176,7 +239,8 @@ console.log('TTS_SPEAK_SKIP_CASES', JSON.stringify({ skipOk, rows: skipRows }))
   console.log(
     'TTS_PLAY_RESULT',
     JSON.stringify({
-      ok: speakOk && engineOk && ownOk && skipOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      ok: speakOk && engineOk && ownOk && prefixOk && skipOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      prefixOk,
       speakOk,
       engineOk,
       playOkCount,

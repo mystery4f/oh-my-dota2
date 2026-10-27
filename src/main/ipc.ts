@@ -24,6 +24,8 @@ import { getChatSender, normalizeChatLine } from './services/input/chat-send'
 import { getWhisperAdapter } from './services/voice/whisper'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
+import { ensureSovitsInstall } from './services/voice/sovits-install'
+import { ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { getOverlayManager } from './windows/overlay'
 import { gsiStatus } from './services/gsi'
 
@@ -193,6 +195,14 @@ export function registerIpc(): void {
     return getWhisperAdapter().transcribe(wavPath, language ?? 'auto')
   })
   ipcMain.handle(IPC.TTS_OFFLINE_STATE, () => offlineStatus())
+  // GPT-SoVITS：面板每 3 秒问一次「包在不在、服务起没起、最近日志」，不再靠翻控制台猜。
+  ipcMain.handle(IPC.TTS_SOVITS_STATUS, () => sovitsStatusSnapshot())
+  // 一键安装：.7z 已放数据目录就只解压；否则下 8GB 再解压。装完顺手把服务拉起来。
+  ipcMain.handle(IPC.TTS_SOVITS_INSTALL, async () => {
+    await ensureSovitsInstall()
+    void ensureSovitsServer()
+    return sovitsStatusSnapshot()
+  })
   ipcMain.handle(IPC.TTS_OFFLINE_DOWNLOAD, () => ensureOfflineModel())
   ipcMain.handle(IPC.VOICE_TTS_PREVIEW, (_e, text: string) =>
     getTtsAdapter().preview(String(text ?? ''))

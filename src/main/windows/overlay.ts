@@ -39,8 +39,8 @@ class OverlayManager {
   private opacity = clampOpacity(loadSettings().overlayOpacity)
   /** 用户调过的几何；null 表示跟着捕获区域自动摆。 */
   private custom: OverlayGeometry | null = loadSettings().overlayBounds
-  /** 收起 = 缩成小图标。收起前的几何记在这里，展开时原样回去。 */
-  private collapsed = false
+  /** 收起 = 缩成小图标。收起前的几何记在这里，展开时原样回去。跨启动记住（overlayCollapsed）。 */
+  private collapsed = loadSettings().overlayCollapsed
   private expandedBounds: OverlayGeometry | null = null
   private statusListeners = new Set<(state: OverlayStatus) => void>()
   /** 为什么取不到字；null = 一切正常，浮层上不显示任何提示。 */
@@ -108,11 +108,12 @@ class OverlayManager {
       // 收起的意思是「这一局先别管它」：顺手锁上，图标才不会被误拖误点。
       // 锁定后照旧穿透、照旧可点——applyClickThrough 对 collapsed 网开一面。
       this.locked = true
-      saveSettings({ overlayLocked: true })
+      saveSettings({ overlayLocked: true, overlayCollapsed: true })
       this.clearIdle()
       this.win.setBounds(miniGeometry(this.expandedBounds, this.workArea()))
     } else {
       this.collapsed = false
+      saveSettings({ overlayCollapsed: false })
       // 展开也要夹：收起期间可能换了分辨率，直接回首旧坐标会落到屏幕外。
       if (this.custom) this.win.setBounds(clampGeometry(this.custom, this.workArea()))
       else this.reposition()
@@ -246,8 +247,13 @@ class OverlayManager {
   }
 
   toggle(): OverlayStatus {
-    if (this.status().visible) this.win?.hide()
-    else this.show()
+    if (this.status().visible) {
+      this.win?.hide()
+      // 藏起来要跨启动记住：用户明确按了 Alt+Shift+O，下次启动就别自己蹦出来。
+      saveSettings({ overlayVisible: false })
+    } else {
+      this.show()
+    }
     this.broadcast()
     return this.status()
   }
@@ -262,11 +268,18 @@ class OverlayManager {
   show(): void {
     if (!this.win) this.win = this.createWindow()
     this.reposition()
+    // 上次以「收起的小图标」退出：这次见面也应该是小图标，不该突然整块砸出来。
+    if (this.collapsed) {
+      this.expandedBounds = this.expandedBounds ?? this.currentGeometry()
+      this.win.setBounds(miniGeometry(this.expandedBounds, this.workArea()))
+    }
     this.applyClickThrough()
     // Windows 上透明窗口在某些路径（show / setBounds 之后）会退回不透明底，
     // 每次显示都重新声明一次全透明背景，是代价最小且不伤性能的兜底。
     this.win.setBackgroundColor('#00000000')
     this.win.showInactive()
+    // 显示状态跨启动记住（「记忆隐藏」）：这次亮出来，下次启动也亮出来。
+    if (!loadSettings().overlayVisible) saveSettings({ overlayVisible: true })
     this.broadcast()
   }
 

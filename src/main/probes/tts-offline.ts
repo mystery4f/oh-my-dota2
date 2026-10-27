@@ -19,7 +19,7 @@ function percentile(values: number[], ratio: number): number {
 
 export async function runTtsOfflineProbe(): Promise<void> {
   // 想测哪一个本地音色就把它的 id 跟在探针名后面：--tts-offline-probe baker
-  const VOICE = (['melo', 'baker', 'xiao_ya', 'eula'].find((id) => process.argv.includes(id)) ?? 'melo') as OfflineVoiceId
+  const VOICE = (['baker', 'xiao_ya', 'eula'].find((id) => process.argv.includes(id)) ?? 'baker') as OfflineVoiceId
   const status = offlineStatus(VOICE)
   console.log('TTS_OFFLINE_PROBE_STATUS', JSON.stringify({ voice: VOICE, ...status, userData: app.getPath('userData') }))
   if (!offlineReady(VOICE)) {
@@ -33,7 +33,7 @@ export async function runTtsOfflineProbe(): Promise<void> {
     const at = Date.now()
     const audio = await synthesizeOffline(line, VOICE, 1)
     const ms = Date.now() - at
-    // 44 字节 WAV 头 + 16 bit 单声道 → 秒数。采样率必须跟着模型走（melo 是 44.1 kHz），
+    // 44 字节 WAV 头 + 16 bit 单声道 → 秒数。采样率必须跟着模型走（剩下三款都是 22.05 kHz），
     // 写死 22050 会让秒数虚高一倍。
     const secs = audio ? (audio.length - 44) / 2 / 44100 : 0
     rows.push({ ok: Boolean(audio), ms, bytes: audio?.length ?? 0, secs })

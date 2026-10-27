@@ -11,6 +11,14 @@ directories:
   output: dist
   buildResources: build
 
+extraResources:
+  - from: resources/tts-offline-worker.cjs
+    to: tts-offline-worker.cjs
+  # GPT-SoVITS 引擎包的解压器（LGPL，独立 7z-only 版）：应用内一键下载 8GB 后要用它解压，
+  # 系统里未必装了 7-Zip，跟着安装包走才可靠。
+  - from: resources/7zr.exe
+    to: 7zr.exe
+
 # Only the compiled bundle ships; sources, probes' fixtures and docs stay out of the archive.
 files:
   - out/**/*

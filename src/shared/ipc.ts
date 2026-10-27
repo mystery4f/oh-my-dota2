@@ -58,7 +58,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ]
 
 
-export type OfflineVoiceId = 'melo' | 'baker' | 'xiao_ya' | 'eula'
+export type OfflineVoiceId = 'baker' | 'xiao_ya' | 'eula'
 
 export interface OfflineVoice {
   id: OfflineVoiceId
@@ -71,15 +71,15 @@ export interface OfflineVoice {
 }
 
 /**
- * 本地音色留下这四个（用户试听后钦定）：
- * - melo：44.1 kHz，本组唯一高采样率，中英混读，音色偏中性。
+/**
+ * 本地音色留下这三个（用户钦定后又裁掉 melo，2026-10-25）：
  * - baker：Matcha icefall，22.05 kHz，最快（200 ms 级），声音闷一点但最跟得上节奏。
  * - xiao_ya：piper 小雅，22.05 kHz，包最小（60 MB），音色偏温柔。
  * - eula：hf 角色微调，22.05 kHz，804 个说话人，sid 挑嗓子。
  * 名字给人的错觉要说清：eula/baker 这些是「训练目标」，不代表听感；听感由模型 + sid 决定。
+ * melo（44.1 kHz 中英混读）曾入选，因延迟最高（~0.5 s）被移除，模型目录可整目录删掉。
  */
 export const OFFLINE_VOICES: OfflineVoice[] = [
-  { id: 'melo', label: 'MeloTTS', note: '44.1 kHz，中英混读', speed: 1, pitch: 1, sid: 0 },
   { id: 'baker', label: 'Baker（最快）', note: '22.05 kHz，200 ms 级', speed: 1, pitch: 1, sid: 0 },
   { id: 'xiao_ya', label: '小雅', note: '22.05 kHz，包最小', speed: 1, pitch: 1, sid: 0 },
   { id: 'eula', label: 'Eula #5', note: '22.05 kHz，804 人表', speed: 1, pitch: 1, sid: 5 }
@@ -126,6 +126,17 @@ export interface AppSettings {
    * 想核对发音、或单人练英雄时打开它。
    */
   ttsReadOwn: boolean
+  /**
+   * 「某某说」前缀念不念、念在哪头。默认 front（「影魔说，中路没人」）；
+   * back = 内容在前（「中路没人，影魔说」）；off = 只念内容。
+   */
+  ttsSpeakPrefix: 'front' | 'back' | 'off'
+  /**
+   * 说话人怎么念，连标点一起整句模板化：{who}=说话人（我/影魔/玩家9），{body}=内容。
+   * 两条各自管一头；没有 {body} 的模板视同没配（loadSettings 打回缺省）。
+   */
+  ttsSpeakFrontTpl: string
+  ttsSpeakBackTpl: string
   /** 朗读语速，1 = 正常；超过 2 会听不清，低于 0.6 会跟不上聊天节奏。 */
   ttsRate: number
   /**
@@ -141,12 +152,25 @@ export interface AppSettings {
    */
   ttsOfflineVoice: OfflineVoiceId
   /**
-   * 朗读引擎：edge = 微软神经语音（好听，需联网，失败自动退回系统嗓子）；
-   * system = 本机 speechSynthesis（离线，中文只有「慧慧」一个嗓子）。
+ * 朗读引擎：edge = 微软神经语音（好听，需联网，失败自动退回系统嗓子）；
+ * system = 本机 speechSynthesis（离线，中文只有「慧慧」一个嗓子）；
+ * sovits = GPT-SoVITS 本地服务（需另起整合包的 api_v2，服务不在就不出声，绝不回退）。
    */
-  ttsEngine: 'system' | 'edge' | 'offline'
+  ttsEngine: 'system' | 'edge' | 'offline' | 'sovits'
+  /** GPT-SoVITS api_v2 服务地址（整合包 runtime 起，默认 127.0.0.1:9880）。 */
+  ttsSovitsUrl: string
+  /** 参考音频绝对路径（api_v2 在服务端磁盘上读这个文件；同机部署就是本机路径）。 */
+  ttsSovitsRefAudio: string
+  /** 参考音频的逐字转写：转写和音频对不上，克隆音质会明显劣化。 */
+  ttsSovitsPromptText: string
+  /** 整合包安装目录（如 D:\AI\GPT-SoVITS-v2pro-20250604）；填了就由应用自动拉起 api_v2。 */
+  ttsSovitsHome: string
   /** 浮层锁定：位置尺寸冻住 + 强制穿透。想拖动或改大小时先解锁。 */
   overlayLocked: boolean
+  /** 上次退出时浮层是收起的小图标还是整块；启动时照此还原（2026-10-28「记忆收起」）。 */
+  overlayCollapsed: boolean
+  /** 上次退出时浮层是显示还是被 Alt+Shift+O 藏了；启动时照此还原（「记忆隐藏」）。 */
+  overlayVisible: boolean
   /** 每行底色不透明度（0.05–0.9）：游戏画面亮的时候要淡，暗图要深一点才看得清。 */
   overlayOpacity: number
   /** 用户调过的浮层几何；null = 跟随捕获区域自动摆放。 */
@@ -173,12 +197,21 @@ export const DEFAULT_SETTINGS: AppSettings = {
   crossToneLookup: true,
   ttsReadAloud: false,
   ttsReadOwn: false,
+  ttsSpeakPrefix: 'front',
+  ttsSpeakFrontTpl: '{who}说，{body}',
+  ttsSpeakBackTpl: '{body}，{who}表示',
   ttsRate: 1,
   ttsPitch: 1,
   ttsVoice: '',
-  ttsOfflineVoice: 'melo',
+  ttsOfflineVoice: 'baker',
   ttsEngine: 'edge',
+  ttsSovitsUrl: 'http://127.0.0.1:9880',
+  ttsSovitsRefAudio: '',
+  ttsSovitsPromptText: '',
+  ttsSovitsHome: '',
   overlayLocked: true,
+  overlayCollapsed: false,
+  overlayVisible: false,
   overlayOpacity: 0.34,
   overlayBounds: null
 }
@@ -208,9 +241,9 @@ export interface SpeakPayload {
   /** 音高倍率，1 = 原声。 */
   pitch: number
   voice: string
-  /** edge / offline：需要 audio 才出声；system：用 text 走系统嗓子。 */
-  engine?: 'system' | 'edge' | 'offline'
-  /** 合成好的音频（base64）。edge 是 mp3，offline 是 wav；为空表示这句合成失败。 */
+  /** edge / offline / sovits：需要 audio 才出声；system：用 text 走系统嗓子。 */
+  engine?: 'system' | 'edge' | 'offline' | 'sovits'
+  /** 合成好的音频（base64）。edge 是 mp3，offline / sovits 是 wav；为空表示这句合成失败。 */
   audio?: string
   /** audio 的 MIME，缺省按 audio/mpeg 处理。 */
   audioMime?: string
@@ -359,11 +392,13 @@ export interface VoiceAssetsResult {
   error?: string
 }
 
-/** Result of an Edge TTS preview; audio is returned as base64 mp3 for the renderer. */
+/** Result of a TTS preview; audio is base64 (edge=mp3, sovits=wav) for the renderer. */
 export interface VoicePreviewResult {
   ok: boolean
   audioBase64?: string
   voice?: string
+  /** 音频 MIME；缺省按 audio/mp3 处理（Edge）。sovits 回 audio/wav。 */
+  audioMime?: string
   error?: string
 }
 
@@ -459,6 +494,8 @@ export const IPC = {
   VOICE_SPEAK: 'voice:speak',
   TTS_OFFLINE_STATE: 'tts:offline-state',
   TTS_OFFLINE_DOWNLOAD: 'tts:offline-download',
+  TTS_SOVITS_STATUS: 'tts:sovits-status',
+  TTS_SOVITS_INSTALL: 'tts:sovits-install',
   OVERLAY_GEOMETRY: 'overlay:geometry',
   OVERLAY_GEOMETRY_RESET: 'overlay:geometry-reset',
   OVERLAY_VOICE: 'overlay:voice',
@@ -485,6 +522,32 @@ export interface OfflineStatus {
   error: string | null
 }
 
+/** GPT-SoVITS：引擎包安装状态 + api_v2 服务状态 + 最近日志（面板一眼看出「起没起来」）。 */
+export interface SovitsStatus {
+  /** 引擎包是否已就位（runtime/python.exe + api_v2.py 都在）。 */
+  installed: boolean
+  /** 手动放进去的 8GB 压缩包是否在（用户自己下载后丢进数据目录即可）。 */
+  archivePresent: boolean
+  install: {
+    phase: 'idle' | 'downloading' | 'extracting' | 'ready' | 'error'
+    progress: number
+    error: string | null
+  }
+  /** 服务状态机：off 没起 / starting 拉模型中 / ready 应用托管运行 / external 复用外部实例。 */
+  server: {
+    phase: 'off' | 'starting' | 'ready' | 'external'
+    detail: string
+    sinceMs: number
+    pid: number | null
+  }
+  /** 实际用的引擎包目录（配置 > 应用自装位 > D:\AI 兜底）。 */
+  home: string
+  /** 数据目录下这一层的路径：手动安装时告诉用户压缩包该放哪。 */
+  installRoot: string
+  /** 最近若干行日志（旧→新），面板折叠框直接展示。 */
+  logs: string[]
+}
+
 export interface WindowApi {
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
@@ -502,6 +565,10 @@ export interface WindowApi {
   ttsOfflineState(): Promise<OfflineStatus>
   /** 触发（或继续）一次离线模型下载；返回最新状态。 */
   ttsOfflineDownload(): Promise<OfflineStatus>
+  /** GPT-SoVITS 引擎包与服务状态（含最近日志）。 */
+  sovitsStatus(): Promise<SovitsStatus>
+  /** 一键安装：没有引擎包就下 8GB 再解压；压缩包已放进数据目录则只解压。 */
+  sovitsInstall(): Promise<SovitsStatus>
   captureStart(): Promise<CaptureStatus>
   captureStop(): Promise<CaptureStatus>
   captureStatus(): Promise<CaptureStatus>
