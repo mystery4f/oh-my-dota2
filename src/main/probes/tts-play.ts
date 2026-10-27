@@ -22,8 +22,10 @@ export async function runTtsPlayProbe(): Promise<void> {
     { name: '英文译文优先', entry: { id: '2', ts: 0, pending: false, original: '[Team] X: push top', translated: '推上路' }, want: '推上路' },
     { name: '有英雄名就念「谁说」', entry: { id: '5', ts: 0, pending: false, original: '[lina] [队友] [队友甲] ⚔ push top', translated: '推上路', speaker: 'lina' }, want: '莉娜说，推上路' },
     { name: '中文原话也带英雄名', entry: { id: '6', ts: 0, pending: false, original: '[pudge] [敌方] [敌人乙] 🌐 中路没人', translated: null, speaker: 'nevermore' }, want: '影魔说，中路没人' },
-    { name: '没有英雄名就念关系', entry: { id: '10', ts: 0, pending: false, original: '[敌方] [敌人B] 🌐 lol', translated: '哈哈' }, want: '敌方说，哈哈' },
-    { name: '队友同理', entry: { id: '11', ts: 0, pending: false, original: '[队友] [队友A] ⚔ push now', translated: '现在推' }, want: '队友说，现在推' },
+    { name: '没有英雄名就念座位标签（玩家N）', entry: { id: '10', ts: 0, pending: false, original: '[队友] [玩家2] ⚔ why', translated: '为什么' }, want: '玩家2说，为什么' },
+    { name: '阵营未知（所有人频道）也念座位标签', entry: { id: '13', ts: 0, pending: false, original: '[玩家] [玩家8] 🌐 end', translated: null }, want: '玩家8说，end' },
+    { name: '有昵称就念昵称', entry: { id: '12', ts: 0, pending: false, original: '[敌方] [敌人B] 🌐 lol', translated: '哈哈' }, want: '敌人B说，哈哈' },
+    { name: '队友同理', entry: { id: '11', ts: 0, pending: false, original: '[队友] [队友A] ⚔ push now', translated: '现在推' }, want: '队友A说，现在推' },
     { name: '自己说的不念（哪怕带英雄名）', entry: { id: '8', ts: 0, pending: false, own: true, original: '[nyx_assassin] [我] [Balance(Bot)] 🌐 ::', translated: null, speaker: 'nyx_assassin' }, want: null },
     { name: '还没翻完不念', entry: { id: '3', ts: 0, pending: true, original: '[Team] X: push top' }, want: null },
     { name: '整行只有符号不念', entry: { id: '4', ts: 0, pending: false, original: '[All] ⚔ 🌐' }, want: null }
@@ -78,7 +80,7 @@ export async function runTtsPlayProbe(): Promise<void> {
     })
   const ownRows = [
     { name: '默认：自己的话不念', want: null, got: ownSession(false)?.text ?? null },
-    { name: '开关打开：自己的话照念', want: '司夜刺客说，推上路', got: ownSession(true)?.text ?? null }
+    { name: '开关打开：自己的话照念「我说」', want: '我说，推上路', got: ownSession(true)?.text ?? null }
   ].map((row) => ({ ...row, ok: row.got === row.want }))
   const ownOk = ownRows.every((row) => row.ok)
   console.log('TTS_SPEAK_OWN_CASES', JSON.stringify({ ownOk, rows: ownRows }))

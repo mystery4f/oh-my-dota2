@@ -97,13 +97,14 @@ export function speakSkipReason(entry: CaptureEntry, options: SpeakOptions): 'mu
   return null
 }
 
-/** GSI 行前缀里的 [关系]（我/队友/敌方）：英雄名拿不到时退而求其次，至少念出是哪边在说。 */
-function relationFromLine(raw: string): string | null {
+/** GSI 行前缀里的说话人标签：[我/队友/敌方/玩家] 后面那个 [昵称/玩家N]。「玩家」是阵营未知时的兜底关系（allplayers 不来、频道又判不出敌我），漏了它所有人频道全退成裸念。 */
+function speakerFromLine(raw: string): string | null {
   const head = raw.split(/[⚔🌐]/u)[0] ?? ''
-  const hit = /\[(我|队友|敌方)\]/u.exec(head)
-  return hit ? hit[1] : null
+  const hit = /\[(?:我|队友|敌方|玩家)\]\s*\[([^\]]+)\]/u.exec(head)
+  const label = hit?.[1]?.trim()
+  // slotLabel 兜底出「未知」时，念「未知说」比不念还难受，退空让内容裸念。
+  return label && label !== '未知' ? label : null
 }
-
 export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPayload | null {
   if (speakSkipReason(entry, options) !== null) return null
   // 念之前先剥掉 `[昵称] ⚔` 这类装饰；剥空了就退回原文正文，别念一串标签。
@@ -111,15 +112,16 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
   // 有英雄名就念成「某某 说 ……」：听的人需要知道是谁在说话，但不需要听方括号和频道符号。
   // 「说」不能省：没有它听起来像两个不相干的短语被连读；用逗号接住，
   // 句号会让引擎在「说」后面停一拍，就是用户抱怨的那个卡顿。
-  // 有英雄名就念「某某说，」；GSI 只推自己的 hero 块，别人的英雄（allplayers）真对局
-  // 实测一帧都没到过——拿不到英雄时退回行前缀里的 [关系]，念「队友说，/敌方说，」，
-  // 比光秃秃念内容至少多一层「谁在说话」；OCR 行没有关系标签就老老实实不加前缀。
-  const relation = entry.speaker ? null : relationFromLine(entry.original)
-  const prefix = entry.speaker
-    ? `${heroChinese(entry.speaker)}说，`
-    : relation
-      ? `${relation}说，`
-      : ''
+  // 前缀规则（2026-10-25 用户定稿）：自己的话念「我说，」（开了「自己也念」才走到这）；
+  // 别人有英雄念「英雄说，」（GSI 只推自己的 hero 块，allplayers 真对局一帧都没到过）；
+  // 别人没英雄念行前缀里的座位标签「玩家2说，」，比笼统的「队友说」对得上屏幕上是谁在讲话；
+  // 手动/快照行没有标签就老老实实不加前缀。
+  const spoken = entry.own === true
+    ? '我'
+    : entry.speaker
+      ? heroChinese(entry.speaker)
+      : speakerFromLine(entry.original)
+  const prefix = spoken ? `${spoken}说，` : ''
   const text = prefix ? `${prefix}${body}` : body
   const clipped = text.length > SPEAK_MAX_CHARS ? `${text.slice(0, SPEAK_MAX_CHARS)}…` : text
   return {
@@ -175,14 +177,14 @@ export function announceEntries(entries: CaptureEntry[]): void {
       )
       continue
     }
-    // 前缀来源留痕：speaker=英雄名（现实中只有自己的话有）；relation=退回的 [关系]；
+    // 前缀来源留痕：speaker=英雄名（现实中只有自己的话有）；fallback=退回的座位标签；
     // 两者皆空=光念内容。英雄名消失这类问题，有这条日志就不用考古了。
     console.log(
       'TTS_SPEAK_PICK',
       JSON.stringify({
         engine: payload.engine,
         speaker: entry.speaker ?? null,
-        relation: entry.speaker ? null : relationFromLine(entry.original),
+        fallback: entry.speaker ? null : speakerFromLine(entry.original),
         text: payload.text.slice(0, 40)
       })
     )

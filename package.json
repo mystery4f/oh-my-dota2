@@ -1,6 +1,6 @@
 {
   "name": "oh-my-dota2",
-  "version": "1.1.0",
+  "version": "1.0.1",
   "description": "Zero-injection Dota 2 teammate communication tool: chat OCR translation overlay, voice transcription, mic language conversion",
   "main": "./out/main/index.js",
   "author": "mystery4f <40482524+mystery4f@users.noreply.github.com>",
