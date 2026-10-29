@@ -36,7 +36,7 @@ export async function synthesizeSovits(text: string, rate = 1, lang: 'zh' | 'en'
     text_lang: lang,
     ref_audio_path: settings.ttsSovitsRefAudio,
     prompt_text: settings.ttsSovitsPromptText,
-    prompt_lang: 'zh',
+    prompt_lang: settings.ttsSovitsPromptLang || 'zh',
     media_type: 'wav',
     streaming_mode: 'false',
     // batch 解码：实测 RTX 4060 上 11 字 p50 1.96→1.23s、22 字 3.37→1.91s（2026-10-27）。

@@ -413,6 +413,7 @@ function OverlayCard(): React.ReactElement {
   const [sovitsUrl, setSovitsUrl] = useState('http://127.0.0.1:9880')
   const [sovitsRef, setSovitsRef] = useState('')
   const [sovitsPrompt, setSovitsPrompt] = useState('')
+  const [sovitsPromptLang, setSovitsPromptLang] = useState<'zh' | 'en'>('zh')
   const [sovitsHome, setSovitsHome] = useState('')
   const [sovits, setSovits] = useState<SovitsStatus | null>(null)
   const [nicknames, setNicknames] = useState('')
@@ -434,6 +435,7 @@ function OverlayCard(): React.ReactElement {
       setSovitsUrl(next.ttsSovitsUrl)
       setSovitsRef(next.ttsSovitsRefAudio)
       setSovitsPrompt(next.ttsSovitsPromptText)
+      setSovitsPromptLang(next.ttsSovitsPromptLang ?? 'zh')
       setSovitsHome(next.ttsSovitsHome)
       setNicknames(next.myNicknames.join(', '))
       setAutoStart(next.autoStartCapture)
@@ -770,6 +772,19 @@ function OverlayCard(): React.ReactElement {
                 placeholder="参考音频的逐字转写"
                 title="转写：那段参考音频说了什么，一字不差；对不上音质会明显劣化"
               />
+              <select
+                className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+                value={sovitsPromptLang}
+                onChange={(e) => {
+                  const next = e.target.value as 'zh' | 'en'
+                  setSovitsPromptLang(next)
+                  void window.api.setSettings({ ttsSovitsPromptLang: next })
+                }}
+                title="参考音频的语言：转写是什么语言就选什么，克隆时靠它对齐"
+              >
+                <option value="zh">参考语言 · 中文</option>
+                <option value="en">参考语言 · 英文</option>
+              </select>
             </div>
             <div className="flex w-full flex-col gap-1">
               {/* 状态行：服务起没起、用的哪个目录、包装没装——一眼能看完，不用问人。 */}

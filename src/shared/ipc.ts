@@ -163,6 +163,8 @@ export interface AppSettings {
   ttsSovitsRefAudio: string
   /** 参考音频的逐字转写：转写和音频对不上，克隆音质会明显劣化。 */
   ttsSovitsPromptText: string
+  /** 参考音频转写的语言（zh/en）：零样本克隆按转写语言对齐，英文参考必须配 en。 */
+  ttsSovitsPromptLang: 'zh' | 'en'
   /** 整合包安装目录（如 D:\AI\GPT-SoVITS-v2pro-20250604）；填了就由应用自动拉起 api_v2。 */
   ttsSovitsHome: string
   /** 浮层锁定：位置尺寸冻住 + 强制穿透。想拖动或改大小时先解锁。 */
@@ -208,6 +210,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsSovitsUrl: 'http://127.0.0.1:9880',
   ttsSovitsRefAudio: '',
   ttsSovitsPromptText: '',
+  ttsSovitsPromptLang: 'zh',
   ttsSovitsHome: '',
   overlayLocked: true,
   overlayCollapsed: false,
