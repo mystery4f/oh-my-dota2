@@ -5,6 +5,15 @@
 
 ## 刚完成并已验证
 
+**风行者至宝音色：参考语言可配置 + v2 微调上线（2026-10-30；提交 `e0f2c32` 已推）**
+
+- `ttsSovitsPromptLang`（`zh`|`en`，默认 `zh`）：`sovits.ts` 透传给 `/tts` 的 `prompt_lang`，面板「参考语言」下拉。零样本音色由「参考音频 + 逐字转写」对齐，英文参考必须配 `en`，写死 `zh` 时英文参考会劣化——这就是本次改动的动因。
+- 参考来源：`dota_schinese` vpk 里的简中配音 `sounds/vo/windrunner/wr_arc_*`（Source2Viewer-CLI 反编译成 mp3，64 条存 `D:\AI\ohmydota2-ref\windranger-arcana-set\`）；官方逐字转写只有语音轮盘 3 条，取自 `resource/localization/hero_chat_wheel_schinese.txt` 的 `dota_chatwheel_message_windrunner_arcana_*`（wiki 台词页是英文音频，没用）。
+- 微调流程（总耗时 ≈ 10 分钟，数据小是主因）：funasr 转写 64 条 → 回声清洗（游戏配音带混响尾巴，ASR 会把尾音写成重复词；58 条入选，2 条官方转写兜底）→ 预处理三步（text/hubert/semantic，58 对对齐）→ `s2` 8 epochs + `s1` 15 epochs。权重：`SoVITS_weights_v2/windranger_e8_s192.pth` + `GPT_weights_v2/windranger-e15.ckpt`（另有 e4/e5/e10 中间档），`tts_infer.yaml` custom 段已切。实测 23 字 4.7 s 音频 / 1.6 s 往返（微调前拖到 6–7 s）。
+- 三个复刻 webui 的坑（脚本在 `.tmp/`，别提交）：① `runtime/Lib/site-packages/users.pth` 指向旧解压目录（包从 BaiduNetdiskDownload 挪到 D:\AI 后没更新）→ `ModuleNotFoundError: text`，已重写；② 训练脚本不会自建 `logs/<exp>/logs_s2_v2/` 与权重目录（webui 会）→ epoch 4 存档 `FileNotFoundError G_233333333333.pth`；③ `cmd` 脚本必须纯 ASCII（GBK 控制台把中文注释炸成乱行）。
+- 运行时事故留档：api_v2 一次坏请求后进程卡死——之后所有 `/tts` 秒回 400 `[Errno 22] Invalid argument`（`ms:5`），重启进程即恢复；已在 `api_v2.py` 444 行的 `except` 加 `traceback.print_exc()`，下次复发看服务日志真实堆栈。复发症状 → 处置：`TTS_SOVITS_FAIL status:400 ms<100` 持续出现 = 服务进程脏了，杀掉重拉。
+- ⚠️ 微调权重是用 Valve 配音训的：自用，不外传模型/音频。
+
 **GPT-SoVITS 朗读引擎（第四个引擎，2026-10-27；真机验证通过）**
 
 - `src/main/services/voice/sovits.ts` 走本机 api_v2 `GET /tts`（`batch_size=8`、`speed_factor` 透传语速），失败一律 `null` 静默跳过，绝不回退系统嗓子。
