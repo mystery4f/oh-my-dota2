@@ -46,10 +46,10 @@
 
 - 训练产出在 `D:\AI\GPT-SoVITS-v2pro-20250604`（`GPT_weights_v2/` + `SoVITS_weights_v2/`）
 - 参考音频用哪段、转写文本是什么，记到下面的溯源表
-- 三个文件传魔搭仓（网页传或 `python .tmp/ms-upload.py`），字节数以 `ls -l` 实测为准
-- 改仓里的 `voicepacks.json`：`version`、三个 `path`、三个 `bytes`
-- 本地开发验证：`npx electron out/main/index.js --sovits-voicepack-probe`（42 项全绿）
-  面板下拉应显示新版本号，「重新下载」走增量补齐
+- 三个文件传魔搭仓：`python scripts/ms-voicepack-upload.py local:repo …`（先 `--dry-run` 看计划；令牌走 env `MS_TOKEN`，要用 GPT-SoVITS 的 runtime python，SDK 在那边）
+- 改仓里的 `voicepacks.json`：`version`、三个 `path`、三个 `bytes`（`--manifest` 传上去）
+- 溯源表加一行，发布流程细节见 `.pi/skills/dota-voice-release`
+- 本地开发验证：`npx electron out/main/index.js --sovits-voicepack-probe`（41 项全绿），面板下拉应显示新版本号，「重新下载」走增量补齐
 
 ## 音色溯源表
 
@@ -67,3 +67,15 @@
 
 - 参考音频 → `tts/sovits-refs/<id>/<原名>`，`refs.json` 由安装流程代写（用户仍可手编）
 - 微调权重 → `gpt-sovits/weights/<id>/<原名>`
+
+## 仅存本地的资产（丢了无法重训）
+
+| 资产 | 位置 | 大小 | 说明 |
+|---|---|---|---|
+| 原始数据集（vpk 提取 + ASR 转写） | `D:\AI\windranger-finetune\` | 4.4MB | 风行者 58 条数据集的源头 |
+| 同上 | `D:\AI\mirana-finetune\` | 43MB | 米拉娜 209 条 |
+| 训练配置 | `D:\AI\GPT-SoVITS-v2pro-20250604\logs\<hero>\config.json` | 2KB | 实验参数（语义/批次/轮次） |
+| 中间轮权重 e5/e10、e4 | `{GPT,SoVITS}_weights_v2\` | ~720MB | 在用版本已在魔搭，这些是备胎 |
+
+在用权重、引擎、参考音频都在云端（魔搭）或数据根，上面这些是仅存本地的部分——换盘/重装前先打包这两个 finetune 目录。
+
