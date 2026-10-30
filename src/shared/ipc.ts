@@ -557,6 +557,8 @@ export interface SovitsStatus {
   logs: string[]
 }
 
+/** 晓晓保底参考在 refs 库里的子目录名（渲染层判断「保底条目在不在」用）。 */
+export const SOVITS_SEED_REF_DIR = 'xiaoxiao-seed'
 /** 参考音频库（<数据根>/tts/sovits-refs/）里的一条：下拉框选一下就把参考整套换掉。 */
 export interface SovitsRefEntry {
   /** 下拉框显示的名字，如「米拉娜」。 */

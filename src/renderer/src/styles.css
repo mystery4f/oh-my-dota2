@@ -4,6 +4,10 @@
 
 @layer base {
   :root {
+    /* 界面永远是深色的：告诉 Chromium 按深色渲染原生控件（select 弹出层、
+       系统箭头等），否则下拉弹层是 Windows 浅色样式——亮蓝高亮+白底，
+       和暗色主题严重割裂。 */
+    color-scheme: dark;
     --background: 20 14% 4%;
     --foreground: 36 40% 92%;
     --card: 24 10% 8%;
@@ -58,6 +62,14 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background-color: hsl(24 8% 26%);
+}
+
+
+/* 原生 select 的弹出层在部分平台仍不吃 color-scheme，把 option 的底色/文字
+   显式钉到主题色上兜底（Chromium 认 option 上的背景与文字色）。 */
+option {
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
 }
 
 ::-webkit-scrollbar-track {

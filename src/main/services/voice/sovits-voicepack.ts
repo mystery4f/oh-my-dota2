@@ -3,7 +3,7 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, re
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import type { SovitsVoicePack } from '@shared/ipc'
+import { SOVITS_SEED_REF_DIR, type SovitsVoicePack } from '@shared/ipc'
 import { loadSettings } from '../settings'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './sovits-refs'
 import { activateSovitsRef, recordSovitsLog } from './sovits-server'
@@ -449,14 +449,15 @@ export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
   return sovitsVoicePacks()
 }
 
-/** 首启保底（纯函数可测的部分内联在实现里）：库一条参考都没有时用 Edge 现合成一条晓晓参考。 */
-export const SEED_REF_DIR = 'xiaoxiao-seed'
+/** 保底参考（幂等）：库里还没有晓晓保底条目时用 Edge 现合成一条；有别的参考（音色包）不拦着。 */
+export const SEED_REF_DIR = SOVITS_SEED_REF_DIR
 export const SEED_REF_TEXT = '队友们小心，敌人可能在中路埋伏，我们先撤一下再来打。'
 
 export async function ensureSovitsSeedRef(force = false): Promise<boolean> {
   const refsRoot = sovitsRefsRoot(app.getPath('userData'))
   const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
-  if (!force && listSovitsRefs(refsRoot, weightsRoot).length > 0) return false
+  if (!force && listSovitsRefs(refsRoot, weightsRoot).some((ref) => ref.audio === `${SEED_REF_DIR}/seed.mp3`))
+    return false
   const audioPath = join(refsRoot, SEED_REF_DIR, 'seed.mp3')
   const mp3 = await synthesizeEdge(SEED_REF_TEXT, DEFAULT_EDGE_VOICE, 1)
   if (!mp3 || mp3.length === 0) {
@@ -487,7 +488,7 @@ export async function ensureSovitsSeedRef(force = false): Promise<boolean> {
 
 /**
  * 引擎装好后的一键拉齐（装包完成钩子 + 启动钩子共用）：
- * 默认音色包不在就下它；库还空着就先垫一条晓晓保底参考——两条都失败也不拦主流程。
+ * 默认音色包不在就下它；晓晓保底参考缺了就现合成一条（自带幂等，已有则秒返回）——失败也不拦主流程。
  */
 export async function autoVoicePackSetup(): Promise<void> {
   const refsRoot = sovitsRefsRoot(app.getPath('userData'))
@@ -498,5 +499,5 @@ export async function autoVoicePackSetup(): Promise<void> {
     await installVoicePack(fallback.id)
     return
   }
-  if (listSovitsRefs(refsRoot, weightsRoot).length === 0) await ensureSovitsSeedRef()
+  await ensureSovitsSeedRef()
 }

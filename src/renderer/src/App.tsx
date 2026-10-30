@@ -20,7 +20,8 @@ import {
   type OfflineVoiceId,
   type SovitsRefEntry,
   type SovitsStatus,
-  type SovitsVoicePack
+  type SovitsVoicePack,
+  SOVITS_SEED_REF_DIR
 } from '@shared/ipc'
 import type { UpdateState } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
@@ -465,8 +466,14 @@ function OverlayCard(): React.ReactElement {
         if (alive) setSovits(next)
       })
       // 音色包下载进度在主进程内存里，跟着状态一起刷。
+      // 参考库也跟着刷：音色包装完会往 refs.json 追加条目（主进程写的），
+      // 不刷的话「参考音频库」下拉会一直显示切引擎那一刻的旧快照——
+      // 装完米拉娜下拉里却看不到，就是这个坑。
       void window.api.sovitsVoicepacks().then((next) => {
         if (alive) setSovitsPacks(next)
+      })
+      void window.api.sovitsRefs().then((next) => {
+        if (alive) setSovitsRefs(next)
       })
     }
     tick()
@@ -764,7 +771,7 @@ function OverlayCard(): React.ReactElement {
                   <label className="flex items-center gap-2">
                     <span className="shrink-0 text-xs text-muted-foreground">音色包</span>
                     <select
-                      className="h-7 min-w-0 flex-1 rounded border border-input bg-transparent px-1 text-xs"
+                      className="w-60 max-w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
                       value={selected.id}
                       onChange={(e) => {
                         setPackSel(e.target.value)
@@ -838,13 +845,16 @@ function OverlayCard(): React.ReactElement {
                 </div>
               )
             })()}
-            {sovitsRefs.length === 0 && (
+            {(sovitsRefs.length === 0 ||
+              !sovitsRefs.some((ref) => ref.audio.startsWith(`${SOVITS_SEED_REF_DIR}/`))) && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">参考音频库是空的，没有参考音色出不来</span>
+                {sovitsRefs.length === 0 && (
+                  <span className="text-xs text-muted-foreground">参考音频库是空的，没有参考音色出不来</span>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
-                  title="用免费的 Edge 嗓子现场合成一条晓晓参考音频写进库里，不下载任何模型"
+                  title="用免费的 Edge 嗓子现合成一条晓晓参考写进库里，不下载任何模型；已有音色包也能补，重复点会替换旧的那条"
                   onClick={() =>
                     void window.api.sovitsSeed().then(() => {
                       void window.api.sovitsRefs().then(setSovitsRefs)
