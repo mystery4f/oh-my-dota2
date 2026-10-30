@@ -5,9 +5,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applySovitsVoice } from '../services/voice/sovits-server'
 import {
+  cleanupStalePackFiles,
   downloadPackFile,
   mergeRefsJson,
+  mergeVoicePacks,
+  packRefsMerge,
+  parseVoicePackManifest,
   planVoicePackFiles,
+  resolveVoicePacks,
+  safePackRelPath,
   VOICE_PACKS,
   voicePackInstalled
 } from '../services/voice/sovits-voicepack'
@@ -58,6 +64,92 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
     push('同 audio 键原位替换不追加', merged.length === 2 && (merged[1] as { promptText: string }).promptText === 'y2')
     const fromObject = mergeRefsJson({ not: 'array' }, entryA)
     push('坏索引按空表起步', Array.isArray(fromObject) && fromObject.length === 1)
+
+    // —— 纯函数：远端清单 voicepacks.json 解析 ——
+    const manifestOk = {
+      schemaVersion: 1,
+      packs: [
+        {
+          id: 'windranger', name: '风行者', version: 'e30', note: '重训版', default: true,
+          promptText: '谁能预测到这一幕？哦，等一下。是我。', promptLang: 'zh',
+          refAudio: { path: 'windranger/windranger-arcana-ref-zh.wav', bytes: 284_666 },
+          gptWeights: { path: 'windranger/windranger-e30.ckpt', bytes: 155_312_333 },
+          sovitsWeights: { path: 'windranger/windranger_e8_s384.pth', bytes: 85_007_488 }
+        },
+        { id: 'new-hero', name: '新英雄', version: 'e1', promptText: 'hi', promptLang: 'zh',
+          refAudio: { path: 'new-hero/ref.wav', bytes: 1 }, gptWeights: { path: 'new-hero/g.ckpt', bytes: 2 }, sovitsWeights: { path: 'new-hero/s.pth', bytes: 3 } }
+      ]
+    }
+    const parsed = parseVoicePackManifest(manifestOk)
+    push('合法清单解析出两个包', parsed !== null && parsed.length === 2, parsed ? `${parsed.length}` : 'null')
+    push('version 与 URL 透传', parsed !== null && parsed[0].version === 'e30' && parsed[0].gptWeights.url.includes('windranger-e30.ckpt'))
+    push('note 缺省成空串', parsed !== null && parsed[1].note === '')
+    push('schemaVersion 不认直接废', parseVoicePackManifest({ ...manifestOk, schemaVersion: 2 }) === null)
+    push('packs 非数组直接废', parseVoicePackManifest({ schemaVersion: 1, packs: 'nope' }) === null)
+    push('空包列表当失败走兜底', parseVoicePackManifest({ schemaVersion: 1, packs: [] }) === null)
+    const evilPath = parseVoicePackManifest({ schemaVersion: 1, packs: [{ ...manifestOk.packs[0], gptWeights: { path: '../evil.ckpt', bytes: 1 } }] })
+    push('越权路径的包整条剔除', evilPath === null)
+    const badBytes = parseVoicePackManifest({ schemaVersion: 1, packs: [
+      manifestOk.packs[1],
+      { ...manifestOk.packs[0], refAudio: { path: 'windranger/r.wav', bytes: 1.5 } }
+    ] })
+    push('字节数非整数剔除坏包留好包', badBytes !== null && badBytes.length === 1 && badBytes[0].id === 'new-hero')
+    push('反斜杠路径不安全', !safePackRelPath('a\\b.wav'))
+    push('绝对路径不安全', !safePackRelPath('/etc/passwd') && !safePackRelPath('C:/x.wav'))
+    push('无子目录不安全（必须 a/b 起）', !safePackRelPath('plain.wav'))
+    push('正常两段路径安全', safePackRelPath('windranger/r.wav'))
+
+    // —— 纯函数：远端与内置目录合并 ——
+    const builtinDefaultId = VOICE_PACKS.find((item) => item.default)?.id ?? ''
+    const mergedPacks = mergeVoicePacks(parsed, VOICE_PACKS)
+    push('远端同 id 覆盖内置', mergedPacks.find((item) => item.id === 'windranger')?.version === 'e30')
+    push('内置独有包保留', mergedPacks.some((item) => item.id === 'mirana'))
+    push('远端新增包进目录', mergedPacks.some((item) => item.id === 'new-hero'))
+    push('远端为空整份用内置', mergeVoicePacks(null, VOICE_PACKS).length === VOICE_PACKS.length)
+    const noDefault = [{ ...VOICE_PACKS[1], default: false }, { ...VOICE_PACKS[0], default: false }]
+    const keptDefault = mergeVoicePacks(noDefault, VOICE_PACKS)
+    push('没人当默认时保住内置默认包', keptDefault.find((item) => item.id === builtinDefaultId)?.default === true)
+
+    // —— 纯函数：包条目合并（同名/同音频去重）与孤儿清理 ——
+    const oldRefs = [
+      { name: '风行者', audio: 'windranger/old-ref.wav', promptText: '旧', promptLang: 'zh', gptWeights: 'windranger/old.ckpt', sovitsWeights: 'windranger/old.pth' },
+      { name: '别的', audio: 'other/keep.wav', promptText: '留', promptLang: 'zh' }
+    ]
+    const packMerged = packRefsMerge(oldRefs, VOICE_PACKS[0])
+    push('同名旧条目剔掉且报出旧音频', packMerged.list.length === 2 && packMerged.staleAudio.includes('windranger/old-ref.wav'))
+    push('新条目带权重路径落位', (packMerged.list.at(-1) as { gptWeights?: string }).gptWeights === VOICE_PACKS[0].gptWeights.relPath)
+    const sameAudioMerged = packRefsMerge([{ name: '别名', audio: VOICE_PACKS[0].refAudio.relPath, promptText: 'x', promptLang: 'zh' }], VOICE_PACKS[0])
+    push('同音频不同名也替换', sameAudioMerged.list.length === 1 && sameAudioMerged.staleAudio.length === 0)
+
+    const packV2 = { ...VOICE_PACKS[0], gptWeights: { ...VOICE_PACKS[0].gptWeights, relPath: 'windranger/windranger-e30.ckpt' } }
+    const wDir = join(weightsRoot, 'windranger')
+    mkdirSync(wDir, { recursive: true })
+    writeFileSync(join(wDir, 'windranger-e30.ckpt'), Buffer.alloc(4, 1))
+    writeFileSync(join(wDir, VOICE_PACKS[0].sovitsWeights.relPath.split('/').pop() ?? ''), Buffer.alloc(4, 1))
+    writeFileSync(join(wDir, 'windranger-e15.ckpt.part'), Buffer.alloc(4, 1))
+    const cleaned = cleanupStalePackFiles(packV2, ['windranger/old-ref.wav', 'other/keep.wav'], refsRoot, weightsRoot)
+    push(
+      '换版清理只删旧权重与旧参考',
+      cleaned.includes('weights/windranger/windranger-e15.ckpt.part') && !cleaned.some((f) => f.includes('windranger_e8_s192.pth')) && !cleaned.includes('other/keep.wav'),
+      cleaned.join('|')
+    )
+    // —— 集成：远端清单经本地 HTTP 生效（resolveVoicePacks 可注入 URL） ——
+    const manifestServer = await startHttpServer((req, reply) => {
+      if (req.url === '/voicepacks.json') reply(Buffer.from(JSON.stringify(manifestOk)), 200, { 'content-type': 'application/json' })
+      else reply(Buffer.from('nope'), 404)
+    })
+    try {
+      const fromHttp = await resolveVoicePacks({ url: `http://127.0.0.1:${manifestServer.port}/voicepacks.json` })
+      push('远端清单优先于内置', fromHttp.find((item) => item.id === 'windranger')?.version === 'e30' && fromHttp.some((item) => item.id === 'new-hero'))
+      const fallbackPacks = await resolveVoicePacks({ url: `http://127.0.0.1:${manifestServer.port}/missing.json` })
+      push(
+        '清单 404 落回内置兜底',
+        fallbackPacks.length === VOICE_PACKS.length && fallbackPacks.find((item) => item.id === 'windranger')?.version === 'e15',
+        fallbackPacks.map((item) => `${item.id}:${item.version}`).join('|')
+      )
+    } finally {
+      manifestServer.close()
+    }
 
     // —— 集成：本地 HTTP 断点续传 ——
     const payload = Buffer.from('0123456789abcdefghijklmnopqrstuvwxyz')

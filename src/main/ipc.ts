@@ -27,7 +27,7 @@ import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
-import { autoVoicePackSetup, ensureSovitsSeedRef, installVoicePack, sovitsVoicePacks } from './services/voice/sovits-voicepack'
+import { autoVoicePackSetup, deleteVoicePack, ensureSovitsSeedRef, installVoicePack, sovitsVoicePacks } from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
 import { gsiStatus } from './services/gsi'
 
@@ -214,6 +214,7 @@ export function registerIpc(): void {
   // 音色包：目录 + 本地状态一张表；安装 = 下载三件套 → refs.json 落条目 →（没选过音色）自动选中。
   ipcMain.handle(IPC.TTS_SOVITS_VOICEPACKS, () => sovitsVoicePacks())
   ipcMain.handle(IPC.TTS_SOVITS_VOICEPACK_INSTALL, (_e, id: unknown) => installVoicePack(String(id ?? '')))
+  ipcMain.handle(IPC.TTS_SOVITS_VOICEPACK_DELETE, (_e, id: unknown) => deleteVoicePack(String(id ?? '')))
   // 选定一条参考：统一走主进程「写设置 → 切权重 → 预热」，且只认库里真实存在的条目。
   ipcMain.handle(IPC.TTS_SOVITS_SELECT_REF, async (_e, raw: unknown) => {
     const wanted = typeof raw === 'object' && raw !== null ? (raw as { audioPath?: unknown }).audioPath : ''

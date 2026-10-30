@@ -502,6 +502,7 @@ export const IPC = {
   TTS_SOVITS_REFS: 'tts:sovits-refs',
   TTS_SOVITS_VOICEPACKS: 'tts:sovits-voicepacks',
   TTS_SOVITS_VOICEPACK_INSTALL: 'tts:sovits-voicepack-install',
+  TTS_SOVITS_VOICEPACK_DELETE: 'tts:sovits-voicepack-delete',
   TTS_SOVITS_SELECT_REF: 'tts:sovits-select-ref',
   TTS_SOVITS_SEED: 'tts:sovits-seed',
   OVERLAY_GEOMETRY: 'overlay:geometry',
@@ -581,15 +582,21 @@ export interface SovitsRefEntry {
 export interface SovitsVoicePack {
   id: string
   name: string
+  /** 训练轮次标识（如 e15 = GPT 第 15 轮），来自清单，换版即换号。 */
+  version: string
   /** 一句话说明（面板小字），如「默认音色，引擎装完自动下载」。 */
   note: string
   defaultPack: boolean
   /** 三件套（参考音频 + GPT ckpt + SoVITS pth）总字节数。 */
   bytes: number
+  /** 盘上已有且字节数对得上的部分（.part 不算），差 bytes-haveBytes 才是要下的。 */
+  haveBytes: number
   installed: boolean
   downloading: boolean
   /** 0–1；已就绪恒为 1。 */
   progress: number
+  /** 当前 ttsSovitsRefAudio 指着这个包的参考音频（删除要拦）。 */
+  active: boolean
   error: string | null
 }
 
@@ -616,10 +623,12 @@ export interface WindowApi {
   sovitsInstall(): Promise<SovitsStatus>
   /** 参考音频库清单：读 refs.json，坏条目与缺失音频已被主进程滤掉。 */
   sovitsRefs(): Promise<SovitsRefEntry[]>
-  /** 内置英雄音色包清单（含本地安装状态与下载进度）。 */
+  /** 音色包清单（远端 voicepacks.json 优先，拉不到用内置兜底；含本地状态与下载进度）。 */
   sovitsVoicepacks(): Promise<SovitsVoicePack[]>
   /** 下载/续装一个音色包：拉三件套 → refs.json 落条目 → 没选过音色就自动选中。 */
   sovitsVoicepackInstall(id: string): Promise<SovitsVoicePack[]>
+  /** 删除音色包：三件套文件 + refs.json 条目一起清；正在使用的包会被拒绝。 */
+  sovitsVoicepackDelete(id: string): Promise<SovitsVoicePack[]>
   /** 选定一条参考：主进程按「写设置 → 切权重 → 预热」的顺序激活，不再由渲染层各写各的。 */
   sovitsSelectRef(entry: SovitsRefEntry): Promise<boolean>
   /** 首启保底：参考库一条都没有时，用 Edge 现合成一条晓晓参考入库。 */

@@ -112,6 +112,7 @@ const api: WindowApi = {
   sovitsRefs: () => ipcRenderer.invoke(IPC.TTS_SOVITS_REFS),
   sovitsVoicepacks: () => ipcRenderer.invoke(IPC.TTS_SOVITS_VOICEPACKS),
   sovitsVoicepackInstall: (id: string) => ipcRenderer.invoke(IPC.TTS_SOVITS_VOICEPACK_INSTALL, id),
+  sovitsVoicepackDelete: (id: string) => ipcRenderer.invoke(IPC.TTS_SOVITS_VOICEPACK_DELETE, id),
   sovitsSelectRef: (entry: SovitsRefEntry) => ipcRenderer.invoke(IPC.TTS_SOVITS_SELECT_REF, entry),
   sovitsSeed: () => ipcRenderer.invoke(IPC.TTS_SOVITS_SEED),
   onVoiceSpeak: (callback) => {

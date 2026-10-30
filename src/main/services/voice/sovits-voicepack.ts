@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -34,6 +34,8 @@ export interface VoicePackFileDef {
 export interface VoicePackDef {
   id: string
   name: string
+  /** 训练轮次标识（e15 = GPT 第 15 轮）。文件名本身就带版本，这里只是给面板看的短号。 */
+  version: string
   note: string
   default: boolean
   promptText: string
@@ -52,6 +54,7 @@ export const VOICE_PACKS: VoicePackDef[] = [
   {
     id: 'windranger',
     name: '风行者',
+    version: 'e15',
     note: '默认音色，引擎装完自动下载（约 230MB）',
     default: true,
     promptText: '谁能预测到这一幕？哦，等一下。是我。',
@@ -63,6 +66,7 @@ export const VOICE_PACKS: VoicePackDef[] = [
   {
     id: 'mirana',
     name: '米拉娜',
+    version: 'e15',
     note: '月之公主，与风行者同批训练（约 230MB）',
     default: false,
     promptText: '从银夜森林到太阳帝权人们都是怀着敬畏和尊重说出我的名字',
@@ -72,6 +76,199 @@ export const VOICE_PACKS: VoicePackDef[] = [
     sovitsWeights: { url: modelscopeUrl('mirana/mirana_e8_s336.pth'), relPath: 'mirana/mirana_e8_s336.pth', bytes: 85_006_749 }
   }
 ]
+
+/** 清单里的相对路径规则（与 sovits-refs 的 parseEntry 同款）：POSIX、不绝对、无 ..，必须 a/b 两段起。 */
+export function safePackRelPath(p: unknown): p is string {
+  return (
+    typeof p === 'string' &&
+    p.length > 3 &&
+    p.length <= 200 &&
+    !p.includes('\\') &&
+    !p.includes(':') &&
+    !p.startsWith('/') &&
+    p.split('/').every((seg) => seg.length > 0 && seg !== '.' && seg !== '..') &&
+    p.includes('/')
+  )
+}
+
+interface ManifestFileRaw {
+  path: unknown
+  bytes: unknown
+}
+
+function parseManifestFile(raw: unknown): VoicePackFileDef | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const { path, bytes } = raw as ManifestFileRaw
+  if (!safePackRelPath(path)) return null
+  if (!Number.isInteger(bytes) || (bytes as number) <= 0 || (bytes as number) > 20 * 1024 ** 3) return null
+  return { url: modelscopeUrl(path), relPath: path, bytes: bytes as number }
+}
+
+/**
+ * 远端 voicepacks.json → 包目录。严格校验：schemaVersion 必须是 1，单个包坏就丢这个包
+ * （别让一条坏数据废掉整份清单），一条都不剩才算失败（返回 null，走内置兜底）。
+ */
+export function parseVoicePackManifest(raw: unknown): VoicePackDef[] | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const top = raw as { schemaVersion?: unknown; packs?: unknown }
+  if (top.schemaVersion !== 1 || !Array.isArray(top.packs)) return null
+  const packs: VoicePackDef[] = []
+  for (const item of top.packs) {
+    if (typeof item !== 'object' || item === null) continue
+    const p = item as Record<string, unknown>
+    if (typeof p.id !== 'string' || !/^[a-z0-9][a-z0-9_-]*$/.test(p.id)) continue
+    if (typeof p.name !== 'string' || p.name.length === 0 || p.name.length > 40) continue
+    if (typeof p.version !== 'string' || p.version.length === 0 || p.version.length > 32) continue
+    if (typeof p.promptText !== 'string' || p.promptText.length === 0 || p.promptText.length > 500) continue
+    if (p.promptLang !== 'zh' && p.promptLang !== 'en') continue
+    const refAudio = parseManifestFile(p.refAudio)
+    const gptWeights = parseManifestFile(p.gptWeights)
+    const sovitsWeights = parseManifestFile(p.sovitsWeights)
+    if (!refAudio || !gptWeights || !sovitsWeights) continue
+    packs.push({
+      id: p.id,
+      name: p.name,
+      version: p.version,
+      note: typeof p.note === 'string' ? p.note.slice(0, 120) : '',
+      default: p.default === true,
+      promptText: p.promptText,
+      promptLang: p.promptLang,
+      refAudio,
+      gptWeights,
+      sovitsWeights
+    })
+  }
+  return packs.length > 0 ? packs : null
+}
+
+/** 远端目录与内置目录按 id 合并：远端赢（同 id 覆盖），内置独有的补在后面；没人当默认时保住内置默认包。 */
+export function mergeVoicePacks(remote: VoicePackDef[] | null, builtin: VoicePackDef[]): VoicePackDef[] {
+  if (!remote) return builtin
+  const byId = new Map(builtin.map((pack) => [pack.id, { ...pack }]))
+  for (const pack of remote) byId.set(pack.id, pack)
+  const merged = [...byId.values()]
+  if (!merged.some((pack) => pack.default)) {
+    const builtinDefault = merged.find((pack) => pack.id === builtin.find((b) => b.default)?.id)
+    if (builtinDefault) builtinDefault.default = true
+    else if (merged.length > 0) merged[0].default = true
+  }
+  return merged
+}
+
+const MANIFEST_URL = modelscopeUrl('voicepacks.json')
+const MANIFEST_TTL_MS = 5 * 60_000
+let manifestCache: { at: number; remote: VoicePackDef[] | null } | null = null
+
+/** 拉一份远端清单（URL 可注入，探针用本地假源）。任何失败都返回 null，绝不抛。 */
+export async function fetchVoicePackManifest(url = MANIFEST_URL): Promise<VoicePackDef[] | null> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) })
+    if (!response.ok) return null
+    return parseVoicePackManifest(await response.json())
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 面板/安装/自动装共用的目录来源：远端清单优先（5 分钟缓存），拉不到用内置兜底。
+ * force 跳缓存重拉；带 url 时直连该源不落缓存（探针专用）。
+ */
+export async function resolveVoicePacks(opts?: { force?: boolean; url?: string }): Promise<VoicePackDef[]> {
+  if (opts?.url) return mergeVoicePacks(await fetchVoicePackManifest(opts.url), VOICE_PACKS)
+  if (!opts?.force && manifestCache && Date.now() - manifestCache.at < MANIFEST_TTL_MS) {
+    return mergeVoicePacks(manifestCache.remote, VOICE_PACKS)
+  }
+  const remote = await fetchVoicePackManifest()
+  // 拉挂了就继续用手里的旧缓存（哪怕是过期的），比把用户打回内置版强；从没拉到过才落兜底。
+  if (remote) manifestCache = { at: Date.now(), remote }
+  return mergeVoicePacks(manifestCache?.remote ?? null, VOICE_PACKS)
+}
+
+/** refs.json 落包条目（纯函数）：同名（包拥有自己的名字）或同音频路径的旧条目先剔掉，顺带报出可删的旧音频。 */
+export function packRefsMerge(
+  current: unknown,
+  pack: VoicePackDef
+): { list: unknown[]; staleAudio: string[] } {
+  const list = Array.isArray(current) ? [...current] : []
+  const keep: unknown[] = []
+  const staleAudio: string[] = []
+  for (const item of list) {
+    if (typeof item === 'object' && item !== null) {
+      const entry = item as Record<string, unknown>
+      const sameName = entry.name === pack.name
+      const sameAudio = entry.audio === pack.refAudio.relPath
+      if (sameName || sameAudio) {
+        if (typeof entry.audio === 'string' && entry.audio !== pack.refAudio.relPath) staleAudio.push(entry.audio)
+        continue
+      }
+    }
+    keep.push(item)
+  }
+  keep.push(refsEntryFor(pack))
+  return { list: keep, staleAudio }
+}
+
+/** 换版后的孤儿清理：权重目录里不属于当前版本的文件全删；旧参考音频只删本包目录下的。 */
+export function cleanupStalePackFiles(pack: VoicePackDef, staleAudio: string[], refsRoot: string, weightsRoot: string): string[] {
+  const deleted: string[] = []
+  const weightsDir = join(weightsRoot, pack.id)
+  const keepNames = new Set([pack.gptWeights.relPath, pack.sovitsWeights.relPath].map((rel) => rel.split('/').pop() ?? ''))
+  try {
+    for (const name of readdirSync(weightsDir)) {
+      const clean = name.replace(/\.part$/, '')
+      if (!keepNames.has(clean)) {
+        rmSync(join(weightsDir, name), { force: true })
+        deleted.push(`weights/${pack.id}/${name}`)
+      }
+    }
+  } catch {
+    // 目录不在 = 没有孤儿，安静通过。
+  }
+  for (const rel of staleAudio) {
+    const segments = rel.split('/')
+    if (segments[0] !== pack.id || segments.length < 2) continue // 只动本包目录，用户的参考不碰
+    const target = join(refsRoot, ...segments)
+    try {
+      rmSync(target, { force: true })
+      deleted.push(rel)
+    } catch {
+      // 删不掉就留着，下次清理还会撞见。
+    }
+  }
+  return deleted
+}
+
+/** 删除音色包：三件套 + refs.json 条目 + 下载进度一起清；正在使用的包直接拒绝。 */
+export async function deleteVoicePack(id: string): Promise<SovitsVoicePack[]> {
+  const pack = (await resolveVoicePacks()).find((item) => item.id === id)
+  if (!pack) throw new Error(`unknown voicepack: ${id}`)
+  const refsRoot = sovitsRefsRoot(app.getPath('userData'))
+  const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
+  const refPath = join(refsRoot, ...pack.refAudio.relPath.split('/'))
+  const settings = loadSettings()
+  const active = settings.ttsSovitsRefAudio.trim().toLowerCase() === refPath.toLowerCase()
+  if (active) throw new Error('正在使用这个音色，先切到其他音色再删除')
+  rmSync(refPath, { force: true })
+  rmSync(`${refPath}.part`, { force: true })
+  rmSync(join(weightsRoot, pack.id), { recursive: true, force: true })
+  const refsFile = join(refsRoot, 'refs.json')
+  if (existsSync(refsFile)) {
+    let current: unknown = []
+    try {
+      current = JSON.parse(readFileSync(refsFile, 'utf-8'))
+    } catch {
+      current = []
+    }
+    const kept = (Array.isArray(current) ? current : []).filter(
+      (item) => !(typeof item === 'object' && item !== null && ((item as Record<string, unknown>).name === pack.name || (item as Record<string, unknown>).audio === pack.refAudio.relPath))
+    )
+    writeFileSync(refsFile, `${JSON.stringify(kept, null, 2)}\n`, 'utf-8')
+  }
+  packRuns.delete(pack.id)
+  recordSovitsLog('TTS_SOVITS_PACK_DELETE', { id: pack.id })
+  return sovitsVoicePacks()
+}
 
 /** 下载计划（纯函数，探针用）：每个文件落到哪、已在盘上多少字节、还差多少。 */
 export function planVoicePackFiles(pack: VoicePackDef, refsRoot: string, weightsRoot: string): Array<{
@@ -133,20 +330,27 @@ function refsEntryFor(pack: VoicePackDef): Record<string, unknown> {
 const packRuns = new Map<string, { downloading: boolean; progress: number; error: string | null }>()
 
 /** 面板视图：目录 + 本地状态（在不在、下没下、进度、错误）合成一张表。 */
-export function sovitsVoicePacks(): SovitsVoicePack[] {
+export async function sovitsVoicePacks(): Promise<SovitsVoicePack[]> {
   const refsRoot = sovitsRefsRoot(app.getPath('userData'))
   const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
-  return VOICE_PACKS.map((pack) => {
+  const activeRef = loadSettings().ttsSovitsRefAudio.trim().toLowerCase()
+  const packs = await resolveVoicePacks()
+  return packs.map((pack) => {
     const run = packRuns.get(pack.id)
+    const plan = planVoicePackFiles(pack, refsRoot, weightsRoot)
+    const haveBytes = plan.reduce((sum, file) => sum + Math.min(file.have, file.bytes), 0)
     return {
       id: pack.id,
       name: pack.name,
+      version: pack.version,
       note: pack.note,
       defaultPack: pack.default,
-      bytes: pack.refAudio.bytes + pack.gptWeights.bytes + pack.sovitsWeights.bytes,
+      bytes: plan.reduce((sum, file) => sum + file.bytes, 0),
+      haveBytes,
       installed: voicePackInstalled(pack, refsRoot, weightsRoot),
       downloading: run?.downloading ?? false,
       progress: run?.progress ?? 0,
+      active: activeRef !== '' && activeRef === join(refsRoot, ...pack.refAudio.relPath.split('/')).toLowerCase(),
       error: run?.error ?? null
     }
   })
@@ -186,7 +390,7 @@ export async function downloadPackFile(
  * → 切权重 + 预热。已在盘上就只做落条目/激活，不重下。
  */
 export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
-  const pack = VOICE_PACKS.find((item) => item.id === id)
+  const pack = (await resolveVoicePacks()).find((item) => item.id === id)
   if (!pack) throw new Error(`unknown voicepack: ${id}`)
   const refsRoot = sovitsRefsRoot(app.getPath('userData'))
   const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
@@ -221,7 +425,11 @@ export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
         current = []
       }
     }
-    writeFileSync(refsFile, `${JSON.stringify(mergeRefsJson(current, refsEntryFor(pack)), null, 2)}\n`, 'utf-8')
+    // 换版时同名/同路径的旧条目先剔掉（包拥有自己的名字），旧参考音频记下来给清理步骤。
+    const merged = packRefsMerge(current, pack)
+    writeFileSync(refsFile, `${JSON.stringify(merged.list, null, 2)}\n`, 'utf-8')
+    const stale = cleanupStalePackFiles(pack, merged.staleAudio, refsRoot, weightsRoot)
+    if (stale.length > 0) recordSovitsLog('TTS_SOVITS_PACK_CLEANUP', { id: pack.id, files: stale })
     recordSovitsLog('TTS_SOVITS_PACK_READY', { id: pack.id, name: pack.name })
     // 自动选中：当前没配参考（或配的还是空）就选它；用户已经挑了别的音色则不动。
     const settings = loadSettings()
@@ -284,7 +492,7 @@ export async function ensureSovitsSeedRef(force = false): Promise<boolean> {
 export async function autoVoicePackSetup(): Promise<void> {
   const refsRoot = sovitsRefsRoot(app.getPath('userData'))
   const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
-  const fallback = VOICE_PACKS.find((pack) => pack.default)
+  const fallback = (await resolveVoicePacks()).find((pack) => pack.default)
   if (fallback && !voicePackInstalled(fallback, refsRoot, weightsRoot)) {
     recordSovitsLog('TTS_SOVITS_PACK_AUTO_INSTALL', { id: fallback.id })
     await installVoicePack(fallback.id)

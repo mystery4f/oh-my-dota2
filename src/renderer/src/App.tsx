@@ -420,6 +420,8 @@ function OverlayCard(): React.ReactElement {
   const [sovits, setSovits] = useState<SovitsStatus | null>(null)
   const [sovitsRefs, setSovitsRefs] = useState<SovitsRefEntry[]>([])
   const [sovitsPacks, setSovitsPacks] = useState<SovitsVoicePack[]>([])
+  const [packSel, setPackSel] = useState('')
+  const [packErr, setPackErr] = useState<string | null>(null)
   const [nicknames, setNicknames] = useState('')
   const [autoStart, setAutoStart] = useState(DEFAULT_SETTINGS.autoStartCapture)
 
@@ -752,34 +754,90 @@ function OverlayCard(): React.ReactElement {
         {engine === 'sovits' && (
           <div className="flex w-full flex-col gap-2">
             <GroupLabel text="GPT-SoVITS · 音色由参考音频决定" />
-            {/* 英雄音色包：一键拉参考音频 + 微调权重，装完自动进下面的参考库。 */}
-            {sovitsPacks.length > 0 && (
-              <div className="flex flex-col gap-1">
-                {sovitsPacks.map((pack) => (
-                  <div key={pack.id} className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="text-foreground">{pack.name}</span>
-                    {pack.defaultPack && (
+            {/* 英雄音色包：清单来自魔搭 voicepacks.json（拉不到用内置兜底），选中看详情，不竖排堆列表。 */}
+            {sovitsPacks.length > 0 && (() => {
+              const selected = sovitsPacks.find((pack) => pack.id === packSel) ?? sovitsPacks[0]
+              const remaining = selected.bytes - selected.haveBytes
+              const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(0)} MB`
+              return (
+                <div className="flex flex-col gap-1">
+                  <label className="flex items-center gap-2">
+                    <span className="shrink-0 text-xs text-muted-foreground">音色包</span>
+                    <select
+                      className="h-7 min-w-0 flex-1 rounded border border-input bg-transparent px-1 text-xs"
+                      value={selected.id}
+                      onChange={(e) => {
+                        setPackSel(e.target.value)
+                        setPackErr(null)
+                      }}
+                    >
+                      {sovitsPacks.map((pack) => (
+                        <option key={pack.id} value={pack.id}>
+                          {pack.name} · {pack.downloading ? `下载中 ${Math.round(pack.progress * 100)}%` : pack.installed ? '已就绪' : '未下载'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-muted/30 px-2 py-1.5 text-xs">
+                    {selected.installed ? (
+                      <span className="text-emerald-600 dark:text-emerald-400">● 已就绪</span>
+                    ) : selected.downloading ? (
+                      <span className="text-amber-600 dark:text-amber-400">↓ 下载中 {Math.round(selected.progress * 100)}%</span>
+                    ) : (
+                      <span className="text-muted-foreground">○ 未下载</span>
+                    )}
+                    <span className="text-muted-foreground">v{selected.version}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {selected.installed ? mb(selected.bytes) : `还需 ${mb(remaining)} / ${mb(selected.bytes)}`}
+                    </span>
+                    {selected.active && (
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">使用中</span>
+                    )}
+                    {selected.defaultPack && (
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">默认</span>
                     )}
-                    <span className="text-muted-foreground">{pack.note}</span>
-                    {pack.installed ? (
-                      <span className="text-emerald-600 dark:text-emerald-400">已就绪</span>
-                    ) : pack.downloading ? (
-                      <span className="text-amber-600 dark:text-amber-400">下载中 {Math.round(pack.progress * 100)}%</span>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void window.api.sovitsVoicepackInstall(pack.id).then(setSovitsPacks)}
-                      >
-                        下载（{(pack.bytes / 1024 / 1024).toFixed(0)} MB）
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground" title={selected.note}>
+                      {selected.note}
+                    </span>
+                    {!selected.installed && !selected.downloading && (
+                      <Button size="sm" variant="outline" onClick={() => void window.api.sovitsVoicepackInstall(selected.id).then(setSovitsPacks)}>
+                        下载
                       </Button>
                     )}
-                    {pack.error !== null && <span className="text-destructive">{pack.error}</span>}
+                    {selected.installed && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={selected.downloading}
+                          onClick={() => void window.api.sovitsVoicepackInstall(selected.id).then(setSovitsPacks)}
+                        >
+                          重新下载
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={selected.active}
+                          title={selected.active ? '先在下面的参考音频库切换到其他音色' : undefined}
+                          onClick={() => {
+                            setPackErr(null)
+                            void window.api
+                              .sovitsVoicepackDelete(selected.id)
+                              .then(setSovitsPacks)
+                              .catch((err: unknown) => setPackErr(err instanceof Error ? err.message : String(err)))
+                          }}
+                        >
+                          删除
+                        </Button>
+                      </>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
+                  {(selected.error ?? packErr) !== null && (
+                    <span className="text-xs text-destructive">{selected.error ?? packErr}</span>
+                  )}
+                </div>
+              )
+            })()}
             {sovitsRefs.length === 0 && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-muted-foreground">参考音频库是空的，没有参考音色出不来</span>
