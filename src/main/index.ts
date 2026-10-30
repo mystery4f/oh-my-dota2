@@ -23,6 +23,7 @@ import { runGsiProbe } from './probes/gsi'
 import { runSettingsPersistProbe } from './probes/settings-persist'
 import { runGsiDumpProbe } from './probes/gsi-dump'
 import { runGsiFramesReportProbe } from './probes/gsi-frames-report'
+import { runSovitsRefsProbe } from './probes/sovits-refs'
 import { runMatchReportProbe } from './probes/match-report'
 import { runTranslateCacheProbe } from './probes/translate-cache'
 import { startGsi, stopGsi } from './services/gsi'
@@ -159,6 +160,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--chat-block-probe')) void runChatBlockProbe()
   if (process.argv.includes('--gsi-probe')) void runGsiProbe()
   if (process.argv.includes('--settings-persist-probe')) void runSettingsPersistProbe()
+  if (process.argv.includes('--sovits-refs-probe')) void runSovitsRefsProbe()
   if (process.argv.includes('--gsi-dump')) void runGsiDumpProbe()
   if (process.argv.includes('--gsi-dump-report')) void runGsiFramesReportProbe()
   if (process.argv.includes('--match-report')) void runMatchReportProbe()

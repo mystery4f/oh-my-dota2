@@ -18,6 +18,7 @@ import {
   type VoiceProbeResult,
   OFFLINE_VOICES,
   type OfflineVoiceId,
+  type SovitsRefEntry,
   type SovitsStatus
 } from '@shared/ipc'
 import type { UpdateState } from '@shared/ipc'
@@ -416,6 +417,7 @@ function OverlayCard(): React.ReactElement {
   const [sovitsPromptLang, setSovitsPromptLang] = useState<'zh' | 'en'>('zh')
   const [sovitsHome, setSovitsHome] = useState('')
   const [sovits, setSovits] = useState<SovitsStatus | null>(null)
+  const [sovitsRefs, setSovitsRefs] = useState<SovitsRefEntry[]>([])
   const [nicknames, setNicknames] = useState('')
   const [autoStart, setAutoStart] = useState(DEFAULT_SETTINGS.autoStartCapture)
 
@@ -441,6 +443,8 @@ function OverlayCard(): React.ReactElement {
       setAutoStart(next.autoStartCapture)
     })
     void window.api.overlayReplyState().then(setOverlay)
+    void window.api.overlayReplyState().then(setOverlay)
+    void window.api.sovitsRefs().then(setSovitsRefs)
     return window.api.onOverlayState(setOverlay)
   }, [])
 
@@ -448,6 +452,8 @@ function OverlayCard(): React.ReactElement {
     // 服务状态每 3 秒刷一次：拉模型、下 8GB、服务挂掉都在这条轮询里体现。
     // 只在选了 GPT-SoVITS 时轮询，别的引擎不该为它多花一次 IPC。
     if (engine !== 'sovits') return
+    // 切到 sovits 时顺手刷新参考库：refs.json 是手编文件，加条目不该要求重启。
+    void window.api.sovitsRefs().then(setSovitsRefs)
     let alive = true
     const tick = (): void => {
       void window.api.sovitsStatus().then((next) => {
@@ -739,6 +745,35 @@ function OverlayCard(): React.ReactElement {
         {engine === 'sovits' && (
           <div className="flex w-full flex-col gap-2">
             <GroupLabel text="GPT-SoVITS · 音色由参考音频决定" />
+            {sovitsRefs.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+                  value={sovitsRefs.find((ref) => ref.audioPath === sovitsRef)?.audio ?? ''}
+                  onChange={(e) => {
+                    const picked = sovitsRefs.find((ref) => ref.audio === e.target.value)
+                    if (!picked) return
+                    // 路径、转写、语言是同一份参考的三面，一次 patch 原子写入。
+                    setSovitsRef(picked.audioPath)
+                    setSovitsPrompt(picked.promptText)
+                    setSovitsPromptLang(picked.promptLang)
+                    void window.api.setSettings({
+                      ttsSovitsRefAudio: picked.audioPath,
+                      ttsSovitsPromptText: picked.promptText,
+                      ttsSovitsPromptLang: picked.promptLang
+                    })
+                  }}
+                  title="参考音频库：选中即整套换参考，下一句朗读就生效；下面的手填框留给临时野路径"
+                >
+                  <option value="">从参考音频库选择…</option>
+                  {sovitsRefs.map((ref) => (
+                    <option key={ref.audio} value={ref.audio}>
+                      {ref.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <Input
                 className="w-56"

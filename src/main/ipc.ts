@@ -26,6 +26,7 @@ import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
+import { listSovitsRefs, sovitsRefsRoot } from './services/voice/sovits-refs'
 import { getOverlayManager } from './windows/overlay'
 import { gsiStatus } from './services/gsi'
 
@@ -203,6 +204,8 @@ export function registerIpc(): void {
     void ensureSovitsServer()
     return sovitsStatusSnapshot()
   })
+  // 参考音频库：读数据根下 tts/sovits-refs/refs.json，坏条目与缺失音频已在纯函数里滤掉。
+  ipcMain.handle(IPC.TTS_SOVITS_REFS, () => listSovitsRefs(sovitsRefsRoot(app.getPath('userData'))))
   ipcMain.handle(IPC.TTS_OFFLINE_DOWNLOAD, () => ensureOfflineModel())
   ipcMain.handle(IPC.VOICE_TTS_PREVIEW, (_e, text: string) =>
     getTtsAdapter().preview(String(text ?? ''))

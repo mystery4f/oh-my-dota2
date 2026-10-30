@@ -108,6 +108,7 @@ const api: WindowApi = {
   ttsOfflineDownload: () => ipcRenderer.invoke(IPC.TTS_OFFLINE_DOWNLOAD),
   sovitsStatus: () => ipcRenderer.invoke(IPC.TTS_SOVITS_STATUS),
   sovitsInstall: () => ipcRenderer.invoke(IPC.TTS_SOVITS_INSTALL),
+  sovitsRefs: () => ipcRenderer.invoke(IPC.TTS_SOVITS_REFS),
   onVoiceSpeak: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, payload: SpeakPayload): void => callback(payload)
     ipcRenderer.on(IPC.VOICE_SPEAK, listener)

@@ -60,7 +60,8 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 - [ ] 不说话直接按第二次 → 提示「没有检测到语音（音量 RMS …）」，不会出现幻觉文本（whisper 的 `[BLANK_AUDIO]` 标记已过滤）
 - [ ] 语音卡点「试听 TTS」→ 播放中文合成语音（24kHz mp3，走代理访问 Edge 语音服务）
 - [ ] 「探测 whisper.cpp」分支正确：路径不存在提示「binary not found」，清空后自动使用已下载的二进制
-
+- [ ] GPT-SoVITS 设置段出现「从参考音频库选择…」下拉框：候选来自数据根 `tts/sovits-refs/refs.json`，选中后路径/转写/语言三个框自动带出，下一句朗读立即用新参考（无需重启）
+- [ ] 参考音频库健壮性：删掉库里某个音频后下拉不再出现该条；`refs.json` 写坏（缺逗号/非数组）时下拉消失、应用不崩，控制台有 `[sovits-refs]` 日志
 ## M7 聊天翻译与回复体验
 
 - [ ] 队友一条消息被 OCR 拆成两行（换行续句）时，overlay 只出现一条合并后的译文，不出现两条半句

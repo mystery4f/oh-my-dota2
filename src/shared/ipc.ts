@@ -499,6 +499,7 @@ export const IPC = {
   TTS_OFFLINE_DOWNLOAD: 'tts:offline-download',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
+  TTS_SOVITS_REFS: 'tts:sovits-refs',
   OVERLAY_GEOMETRY: 'overlay:geometry',
   OVERLAY_GEOMETRY_RESET: 'overlay:geometry-reset',
   OVERLAY_VOICE: 'overlay:voice',
@@ -551,6 +552,20 @@ export interface SovitsStatus {
   logs: string[]
 }
 
+/** 参考音频库（<数据根>/tts/sovits-refs/）里的一条：下拉框选一下就把参考整套换掉。 */
+export interface SovitsRefEntry {
+  /** 下拉框显示的名字，如「米拉娜」。 */
+  name: string
+  /** refs.json 里写的库内相对路径（POSIX 风格，含音色子目录）。 */
+  audio: string
+  /** 解析后的音频绝对路径：渲染层拿它填进参考路径框，服务端按它读文件。 */
+  audioPath: string
+  /** 参考音频的逐字转写。 */
+  promptText: string
+  /** 转写的语言：克隆时按它对齐。 */
+  promptLang: 'zh' | 'en'
+}
+
 export interface WindowApi {
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
@@ -572,6 +587,8 @@ export interface WindowApi {
   sovitsStatus(): Promise<SovitsStatus>
   /** 一键安装：没有引擎包就下 8GB 再解压；压缩包已放进数据目录则只解压。 */
   sovitsInstall(): Promise<SovitsStatus>
+  /** 参考音频库清单：读 refs.json，坏条目与缺失音频已被主进程滤掉。 */
+  sovitsRefs(): Promise<SovitsRefEntry[]>
   captureStart(): Promise<CaptureStatus>
   captureStop(): Promise<CaptureStatus>
   captureStatus(): Promise<CaptureStatus>
