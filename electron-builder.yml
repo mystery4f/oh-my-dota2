@@ -45,10 +45,6 @@ publish:
   owner: mystery4f
   repo: oh-my-dota2
 
-extraResources:
-  - from: resources/tts-offline-worker.cjs
-    to: tts-offline-worker.cjs
-
 nsis:
   # 卸载时保住 data（设置/账本/日志）：自定义卸载段定义在 build/installer.nsh。
   include: build/installer.nsh
