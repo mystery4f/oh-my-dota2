@@ -1234,7 +1234,17 @@ export default function App(): React.ReactElement {
 
   const save = async (): Promise<void> => {
     try {
-      setSettings(await window.api.setSettings(settings))
+      // 只落本页拥有的字段。整对象回写会把别的页/主进程后来写的字段（音色包自动激活的
+      // 参考路径、引擎选择）按本页挂载时的旧值盖回去——实测：填个 key 保存，就把已配好的
+      // sovits 参考清空、引擎打回 edge。setSettings 的契约本来就是 Partial 补丁。
+      const next = await window.api.setSettings({
+        provider: settings.provider,
+        proxyUrl: settings.proxyUrl,
+        targetLang: settings.targetLang,
+        whisperBinPath: settings.whisperBinPath,
+        ttsOutputDevice: settings.ttsOutputDevice,
+      })
+      setSettings(next)
       setSaveFlash('已保存')
     } catch (e) {
       setSaveFlash(`保存失败：${e instanceof Error ? e.message : String(e)}`)
