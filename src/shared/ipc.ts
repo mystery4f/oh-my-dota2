@@ -500,6 +500,10 @@ export const IPC = {
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
+  TTS_SOVITS_VOICEPACKS: 'tts:sovits-voicepacks',
+  TTS_SOVITS_VOICEPACK_INSTALL: 'tts:sovits-voicepack-install',
+  TTS_SOVITS_SELECT_REF: 'tts:sovits-select-ref',
+  TTS_SOVITS_SEED: 'tts:sovits-seed',
   OVERLAY_GEOMETRY: 'overlay:geometry',
   OVERLAY_GEOMETRY_RESET: 'overlay:geometry-reset',
   OVERLAY_VOICE: 'overlay:voice',
@@ -564,6 +568,29 @@ export interface SovitsRefEntry {
   promptText: string
   /** 转写的语言：克隆时按它对齐。 */
   promptLang: 'zh' | 'en'
+  /** 微调权重（可选）：GPT ckpt 相对 <数据根>/gpt-sovits/weights/ 的 POSIX 路径，与 sovitsWeights 成对。 */
+  gptWeights?: string
+  /** 微调权重（可选）：SoVITS pth 相对路径，与 gptWeights 成对。 */
+  sovitsWeights?: string
+  /** 解析后的权重绝对路径：主进程切权重时直接喂给 api_v2；缺省表示底座零样本。 */
+  gptWeightsPath?: string
+  sovitsWeightsPath?: string
+}
+
+/** 内置英雄音色包在面板上的样子：内置目录 + 本地安装状态合成一行。 */
+export interface SovitsVoicePack {
+  id: string
+  name: string
+  /** 一句话说明（面板小字），如「默认音色，引擎装完自动下载」。 */
+  note: string
+  defaultPack: boolean
+  /** 三件套（参考音频 + GPT ckpt + SoVITS pth）总字节数。 */
+  bytes: number
+  installed: boolean
+  downloading: boolean
+  /** 0–1；已就绪恒为 1。 */
+  progress: number
+  error: string | null
 }
 
 export interface WindowApi {
@@ -589,6 +616,14 @@ export interface WindowApi {
   sovitsInstall(): Promise<SovitsStatus>
   /** 参考音频库清单：读 refs.json，坏条目与缺失音频已被主进程滤掉。 */
   sovitsRefs(): Promise<SovitsRefEntry[]>
+  /** 内置英雄音色包清单（含本地安装状态与下载进度）。 */
+  sovitsVoicepacks(): Promise<SovitsVoicePack[]>
+  /** 下载/续装一个音色包：拉三件套 → refs.json 落条目 → 没选过音色就自动选中。 */
+  sovitsVoicepackInstall(id: string): Promise<SovitsVoicePack[]>
+  /** 选定一条参考：主进程按「写设置 → 切权重 → 预热」的顺序激活，不再由渲染层各写各的。 */
+  sovitsSelectRef(entry: SovitsRefEntry): Promise<boolean>
+  /** 首启保底：参考库一条都没有时，用 Edge 现合成一条晓晓参考入库。 */
+  sovitsSeed(): Promise<boolean>
   captureStart(): Promise<CaptureStatus>
   captureStop(): Promise<CaptureStatus>
   captureStatus(): Promise<CaptureStatus>

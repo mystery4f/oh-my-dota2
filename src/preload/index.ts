@@ -4,6 +4,7 @@ import {
   type CaptureEntry,
   type OverlayStatus,
   type OverlayTextMode,
+  type SovitsRefEntry,
   type SpeakPayload,
   type StreamRect,
   type UpdateState,
@@ -109,6 +110,10 @@ const api: WindowApi = {
   sovitsStatus: () => ipcRenderer.invoke(IPC.TTS_SOVITS_STATUS),
   sovitsInstall: () => ipcRenderer.invoke(IPC.TTS_SOVITS_INSTALL),
   sovitsRefs: () => ipcRenderer.invoke(IPC.TTS_SOVITS_REFS),
+  sovitsVoicepacks: () => ipcRenderer.invoke(IPC.TTS_SOVITS_VOICEPACKS),
+  sovitsVoicepackInstall: (id: string) => ipcRenderer.invoke(IPC.TTS_SOVITS_VOICEPACK_INSTALL, id),
+  sovitsSelectRef: (entry: SovitsRefEntry) => ipcRenderer.invoke(IPC.TTS_SOVITS_SELECT_REF, entry),
+  sovitsSeed: () => ipcRenderer.invoke(IPC.TTS_SOVITS_SEED),
   onVoiceSpeak: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, payload: SpeakPayload): void => callback(payload)
     ipcRenderer.on(IPC.VOICE_SPEAK, listener)

@@ -63,6 +63,63 @@ export async function runSovitsRefsProbe(): Promise<void> {
       mirana?.audioPath
     )
     push('sovitsRefsRoot 拼在数据根下', sovitsRefsRoot(join('D:', 'data')) === join('D:', 'data', 'tts', 'sovits-refs'))
+
+    // 微调权重：条目可声明 gptWeights/sovitsWeights（相对权重根），文件在盘上才放行。
+    const weightsRoot = join(base, 'weights')
+    mkdirSync(join(weightsRoot, 'windranger'), { recursive: true })
+    writeFileSync(join(weightsRoot, 'windranger', 'gpt.ckpt'), 'w', 'utf-8')
+    writeFileSync(join(weightsRoot, 'windranger', 'sovits.pth'), 'w', 'utf-8')
+    const tunedRoot = join(base, 'tuned')
+    mkdirSync(join(tunedRoot, 'windranger'), { recursive: true })
+    writeFileSync(join(tunedRoot, 'windranger', 'ref.wav'), 'fake', 'utf-8')
+    writeFileSync(
+      join(tunedRoot, 'refs.json'),
+      JSON.stringify([
+        {
+          name: '风行者',
+          audio: 'windranger/ref.wav',
+          promptText: '谁能预测到这一幕',
+          promptLang: 'zh',
+          gptWeights: 'windranger/gpt.ckpt',
+          sovitsWeights: 'windranger/sovits.pth'
+        },
+        {
+          name: '权重文件缺失',
+          audio: 'windranger/ref.wav',
+          promptText: 'x',
+          promptLang: 'zh',
+          gptWeights: 'windranger/gone.ckpt',
+          sovitsWeights: 'windranger/sovits.pth'
+        },
+        {
+          name: '权重只写一半',
+          audio: 'windranger/ref.wav',
+          promptText: 'x',
+          promptLang: 'zh',
+          gptWeights: 'windranger/gpt.ckpt'
+        },
+        {
+          name: '权重越界',
+          audio: 'windranger/ref.wav',
+          promptText: 'x',
+          promptLang: 'zh',
+          gptWeights: '../escape.ckpt',
+          sovitsWeights: 'windranger/sovits.pth'
+        }
+      ]),
+      'utf-8'
+    )
+    const tuned = listSovitsRefs(tunedRoot, weightsRoot)
+    push('权重缺失/半对/越界的条目被剔除', tuned.length === 1, `得到 ${tuned.length} 条`)
+    const ranger = tuned[0]
+    push(
+      '带权重的条目解析出绝对权重路径',
+      !!ranger &&
+        ranger.gptWeightsPath === join(weightsRoot, 'windranger', 'gpt.ckpt') &&
+        ranger.sovitsWeightsPath === join(weightsRoot, 'windranger', 'sovits.pth'),
+      ranger ? `${ranger.gptWeightsPath}/${ranger.sovitsWeightsPath}` : 'none'
+    )
+    push('不传权重根时带权重条目按无法核实剔除', listSovitsRefs(tunedRoot).length === 0)
   } finally {
     rmSync(base, { recursive: true, force: true })
   }

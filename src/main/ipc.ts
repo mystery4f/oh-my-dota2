@@ -25,8 +25,9 @@ import { getWhisperAdapter } from './services/voice/whisper'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
-import { ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
-import { listSovitsRefs, sovitsRefsRoot } from './services/voice/sovits-refs'
+import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
+import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
+import { autoVoicePackSetup, ensureSovitsSeedRef, installVoicePack, sovitsVoicePacks } from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
 import { gsiStatus } from './services/gsi'
 
@@ -198,14 +199,33 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.TTS_OFFLINE_STATE, () => offlineStatus())
   // GPT-SoVITS：面板每 3 秒问一次「包在不在、服务起没起、最近日志」，不再靠翻控制台猜。
   ipcMain.handle(IPC.TTS_SOVITS_STATUS, () => sovitsStatusSnapshot())
-  // 一键安装：.7z 已放数据目录就只解压；否则下 8GB 再解压。装完顺手把服务拉起来。
+  // 一键安装：.7z 已放数据目录就只解压；否则下 8GB 再解压。装完顺手把服务拉起来，
+  // 再把默认音色包拉齐（三件套 → refs.json → 自动选中）。
   ipcMain.handle(IPC.TTS_SOVITS_INSTALL, async () => {
-    await ensureSovitsInstall()
+    const state = await ensureSovitsInstall()
     void ensureSovitsServer()
+    if (state.phase === 'ready') void autoVoicePackSetup()
     return sovitsStatusSnapshot()
   })
   // 参考音频库：读数据根下 tts/sovits-refs/refs.json，坏条目与缺失音频已在纯函数里滤掉。
-  ipcMain.handle(IPC.TTS_SOVITS_REFS, () => listSovitsRefs(sovitsRefsRoot(app.getPath('userData'))))
+  ipcMain.handle(IPC.TTS_SOVITS_REFS, () =>
+    listSovitsRefs(sovitsRefsRoot(app.getPath('userData')), sovitsWeightsRoot(app.getPath('userData')))
+  )
+  // 音色包：目录 + 本地状态一张表；安装 = 下载三件套 → refs.json 落条目 →（没选过音色）自动选中。
+  ipcMain.handle(IPC.TTS_SOVITS_VOICEPACKS, () => sovitsVoicePacks())
+  ipcMain.handle(IPC.TTS_SOVITS_VOICEPACK_INSTALL, (_e, id: unknown) => installVoicePack(String(id ?? '')))
+  // 选定一条参考：统一走主进程「写设置 → 切权重 → 预热」，且只认库里真实存在的条目。
+  ipcMain.handle(IPC.TTS_SOVITS_SELECT_REF, async (_e, raw: unknown) => {
+    const wanted = typeof raw === 'object' && raw !== null ? (raw as { audioPath?: unknown }).audioPath : ''
+    if (typeof wanted !== 'string') return false
+    const entry = listSovitsRefs(sovitsRefsRoot(app.getPath('userData')), sovitsWeightsRoot(app.getPath('userData'))).find(
+      (item) => item.audioPath === wanted
+    )
+    if (!entry) return false
+    return activateSovitsRef(entry)
+  })
+  // 首启保底：库一条参考都没有时，用 Edge 现场合成一条晓晓参考入库（零分发）。
+  ipcMain.handle(IPC.TTS_SOVITS_SEED, () => ensureSovitsSeedRef(false))
   ipcMain.handle(IPC.TTS_OFFLINE_DOWNLOAD, () => ensureOfflineModel())
   ipcMain.handle(IPC.VOICE_TTS_PREVIEW, (_e, text: string) =>
     getTtsAdapter().preview(String(text ?? ''))

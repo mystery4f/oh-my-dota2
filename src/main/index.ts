@@ -15,6 +15,7 @@ import { runInputProbe } from './probes/input'
 import { captureHint } from '@shared/overlay-hint'
 import { warmEdge } from './services/voice/edge'
 import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-server'
+import { autoVoicePackSetup } from './services/voice/sovits-voicepack'
 import { runTtsBenchProbe } from './probes/tts-bench'
 import { runTtsOfflineProbe } from './probes/tts-offline'
 import { runTtsVoicesProbe } from './probes/tts-voices'
@@ -24,6 +25,7 @@ import { runSettingsPersistProbe } from './probes/settings-persist'
 import { runGsiDumpProbe } from './probes/gsi-dump'
 import { runGsiFramesReportProbe } from './probes/gsi-frames-report'
 import { runSovitsRefsProbe } from './probes/sovits-refs'
+import { runSovitsVoicepackProbe } from './probes/sovits-voicepack'
 import { runMatchReportProbe } from './probes/match-report'
 import { runTranslateCacheProbe } from './probes/translate-cache'
 import { startGsi, stopGsi } from './services/gsi'
@@ -161,6 +163,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--gsi-probe')) void runGsiProbe()
   if (process.argv.includes('--settings-persist-probe')) void runSettingsPersistProbe()
   if (process.argv.includes('--sovits-refs-probe')) void runSovitsRefsProbe()
+  if (process.argv.includes('--sovits-voicepack-probe')) void runSovitsVoicepackProbe()
   if (process.argv.includes('--gsi-dump')) void runGsiDumpProbe()
   if (process.argv.includes('--gsi-dump-report')) void runGsiFramesReportProbe()
   if (process.argv.includes('--match-report')) void runMatchReportProbe()
@@ -176,7 +179,12 @@ app.whenReady().then(() => {
   // 朗读预热：实测冷握手 1–21 秒、热连接 1–2 秒，开机就把两条连接握好。
   if (!probeRun) warmEdge()
   // GPT-SoVITS：模型加载约 40s，选了这个引擎就趁没人说话先把服务拉起来。
-  if (!probeRun && startup.ttsEngine === 'sovits') void ensureSovitsServer()
+  // 开机自起 sovits 服务，同时把默认音色包补齐：三件套下载/落 refs.json 都不需要引擎在场，
+  // 引擎还没装的用户也能先把 230MB 拉好，装完引擎即刻可用。
+  if (!probeRun && startup.ttsEngine === 'sovits') {
+    void ensureSovitsServer()
+    void autoVoicePackSetup()
+  }
   // 原地直发要两次往返游戏窗口：常驻 PowerShell 桥在后台先起好，省掉每次 600ms 的启动与 Add-Type 编译。
   if (!probeRun) void getInPlaceSender().prewarm()
   // GSI：本地状态源，进对局自动开捕获、打完自动停，并把 player.name 记进 myNicknames。

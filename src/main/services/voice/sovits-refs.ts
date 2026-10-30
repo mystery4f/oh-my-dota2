@@ -8,10 +8,36 @@ export function sovitsRefsRoot(userDataDir: string): string {
 }
 
 /**
+ * 微调权重（GPT ckpt + SoVITS pth）的落位：<数据根>/gpt-sovits/weights/<音色>/<文件>。
+ * 放数据根而不是引擎包里：重装/升级引擎包不会把训练产物一起冲掉。
+ */
+export function sovitsWeightsRoot(userDataDir: string): string {
+  return join(userDataDir, 'gpt-sovits', 'weights')
+}
+
+/**
+ * 库内相对路径的统一校验：POSIX 风格、不能是 .. 或绝对路径、解析后必须落在 base 里。
+ * 参考音频和微调权重共用这一套规则，读不出去也读不出数据根。
+ */
+function resolveUnderBase(rawPath: string, base: string): string | null {
+  if (!rawPath || rawPath.includes('\\') || rawPath.includes('..') || isAbsolute(rawPath)) return null
+  const segments = rawPath.split('/').filter(Boolean)
+  if (segments.length === 0) return null
+  const resolvedBase = resolve(base)
+  const fullPath = resolve(join(resolvedBase, ...segments))
+  if (!fullPath.startsWith(resolvedBase + sep)) return null
+  return existsSync(fullPath) ? fullPath : null
+}
+
+/**
  * 单条索引的形态校验：字段齐、类型对、路径必须是库内的相对路径。
  * refs.json 是手编文件，一条写坏不能连累其余条目，更不能把路径读出库外。
+ *
+ * 微调权重（gptWeights / sovitsWeights，相对 <数据根>/gpt-sovits/weights/）是可选字段，
+ * 但「声明了就必须真的在」：权重文件缺失时整条剔除而不是悄悄退回底座——
+ * 下拉框标着「风行者」出来却是零样本音色，比没有这个选项糟糕得多。
  */
-function parseEntry(raw: unknown, root: string): SovitsRefEntry | null {
+function parseEntry(raw: unknown, root: string, weightsRoot: string | undefined): SovitsRefEntry | null {
   if (typeof raw !== 'object' || raw === null) return null
   const rec = raw as Record<string, unknown>
   const name = typeof rec.name === 'string' ? rec.name.trim() : ''
@@ -19,22 +45,30 @@ function parseEntry(raw: unknown, root: string): SovitsRefEntry | null {
   const promptText = typeof rec.promptText === 'string' ? rec.promptText.trim() : ''
   const promptLang = rec.promptLang === 'en' ? 'en' : rec.promptLang === 'zh' ? 'zh' : null
   if (!name || !audio || !promptText || !promptLang) return null
-  // 只收 POSIX 风格的库内相对路径：反斜杠、..、绝对路径一律拒绝。
-  if (audio.includes('\\') || audio.includes('..') || isAbsolute(audio)) return null
-  const segments = audio.split('/').filter(Boolean)
-  if (segments.length === 0) return null
-  const resolvedRoot = resolve(root)
-  const audioPath = resolve(join(resolvedRoot, ...segments))
-  if (!audioPath.startsWith(resolvedRoot + sep)) return null
-  if (!existsSync(audioPath)) return null
+  const audioPath = resolveUnderBase(audio, root)
+  if (!audioPath) return null
+  // 权重字段：字符串 + 非空才算「声明了」；空串/缺省视为不带微调（底座零样本）。
+  const gptWeights = typeof rec.gptWeights === 'string' ? rec.gptWeights.trim() : ''
+  const sovitsWeights = typeof rec.sovitsWeights === 'string' ? rec.sovitsWeights.trim() : ''
+  if (gptWeights || sovitsWeights) {
+    if (!weightsRoot) return null
+    // 半装状态（声明了一边、另一边没写）同样算坏：训练权重必须成对切。
+    if (!gptWeights || !sovitsWeights) return null
+    const gptWeightsPath = resolveUnderBase(gptWeights, weightsRoot)
+    const sovitsWeightsPath = resolveUnderBase(sovitsWeights, weightsRoot)
+    if (!gptWeightsPath || !sovitsWeightsPath) return null
+    return { name, audio, audioPath, promptText, promptLang, gptWeights, sovitsWeights, gptWeightsPath, sovitsWeightsPath }
+  }
   return { name, audio, audioPath, promptText, promptLang }
 }
 
 /**
  * 读参考音频库清单。纯函数（库根由调用方传入），探针用临时目录即可覆盖：
  * 索引缺失 / 坏 JSON / 非数组 → 空清单 + 日志，绝不抛；坏条目与缺失音频逐条跳过。
+ *
+ * weightsRoot 给了才会接受带微调权重的条目；没给时这类条目按「无法核实」整条剔除。
  */
-export function listSovitsRefs(root: string): SovitsRefEntry[] {
+export function listSovitsRefs(root: string, weightsRoot?: string): SovitsRefEntry[] {
   const file = join(root, 'refs.json')
   if (!existsSync(file)) return []
   let raw: unknown
@@ -50,7 +84,7 @@ export function listSovitsRefs(root: string): SovitsRefEntry[] {
   }
   const entries: SovitsRefEntry[] = []
   for (const item of raw) {
-    const entry = parseEntry(item, root)
+    const entry = parseEntry(item, root, weightsRoot)
     if (entry) entries.push(entry)
     else console.warn(`[sovits-refs] 跳过不合法或音频缺失的索引条目：${JSON.stringify(item)}`)
   }

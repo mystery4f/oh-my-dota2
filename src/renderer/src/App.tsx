@@ -19,7 +19,8 @@ import {
   OFFLINE_VOICES,
   type OfflineVoiceId,
   type SovitsRefEntry,
-  type SovitsStatus
+  type SovitsStatus,
+  type SovitsVoicePack
 } from '@shared/ipc'
 import type { UpdateState } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
@@ -418,6 +419,7 @@ function OverlayCard(): React.ReactElement {
   const [sovitsHome, setSovitsHome] = useState('')
   const [sovits, setSovits] = useState<SovitsStatus | null>(null)
   const [sovitsRefs, setSovitsRefs] = useState<SovitsRefEntry[]>([])
+  const [sovitsPacks, setSovitsPacks] = useState<SovitsVoicePack[]>([])
   const [nicknames, setNicknames] = useState('')
   const [autoStart, setAutoStart] = useState(DEFAULT_SETTINGS.autoStartCapture)
 
@@ -452,12 +454,17 @@ function OverlayCard(): React.ReactElement {
     // 服务状态每 3 秒刷一次：拉模型、下 8GB、服务挂掉都在这条轮询里体现。
     // 只在选了 GPT-SoVITS 时轮询，别的引擎不该为它多花一次 IPC。
     if (engine !== 'sovits') return
-    // 切到 sovits 时顺手刷新参考库：refs.json 是手编文件，加条目不该要求重启。
+    // 切到 sovits 时顺手刷新参考库与音色包：refs.json 是手编文件，加条目不该要求重启。
     void window.api.sovitsRefs().then(setSovitsRefs)
+    void window.api.sovitsVoicepacks().then(setSovitsPacks)
     let alive = true
     const tick = (): void => {
       void window.api.sovitsStatus().then((next) => {
         if (alive) setSovits(next)
+      })
+      // 音色包下载进度在主进程内存里，跟着状态一起刷。
+      void window.api.sovitsVoicepacks().then((next) => {
+        if (alive) setSovitsPacks(next)
       })
     }
     tick()
@@ -745,6 +752,52 @@ function OverlayCard(): React.ReactElement {
         {engine === 'sovits' && (
           <div className="flex w-full flex-col gap-2">
             <GroupLabel text="GPT-SoVITS · 音色由参考音频决定" />
+            {/* 英雄音色包：一键拉参考音频 + 微调权重，装完自动进下面的参考库。 */}
+            {sovitsPacks.length > 0 && (
+              <div className="flex flex-col gap-1">
+                {sovitsPacks.map((pack) => (
+                  <div key={pack.id} className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-foreground">{pack.name}</span>
+                    {pack.defaultPack && (
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">默认</span>
+                    )}
+                    <span className="text-muted-foreground">{pack.note}</span>
+                    {pack.installed ? (
+                      <span className="text-emerald-600 dark:text-emerald-400">已就绪</span>
+                    ) : pack.downloading ? (
+                      <span className="text-amber-600 dark:text-amber-400">下载中 {Math.round(pack.progress * 100)}%</span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void window.api.sovitsVoicepackInstall(pack.id).then(setSovitsPacks)}
+                      >
+                        下载（{(pack.bytes / 1024 / 1024).toFixed(0)} MB）
+                      </Button>
+                    )}
+                    {pack.error !== null && <span className="text-destructive">{pack.error}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {sovitsRefs.length === 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">参考音频库是空的，没有参考音色出不来</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  title="用免费的 Edge 嗓子现场合成一条晓晓参考音频写进库里，不下载任何模型"
+                  onClick={() =>
+                    void window.api.sovitsSeed().then(() => {
+                      void window.api.sovitsRefs().then(setSovitsRefs)
+                      void window.api.sovitsVoicepacks().then(setSovitsPacks)
+                    })
+                  }
+                >
+                  现合成一条保底参考（免费）
+                </Button>
+              </div>
+            )}
             {sovitsRefs.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
                 <select
@@ -753,15 +806,11 @@ function OverlayCard(): React.ReactElement {
                   onChange={(e) => {
                     const picked = sovitsRefs.find((ref) => ref.audio === e.target.value)
                     if (!picked) return
-                    // 路径、转写、语言是同一份参考的三面，一次 patch 原子写入。
+                    // 激活是主进程的事：写设置 → 切权重 → 预热一气呵成，微调音色不切权重就是错音色。
                     setSovitsRef(picked.audioPath)
                     setSovitsPrompt(picked.promptText)
                     setSovitsPromptLang(picked.promptLang)
-                    void window.api.setSettings({
-                      ttsSovitsRefAudio: picked.audioPath,
-                      ttsSovitsPromptText: picked.promptText,
-                      ttsSovitsPromptLang: picked.promptLang
-                    })
+                    void window.api.sovitsSelectRef(picked)
                   }}
                   title="参考音频库：选中即整套换参考，下一句朗读就生效；下面的手填框留给临时野路径"
                 >
@@ -769,6 +818,7 @@ function OverlayCard(): React.ReactElement {
                   {sovitsRefs.map((ref) => (
                     <option key={ref.audio} value={ref.audio}>
                       {ref.name}
+                      {ref.gptWeightsPath ? ' · 微调' : ''}
                     </option>
                   ))}
                 </select>

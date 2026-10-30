@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { app } from 'electron'
 import { createWriteStream, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { statfs } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -23,6 +24,9 @@ const DIR_NAME = 'GPT-SoVITS-v2pro-20250604'
 const DOWNLOAD_URL = `https://www.modelscope.cn/models/FlowerCry/gpt-sovits-7z-pacakges/resolve/master/${ARCHIVE_NAME}`
 /** 低于这个字节数的 .7z 当作没下完的残片（完整包 8.2GB）。 */
 const MIN_ARCHIVE_BYTES = 1024 * 1024 * 1024
+/** 空间预检用的估算值（实际压缩包 8.2GB / 解压后 13GB，各留一点余量）。 */
+const EST_ARCHIVE_BYTES = 8.5 * 1024 * 1024 * 1024
+const EXTRACTED_BYTES = 14 * 1024 * 1024 * 1024
 const STALL_MS = 60_000
 
 export interface SovitsInstallState {
@@ -76,18 +80,65 @@ function sevenZip(): string {
   return found ?? '7zr'
 }
 
+/**
+ * 磁盘预检：下载 + 解压的峰值占用（残片/已放好的压缩包抵掉一部分）对比剩余空间，
+ * 不够就别开下——下到 80% 才报「磁盘已满」是最伤人的失败方式。拿不到空间数据就放行。
+ */
+async function checkDiskSpace(): Promise<string | null> {
+  try {
+    const root = sovitsInstallRoot()
+    mkdirSync(root, { recursive: true })
+    const info = await statfs(root)
+    const free = info.bsize * Number(info.bavail)
+    const partBytes = existsSync(join(root, `${ARCHIVE_NAME}.part`)) ? statSync(join(root, `${ARCHIVE_NAME}.part`)).size : 0
+    const remainingDownload = archivePresent() ? 0 : Math.max(0, EST_ARCHIVE_BYTES - partBytes)
+    const need = remainingDownload + EXTRACTED_BYTES
+    if (free < need) {
+      return `磁盘空间不足：还需约 ${(need / 1073741824).toFixed(1)} GB（下载+解压峰值），${root} 所在盘只剩 ${(free / 1073741824).toFixed(1)} GB`
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** 解析 content-range「bytes 100-199/1000」；不合法返回 null。 */
+function parseContentRange(header: string | null): { start: number; total: number } | null {
+  const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(header ?? '')
+  if (!match) return null
+  return { start: Number(match[1]), total: Number(match[3]) }
+}
+
 async function downloadArchive(onProgress: (ratio: number) => void): Promise<void> {
   const archive = join(sovitsInstallRoot(), ARCHIVE_NAME)
   const part = `${archive}.part`
-  const response = await fetch(DOWNLOAD_URL)
+  // 断点续传：.part 在就带着 Range 接着下（魔搭直链支持，实测返回 206），
+  // 8GB 断在第 6GB 不用从零再来——用户重按一次安装按钮即可续上。
+  const partBytes = existsSync(part) ? statSync(part).size : 0
+  const response = await fetch(DOWNLOAD_URL, partBytes > 0 ? { headers: { Range: `bytes=${partBytes}-` } } : undefined)
+  if (response.status === 416 && partBytes >= MIN_ARCHIVE_BYTES) {
+    // 残片已经比完整包还大：服务端拒续传，但文件本身大概率是齐的，直接收尾。
+    renameSync(part, archive)
+    return
+  }
   if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
-  const total = Number(response.headers.get('content-length') ?? 0)
-  const source = Readable.fromWeb(response.body as never)
+  let total = Number(response.headers.get('content-length') ?? 0)
   let received = 0
+  const range = parseContentRange(response.headers.get('content-range'))
+  const appendable = response.status === 206 && range !== null && range.start === partBytes
+  if (response.status === 206 && range) total = range.total
+  if (appendable) {
+    received = partBytes
+    console.log('TTS_SOVITS_INSTALL_RESUME', JSON.stringify({ fromBytes: partBytes, total }))
+  } else if (partBytes > 0) {
+    // 服务端没认 Range（200 全量）或起点对不上：从零重下，别在残片上叠加脏数据。
+    console.log('TTS_SOVITS_INSTALL_RESTART', JSON.stringify({ partBytes, status: response.status }))
+  }
+  const source = Readable.fromWeb(response.body as never)
   let reported = 0
   let lastChunkAt = Date.now()
   const stall = setInterval(() => {
-    // 大文件直链偶发断流：60 秒没有新字节就掐断流，让用户重按一次（魔搭不支持断点续传，重来）。
+    // 大文件直链偶发断流：60 秒没有新字节就掐断流；已落盘的字节留在 .part 里等续传。
     if (Date.now() - lastChunkAt > STALL_MS) source.destroy(new Error(`stall: no bytes for ${STALL_MS / 1000}s`))
   }, 5_000)
   source.on('data', (chunk: Buffer) => {
@@ -100,8 +151,9 @@ async function downloadArchive(onProgress: (ratio: number) => void): Promise<voi
     }
   })
   try {
-    await pipeline(source, createWriteStream(part))
+    await pipeline(source, createWriteStream(part, { flags: appendable ? 'a' : 'w' }))
     if (received < MIN_ARCHIVE_BYTES) throw new Error(`download too small: ${received}`)
+    if (total > 0 && received < total) throw new Error(`download incomplete: ${received}/${total}`)
     renameSync(part, archive)
   } finally {
     clearInterval(stall)
@@ -132,6 +184,8 @@ export async function ensureSovitsInstall(): Promise<SovitsInstallState> {
   try {
     mkdirSync(sovitsInstallRoot(), { recursive: true })
     if (!archivePresent()) {
+      const shortage = await checkDiskSpace()
+      if (shortage) throw new Error(shortage)
       console.log('TTS_SOVITS_INSTALL_DOWNLOAD', JSON.stringify({ url: DOWNLOAD_URL }))
       await downloadArchive((ratio) => {
         state = { ...state, progress: ratio }
