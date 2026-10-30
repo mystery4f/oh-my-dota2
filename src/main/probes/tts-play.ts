@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, synthesizeEdge } from '../services/voice/edge'
-import { decideSpeak, speakOptionsFromSettings, speakSkipReason } from '../services/voice/speech'
+import { applyBacklogPolicy, decideSpeak, isSpeakStale, speakOptionsFromSettings, speakSkipReason } from '../services/voice/speech'
 import { offlineReady, synthesizeOffline } from '../services/voice/offline'
 import type { OfflineVoiceId } from '../../shared/ipc'
 
@@ -164,6 +164,19 @@ const skipRows = [
 const skipOk = skipRows.every((row) => row.ok)
 console.log('TTS_SPEAK_SKIP_CASES', JSON.stringify({ skipOk, rows: skipRows }))
 
+// 丢弃积压（TTS_SPEAK_DROP 的判定核）：开着时新消息顶掉整条排队；关着 FIFO 不动；
+// 代际判据只淘汰旧代——「读到一半被顶掉」就靠它拦。判据漂了，显卡又要被排队按死。
+const backlogRows = [
+  { name: '开着：排队中的旧消息被顶掉', got: applyBacklogPolicy(['旧一', '旧二'], true, '新的'), want: { queue: ['新的'], dropped: ['旧一', '旧二'] } },
+  { name: '开着：队列本来就空，不误伤', got: applyBacklogPolicy([], true, '新的'), want: { queue: ['新的'], dropped: [] } },
+  { name: '关着：每条都排队不丢', got: applyBacklogPolicy(['旧一'], false, '新的'), want: { queue: ['旧一', '新的'], dropped: [] } },
+  { name: '开着：旧代判过期', got: isSpeakStale(true, 3, 4), want: true },
+  { name: '开着：当前代不过期', got: isSpeakStale(true, 4, 4), want: false },
+  { name: '关着：代际不同也不淘汰', got: isSpeakStale(false, 3, 4), want: false }
+].map((row) => ({ ...row, ok: JSON.stringify(row.got) === JSON.stringify(row.want) }))
+const backlogOk = backlogRows.every((row) => row.ok)
+console.log('TTS_SPEAK_BACKLOG_CASES', JSON.stringify({ backlogOk, rows: backlogRows }))
+
   const text = '小心中路，他们可能在打肉山'
   const audio = await synthesizeEdge(text, DEFAULT_EDGE_VOICE, 1)
   console.log('TTS_PLAY_SYNTH', JSON.stringify({ bytes: audio?.length ?? 0 }))
@@ -239,7 +252,7 @@ console.log('TTS_SPEAK_SKIP_CASES', JSON.stringify({ skipOk, rows: skipRows }))
   console.log(
     'TTS_PLAY_RESULT',
     JSON.stringify({
-      ok: speakOk && engineOk && ownOk && prefixOk && skipOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      ok: speakOk && engineOk && ownOk && prefixOk && skipOk && backlogOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
       prefixOk,
       speakOk,
       engineOk,

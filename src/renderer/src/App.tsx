@@ -401,6 +401,7 @@ function OverlayCard(): React.ReactElement {
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
   const [readAloud, setReadAloud] = useState(false)
   const [readOwn, setReadOwn] = useState(false)
+  const [dropBacklog, setDropBacklog] = useState(true)
   const [speakPrefix, setSpeakPrefix] = useState<'front' | 'back' | 'off'>('front')
   const [speakFrontTpl, setSpeakFrontTpl] = useState('{who}说，{body}')
   const [speakBackTpl, setSpeakBackTpl] = useState('{body}，{who}表示')
@@ -431,6 +432,7 @@ function OverlayCard(): React.ReactElement {
     void window.api.getSettings().then((next) => {
       setReadAloud(next.ttsReadAloud)
       setReadOwn(next.ttsReadOwn)
+      setDropBacklog(next.ttsDropBacklog)
       setSpeakPrefix(next.ttsSpeakPrefix)
       setSpeakFrontTpl(next.ttsSpeakFrontTpl)
       setSpeakBackTpl(next.ttsSpeakBackTpl)
@@ -581,6 +583,19 @@ function OverlayCard(): React.ReactElement {
             title="自己发的消息也念出来。默认关：自己刚打完的字不必再听一遍"
           >
             自己的话：{readOwn ? '念' : '不念'}
+          </Button>
+          {/* 丢弃积压：GPT-SoVITS 本机推理时刷屏会把显卡按住几十秒；默认只念最新一条。 */}
+          <Button
+            variant={dropBacklog ? 'secondary' : 'outline'}
+            disabled={!readAloud}
+            onClick={() => {
+              const next = !dropBacklog
+              setDropBacklog(next)
+              void window.api.setSettings({ ttsDropBacklog: next })
+            }}
+            title="聊天刷屏时只念最新一条，跳过积压的旧消息：省显卡，游戏掉帧更少。关掉则每条都念"
+          >
+            积压：{dropBacklog ? '只念最新' : '全念'}
           </Button>
           {/* 「某某说」念在哪头。用下拉不用循环按钮：三个选项一眼看得全，
               循环按钮的当前态（「说话人：不念」）曾被用户当成「没有前后那个设置」。 */}

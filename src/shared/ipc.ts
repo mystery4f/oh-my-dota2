@@ -127,6 +127,13 @@ export interface AppSettings {
    */
   ttsReadOwn: boolean
   /**
+   * 丢弃积压：默认开。GPT-SoVITS 在本机显卡上推理，游戏正吃满显卡时一句要 5–7 s，
+   * 聊天刷屏时排队会把显卡按住几十秒——游戏掉帧、读到的也是过时的旧消息。
+   * 开启后同一时刻只保留最新一条待读，被顶掉的直接跳过（日志 TTS_SPEAK_DROP）。
+   * 关掉它就恢复「每条都念」的完整回放。
+   */
+  ttsDropBacklog: boolean
+  /**
    * 「某某说」前缀念不念、念在哪头。默认 front（「影魔说，中路没人」）；
    * back = 内容在前（「中路没人，影魔说」）；off = 只念内容。
    */
@@ -199,6 +206,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   crossToneLookup: true,
   ttsReadAloud: false,
   ttsReadOwn: false,
+  ttsDropBacklog: true,
   ttsSpeakPrefix: 'front',
   ttsSpeakFrontTpl: '{who}说，{body}',
   ttsSpeakBackTpl: '{body}，{who}表示',

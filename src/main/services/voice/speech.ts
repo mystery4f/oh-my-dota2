@@ -221,13 +221,11 @@ export function announceEntries(entries: CaptureEntry[]): void {
     }
     // GPT-SoVITS：本机 api_v2，音色由参考音频决定。与 Edge 同样切段并行、按序投递；
     // 服务不在 / 参考没配，合成得 null，浮层整句跳过——绝不回退系统嗓子。
+    // GPT-SoVITS：本机 api_v2，音色由参考音频决定。走专用队列（见 enqueueSovitsSpeak）：
+    // 一次只合成一条、可丢弃积压——预发全部请求会让本机显卡被服务端排队按死。
+    // 服务不在 / 参考没配，合成得 null，浮层整句跳过——绝不回退系统嗓子。
     if (engine === 'sovits') {
-      const segments = splitForSpeech(payload.text)
-      const audios = segments.map((segment) => synthesizeSovits(segment, payload.rate, payload.lang))
-      segments.forEach((segment, index) => {
-        const audio = audios[index]
-        speakChain = speakChain.then(() => deliver({ ...payload, text: segment }, audio)).catch(() => undefined)
-      })
+      enqueueSovitsSpeak(payload, settings.ttsDropBacklog === true)
       continue
     }
     if (engine !== 'edge') {
@@ -247,6 +245,80 @@ export function announceEntries(entries: CaptureEntry[]): void {
 let lastSpeakAt = 0
 
 let speakChain: Promise<void> = Promise.resolve()
+
+/**
+ * GPT-SoVITS 专用朗读队列。与 Edge 不同，sovits 在本机显卡上推理（游戏吃着显卡时一句
+ * 2–7 s），「进队列就把所有段的合成请求都发出去」会让 api_v2 服务端堆一串排不完的活，
+ * 显卡被按住几十秒——游戏掉帧，读到的还是过时消息。这里改成：
+ * - 合成懒启动：轮到谁才合成谁，同一时刻服务端最多积一段（段间预取保连续）；
+ * - 「丢弃积压」开启时，新消息一来就顶掉整条队列，被顶掉的永不合成（TTS_SPEAK_DROP）；
+ *   消息放到一半来了新的，剩下的段也当场作废。
+ */
+interface SovitsJob {
+  payload: SpeakPayload
+  segments: string[]
+  gen: number
+}
+
+/** 丢弃积压（纯函数，探针断言）：开关开着且队里已有待读消息时，队列只保留新来的这条。 */
+export function applyBacklogPolicy<T>(queue: T[], drop: boolean, incoming: T): { queue: T[]; dropped: T[] } {
+  if (!drop || queue.length === 0) return { queue: [...queue, incoming], dropped: [] }
+  return { queue: [incoming], dropped: [...queue] }
+}
+
+/** 这条是否已被更新的消息顶掉（纯函数）：只在「丢弃积压」开启时才淘汰旧代。 */
+export const isSpeakStale = (drop: boolean, jobGen: number, currentGen: number): boolean => drop && jobGen !== currentGen
+
+const sovitsQueue: SovitsJob[] = []
+let sovitsGen = 0
+let sovitsPumping = false
+
+function enqueueSovitsSpeak(payload: SpeakPayload, drop: boolean): void {
+  const plan = applyBacklogPolicy(sovitsQueue, drop, {
+    payload,
+    segments: splitForSpeech(payload.text),
+    gen: sovitsGen + 1
+  })
+  sovitsGen += 1
+  sovitsQueue.length = 0
+  sovitsQueue.push(...plan.queue)
+  if (plan.dropped.length > 0) {
+    console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'queued', dropped: plan.dropped.length, keep: payload.text.slice(0, 30) }))
+  }
+  void pumpSovits(drop)
+}
+
+async function pumpSovits(drop: boolean): Promise<void> {
+  if (sovitsPumping) return
+  sovitsPumping = true
+  try {
+    while (sovitsQueue.length > 0) {
+      const job = sovitsQueue.shift()!
+      // 预取下一段：当前段在浮层播放时下一段已在合成，长句听完不出空窗。
+      let prefetch: Promise<Buffer | null> | null = null
+      for (let index = 0; index < job.segments.length; index += 1) {
+        if (isSpeakStale(drop, job.gen, sovitsGen)) {
+          console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'stale', text: job.segments[index].slice(0, 20) }))
+          break
+        }
+        const audio = prefetch ?? (await synthesizeSovits(job.segments[index], job.payload.rate, job.payload.lang))
+        prefetch = null
+        // 合成期间来了新消息：这条剩下的段不再投递（音频已花掉，认了）。
+        if (isSpeakStale(drop, job.gen, sovitsGen)) {
+          console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'synthesized', text: job.segments[index].slice(0, 20) }))
+          break
+        }
+        prefetch =
+          index + 1 < job.segments.length
+            ? synthesizeSovits(job.segments[index + 1], job.payload.rate, job.payload.lang)
+            : null
+        await deliver({ ...job.payload, text: job.segments[index] }, audio ? Promise.resolve(audio) : null)
+      }
+    }
+  } finally {
+    sovitsPumping = false
+  }
+}
 
 async function deliver(payload: SpeakPayload, audioPromise: Promise<Buffer | null> | null): Promise<void> {
   let packet = payload
