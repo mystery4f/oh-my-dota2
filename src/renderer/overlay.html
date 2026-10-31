@@ -237,6 +237,10 @@
         font-size: 12px;
         cursor: pointer;
       }
+      /* 未锁定时小图标可以拖走：给个拖动手势；锁定时反正穿透，手势无所谓。 */
+      body[data-locked='false'] #mini {
+        cursor: move;
+      }
       #mini:hover {
         background: rgba(37, 99, 235, 0.6);
       }

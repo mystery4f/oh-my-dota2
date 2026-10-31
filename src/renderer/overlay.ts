@@ -171,7 +171,8 @@ const barCollapse = document.getElementById('bar-collapse') as HTMLButtonElement
 const mini = document.getElementById('mini') as HTMLButtonElement
 const gripLeft = document.getElementById('resize-left') as HTMLElement
 const gripRight = document.getElementById('resize-right') as HTMLElement
-
+// 拖动是否真的挪过（>3px）：小图标拖完的松手不再当点击，不然一拖就顺手展开。
+let lastDragMoved = false
 let overlayState: OverlayStatus | null = null
 
 /**
@@ -230,6 +231,7 @@ function applyState(state: OverlayStatus): void {
 type DragKind = 'move' | 'left' | 'right'
 
 function beginDrag(kind: DragKind, event: PointerEvent): void {
+  lastDragMoved = false
   const current = overlayState
   if (!current || current.locked || event.button !== 0) return
   event.preventDefault()
@@ -253,6 +255,7 @@ function beginDrag(kind: DragKind, event: PointerEvent): void {
   const onMove = (move: PointerEvent): void => {
     const dx = move.screenX - startX
     const dy = move.screenY - startY
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) lastDragMoved = true
     next =
       kind === 'move'
         ? moveBy(start, dx, dy, UNBOUNDED)
@@ -261,7 +264,6 @@ function beginDrag(kind: DragKind, event: PointerEvent): void {
           : resizeFromRight(start, dx, UNBOUNDED)
     if (frame === 0) frame = requestAnimationFrame(flush)
   }
-
   const onUp = (): void => {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
@@ -291,7 +293,15 @@ barCollapse.addEventListener('click', () => {
   void window.api.overlayToggleCollapse().then(applyState)
 })
 mini.addEventListener('click', () => {
+  if (lastDragMoved) {
+    lastDragMoved = false
+    return
+  }
   void window.api.overlayToggleCollapse().then(applyState)
+})
+// 未锁定时小图标可以直接拖走；锁定时 beginDrag 里挡掉，且穿透状态事件根本进不来。
+mini.addEventListener('pointerdown', (event) => {
+  beginDrag('move', event)
 })
 barReset.addEventListener('click', () => {
   void window.api.overlayResetGeometry().then(applyState)

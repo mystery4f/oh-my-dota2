@@ -185,6 +185,26 @@ class OverlayManager {
   /** 拖动/拉伸：patch 只带要改的字段，坐标由渲染层按起点算好再传。 */
   applyGeometry(patch: Partial<OverlayGeometry>): OverlayStatus {
     if (!this.win) this.win = this.createWindow()
+    if (this.collapsed) {
+      // 收起时窗口只有 132x34，clampGeometry 的 240x120 下限会把它当场撑大；
+      // 所以这里只挪位置，尺寸保持小图标，也绝不过 clamp。
+      // 展开几何的记忆（expandedBounds / custom）只更新原点：拖到哪，展开就从哪长出来。
+      const wa = this.workArea()
+      const base = this.expandedBounds ?? this.currentGeometry()
+      const origin = {
+        x: Math.round(patch.x ?? base.x),
+        y: Math.round(patch.y ?? base.y)
+      }
+      this.expandedBounds = { ...base, ...origin }
+      if (this.custom) {
+        this.custom = { ...this.custom, ...origin }
+        saveSettings({ overlayBounds: this.custom })
+      }
+      this.win.setBounds(miniGeometry(this.expandedBounds, wa))
+      this.armIdle()
+      this.broadcast()
+      return this.status()
+    }
     const base = this.currentGeometry()
     const next = clampGeometry({ ...base, ...patch }, this.workArea())
     this.custom = next
