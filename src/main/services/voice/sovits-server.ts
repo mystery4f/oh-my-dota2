@@ -8,6 +8,7 @@ import type { SovitsRefEntry, SovitsStatus } from '@shared/ipc'
 import { loadSettings, saveSettings } from '../settings'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './sovits-refs'
 import { sovitsInstallHome, sovitsInstallRoot, sovitsInstallState, sovitsInstalled } from './sovits-install'
+import { resetSovitsCache } from './sovits-cache'
 
 /**
  * GPT-SoVITS api_v2 的进程托管：选了 sovits 引擎就由应用自己拉起引擎包里的服务，
@@ -176,6 +177,8 @@ export async function applySovitsVoice(
       if (!response.ok) throw new Error(`${endpoint} HTTP ${response.status}`)
     }
     appliedWeightsKey = key
+    // 音色换了，重复句缓存里全是旧音色的音频，整包清掉（ADR docs/adr/tts-repeat-cache.md）。
+    resetSovitsCache()
     recordSovitsLog('TTS_SOVITS_SET_WEIGHTS', { ms: Date.now() - started })
     return true
   } catch (err) {
@@ -280,6 +283,8 @@ export async function ensureSovitsServer(): Promise<boolean> {
         // 起服就先合成一句废话扔掉，把这笔代价挪到没人说话的时候。
         // 新进程是从底座权重起的，旧幂等键必须作废，否则重启后会跳过该切的微调权重。
         appliedWeightsKey = null
+        // 新进程权重状态未知（yaml custom 里躺的是上次切的），缓存按旧音色建的，全清。
+        resetSovitsCache()
         void restoreSovitsVoice(port)
         if (child === spawned) setPhase('ready', '服务运行中（应用托管）')
         else setPhase('external', '端口已有服务在跑，直接复用')

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, synthesizeEdge } from '../services/voice/edge'
 import { applyBacklogPolicy, decideSpeak, isSpeakStale, speakOptionsFromSettings, speakSkipReason } from '../services/voice/speech'
+import { lookupSovitsCache, resetSovitsCache, sovitsCacheSize, storeSovitsCache } from '../services/voice/sovits-cache'
 import { offlineReady, synthesizeOffline } from '../services/voice/offline'
 import type { OfflineVoiceId } from '../../shared/ipc'
 
@@ -177,6 +178,21 @@ const backlogRows = [
 const backlogOk = backlogRows.every((row) => row.ok)
 console.log('TTS_SPEAK_BACKLOG_CASES', JSON.stringify({ backlogOk, rows: backlogRows }))
 
+// 重复句缓存（TTS_CACHE_HIT 的判定核）：段粒度 key、50 条 LRU、切音色整包清。
+// 命中必须刷新 LRU 顺序，否则常念的句子反而先被挤出去。
+resetSovitsCache()
+const cacheRows: Array<{ name: string; ok: boolean }> = []
+cacheRows.push({ name: '未存过：未命中', ok: lookupSovitsCache('没有这句') === null })
+storeSovitsCache('k1', Buffer.from('a'))
+cacheRows.push({ name: '存了能取回', ok: lookupSovitsCache('k1')?.toString() === 'a' })
+for (let i = 0; i < 50; i += 1) storeSovitsCache(`fill-${i}`, Buffer.from([i]))
+cacheRows.push({ name: '到顶挤掉最老（k1 没了）', ok: lookupSovitsCache('k1') === null })
+cacheRows.push({ name: '容量恒为 50', ok: sovitsCacheSize() === 50 })
+resetSovitsCache()
+cacheRows.push({ name: '清空归零（切音色钩子用）', ok: sovitsCacheSize() === 0 })
+const cacheOk = cacheRows.every((row) => row.ok)
+console.log('TTS_CACHE_CASES', JSON.stringify({ cacheOk, rows: cacheRows }))
+
   const text = '小心中路，他们可能在打肉山'
   const audio = await synthesizeEdge(text, DEFAULT_EDGE_VOICE, 1)
   console.log('TTS_PLAY_SYNTH', JSON.stringify({ bytes: audio?.length ?? 0 }))
@@ -252,7 +268,7 @@ console.log('TTS_SPEAK_BACKLOG_CASES', JSON.stringify({ backlogOk, rows: backlog
   console.log(
     'TTS_PLAY_RESULT',
     JSON.stringify({
-      ok: speakOk && engineOk && ownOk && prefixOk && skipOk && backlogOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      ok: speakOk && engineOk && ownOk && prefixOk && skipOk && backlogOk && cacheOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
       prefixOk,
       speakOk,
       engineOk,

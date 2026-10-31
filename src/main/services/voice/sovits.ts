@@ -1,5 +1,6 @@
 import { loadSettings } from '../settings'
 import { ensureSovitsServer, recordSovitsLog } from './sovits-server'
+import { lookupSovitsCache, sovitsCacheKey, storeSovitsCache } from './sovits-cache'
 
 /**
  * GPT-SoVITS 本地朗读引擎：整合作自带的 api_v2 HTTP 服务（官方 Windows 整合包，
@@ -31,6 +32,16 @@ export async function synthesizeSovits(text: string, rate = 1, lang: 'zh' | 'en'
     return null
   }
   const base = (settings.ttsSovitsUrl || 'http://127.0.0.1:9880').replace(/\/+$/, '')
+  const key = sovitsCacheKey({
+    text,
+    rate,
+    lang,
+    refAudio: settings.ttsSovitsRefAudio,
+    promptText: settings.ttsSovitsPromptText,
+    baseUrl: base
+  })
+  const cached = lookupSovitsCache(key)
+  if (cached) return cached
   const query = new URLSearchParams({
     text,
     text_lang: lang,
@@ -59,6 +70,7 @@ export async function synthesizeSovits(text: string, rate = 1, lang: 'zh' | 'en'
       return null
     }
     recordSovitsLog('TTS_SOVITS_OK', { ms: Date.now() - started, bytes: wav.length })
+    storeSovitsCache(key, wav)
     return wav
   }
   try {
