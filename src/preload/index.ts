@@ -10,6 +10,7 @@ import {
   type UpdateState,
   type VoiceAssetProgress,
   type VoiceOutPlayRequest,
+  type VoiceChainSummary,
   type WindowApi
 } from '@shared/ipc'
 
@@ -27,6 +28,18 @@ const api: WindowApi = {
     const listener = (): void => callback()
     ipcRenderer.on(IPC.VOICE_RECORD_TOGGLE, listener)
     return () => ipcRenderer.removeListener(IPC.VOICE_RECORD_TOGGLE, listener)
+  },
+  reportVoiceState: (recording: boolean) => ipcRenderer.send(IPC.OVERLAY_VOICE_STATE, recording),
+  reportVoiceChain: (result: VoiceChainSummary) => ipcRenderer.send(IPC.OVERLAY_VOICE_RESULT, result),
+  onVoiceRecordState: (callback: (state: { recording: boolean }) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, state: { recording: boolean }): void => callback(state)
+    ipcRenderer.on(IPC.VOICE_RECORD_STATE, listener)
+    return () => ipcRenderer.removeListener(IPC.VOICE_RECORD_STATE, listener)
+  },
+  onVoiceChainResult: (callback: (result: VoiceChainSummary) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, result: VoiceChainSummary): void => callback(result)
+    ipcRenderer.on(IPC.VOICE_CHAIN_RESULT, listener)
+    return () => ipcRenderer.removeListener(IPC.VOICE_CHAIN_RESULT, listener)
   },
   onWhisperProgress: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, progress: VoiceAssetProgress): void => callback(progress)

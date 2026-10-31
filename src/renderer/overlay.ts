@@ -487,7 +487,9 @@ async function startRecording(): Promise<void> {
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
     })
   } catch (err) {
-    appendRow('🎤 麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）', null)
+    const micError = '麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）'
+    appendRow('🎤 ' + micError, null)
+    window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: micError })
     console.error('overlay: getUserMedia failed', err)
     return
   }
@@ -501,6 +503,7 @@ async function startRecording(): Promise<void> {
   source.connect(recordNode)
   recordNode.connect(recordCtx.destination)
   recording = true
+  window.api.reportVoiceState(true)
   pill.textContent = '● 录音中 · Alt+Shift+V 结束'
   pill.classList.remove('through')
   recordTimer = setTimeout(() => void stopRecording(), RECORD_MAX_MS)
@@ -510,6 +513,7 @@ async function startRecording(): Promise<void> {
 async function stopRecording(): Promise<void> {
   if (!recording) return
   recording = false
+  window.api.reportVoiceState(false)
   if (recordTimer) clearTimeout(recordTimer)
   recordTimer = null
   const rate = recordCtx?.sampleRate ?? 48_000
@@ -525,6 +529,7 @@ async function stopRecording(): Promise<void> {
   const frames = chunks.reduce((total, chunk) => total + chunk.length, 0)
   if (frames < rate * 0.3) {
     appendRow('🎤 录音太短，已忽略', null)
+    window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: '录音太短（不足 0.3 秒）' })
     pill.textContent = '运行中 · Alt+Shift+O'
     return
   }
@@ -535,7 +540,9 @@ async function stopRecording(): Promise<void> {
   }
   const rms = Math.sqrt(energy / frames)
   if (rms < 0.012) {
-    appendRow(`🎤 没有检测到语音（音量 RMS ${rms.toFixed(4)}）`, null)
+    const quietError = `没有检测到语音（音量 RMS ${rms.toFixed(4)}）`
+    appendRow('🎤 ' + quietError, null)
+    window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: quietError })
     pill.textContent = '运行中 · Alt+Shift+O'
     return
   }
@@ -543,7 +550,9 @@ async function stopRecording(): Promise<void> {
   const result = await window.api.transcribeAudio(encodeWav16k(chunks, rate))
   const transcript = result.text.trim()
   if (!result.ok || !transcript) {
-    appendRow('🎤 ' + (result.error ?? '未识别到语音'), null)
+    const transcriptError = result.error ?? '未识别到语音'
+    appendRow('🎤 ' + transcriptError, null)
+    window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: transcriptError })
     pill.textContent = '运行中 · Alt+Shift+O'
     return
   }
@@ -566,6 +575,13 @@ async function stopRecording(): Promise<void> {
       setSpoken(row, spokenStatusLine(reply.spoken, reply.error))
     }
   }
+  window.api.reportVoiceChain({
+    transcript,
+    translated: reply.translated,
+    spoken: reply.spoken,
+    stage: reply.stage,
+    error: reply.error
+  })
   pill.textContent = '运行中 · Alt+Shift+O'
 }
 

@@ -11,7 +11,8 @@ import {
   type ReplyResult,
   type ReplyTone,
   type TranslateDirection,
-  type VoiceReplyResult
+  type VoiceReplyResult,
+  type VoiceChainSummary
 } from '@shared/ipc'
 import { decideVoiceOutReply } from '@shared/voice-out'
 import { loadSettings, saveSettings } from './services/settings'
@@ -212,6 +213,16 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.OVERLAY_VOICE_TOGGLE, () => {
     getOverlayManager().toggleVoiceCapture()
     return { ok: true }
+  })
+  // overlay 起录/停录/出结果时上抛，广播给所有窗口（面板按钮与回显行靠它活着）。
+  const broadcast = (channel: string, payload: unknown): void => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
+  }
+  ipcMain.on(IPC.OVERLAY_VOICE_STATE, (_e, recording: boolean) => {
+    broadcast(IPC.VOICE_RECORD_STATE, { recording: Boolean(recording) })
+  })
+  ipcMain.on(IPC.OVERLAY_VOICE_RESULT, (_e, result: VoiceChainSummary) => {
+    broadcast(IPC.VOICE_CHAIN_RESULT, result)
   })
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
   ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))

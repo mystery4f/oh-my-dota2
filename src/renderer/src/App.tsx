@@ -15,6 +15,7 @@ import {
   type VoiceAssetsResult,
   type VoicePreviewResult,
   type VoiceOutTestResult,
+  type VoiceChainSummary,
   type TranslatorStatus,
   type VoiceProbeResult,
   OFFLINE_VOICES,
@@ -1385,6 +1386,11 @@ export default function App(): React.ReactElement {
   const [voiceOutBusy, setVoiceOutBusy] = useState(false)
   const [voiceOutResult, setVoiceOutResult] = useState<VoiceOutTestResult | null>(null)
 
+  // 「说一句试试」的状态与回显：录音中按钮变样，链路结果（含失败原因）落在按钮下面。
+  const [voiceRecording, setVoiceRecording] = useState(false)
+  const [voiceChain, setVoiceChain] = useState<VoiceChainSummary | null>(null)
+  useEffect(() => window.api.onVoiceRecordState((s) => setVoiceRecording(s.recording)), [])
+  useEffect(() => window.api.onVoiceChainResult((result) => setVoiceChain(result)), [])
   useEffect(() => window.api.onWhisperProgress((progress) => setVoiceProgress(progress)), [])
 
   // 输出设备列表只用来展示：面板里枚举一次，插拔设备后重新打开页面就能看到。
@@ -1778,16 +1784,32 @@ export default function App(): React.ReactElement {
                   试听 TTS
                 </Button>
                 <Button
-                  variant="outline"
+                  variant={voiceRecording ? 'secondary' : 'outline'}
                   title="与 Alt+Shift+V 同一条链：点一下开始说话，再点一下结束；识别→翻译→声出全程照跑，测试模式开着时只放耳机不按说话键"
-                  onClick={() => void window.api.overlayVoiceToggle()}
+                  onClick={() => {
+                    if (typeof window.api.overlayVoiceToggle !== 'function') {
+                      setVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: '主进程还是旧版本（preload 里没有这个通道），请完全退出再 npm run dev' })
+                      return
+                    }
+                    void window.api.overlayVoiceToggle()
+                  }}
                 >
-                  说一句试试
+                  {voiceRecording ? '● 录音中 · 再点一下结束' : '说一句试试'}
                 </Button>
                 <Button variant="outline" disabled={voiceOutBusy} onClick={() => void runVoiceOutTest()}>
                   测试声出
                 </Button>
               </div>
+              {voiceRecording && (
+                <p className="text-xs text-amber-400">● 正在录音——对着麦克风说话，说完再点一次按钮（或按 Alt+Shift+V）结束。</p>
+              )}
+              {voiceChain && (
+                <p className="text-xs text-muted-foreground">
+                  {voiceChain.error
+                    ? `🎤 ${voiceChain.error}`
+                    : `🎤 ${voiceChain.transcript} → ${voiceChain.translated ?? '（翻译失败）'}${voiceChain.spoken ? ' · 已播放' : ''}`}
+                </p>
+              )}
               {voiceProgress && (
                 <p className="text-xs text-muted-foreground">
                   正在下载 {voiceProgress.phase} · {voiceProgress.pct}%

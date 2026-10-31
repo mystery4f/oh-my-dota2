@@ -342,6 +342,20 @@ export interface VoiceReplyResult {
   error: string | null
 }
 
+/** 语音链在面板上的回显：一条摘要覆盖 成功 / 某环失败 / 压根没识别到话。 */
+export interface VoiceChainSummary {
+  /** 识别到的原文；没识别到为空串。 */
+  transcript: string
+  /** 译文；翻译失败为 null。 */
+  translated: string | null
+  /** 声出是否完整播出。 */
+  spoken: boolean
+  /** 失败停在哪一环；成功为 null。 */
+  stage: VoiceReplyStage | null
+  /** 失败说明；成功为 null。 */
+  error: string | null
+}
+
 /** One deduped chat line pushed to the overlay / dashboard stream. */
 /** 词库统计：面板上那行「N 对 · 命中 M 次」读的就是它。 */
 /**
@@ -576,6 +590,11 @@ export const IPC = {
   VOICE_WHISPER_SETUP: 'voice:whisper-setup',
   VOICE_WHISPER_PROGRESS: 'voice:whisper-progress',
   VOICE_TRANSCRIBE: 'voice:transcribe',
+  // 语音链状态回显：overlay 起录/停录/出结果时报给主进程，主进程广播给面板。
+  OVERLAY_VOICE_STATE: 'overlay:voice-record-state',
+  OVERLAY_VOICE_RESULT: 'overlay:voice-chain-result',
+  VOICE_RECORD_STATE: 'voice:record-state',
+  VOICE_CHAIN_RESULT: 'voice:chain-result',
   VOICE_REPLY: 'voice:reply',
   VOICE_RECORD_TOGGLE: 'voice:record-toggle',
   VOICE_TTS_PREVIEW: 'voice:tts-preview',
@@ -715,6 +734,14 @@ export interface WindowApi {
   /** Synthesize speech with the Edge neural TTS service and return mp3 bytes for playback. */
   transcribeAudio(wavBase64: string, language?: string): Promise<VoiceTranscribeResult>
   onVoiceRecordToggle(callback: () => void): () => void
+  /** overlay 录音状态上抛（起录/停录都会报），主进程广播给面板。 */
+  reportVoiceState(recording: boolean): void
+  /** 语音链结果上抛（含「没识别到话」这类提前收场），主进程广播给面板。 */
+  reportVoiceChain(result: VoiceChainSummary): void
+  /** 面板订阅录音状态：热键与按钮共用同一份状态。 */
+  onVoiceRecordState(callback: (state: { recording: boolean }) => void): () => void
+  /** 面板订阅语音链结果，用来在按钮下方回显原文/译文/已播。 */
+  onVoiceChainResult(callback: (result: VoiceChainSummary) => void): () => void
   ttsPreview(text: string): Promise<VoicePreviewResult>
   /** 离线朗读模型的安装状态（是否就绪、占用多少磁盘、是否正在下载）。 */
   ttsOfflineState(): Promise<OfflineStatus>
