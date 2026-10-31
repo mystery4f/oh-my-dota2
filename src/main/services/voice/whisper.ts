@@ -44,7 +44,12 @@ function run(
       finish(
         code === 0
           ? { ok: true, output }
-          : { ok: false, output, error: `exit code ${code ?? 'null'}` }
+          : {
+              ok: false,
+              output,
+              // 把子进程自己的 stderr 尾巴带上，面板才能看到「为什么」而不是光秃秃的 exit code。
+              error: `exit code ${code ?? 'null'}: ${output.slice(-240).trim() || '(无输出)'}`
+            }
       )
     )
   })
@@ -84,8 +89,13 @@ function findBinary(dir: string): string | null {
     }
     if (entry.name.toLowerCase() === 'whisper-cli.exe') return full
   }
+  // 新版 whisper.cpp 已把 main.exe 换成「只打印弃用警告」的空壳（27KB），跑了必 exit 1；
+  // 小于 1MB 一律当空壳跳过，逼 ensureAssets 重新下载带 whisper-cli.exe 的正式包。
   for (const entry of entries) {
-    if (entry.isFile() && entry.name.toLowerCase() === 'main.exe') return join(dir, entry.name)
+    const full = join(dir, entry.name)
+    if (entry.isFile() && entry.name.toLowerCase() === 'main.exe' && statSync(full).size >= 1024 * 1024) {
+      return full
+    }
   }
   return null
 }
@@ -280,6 +290,15 @@ class WhisperAdapter {
         .find((line) => line.length > 0) ?? ''
     if (!result.ok && !banner.includes('whisper')) {
       return { ok: false, configured: true, error: result.error ?? '探测失败', detail: banner }
+    }
+    // 弃用空壳也会打印带 whisper 字样的横幅，但它是干不了活的——单独立一道闸。
+    if (/deprecated/i.test(banner)) {
+      return {
+        ok: false,
+        configured: true,
+        error: '这个 main.exe 是弃用空壳，转写必然失败；重新下载 whisper 资源换 whisper-cli.exe',
+        detail: banner.slice(0, 160)
+      }
     }
     return {
       ok: true,
