@@ -95,16 +95,25 @@ export function listSovitsRefs(root: string, weightsRoot?: string): SovitsRefEnt
  * 展示顺序：按名字前缀（「·」前的音色名）分组聚拢，组间按首次出现排，组内保持文件序。
  * 音色包和保底参考是往 refs.json 尾部追加的，不聚拢的话「晓晓（保底）」
  * 会孤零零吊在队尾，离「晓晓·原速」隔着一串别的音色。
+/**
+ * 展示顺序：游戏角色语音（米拉娜、风行者）固定排最前，其余按名字前缀（「·」前的音色名）
+ * 分组聚拢，组间按首次出现排，组内保持文件序。音色包和保底参考是往 refs.json 尾部追加的，
+ * 不聚拢的话「晓晓（保底）」会孤零零吊在队尾，离「晓晓·原速」隔着一串别的音色。
  */
+const PRIORITY_GROUPS = ['米拉娜', '风行者']
+
 export function groupRefsForDisplay(entries: SovitsRefEntry[]): SovitsRefEntry[] {
-  const groupIndex = new Map<string, number>()
+  const firstSeen = new Map<string, number>()
+  let counter = 0
   return [...entries]
     .map((entry) => {
       // 「晓晓·原速」和「晓晓（保底）」是同一族：前缀取「·」或「（」之前的那段。
       const group = entry.name.split('·')[0]?.split('（')[0] ?? entry.name
-      if (!groupIndex.has(group)) groupIndex.set(group, groupIndex.size)
-      return { entry, order: groupIndex.get(group) ?? 0 }
+      if (!firstSeen.has(group)) firstSeen.set(group, counter++)
+      const priority = PRIORITY_GROUPS.indexOf(group)
+      const rank = priority >= 0 ? priority : PRIORITY_GROUPS.length + (firstSeen.get(group) ?? 0)
+      return { entry, rank }
     })
-    .sort((a, b) => a.order - b.order)
+    .sort((a, b) => a.rank - b.rank)
     .map((item) => item.entry)
 }
