@@ -81,7 +81,10 @@ public class PttKey
 
 $flags = 0
 if ($Action -eq 'up') { $flags = 0x0002 }
-$sent = [PttKey]::Send([ushort]$Vk, $flags)
+# Windows PowerShell 5.1 on recent builds (26100+) dropped the [ushort]/[short]
+# accelerators; [uint16]/[int16] resolve on every version. The short name dies
+# with TypeNotFound right on the Send call. PS1 must stay pure ASCII (AGENTS.md).
+$sent = [PttKey]::Send([uint16]$Vk, $flags)
 if ($sent -ne 1)
 {
     Write-Output ('SENDFAIL sent=' + $sent + ' err=' + [Runtime.InteropServices.Marshal]::GetLastWin32Error())
