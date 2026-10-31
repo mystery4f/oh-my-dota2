@@ -10,6 +10,8 @@ interface ActivePlay {
   requestId: number
   player: HTMLAudioElement
   objectUrl: string
+  /** START 到达时真正起播的动作：每一单的 player 不同，闭包里带各自的句柄。 */
+  begin: () => void
 }
 
 let active: ActivePlay | null = null
@@ -97,7 +99,15 @@ async function handlePlay(payload: {
       if (active?.requestId === requestId) cleanup()
     }
 
-    active = { requestId, player, objectUrl }
+    const begin = (): void => {
+      // 自动播放策略已在主进程关闭（autoplay-policy=no-user-gesture-required）。
+      void player.play().catch((err) => {
+        reportEnded(requestId, false, null, `播放被拒绝: ${String(err)}`)
+        cleanup()
+      })
+    }
+
+    active = { requestId, player, objectUrl, begin }
     window.api.voiceOut.reportReady({
       requestId,
       ok: true,
@@ -106,15 +116,6 @@ async function handlePlay(payload: {
       sinkLabel: choice.label,
       fallback: choice.fallback,
       hint: choice.hint
-    })
-
-    window.api.voiceOut.onStart((startId) => {
-      if (startId !== requestId || !active) return
-      // 自动播放策略已在主进程关闭（autoplay-policy=no-user-gesture-required）。
-      void player.play().catch((err) => {
-        reportEnded(requestId, false, null, `播放被拒绝: ${String(err)}`)
-        cleanup()
-      })
     })
   } catch (err) {
     cleanup()
@@ -133,4 +134,10 @@ async function handlePlay(payload: {
 
 window.api.voiceOut.onPlay((payload) => {
   void handlePlay(payload)
+})
+
+// START 监听只在模块加载时挂一次（每单 play 都挂会越积越多，SET 里的旧句柄永不退场）。
+// active 闭包在回调时才读，永远指着当前这一单；cleanup() 后 begin 自动变 no-op。
+window.api.voiceOut.onStart((startId) => {
+  if (active && active.requestId === startId) active.begin()
 })

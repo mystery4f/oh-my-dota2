@@ -10,8 +10,10 @@ import {
   type OverlayGeometry,
   type ReplyResult,
   type ReplyTone,
-  type TranslateDirection
+  type TranslateDirection,
+  type VoiceReplyResult
 } from '@shared/ipc'
+import { decideVoiceOutReply } from '@shared/voice-out'
 import { loadSettings, saveSettings } from './services/settings'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
@@ -31,6 +33,48 @@ import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/vo
 import { autoVoicePackSetup, deleteVoicePack, ensureSovitsSeedRef, installVoicePack, sovitsVoicePacks } from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
 import { gsiStatus } from './services/gsi'
+
+/**
+ * 语音对讲一键到底（票 05）：识别文本 → prod 会话翻译（zh→en，复用 replyTone）→
+ * 译文进剪贴板 → 声出（Edge 英文嗓 → 所选输出 → 自动按住说话键）。
+ * 识别为空 / 翻译失败 / 合成失败一律静默跳过：绝不回退系统嗓子，也不退文出，
+ * 浮层错误行由渲染层按 stage 画。
+ */
+export async function voiceReply(transcript: string): Promise<VoiceReplyResult> {
+  const settings = loadSettings()
+  const recognized = String(transcript ?? '').trim()
+  if (decideVoiceOutReply({ recognized, translated: null }).skip === 'empty-recognition') {
+    return { translated: null, spoken: false, stage: 'recognize', error: '未识别到语音' }
+  }
+  let translated: string | null
+  try {
+    translated = await translateReply(settings.provider, recognized, settings.replyTone)
+  } catch (err) {
+    return {
+      translated: null,
+      spoken: false,
+      stage: 'translate',
+      error: err instanceof Error ? err.message : String(err)
+    }
+  }
+  const plan = decideVoiceOutReply({ recognized, translated })
+  if (!plan.speak) {
+    return {
+      translated: null,
+      spoken: false,
+      stage: 'translate',
+      error: plan.skip === 'empty-translation' ? '翻译结果为空' : '翻译失败'
+    }
+  }
+  clipboard.writeText(plan.text)
+  const spoken = await getVoiceOutService().speakReply(plan.text)
+  return {
+    translated: plan.text,
+    spoken: spoken.spoken,
+    stage: spoken.spoken ? null : 'voice-out',
+    error: spoken.error
+  }
+}
 
 export async function sendReply(text: string): Promise<ReplySendResult> {
   const settings = loadSettings()
@@ -234,6 +278,8 @@ export function registerIpc(): void {
   )
   // 测试声出：固定英文句 → Edge 英文嗓 → 所选输出 → 自动按住说话键（voice-out 闭环的入口）。
   ipcMain.handle(IPC.VOICE_OUT_TEST, () => getVoiceOutService().test())
+  // 一键到底：识别文本 → 翻译 → 剪贴板 → 声出（Alt+Shift+V 说中文的全链路）。
+  ipcMain.handle(IPC.VOICE_REPLY, (_e, transcript: string) => voiceReply(String(transcript ?? '')))
   ipcMain.handle(IPC.OVERLAY_REPLY_CLOSE, (_e, submitted?: boolean) =>
     getOverlayManager().closeReply(Boolean(submitted))
   )

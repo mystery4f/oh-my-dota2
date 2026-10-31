@@ -19,6 +19,7 @@ const api: WindowApi = {
   testProvider: (provider) => ipcRenderer.invoke(IPC.PROVIDER_TEST, provider),
   translate: (text, direction) => ipcRenderer.invoke(IPC.PROVIDER_TRANSLATE, text, direction),
   translateReply: (text, tone) => ipcRenderer.invoke(IPC.REPLY_TRANSLATE, text, tone),
+  voiceReply: (transcript) => ipcRenderer.invoke(IPC.VOICE_REPLY, transcript),
   whisperProbe: (binPath) => ipcRenderer.invoke(IPC.VOICE_WHISPER_PROBE, binPath),
   whisperSetup: () => ipcRenderer.invoke(IPC.VOICE_WHISPER_SETUP),
   transcribeAudio: (wavBase64, language) => ipcRenderer.invoke(IPC.VOICE_TRANSCRIBE, wavBase64, language),

@@ -1,5 +1,6 @@
 import type { OverlayStatus } from '@shared/ipc'
 import { moveBy, resizeFromLeft, resizeFromRight } from '@shared/overlay-geometry'
+import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { encodeWav16k } from '@shared/wav'
 
 /** 头像打包进仓库：中国网络直连 Steam CDN 会超时，运行时下载靠不住。 */
@@ -106,6 +107,15 @@ function setTranslation(
   trans.textContent = translated
   trans.title = cached ? '来自翻译词库（未调用模型）' : '本次现翻'
   if (!existing) row.appendChild(trans)
+}
+
+/** 语音对讲第三行（票 05）：已播状态。绿字已播 / 红字带原因，就地更新不另起一行。 */
+function setSpoken(row: HTMLElement, status: SpokenStatus): void {
+  const existing = row.querySelector('.spoken')
+  const line = (existing ?? document.createElement('div')) as HTMLElement
+  line.className = status.ok ? 'spoken ok' : 'spoken err'
+  line.textContent = status.text
+  if (!existing) row.appendChild(line)
 }
 
 /** 译文到达后就地替换，不再另起一行 —— 原文早就显示出来了。 */
@@ -537,10 +547,25 @@ async function stopRecording(): Promise<void> {
     pill.textContent = '运行中 · Alt+Shift+O'
     return
   }
-  appendRow('🎤 ' + transcript, null)
-  const reply = await window.api.translateReply(transcript)
-  if (reply.ok && reply.translated) appendRow(transcript, reply.translated, true)
-  else appendRow(transcript, reply.error ?? '翻译失败', false)
+  // 一键到底（票 05）：识别文本先落一行（pending 态压暗 + 「翻译中…」），译文与
+  // 已播状态就地补进同一行——原文/译文/已播三行，不再另起一行。
+  const rowId = `voice-${Date.now()}`
+  appendRow('🎤 ' + transcript, null, false, rowId, true)
+  pill.textContent = '翻译声出中…'
+  const reply = await window.api.voiceReply(transcript)
+  const row = rows.get(rowId)
+  if (row) {
+    row.classList.remove('pending')
+    row.classList.add('sent')
+    if (reply.translated) {
+      setTranslation(row, reply.translated, false, reply.stage === 'translate' ? (reply.error ?? '翻译失败') : undefined)
+    } else {
+      setTranslation(row, null, false, reply.error ?? '翻译失败')
+    }
+    if (reply.stage === 'voice-out' || reply.spoken) {
+      setSpoken(row, spokenStatusLine(reply.spoken, reply.error))
+    }
+  }
   pill.textContent = '运行中 · Alt+Shift+O'
 }
 

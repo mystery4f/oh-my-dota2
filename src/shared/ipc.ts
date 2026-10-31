@@ -1,3 +1,5 @@
+import type { VoiceReplyStage } from './voice-out'
+
 export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'custom'
 
 export interface ProviderConfig {
@@ -315,6 +317,18 @@ export interface VoiceOutEndedReport {
   error?: string
 }
 
+/** 语音对讲一键到底（票 05）的结果：译文 + 播没播出 + 停在哪一环。 */
+export interface VoiceReplyResult {
+  /** 译文（已 trim，可直接进剪贴板/频道）；翻译这环就失败了为 null。 */
+  translated: string | null
+  /** 音频完整播出且说话键全程按住（队友真能听见）。 */
+  spoken: boolean
+  /** 失败停在哪一环：识别/翻译/声出；成功为 null。 */
+  stage: VoiceReplyStage | null
+  /** 失败说明；成功为 null。 */
+  error: string | null
+}
+
 /** One deduped chat line pushed to the overlay / dashboard stream. */
 /** 词库统计：面板上那行「N 对 · 命中 M 次」读的就是它。 */
 /**
@@ -549,6 +563,7 @@ export const IPC = {
   VOICE_WHISPER_SETUP: 'voice:whisper-setup',
   VOICE_WHISPER_PROGRESS: 'voice:whisper-progress',
   VOICE_TRANSCRIBE: 'voice:transcribe',
+  VOICE_REPLY: 'voice:reply',
   VOICE_RECORD_TOGGLE: 'voice:record-toggle',
   VOICE_TTS_PREVIEW: 'voice:tts-preview',
   VOICE_OUT_TEST: 'voice-out:test',
@@ -678,6 +693,8 @@ export interface WindowApi {
   testProvider(provider: ProviderConfig): Promise<TestResult>
   translate(text: string, direction?: TranslateDirection): Promise<string>
   translateReply(text: string, tone?: ReplyTone): Promise<ReplyResult>
+  /** 语音对讲一键到底：识别文本 → prod 翻译 → 剪贴板 → 声出。失败静默（不回退系统嗓子/文出）。 */
+  voiceReply(transcript: string): Promise<VoiceReplyResult>
   whisperProbe(binPath: string): Promise<VoiceProbeResult>
   whisperSetup(): Promise<VoiceAssetsResult>
   onWhisperProgress(callback: (progress: VoiceAssetProgress) => void): () => void
