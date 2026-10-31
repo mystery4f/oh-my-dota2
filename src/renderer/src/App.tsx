@@ -913,7 +913,7 @@ function OverlayCard(): React.ReactElement {
                 value={sovitsHome}
                 onChange={(e) => setSovitsHome(e.target.value)}
                 onBlur={() => void window.api.setSettings({ ttsSovitsHome: sovitsHome.trim() })}
-                placeholder="D:\AI\GPT-SoVITS-v2pro-20250604"
+                placeholder={sovits?.installHome || '留空＝自动用数据目录的 gpt-sovits 自装位'}
                 title="整合包目录：填了应用启动时就自动拉起 api_v2（模型加载约 40 秒），退出时收掉"
               />
               <Input
@@ -929,7 +929,7 @@ function OverlayCard(): React.ReactElement {
                 value={sovitsRef}
                 onChange={(e) => setSovitsRef(e.target.value)}
                 onBlur={() => void window.api.setSettings({ ttsSovitsRefAudio: sovitsRef.trim() })}
-                placeholder="参考音频绝对路径，如 D:\AI\ref.wav"
+                placeholder="参考音频绝对路径（一般不用手填，从上面参考音频库选）"
                 title="参考音频：决定音色的那段声音，服务端磁盘上的绝对路径"
               />
               <Input

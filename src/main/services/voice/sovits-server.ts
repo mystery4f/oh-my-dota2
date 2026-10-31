@@ -353,6 +353,7 @@ export async function sovitsStatusSnapshot(): Promise<SovitsStatus> {
     server: { phase: server.phase, detail: server.detail, sinceMs: server.sinceMs, pid: server.pid },
     home: server.home,
     installRoot: sovitsInstallRoot(),
+    installHome: sovitsInstallHome(),
     logs: sovitsServerLogs().slice(-80)
   }
 }

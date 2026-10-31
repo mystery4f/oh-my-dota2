@@ -172,7 +172,7 @@ export interface AppSettings {
   ttsSovitsPromptText: string
   /** 参考音频转写的语言（zh/en）：零样本克隆按转写语言对齐，英文参考必须配 en。 */
   ttsSovitsPromptLang: 'zh' | 'en'
-  /** 整合包安装目录（如 D:\AI\GPT-SoVITS-v2pro-20250604）；填了就由应用自动拉起 api_v2。 */
+  /** 整合包安装目录；填了就由应用自动拉起 api_v2，留空用数据目录的 gpt-sovits 自装位。 */
   ttsSovitsHome: string
   /** 浮层锁定：位置尺寸冻住 + 强制穿透。想拖动或改大小时先解锁。 */
   overlayLocked: boolean
@@ -557,10 +557,12 @@ export interface SovitsStatus {
     sinceMs: number
     pid: number | null
   }
-  /** 实际用的引擎包目录（配置 > 应用自装位 > D:\AI 兜底）。 */
+  /** 实际用的引擎包目录（配置 > 应用自装位；两处都没有就是空串，不猜别处的手工安装）。 */
   home: string
   /** 数据目录下这一层的路径：手动安装时告诉用户压缩包该放哪。 */
   installRoot: string
+  /** 自装位下引擎包的完整路径（installRoot + 包目录名）：面板 placeholder 按环境现算现显示。 */
+  installHome: string
   /** 最近若干行日志（旧→新），面板折叠框直接展示。 */
   logs: string[]
 }
