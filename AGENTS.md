@@ -179,3 +179,17 @@ Everything interesting lives in the main process: GSI chat intake, translation s
 
 English Conventional Commits (`feat:` / `fix:` / `perf:` / `docs:` / `chore:`), author
 `mystery4f <40482524+mystery4f@users.noreply.github.com>`.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues (github.com/mystery4f/oh-my-dota2) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
