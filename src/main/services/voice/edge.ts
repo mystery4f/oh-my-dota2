@@ -1,5 +1,5 @@
 import { EdgeTTS } from '@andresaya/edge-tts'
-import { DEFAULT_EDGE_VOICE, EDGE_VOICES, pitchSpec, rateSpec } from '@shared/tts-voices'
+import { DEFAULT_EDGE_VOICE, EDGE_VOICES, pitchSpec, rateSpec, type TtsVoiceOption } from '@shared/tts-voices'
 import { readCachedAudio, ttsCacheKey, writeCachedAudio } from './tts-cache'
 
 /**
@@ -59,12 +59,18 @@ export async function synthesizeEdge(
   voice: string,
   rate: number,
   /** 音高倍率，1 = 原声；缺省时按原声合成（老调用点不用改）。 */
-  pitch = 1
+  pitch = 1,
+  /**
+   * 允许的嗓音白名单。默认 EDGE_VOICES（朗读用，只收中文嗓）；
+   * 声出传 VOICE_OUT_VOICES 才放英文嗓进来——英文嗓读中文回空音频，
+   * 所以朗读这条线永远不能放宽，否则手编设置里的英文嗓会把朗读打成哑巴。
+   */
+  allowedVoices: readonly TtsVoiceOption[] = EDGE_VOICES
 ): Promise<Buffer | null> {
   const trimmed = text.trim()
   if (!trimmed) return null
-  // 设置里可能躺着已下线或英文的嗓子（读中文回「没有音频」），一律挡回默认中文嗓。
-  const voiceName = voice && EDGE_VOICES.some((item) => item.id === voice) ? voice : DEFAULT_EDGE_VOICE
+  // 设置里可能躺着已下线或不在这个白名单里的嗓（读中文回「没有音频」），一律挡回默认中文嗓。
+  const voiceName = voice && allowedVoices.some((item) => item.id === voice) ? voice : DEFAULT_EDGE_VOICE
   if (voice !== voiceName) {
     console.log('EDGE_TTS_VOICE_FALLBACK', JSON.stringify({ asked: voice, used: voiceName }))
   }

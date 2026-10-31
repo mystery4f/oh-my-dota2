@@ -95,6 +95,11 @@ export interface AppSettings {
   targetLang: string
   whisperBinPath: string
   ttsOutputDevice: string
+  /**
+   * 说话键（push-to-talk）：游戏内按住才发言的按键，F1–F12 或单个字母/数字。
+   * 声出期间由应用自动按下/松开（合成成功才按，头尾各留 200ms 余量）；乱填打回 F5。
+   */
+  ttsSpeakKey: string
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
   /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
@@ -202,6 +207,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   targetLang: 'zh-CN',
   whisperBinPath: '',
   ttsOutputDevice: '',
+  ttsSpeakKey: 'F5',
   autoStartCapture: true,
   sendMode: 'inplace',
   consoleKey: '\\',
@@ -266,6 +272,47 @@ export interface SpeakPayload {
   audio?: string
   /** audio 的 MIME，缺省按 audio/mpeg 处理。 */
   audioMime?: string
+}
+
+/** 「测试声出」按钮的结果：念没念成、念了多久、有没有要给用户看的提示。 */
+export interface VoiceOutTestResult {
+  ok: boolean
+  /** 实际播放时长（毫秒）；没播出来为 null。 */
+  durationMs: number | null
+  /** 输出设备回退等提示；无提示为 null。 */
+  hint: string | null
+  /** 说话键按下/松开失败的说明（播放照常进行，只是频道没开）。 */
+  keyError?: string
+  /** 整体失败原因（合成失败 / 窗口超时等）。 */
+  error?: string
+}
+
+/** 主进程 → 声出窗口：播这段音频，并按 requestedDevice 选输出。 */
+export interface VoiceOutPlayRequest {
+  requestId: number
+  audioBase64: string
+  audioMime: string
+  requestedDevice: string
+}
+
+/** 声出窗口 → 主进程：元数据就绪（时长已知、setSinkId 已生效，可以开按说话键了）。 */
+export interface VoiceOutReadyReport {
+  requestId: number
+  ok: boolean
+  durationMs: number | null
+  sinkId: string
+  sinkLabel: string
+  fallback: boolean
+  hint: string | null
+  error?: string
+}
+
+/** 声出窗口 → 主进程：播放结束/失败；主进程据此松开说话键。 */
+export interface VoiceOutEndedReport {
+  requestId: number
+  ok: boolean
+  durationMs: number | null
+  error?: string
 }
 
 /** One deduped chat line pushed to the overlay / dashboard stream. */
@@ -504,6 +551,11 @@ export const IPC = {
   VOICE_TRANSCRIBE: 'voice:transcribe',
   VOICE_RECORD_TOGGLE: 'voice:record-toggle',
   VOICE_TTS_PREVIEW: 'voice:tts-preview',
+  VOICE_OUT_TEST: 'voice-out:test',
+  VOICE_OUT_PLAY: 'voice-out:play',
+  VOICE_OUT_START: 'voice-out:start',
+  VOICE_OUT_READY: 'voice-out:ready',
+  VOICE_OUT_ENDED: 'voice-out:ended',
   OVERLAY_TOGGLE: 'overlay:toggle',
   OVERLAY_REPLY: 'overlay:reply',
   OVERLAY_REPLY_OPEN: 'overlay:reply-open',
@@ -691,6 +743,10 @@ export interface WindowApi {
   overlaySetOpacity(value: number): Promise<OverlayStatus>
   /** 常驻隐藏窗口里的桌面视频流（抓屏专用，不走 dashboard）。 */
   screenStream: ScreenStreamApi
+  /** 测试声出：合成固定英文句 → 路由到所选输出 → 自动按住说话键播放。 */
+  voiceOutTest(): Promise<VoiceOutTestResult>
+  /** 声出隐藏窗口专用桥（面板用不到）。 */
+  voiceOut: VoiceOutApi
 }
 
 /** 物理像素裁切矩形（相对显示器左上角）。 */
@@ -699,6 +755,14 @@ export interface StreamRect {
   y: number
   width: number
   height: number
+}
+
+/** 声出窗口桥：主进程要播一段 → 隐藏窗口选好输出设备播放 → 回报就绪/结束。 */
+export interface VoiceOutApi {
+  onPlay(callback: (payload: VoiceOutPlayRequest) => void): () => void
+  onStart(callback: (requestId: number) => void): () => void
+  reportReady(report: VoiceOutReadyReport): void
+  reportEnded(report: VoiceOutEndedReport): void
 }
 
 /** 抓屏流桥：主进程要一帧 → 隐藏窗口从视频流裁切 → 回传 PNG base64。 */

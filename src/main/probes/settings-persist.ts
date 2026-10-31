@@ -20,6 +20,8 @@ const PERSISTED_FIELDS = [
   'ttsReadOwn',
   'ttsDropBacklog',
   'ttsSpeakSegmentChars',
+  'ttsOutputDevice',
+  'ttsSpeakKey',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -59,6 +61,12 @@ function sentinelFor(
     case 'ttsPitch':
       // 0.9 / 1.1 都是面板滑杆能到的值，验的是「滑杆位置真的落盘」。
       return (current.ttsPitch > 1 ? 0.9 : 1.1) as AppSettings[typeof key]
+    case 'ttsOutputDevice':
+      // 哨兵值是「一台不存在的设备」：存的是原样字符串还是原样回来（归一化不发生在写入侧）。
+      return (current.ttsOutputDevice === 'sink-sentinel-a' ? 'sink-sentinel-b' : 'sink-sentinel-a') as AppSettings[typeof key]
+    case 'ttsSpeakKey':
+      // 两个都是合法键：验的是「选中的那一个」而不是「任意字符串」。
+      return (current.ttsSpeakKey === 'F5' ? 'F6' : 'F5') as AppSettings[typeof key]
   }
 }
 
