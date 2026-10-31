@@ -59,6 +59,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 
 
 export type OfflineVoiceId = 'baker' | 'xiao_ya' | 'eula'
+export type VoiceOutEngine = 'edge' | 'offline' | 'sovits'
 
 export interface OfflineVoice {
   id: OfflineVoiceId
@@ -95,6 +96,13 @@ export interface AppSettings {
   targetLang: string
   whisperBinPath: string
   ttsOutputDevice: string
+  /**
+   * 声出引擎：edge = 英文神经嗓占位（默认）；offline = 本地离线模型（中文嗓，念英文吞字）；
+   * sovits = GV（GPT-SoVITS）音色包——音色由参考音频决定，权重切换走现有音色包管线。
+   */
+  ttsOutEngine: VoiceOutEngine
+  /** 声出音色：edge 存声出清单里的英文嗓 id，offline 存离线清单里的本地嗓 id；GV 不用（空串）。 */
+  ttsOutVoice: string
   /**
    * 说话键（push-to-talk）：游戏内按住才发言的按键，F1–F12 或单个字母/数字。
    * 声出期间由应用自动按下/松开（合成成功才按，头尾各留 200ms 余量）；乱填打回 F5。
@@ -208,6 +216,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   whisperBinPath: '',
   ttsOutputDevice: '',
   ttsSpeakKey: 'F5',
+  ttsOutEngine: 'edge',
+  ttsOutVoice: '',
   autoStartCapture: true,
   sendMode: 'inplace',
   consoleKey: '\\',

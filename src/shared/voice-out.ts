@@ -1,4 +1,9 @@
+import { OFFLINE_VOICES } from './ipc'
+import type { VoiceOutEngine } from './ipc'
 import type { TtsVoiceOption } from './tts-voices'
+
+// 引擎类型与 AppSettings 同源（ipc.ts 定义），这里再出口，声出决策面只认 @shared/voice-out。
+export type { VoiceOutEngine }
 
 /**
  * 声出（voice-out）的纯决策：念不念、念什么、哪个嗓、输出设备怎么路由、说话键按多久。
@@ -27,6 +32,21 @@ export const VOICE_OUT_VOICES: TtsVoiceOption[] = [
 /** 声出默认嗓。GV 英文音色包训练好之前，先用这把神经嗓占位。 */
 export const DEFAULT_VOICE_OUT_VOICE = 'en-US-JennyNeural'
 
+/**
+ * 声出引擎（VoiceOutEngine 定义在 ipc.ts，与 AppSettings 同源）：并入现有三引擎层
+ * （朗读侧的 system 不参与——系统嗓子合成不出能送进频道的音频）。
+ * - edge：英文神经嗓占位（默认）；
+ * - offline：本地离线模型（中文嗓，念英文吞字，仅链路验证）；
+ * - sovits：GV（GPT-SoVITS）音色包——音色由参考音频/权重决定，权重切换走现有音色包管线。
+ */
+/** 声出默认引擎：GV 英文包训练好之前，先用 Edge 英文神经嗓占位。 */
+export const DEFAULT_VOICE_OUT_ENGINE: VoiceOutEngine = 'edge'
+
+/** 手编 JSON / 老配置文件里的垃圾值一律打回默认 edge。 */
+export function normalizeVoiceOutEngine(raw: unknown): VoiceOutEngine {
+  return raw === 'offline' || raw === 'sovits' ? raw : 'edge'
+}
+
 /** 「测试声出」按钮念的固定英文句：要求是纯 ASCII 短句，合成端不挑逗号重音。 */
 export const VOICE_OUT_TEST_LINE = 'Hello team, this is a voice out test. Good luck, have fun.'
 
@@ -39,25 +59,82 @@ export const PTT_MARGIN_MS = 200
 /** 音频时长拿不到（或为 0）时，至少把频道开这么一小会儿，别按了个寂寞。 */
 export const MIN_SPEAK_MS = 150
 
-/** 声出测试的执行决策：念不念（合成成功才有）、念什么（固定英文句）、哪个嗓（英文占位嗓）。 */
+/** 声出测试的执行决策：念不念（合成成功才有）、念什么（固定英文句）、哪个引擎/哪个嗓。 */
 export interface VoiceOutPlan {
   /** false = 这一句不出声，说话键也绝不按（频道里不能开一段空气）。 */
   speak: boolean
   text: string
+  /** 引擎跟设置走（skip 时也带着，日志/提示用）；念不念才是这里真正决策的事。 */
+  engine: VoiceOutEngine
+  /** edge = 声出清单里的英文嗓 id；offline = 离线清单里的本地嗓 id；sovits / skip 时为空串。 */
   voice: string
+  /** edge 出 mp3，offline / sovits 出 wav——渲染层按它解 Blob。 */
+  audioMime: 'audio/mpeg' | 'audio/wav'
   /** 不念的原因；speak = true 时为 null。 */
   skip: 'synth-failed' | 'empty-line' | null
 }
 
 /**
+ * 合成前的引擎/音色/格式决策：给设置里的引擎与音色 + 要念的文本，
+ * 回「用哪个引擎、哪个嗓、出什么格式、念什么语言」。音色不在对应清单里
+ * 一律打回该引擎默认；GV 不选嗓（音色由参考音频决定）。语言看文本本身，
+ * 与朗读 decideSpeak 同判据（含 CJK 即中文）。
+ */
+export interface VoiceOutSynthPlan {
+  engine: VoiceOutEngine
+  voice: string
+  audioMime: 'audio/mpeg' | 'audio/wav'
+  lang: 'zh' | 'en'
+}
+
+export function resolveVoiceOutSynth(
+  engineRaw: unknown,
+  voiceRaw: unknown,
+  text: string
+): VoiceOutSynthPlan {
+  const engine = normalizeVoiceOutEngine(engineRaw)
+  const lang: 'zh' | 'en' = /[\u3400-\u9fff]/.test(text) ? 'zh' : 'en'
+  if (engine === 'sovits') return { engine, voice: '', audioMime: 'audio/wav', lang }
+  if (engine === 'offline') {
+    const voice = OFFLINE_VOICES.some((item) => item.id === voiceRaw)
+      ? (voiceRaw as string)
+      : OFFLINE_VOICES[0].id
+    return { engine, voice, audioMime: 'audio/wav', lang }
+  }
+  const voice = VOICE_OUT_VOICES.some((item) => item.id === voiceRaw)
+    ? (voiceRaw as string)
+    : DEFAULT_VOICE_OUT_VOICE
+  return { engine, voice, audioMime: 'audio/mpeg', lang }
+}
+
+/**
  * 「测试声出」按钮的决策入口。合成结果（Buffer 或 null）先落地，再决定念不念——
  * 断网 / 引擎失败在这里被拦下：静默跳过，说话键不动。
+ * 引擎决策（第 3 参）由 resolveVoiceOutSynth 给出，不传时就是默认 edge 占位。
  */
-export function decideVoiceOutTest(synthOk: boolean, line = VOICE_OUT_TEST_LINE): VoiceOutPlan {
+export function decideVoiceOutTest(
+  synthOk: boolean,
+  line = VOICE_OUT_TEST_LINE,
+  synth = resolveVoiceOutSynth(DEFAULT_VOICE_OUT_ENGINE, '', line)
+): VoiceOutPlan {
   const body = line.trim()
-  if (!synthOk) return { speak: false, text: '', voice: '', skip: 'synth-failed' }
-  if (!body) return { speak: false, text: '', voice: '', skip: 'empty-line' }
-  return { speak: true, text: body, voice: DEFAULT_VOICE_OUT_VOICE, skip: null }
+  const silenced = {
+    speak: false,
+    text: '',
+    engine: synth.engine,
+    voice: '',
+    audioMime: synth.audioMime
+  } as const
+  if (!synthOk) return { ...silenced, skip: 'synth-failed' }
+  if (!body) return { ...silenced, skip: 'empty-line' }
+  return {
+    speak: true,
+    text: body,
+    engine: synth.engine,
+    voice: synth.voice,
+    audioMime: synth.audioMime,
+    skip: null
+  }
 }
 
 /** 面板/探针用的最小设备形状：渲染层 enumerateDevices() 过滤 audiooutput 后映射过来。 */
