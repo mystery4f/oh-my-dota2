@@ -338,6 +338,7 @@ const speakQueue: {
   engine?: 'system' | 'edge' | 'offline'
   audio?: string
   audioMime?: string
+  ts?: number
 }[] = []
 let speaking = false
 
@@ -404,6 +405,14 @@ function pumpSpeech(): void {
 }
 
 window.api.onVoiceSpeak((payload) => {
+  // 新消息一到就清掉队列里更旧的待念：宁可不念旧的，也别让新消息排在旧消息后面——
+  // 「收到第二条还在念第一条」就是这么听出来的。ts 相等（同一条消息的后续段）不清。
+  if (payload.ts !== undefined) {
+    for (let index = speakQueue.length - 1; index >= 0; index -= 1) {
+      const item = speakQueue[index]
+      if (item.ts !== undefined && item.ts < payload.ts) speakQueue.splice(index, 1)
+    }
+  }
   while (speakQueue.length >= SPEAK_QUEUE_MAX) speakQueue.shift()
   speakQueue.push(payload)
   pumpSpeech()

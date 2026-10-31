@@ -139,6 +139,11 @@ export interface AppSettings {
    */
   ttsSpeakPrefix: 'front' | 'back' | 'off'
   /**
+   * 长句切段上限（字）：朗读前按标点把长句切成不超过这个长度的小段，第一段先出声，
+   * 其余段边播边合成。太小断句碎，太大每段等得久；10–60，默认 30。
+   */
+  ttsSpeakSegmentChars: number
+  /**
    * 说话人怎么念，连标点一起整句模板化：{who}=说话人（我/影魔/玩家9），{body}=内容。
    * 两条各自管一头；没有 {body} 的模板视同没配（loadSettings 打回缺省）。
    */
@@ -208,6 +213,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsReadOwn: false,
   ttsDropBacklog: true,
   ttsSpeakPrefix: 'front',
+  ttsSpeakSegmentChars: 30,
   ttsSpeakFrontTpl: '{who}说，{body}',
   ttsSpeakBackTpl: '{body}，{who}表示',
   ttsRate: 1,
@@ -247,6 +253,8 @@ export interface TestResult {
 /** 一条待朗读的译文：语言决定挑哪套系统语音，rate/voice 跟着设置走。 */
 export interface SpeakPayload {
   text: string
+  /** 捕获时间戳（ms）。投递层/浮层拿它判过期：更新的消息已到，旧的待念直接作废。 */
+  ts?: number
   lang: 'zh' | 'en'
   rate: number
   /** 音高倍率，1 = 原声。 */

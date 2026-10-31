@@ -41,6 +41,10 @@ export function loadSettings(): AppSettings {
     if (typeof tplBack !== 'string' || !tplBack.includes('{body}')) {
       merged.ttsSpeakBackTpl = DEFAULT_SETTINGS.ttsSpeakBackTpl
     }
+    // 段长上限：手编文件里躺个 0 / 负数 / 超大值会把切段打瘫（0 等于每字一段），钳回面板能到的范围。
+    const rawSeg = Number(merged.ttsSpeakSegmentChars)
+    if (!Number.isFinite(rawSeg)) merged.ttsSpeakSegmentChars = DEFAULT_SETTINGS.ttsSpeakSegmentChars
+    else merged.ttsSpeakSegmentChars = Math.min(60, Math.max(10, Math.round(rawSeg)))
     return merged
   } catch (err) {
     console.error('settings: load failed, using defaults', err)

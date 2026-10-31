@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, synthesizeEdge } from '../services/voice/edge'
-import { applyBacklogPolicy, decideSpeak, isAnnounceStale, isSpeakStale, speakOptionsFromSettings, speakSkipReason } from '../services/voice/speech'
+import { applyBacklogPolicy, decideSpeak, isAnnounceStale, isSpeakStale, splitForSpeech, speakOptionsFromSettings, speakSkipReason } from '../services/voice/speech'
 import { lookupSovitsCache, resetSovitsCache, sovitsCacheSize, storeSovitsCache } from '../services/voice/sovits-cache'
 import { offlineReady, synthesizeOffline } from '../services/voice/offline'
 import type { OfflineVoiceId } from '../../shared/ipc'
@@ -53,6 +53,16 @@ export async function runTtsPlayProbe(): Promise<void> {
   const staleOk = staleRows.every((row) => row.ok)
   console.log('TTS_ANNOUNCE_STALE_CASES', JSON.stringify({ staleOk, rows: staleRows }))
 
+  // 段长上限必须真的从设置走到切段：默认 30（面板可配 10–60）。无标点长句按上限硬切，
+  // 切完拼回来必须一字不差——播放层靠「先切后拼等价」保证多段顺序投递不丢字。
+  const hardSlice = '一'.repeat(45)
+  const hardSegs = splitForSpeech(hardSlice, 30)
+  const splitRows = [
+    { name: '无标点硬切按上限切（45 字 → 30+15）', want: '30,15', got: hardSegs.map((s) => s.length).join(',') },
+    { name: '切完拼回原文', want: hardSlice, got: hardSegs.join('') }
+  ].map((row) => ({ ...row, ok: row.got === row.want }))
+  const splitOk = splitRows.every((row) => row.ok)
+  console.log('TTS_SPLIT_CASES', JSON.stringify({ splitOk, rows: splitRows }))
   // engine 必须从设置一路传进 payload：漏掉时 decideSpeak 默认 edge，离线 WAV 会被标成
   // audio/mpeg 投递，浮层解不开就静音——「离线朗读无效、联网正常」就是这么来的。
   const engineRows = (['system', 'edge', 'offline', 'sovits'] as const).map((engine) => {
@@ -68,10 +78,11 @@ export async function runTtsPlayProbe(): Promise<void> {
       ttsEngine: engine
     })
     const payload = decideSpeak(
-      { id: '7', ts: 0, pending: false, original: '[All] X: push top', translated: '推上路' } as never,
+      { id: '7', ts: 12345, pending: false, original: '[All] X: push top', translated: '推上路' } as never,
       options
     )
-    return { engine, got: payload?.engine ?? null, ok: payload?.engine === engine }
+    // ts 也随包走（12345 只是随便一个非零值）：投递层/浮层靠它判过期，丢了 ts 等于丢积压失效。
+    return { engine, got: payload?.engine ?? null, ts: payload?.ts ?? null, ok: payload?.engine === engine && payload?.ts === 12345 }
   })
   const engineOk = engineRows.every((row) => row.ok)
   console.log('TTS_SPEAK_ENGINE_CASES', JSON.stringify({ engineOk, rows: engineRows }))
@@ -283,11 +294,12 @@ console.log('TTS_CACHE_CASES', JSON.stringify({ cacheOk, rows: cacheRows }))
   console.log(
     'TTS_PLAY_RESULT',
     JSON.stringify({
-      ok: speakOk && staleOk && engineOk && ownOk && prefixOk && skipOk && backlogOk && cacheOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      ok: speakOk && staleOk && engineOk && ownOk && prefixOk && skipOk && backlogOk && cacheOk && splitOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
       prefixOk,
       speakOk,
       staleOk,
       engineOk,
+      splitOk,
       playOkCount,
       expectedPlays,
       failed,

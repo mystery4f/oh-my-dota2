@@ -33,8 +33,7 @@ export function speakText(raw: string): string {
 /**
  * 长句切段：先前几十个字先出声，剩下的在播放时合成。
  * 为什么不是排版问题：Edge 每段都要一次跨境往返（实测整句 0.7–1.6 s），
- * 一句话 40 个字等一次往返，听众会以为「朗读坏了」。按标点切成 ≤20 字的小段后，
- * 第一段先播，后面的段在播第一段时已经合成完成，听感上是连续的。
+ * 一句话 40 个字等一次往返，听众会以为「朗读坏了」。按标点切成小段后（上限面板可配，默认 30），
  * 只切标点，不动字面：切完拼回来必须和原文一模一样（探针会断言）。
  */
 export function splitForSpeech(text: string, maxChars = 20): string[] {
@@ -82,6 +81,8 @@ export interface SpeakOptions {
   /** 音高倍率，1 = 原声；只有 Edge 引擎认这个参数。 */
   pitch: number
   voice: string
+  /** 长句切段上限（字）：edge / sovits 切段用；缺省 30（AppSettings.ttsSpeakSegmentChars）。 */
+  segmentChars?: number
 }
 
 /**
@@ -141,6 +142,8 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
   const text = spoken ? tpl.replace('{who}', spoken).replace('{body}', body) : body
   const clipped = text.length > SPEAK_MAX_CHARS ? `${text.slice(0, SPEAK_MAX_CHARS)}…` : text
   return {
+    // 捕获时间随包走：投递层/浮层拿它判过期（新消息已到就不再念旧的）。
+    ts: entry.ts,
     text: clipped,
     engine: options.engine ?? 'edge',
     // 中文用中文嗓子，其余用英文嗓子；判据看译文本身，不看用户设置。
@@ -174,6 +177,7 @@ export function speakOptionsFromSettings(settings: {
   ttsVoice: string
   ttsEngine: 'system' | 'edge' | 'offline' | 'sovits'
   ttsSpeakPrefix: 'front' | 'back' | 'off'
+  ttsSpeakSegmentChars?: number
   ttsSpeakFrontTpl: string
   ttsSpeakBackTpl: string
 }): SpeakOptions {
@@ -182,6 +186,7 @@ export function speakOptionsFromSettings(settings: {
     readAloud: settings.ttsReadAloud,
     readOwn: settings.ttsReadOwn,
     prefix: settings.ttsSpeakPrefix,
+    segmentChars: settings.ttsSpeakSegmentChars ?? 30,
     frontTpl: settings.ttsSpeakFrontTpl,
     backTpl: settings.ttsSpeakBackTpl,
     rate: settings.ttsRate,
@@ -190,6 +195,9 @@ export function speakOptionsFromSettings(settings: {
   }
 }
 export function announceEntries(entries: CaptureEntry[], cutoff?: number): void {
+  // 先记账再干活：latestCaptureAt 是投递层判过期的基准——即使这拍全部跳过（没开朗读、没新译文），
+  // 「已经有更新的捕获」这个事实也得记下来。
+  if (cutoff !== undefined && cutoff > latestCaptureAt) latestCaptureAt = cutoff
   if (entries.length === 0) return
   const settings = loadSettings()
   if (!settings.ttsReadAloud) return
@@ -240,7 +248,7 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
     // 一次只合成一条、可丢弃积压——预发全部请求会让本机显卡被服务端排队按死。
     // 服务不在 / 参考没配，合成得 null，浮层整句跳过——绝不回退系统嗓子。
     if (engine === 'sovits') {
-      enqueueSovitsSpeak(payload, settings.ttsDropBacklog === true)
+      enqueueSovitsSpeak(payload, settings.ttsDropBacklog === true, options.segmentChars ?? 30)
       continue
     }
     if (engine !== 'edge') {
@@ -248,7 +256,7 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
       continue
     }
     // Edge：整句切成小段，各段同时发起合成，再按原顺序投递——第一段先出声。
-    const segments = splitForSpeech(payload.text)
+    const segments = splitForSpeech(payload.text, options.segmentChars ?? 30)
     const audios = segments.map((segment) => synthesizeEdge(segment, payload.voice, payload.rate, payload.pitch))
     segments.forEach((segment, index) => {
       const audio = audios[index]
@@ -258,6 +266,8 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
 }
 
 let lastSpeakAt = 0
+/** 最新一次捕获的时间戳：deliver 投递时对照它——合成这几秒里来了更新的消息，旧的就不投了。 */
+let latestCaptureAt = 0
 
 let speakChain: Promise<void> = Promise.resolve()
 
@@ -288,10 +298,10 @@ const sovitsQueue: SovitsJob[] = []
 let sovitsGen = 0
 let sovitsPumping = false
 
-function enqueueSovitsSpeak(payload: SpeakPayload, drop: boolean): void {
+function enqueueSovitsSpeak(payload: SpeakPayload, drop: boolean, segmentChars = 30): void {
   const plan = applyBacklogPolicy(sovitsQueue, drop, {
     payload,
-    segments: splitForSpeech(payload.text),
+    segments: splitForSpeech(payload.text, segmentChars),
     gen: sovitsGen + 1
   })
   sovitsGen += 1
@@ -336,6 +346,12 @@ async function pumpSovits(drop: boolean): Promise<void> {
 }
 
 async function deliver(payload: SpeakPayload, audioPromise: Promise<Buffer | null> | null): Promise<void> {
+  // 投递时点再拦一道：合成这几秒里可能已经来了更新的消息——旧的再开口，
+  // 就是「收到第二条还在念第一条」。announce 层只拦宣布时就过期的，这里拦合成期间变旧的。
+  if (loadSettings().ttsDropBacklog === true && payload.ts !== undefined && payload.ts < latestCaptureAt) {
+    console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'deliver', text: payload.text.slice(0, 30) }))
+    return
+  }
   let packet = payload
   if (audioPromise) {
     const audio = await audioPromise

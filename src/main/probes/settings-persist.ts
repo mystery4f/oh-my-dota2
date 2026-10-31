@@ -19,6 +19,7 @@ const PERSISTED_FIELDS = [
   'ttsPitch',
   'ttsReadOwn',
   'ttsDropBacklog',
+  'ttsSpeakSegmentChars',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -45,6 +46,9 @@ function sentinelFor(
       return !current.ttsReadOwn as AppSettings[typeof key]
     case 'ttsDropBacklog':
       return !current.ttsDropBacklog as AppSettings[typeof key]
+    case 'ttsSpeakSegmentChars':
+      // 20 / 40 都是面板能设的值，验的是「数字真的落盘」。
+      return (current.ttsSpeakSegmentChars >= 30 ? 20 : 40) as AppSettings[typeof key]
     case 'ttsEngine':
       return (current.ttsEngine === 'edge' ? 'system' : 'edge') as AppSettings[typeof key]
     case 'ttsVoice':

@@ -413,6 +413,7 @@ function OverlayCard(): React.ReactElement {
   const [voice, setVoice] = useState(DEFAULT_EDGE_VOICE)
   const [offlineVoice, setOfflineVoice] = useState<OfflineVoiceId>('baker')
   const [rate, setRate] = useState(1)
+  const [segmentChars, setSegmentChars] = useState(30)
   const [pitch, setPitch] = useState(1)
   const [sovitsUrl, setSovitsUrl] = useState('http://127.0.0.1:9880')
   const [sovitsRef, setSovitsRef] = useState('')
@@ -434,6 +435,7 @@ function OverlayCard(): React.ReactElement {
       setReadOwn(next.ttsReadOwn)
       setDropBacklog(next.ttsDropBacklog)
       setSpeakPrefix(next.ttsSpeakPrefix)
+      setSegmentChars(next.ttsSpeakSegmentChars ?? 30)
       setSpeakFrontTpl(next.ttsSpeakFrontTpl)
       setSpeakBackTpl(next.ttsSpeakBackTpl)
       setEngine(next.ttsEngine)
@@ -599,6 +601,28 @@ function OverlayCard(): React.ReactElement {
           </Button>
           {/* 「某某说」念在哪头。用下拉不用循环按钮：三个选项一眼看得全，
               循环按钮的当前态（「说话人：不念」）曾被用户当成「没有前后那个设置」。 */}
+          {/* 段长：长句切段的上限。太小断句碎、太大每段等得久；默认 30，随改随生效。 */}
+          <label
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+            title="长句切段上限（字）：朗读前按标点切成不超过这个长度的小段，第一段先出声。10–60，默认 30"
+          >
+            段长
+            <input
+              type="number"
+              min={10}
+              max={60}
+              value={segmentChars}
+              disabled={!readAloud}
+              className="h-7 w-16 rounded-md border border-input bg-background px-2 text-xs"
+              onChange={(e) => setSegmentChars(Number(e.target.value))}
+              onBlur={() => {
+                const next = Math.min(60, Math.max(10, Math.round(Number(segmentChars)) || 30))
+                setSegmentChars(next)
+                void window.api.setSettings({ ttsSpeakSegmentChars: next })
+              }}
+            />
+            字
+          </label>
           <label
             className="flex items-center gap-2 text-xs text-muted-foreground"
             title="说话人标签念在哪头：句首先知道是谁说的，句尾先听内容，不念只听内容"
