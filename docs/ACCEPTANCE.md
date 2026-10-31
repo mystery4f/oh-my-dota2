@@ -172,6 +172,7 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 - [ ] 「声出输出设备」临时切「系统默认输出」，点「测试声出」→ 面板绿字「声出测试通过 · N 秒」，本机音箱听到英文句「Hello team, this is a voice out test. Good luck, have fun.」
 - [ ] 切回「CABLE Input」再点一次：本机听不到属正常——声音进的是虚拟声卡；Windows「设置 → 系统 → 声音 → 输入」选 CABLE Output，播放期间输入电平条在动，证明声音真的进了声卡
 - [ ] 说话键对齐：训练局/英雄试炼里把游戏切到前台再点「测试声出」→ 英文句播出期间英雄头像旁的语音图标亮起，播完约 0.2 秒熄灭（自动按住说话键：头尾各 200ms 余量）
+- [ ] 测试模式（游戏完全不用开）：面板开「测试模式」→ 输出设备选耳机，点「测试声出」/ 走 `Alt+Shift+V` 全链 → 耳机听到英文，**且当前焦点窗口不会收到 F5**（按键被抑制，日志有 `VOICE_OUT_TEST_MODE`）；验完关掉，正式进局前确认开关回「关」
 
 真局一键到底：
 

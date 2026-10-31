@@ -110,6 +110,8 @@ export interface AppSettings {
    * 声出期间由应用自动按下/松开（合成成功才按，头尾各留 200ms 余量）；乱填打回 F5。
    */
   ttsSpeakKey: string
+  /** 测试模式：开了只放音频到所选输出设备、不模拟按下说话键——游戏没开也能全链路试听，F5 不会落到别的窗口上。 */
+  voiceOutTestMode: boolean
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
   /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
@@ -218,6 +220,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   whisperBinPath: '',
   ttsOutputDevice: '',
   ttsSpeakKey: 'F5',
+  voiceOutTestMode: false,
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
   autoStartCapture: true,

@@ -194,10 +194,14 @@ class VoiceOutService {
     if (ready.fallback && ready.hint) showHint(ready.hint)
 
     // 声出已经成功（音频在手、窗口就绪），从这一刻起说话键才允许动。
+    // 测试模式（voiceOutTestMode）：只放音频、不模拟按键——游戏没开也能试听，
+    // F5 不会落到焦点窗口上（编辑器收到 F5 之类的误触发）。
     const vk = speakKeyVk(settings.ttsSpeakKey)
     let keyError: string | undefined
     let keyHeld = false
-    if (vk === null) {
+    if (settings.voiceOutTestMode) {
+      console.log('VOICE_OUT_TEST_MODE', JSON.stringify({ requestId, leg: 'test', keySuppressed: true }))
+    } else if (vk === null) {
       keyError = '说话键无法识别（检查设置里的说话键）'
     } else {
       const down = await getPttKeySender().down(vk)
@@ -332,7 +336,8 @@ class VoiceOutService {
         if (ready.fallback && ready.hint) showHint(ready.hint)
 
         // 说话键从第一段就绪起按住，整句话期间绝不松——中途松键频道会露缝。
-        if (!keyHeld && !keyError) {
+        // 测试模式下整段按键逻辑跳过（keyHeld 恒 false，finally 的松键自然空转）。
+        if (!settings.voiceOutTestMode && !keyHeld && !keyError) {
           if (vk === null) {
             keyError = '说话键无法识别（检查设置里的说话键）'
           } else {

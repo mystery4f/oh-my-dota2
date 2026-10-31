@@ -24,6 +24,7 @@ const PERSISTED_FIELDS = [
   'ttsSpeakKey',
   'ttsOutEngine',
   'ttsOutVoice',
+  'voiceOutTestMode',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -77,6 +78,9 @@ function sentinelFor(
       return (
         current.ttsOutVoice === 'en-US-JennyNeural' ? 'en-US-AnaNeural' : 'en-US-JennyNeural'
       ) as AppSettings[typeof key]
+    case 'voiceOutTestMode':
+      // 布尔开关：非当前值落盘原样读回（无归一化，同 ttsReadOwn 一档）。
+      return !current.voiceOutTestMode as AppSettings[typeof key]
   }
 }
 

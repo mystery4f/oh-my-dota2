@@ -1750,6 +1750,16 @@ export default function App(): React.ReactElement {
                   placeholder="F5"
                 />
               </div>
+              {/* 测试模式：开了只放音频、不按说话键——游戏没开也能全链路试听（输出设备选耳机即可）。 */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant={settings.voiceOutTestMode ? 'secondary' : 'outline'}
+                  onClick={() => setSettings((s) => ({ ...s, voiceOutTestMode: !s.voiceOutTestMode }))}
+                  title="开了之后声出只放音频到所选输出设备，不模拟按下说话键；游戏没开也能试听，F5 不会落到别的窗口上"
+                >
+                  测试模式：{settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
+                </Button>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Button className="w-fit" onClick={() => void save()}>
                   保存
