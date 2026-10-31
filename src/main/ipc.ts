@@ -255,7 +255,7 @@ export function registerIpc(): void {
     mkdirSync(dir, { recursive: true })
     const wavPath = join(dir, 'utterance.wav')
     writeFileSync(wavPath, Buffer.from(base64, 'base64'))
-    return getWhisperAdapter().transcribe(wavPath, language ?? 'auto')
+    return getWhisperAdapter().transcribe(wavPath, language ?? 'zh')
   })
   ipcMain.handle(IPC.TTS_OFFLINE_STATE, () => offlineStatus())
   // GPT-SoVITS：面板每 3 秒问一次「包在不在、服务起没起、最近日志」，不再靠翻控制台猜。

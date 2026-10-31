@@ -7,11 +7,12 @@ import type { VoiceBackendStatus, VoiceAssetsResult, VoiceProbeResult, VoiceTran
 const PROBE_TIMEOUT_MS = 8000
 const RELEASE_TAG = 'b5454'
 const BIN_URL = `https://github.com/ggml-org/whisper.cpp/releases/download/${RELEASE_TAG}/whisper-bin-x64.zip`
+// small 档对带口音的中文明显更稳（base 在重口音下丢字、串英文）；CPU 6 线程短句仍在数秒级。
 const MODEL_URLS = [
-  'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.bin',
-  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin'
+  'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-small.bin',
+  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin'
 ]
-const MODEL_NAME = 'ggml-base.bin'
+const MODEL_NAME = 'ggml-small.bin'
 const PARALLEL_PARTS = 16
 
 function run(
@@ -308,8 +309,11 @@ class WhisperAdapter {
     }
   }
 
-  /** Transcribe a 16 kHz mono WAV file with whisper-cli. */
-  async transcribe(wavPath: string, language = 'auto'): Promise<VoiceTranscribeResult> {
+  /**
+   * Transcribe a 16 kHz mono WAV file with whisper-cli.
+   * 语言默认钉死中文：对讲链路进来就是中文；auto 在短句+口音下容易误判语种或串英文。
+   */
+  async transcribe(wavPath: string, language = 'zh'): Promise<VoiceTranscribeResult> {
     const assets = await this.ensureAssets()
     if (!assets.ok || !assets.binaryPath || !assets.modelPath) {
       return { ok: false, text: '', error: assets.error ?? 'whisper 资源不可用' }
