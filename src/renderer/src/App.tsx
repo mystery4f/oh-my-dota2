@@ -39,6 +39,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type TestState = { status: 'idle' } | { status: 'running' } | { status: 'done'; result: TestResult }
 
+// 识别记录条目 = 链路结果 + 本地时间戳（主进程广播里没有时间，渲染端补）。
+type VoiceChainLogEntry = VoiceChainSummary & { at: number }
+
 type CheckRow = { label: string; ok: boolean; detail: string }
 
 /** 面板分组标题：一屏里塞十几样东西，没有分组就只能靠猜。 */
@@ -1386,11 +1389,18 @@ export default function App(): React.ReactElement {
   const [voiceOutBusy, setVoiceOutBusy] = useState(false)
   const [voiceOutResult, setVoiceOutResult] = useState<VoiceOutTestResult | null>(null)
 
-  // 「说一句试试」的状态与回显：录音中按钮变样，链路结果（含失败原因）落在按钮下面。
+  // 「说一句试试」的状态与回显：录音中按钮变样，链路结果（含失败原因）进「识别记录」列表——
+  // 每次说了什么、识别成什么、翻成什么都要看得见，不然「声音都是一个内容」这类问题没法定位。
   const [voiceRecording, setVoiceRecording] = useState(false)
-  const [voiceChain, setVoiceChain] = useState<VoiceChainSummary | null>(null)
+  const [voiceChainLog, setVoiceChainLog] = useState<VoiceChainLogEntry[]>([])
   useEffect(() => window.api.onVoiceRecordState((s) => setVoiceRecording(s.recording)), [])
-  useEffect(() => window.api.onVoiceChainResult((result) => setVoiceChain(result)), [])
+  useEffect(
+    () =>
+      window.api.onVoiceChainResult((result) =>
+        setVoiceChainLog((log) => [{ ...result, at: Date.now() }, ...log].slice(0, 6))
+      ),
+    []
+  )
   useEffect(() => window.api.onWhisperProgress((progress) => setVoiceProgress(progress)), [])
 
   // 输出设备列表只用来展示：面板里枚举一次，插拔设备后重新打开页面就能看到。
@@ -1788,7 +1798,10 @@ export default function App(): React.ReactElement {
                   title="与 Alt+Shift+V 同一条链：点一下开始说话，再点一下结束；识别→翻译→声出全程照跑，测试模式开着时只放耳机不按说话键"
                   onClick={() => {
                     if (typeof window.api.overlayVoiceToggle !== 'function') {
-                      setVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: '主进程还是旧版本（preload 里没有这个通道），请完全退出再 npm run dev' })
+                      setVoiceChainLog((log) => [
+                        { transcript: '', translated: null, spoken: false, stage: null, error: '主进程还是旧版本（preload 里没有这个通道），请完全退出再 npm run dev', at: Date.now() },
+                        ...log
+                      ])
                       return
                     }
                     void window.api.overlayVoiceToggle()
@@ -1803,12 +1816,27 @@ export default function App(): React.ReactElement {
               {voiceRecording && (
                 <p className="text-xs text-amber-400">● 正在录音——对着麦克风说话，说完再点一次按钮（或按 Alt+Shift+V）结束。</p>
               )}
-              {voiceChain && (
-                <p className="text-xs text-muted-foreground">
-                  {voiceChain.error
-                    ? `🎤 ${voiceChain.error}`
-                    : `🎤 ${voiceChain.transcript} → ${voiceChain.translated ?? '（翻译失败）'}${voiceChain.spoken ? ' · 已播放' : ''}`}
-                </p>
+              {voiceChainLog.length > 0 && (
+                <div className="space-y-1.5 rounded-md bg-stone-900/60 p-3">
+                  <p className="text-xs font-medium">识别记录（新在上，最多留 6 条）</p>
+                  <ul className="space-y-1">
+                    {voiceChainLog.map((entry) => (
+                      <li key={entry.at} className="text-xs">
+                        <span className="text-muted-foreground">
+                          {new Date(entry.at).toLocaleTimeString('zh-CN', { hour12: false })}
+                        </span>{' '}
+                        {entry.error ? (
+                          <span className="text-rose-400">🎤 {entry.error}</span>
+                        ) : (
+                          <span>
+                            🎤 原文「{entry.transcript || '（空）'}」→ 译文「{entry.translated ?? '（翻译失败）」'}
+                            {entry.spoken ? ' · 已播放' : ' · 未播放'}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               {voiceProgress && (
                 <p className="text-xs text-muted-foreground">
