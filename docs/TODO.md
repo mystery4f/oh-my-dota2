@@ -206,6 +206,7 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
   - 已定：声出走虚拟声卡进游戏语音频道；`Alt+Shift+V` 一键到底；失败静默跳过不退文出；说话键 app 自动按住，**默认 F5、可配置**。
   - 待定：虚拟声卡选型（VB-Cable vs VoiceMeeter）、翻译是否反向。
   - 训练侧（应用外）：GV 英文包数据与微调，产物走现有音色包权重切换（`gptWeights`/`sovitsWeights`），应用侧零改动。
+  - 引擎换型候选（2026-11-01 记录）：[IndexTTS](https://github.com/index-tts/index-tts)——若 GV 英文包训练成本/效果不理想，调研后考虑把 GV 换成它；未定，先记着。
 
 ### 已关闭（留档，别再当待办捡回来）
 
