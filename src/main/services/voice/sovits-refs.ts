@@ -88,5 +88,23 @@ export function listSovitsRefs(root: string, weightsRoot?: string): SovitsRefEnt
     if (entry) entries.push(entry)
     else console.warn(`[sovits-refs] 跳过不合法或音频缺失的索引条目：${JSON.stringify(item)}`)
   }
-  return entries
+  return groupRefsForDisplay(entries)
+}
+
+/**
+ * 展示顺序：按名字前缀（「·」前的音色名）分组聚拢，组间按首次出现排，组内保持文件序。
+ * 音色包和保底参考是往 refs.json 尾部追加的，不聚拢的话「晓晓（保底）」
+ * 会孤零零吊在队尾，离「晓晓·原速」隔着一串别的音色。
+ */
+export function groupRefsForDisplay(entries: SovitsRefEntry[]): SovitsRefEntry[] {
+  const groupIndex = new Map<string, number>()
+  return [...entries]
+    .map((entry) => {
+      // 「晓晓·原速」和「晓晓（保底）」是同一族：前缀取「·」或「（」之前的那段。
+      const group = entry.name.split('·')[0]?.split('（')[0] ?? entry.name
+      if (!groupIndex.has(group)) groupIndex.set(group, groupIndex.size)
+      return { entry, order: groupIndex.get(group) ?? 0 }
+    })
+    .sort((a, b) => a.order - b.order)
+    .map((item) => item.entry)
 }
