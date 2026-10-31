@@ -196,25 +196,32 @@ app.whenReady().then(() => {
   if (!probeRun && startup.overlayVisible) getOverlayManager().show()
   // 更新：装好的包里开机静默查一次，有就自己下，下完把「重启」挂在面板上等用户点。
   if (!probeRun) startUpdateCheck()
-  globalShortcut.register('Alt+Shift+O', () => {
+  // 注册失败不炸只记：别的软件（剪辑工具/输入法/游戏助手）占了这个全局热键时，
+  // 用户按了没反应，日志里能查到是哪一个键没抢到。
+  const registerHotkey = (accelerator: string, handler: () => void): void => {
+    if (!globalShortcut.register(accelerator, handler)) {
+      console.log('HOTKEY_REGISTER_FAIL', JSON.stringify({ accelerator }))
+    }
+  }
+  registerHotkey('Alt+Shift+O', () => {
     getOverlayManager().toggle()
   })
   // 锁定/解锁：锁定后浮层不吃鼠标；解锁后能拖动、拉两侧改宽度，拖完再锁定。
-  globalShortcut.register('Alt+Shift+P', () => {
+  registerHotkey('Alt+Shift+P', () => {
     const overlay = getOverlayManager()
     if (overlay.status().visible) overlay.setLocked(!overlay.status().locked)
   })
   // 收起/展开小图标：收起后如果是锁定状态就穿透点不到，只能靠这个热键收回来。
-  globalShortcut.register('Alt+Shift+B', () => {
+  registerHotkey('Alt+Shift+B', () => {
     const overlay = getOverlayManager()
     if (overlay.status().visible) overlay.toggleCollapse()
   })
   // 直发：inplace = 读游戏聊天框草稿 → 翻译 → 粘回并回车；其他通道 = 弹浮层输入框。
-  globalShortcut.register('Alt+Shift+T', () => {
+  registerHotkey('Alt+Shift+T', () => {
     if (loadSettings().sendMode === 'inplace') void translateInPlace()
     else getOverlayManager().openReply()
   })
-  globalShortcut.register('Alt+Shift+V', () => {
+  registerHotkey('Alt+Shift+V', () => {
     getOverlayManager().toggleVoiceCapture()
   })
 

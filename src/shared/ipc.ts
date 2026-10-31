@@ -585,6 +585,7 @@ export const IPC = {
   VOICE_OUT_READY: 'voice-out:ready',
   VOICE_OUT_ENDED: 'voice-out:ended',
   OVERLAY_TOGGLE: 'overlay:toggle',
+  OVERLAY_VOICE_TOGGLE: 'overlay:voice-record-toggle',
   OVERLAY_REPLY: 'overlay:reply',
   OVERLAY_REPLY_OPEN: 'overlay:reply-open',
   OVERLAY_REPLY_CLOSE: 'overlay:reply-close',
@@ -751,6 +752,7 @@ export interface WindowApi {
   sendReply(text: string): Promise<ReplySendResult>
   translateInPlace(): Promise<InPlaceResult>
   overlayToggle(): Promise<OverlayStatus>
+  overlayVoiceToggle(): Promise<{ ok: boolean }>
   overlaySetText(mode: OverlayTextMode): Promise<OverlayStatus>
   overlayOpenReply(): Promise<OverlayStatus>
   overlayCloseReply(submitted?: boolean): Promise<OverlayStatus>

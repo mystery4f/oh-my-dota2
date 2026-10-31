@@ -208,6 +208,11 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.CAPTURE_STATUS, () => ({ ...getCaptureService().status(), gsi: gsiStatus() }))
   ipcMain.handle(IPC.SESSION_STATUS, () => sessionStatus())
   ipcMain.handle(IPC.OVERLAY_TOGGLE, () => getOverlayManager().toggle())
+  // 面板按钮与 Alt+Shift+V 共用同一条录制链：起录/停录都由 overlay 窗口自己报状态。
+  ipcMain.handle(IPC.OVERLAY_VOICE_TOGGLE, () => {
+    getOverlayManager().toggleVoiceCapture()
+    return { ok: true }
+  })
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
   ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))
   ipcMain.handle(IPC.OVERLAY_OPACITY, (_e, value: number) => getOverlayManager().setOpacity(value))

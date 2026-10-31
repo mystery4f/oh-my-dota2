@@ -84,6 +84,7 @@ const api: WindowApi = {
       ipcRenderer.send(IPC.STREAM_FRAME, { requestId, pngBase64, error })
   },
   overlayToggle: () => ipcRenderer.invoke(IPC.OVERLAY_TOGGLE),
+  overlayVoiceToggle: () => ipcRenderer.invoke(IPC.OVERLAY_VOICE_TOGGLE),
   overlaySetText: (mode: OverlayTextMode) => ipcRenderer.invoke(IPC.OVERLAY_TEXT, mode),
   overlayOpenReply: () => ipcRenderer.invoke(IPC.OVERLAY_REPLY_OPEN),
   overlayCloseReply: (submitted) => ipcRenderer.invoke(IPC.OVERLAY_REPLY_CLOSE, submitted),

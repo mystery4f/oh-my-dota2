@@ -1639,7 +1639,7 @@ export default function App(): React.ReactElement {
             <CardHeader>
               <CardTitle>语音链路</CardTitle>
               <CardDescription>
-                whisper.cpp 在本机运行（资源自动下载）；声出引擎可选 Edge / 离线 / GV，「测试声出」念一句固定英文并自动按住说话键送进频道。
+                whisper.cpp 在本机运行（资源自动下载）；声出引擎可选 Edge / 离线 / GV。「测试声出」念一句固定英文送进频道（冒烟用）；想试自己的声音点「说一句试试」或按 Alt+Shift+V：说中文 → 识别 → 翻译 → 声出，测试模式开着时只放所选输出设备、不按说话键。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
@@ -1776,6 +1776,13 @@ export default function App(): React.ReactElement {
                 </Button>
                 <Button variant="outline" disabled={voiceBusy} onClick={() => void previewTts()}>
                   试听 TTS
+                </Button>
+                <Button
+                  variant="outline"
+                  title="与 Alt+Shift+V 同一条链：点一下开始说话，再点一下结束；识别→翻译→声出全程照跑，测试模式开着时只放耳机不按说话键"
+                  onClick={() => void window.api.overlayVoiceToggle()}
+                >
+                  说一句试试
                 </Button>
                 <Button variant="outline" disabled={voiceOutBusy} onClick={() => void runVoiceOutTest()}>
                   测试声出

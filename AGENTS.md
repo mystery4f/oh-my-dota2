@@ -51,7 +51,7 @@ Everything interesting lives in the main process: GSI chat intake, translation s
 - `Alt+Shift+B` collapse / expand the overlay to its 132x34 icon
 - `Alt+Shift+O` show / hide the overlay
 - `Alt+Shift+R` re-pick the chat region
-- `Alt+Shift+V` hold to record voice (whisper.cpp)
+- `Alt+Shift+V` toggle record: speak Chinese → whisper.cpp transcribes → translate → the reply is spoken through voice-out (the panel 「说一句试试」 button runs the same chain; keyboard auto-repeat is debounced 500ms in `toggleVoiceCapture`)
 
 ## Environment constraints (China, Windows)
 
