@@ -9,6 +9,7 @@ import {
   type StreamRect,
   type UpdateState,
   type VoiceAssetProgress,
+  type VoiceOutPlayRequest,
   type WindowApi
 } from '@shared/ipc'
 
@@ -119,6 +120,21 @@ const api: WindowApi = {
     const listener = (_e: Electron.IpcRendererEvent, payload: SpeakPayload): void => callback(payload)
     ipcRenderer.on(IPC.VOICE_SPEAK, listener)
     return () => ipcRenderer.removeListener(IPC.VOICE_SPEAK, listener)
+  },
+  voiceOutTest: () => ipcRenderer.invoke(IPC.VOICE_OUT_TEST),
+  voiceOut: {
+    onPlay: (callback) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: VoiceOutPlayRequest): void => callback(payload)
+      ipcRenderer.on(IPC.VOICE_OUT_PLAY, listener)
+      return () => ipcRenderer.removeListener(IPC.VOICE_OUT_PLAY, listener)
+    },
+    onStart: (callback) => {
+      const listener = (_e: Electron.IpcRendererEvent, requestId: number): void => callback(requestId)
+      ipcRenderer.on(IPC.VOICE_OUT_START, listener)
+      return () => ipcRenderer.removeListener(IPC.VOICE_OUT_START, listener)
+    },
+    reportReady: (report) => ipcRenderer.send(IPC.VOICE_OUT_READY, report),
+    reportEnded: (report) => ipcRenderer.send(IPC.VOICE_OUT_ENDED, report)
   }
 }
 

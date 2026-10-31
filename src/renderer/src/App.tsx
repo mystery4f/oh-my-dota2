@@ -14,6 +14,7 @@ import {
   type VoiceAssetProgress,
   type VoiceAssetsResult,
   type VoicePreviewResult,
+  type VoiceOutTestResult,
   type TranslatorStatus,
   type VoiceProbeResult,
   OFFLINE_VOICES,
@@ -1350,6 +1351,7 @@ export default function App(): React.ReactElement {
         targetLang: settings.targetLang,
         whisperBinPath: settings.whisperBinPath,
         ttsOutputDevice: settings.ttsOutputDevice,
+        ttsSpeakKey: settings.ttsSpeakKey,
       })
       setSettings(next)
       setSaveFlash('已保存')
@@ -1376,8 +1378,19 @@ export default function App(): React.ReactElement {
   const [voiceAssets, setVoiceAssets] = useState<VoiceAssetsResult | null>(null)
   const [ttsResult, setTtsResult] = useState<VoicePreviewResult | null>(null)
   const [voiceProgress, setVoiceProgress] = useState<VoiceAssetProgress | null>(null)
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([])
+  const [voiceOutBusy, setVoiceOutBusy] = useState(false)
+  const [voiceOutResult, setVoiceOutResult] = useState<VoiceOutTestResult | null>(null)
 
   useEffect(() => window.api.onWhisperProgress((progress) => setVoiceProgress(progress)), [])
+
+  // 输出设备列表只用来展示：面板里枚举一次，插拔设备后重新打开页面就能看到。
+  useEffect(() => {
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((all) => setAudioOutputs(all.filter((d) => d.kind === 'audiooutput')))
+      .catch(() => setAudioOutputs([]))
+  }, [])
 
   const setupWhisper = async (): Promise<void> => {
     setVoiceBusy(true)
@@ -1425,6 +1438,23 @@ export default function App(): React.ReactElement {
       setTtsResult({ ok: false, error: e instanceof Error ? e.message : String(e) })
     } finally {
       setVoiceBusy(false)
+    }
+  }
+
+  const runVoiceOutTest = async (): Promise<void> => {
+    setVoiceOutBusy(true)
+    setVoiceOutResult(null)
+    try {
+      setVoiceOutResult(await window.api.voiceOutTest())
+    } catch (e) {
+      setVoiceOutResult({
+        ok: false,
+        durationMs: null,
+        hint: null,
+        error: e instanceof Error ? e.message : String(e)
+      })
+    } finally {
+      setVoiceOutBusy(false)
     }
   }
 
@@ -1605,7 +1635,7 @@ export default function App(): React.ReactElement {
           <Card>
             <CardHeader>
               <CardTitle>语音链路</CardTitle>
-              <CardDescription>whisper.cpp 在本机运行（资源自动下载）；麦克风采集与 TTS 均已接通。</CardDescription>
+              <CardDescription>whisper.cpp 在本机运行（资源自动下载）；「测试声出」念一句固定英文并自动按住说话键送进频道。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="grid gap-2">
@@ -1618,12 +1648,33 @@ export default function App(): React.ReactElement {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="ttsDevice">TTS 输出设备（虚拟声卡）</Label>
-                <Input
+                <Label htmlFor="ttsDevice">声出输出设备（游戏语音经它进频道）</Label>
+                <Select
                   id="ttsDevice"
                   value={settings.ttsOutputDevice}
                   onChange={(e) => setSettings((s) => ({ ...s, ttsOutputDevice: e.target.value }))}
-                  placeholder="CABLE Input (VB-Audio Virtual Cable)"
+                >
+                  <option value="">系统默认输出</option>
+                  {audioOutputs.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `输出设备 ${d.deviceId.slice(0, 8)}…`}
+                    </option>
+                  ))}
+                  {settings.ttsOutputDevice && !audioOutputs.some((d) => d.deviceId === settings.ttsOutputDevice) ? (
+                    <option value={settings.ttsOutputDevice}>（已保存，当前未接入）</option>
+                  ) : null}
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  选 VB-Cable 的「CABLE Input」；找不到已选设备时自动回退系统默认输出并提示。
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ttsSpeakKey">说话键（游戏里按住才能发言的那个键）</Label>
+                <Input
+                  id="ttsSpeakKey"
+                  value={settings.ttsSpeakKey}
+                  onChange={(e) => setSettings((s) => ({ ...s, ttsSpeakKey: e.target.value.toUpperCase() }))}
+                  placeholder="F5"
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1642,6 +1693,9 @@ export default function App(): React.ReactElement {
                 </Button>
                 <Button variant="outline" disabled={voiceBusy} onClick={() => void previewTts()}>
                   试听 TTS
+                </Button>
+                <Button variant="outline" disabled={voiceOutBusy} onClick={() => void runVoiceOutTest()}>
+                  测试声出
                 </Button>
               </div>
               {voiceProgress && (
@@ -1669,6 +1723,18 @@ export default function App(): React.ReactElement {
                     {ttsResult.ok ? `TTS 正常 · ${ttsResult.voice ?? ''}` : 'TTS 失败'}
                   </p>
                   {ttsResult.error && <p className="text-xs text-destructive">{ttsResult.error}</p>}
+                </div>
+              )}
+              {voiceOutResult && (
+                <div className="space-y-1 rounded-md bg-stone-900/60 p-3 text-sm">
+                  <p className={voiceOutResult.ok ? 'text-emerald-400' : 'text-red-400'}>
+                    {voiceOutResult.ok
+                      ? `声出测试通过${voiceOutResult.durationMs ? ` · ${(voiceOutResult.durationMs / 1000).toFixed(1)} 秒` : ''}`
+                      : '声出测试失败'}
+                  </p>
+                  {voiceOutResult.hint && <p className="text-xs text-amber-400">{voiceOutResult.hint}</p>}
+                  {voiceOutResult.keyError && <p className="text-xs text-destructive">{voiceOutResult.keyError}</p>}
+                  {voiceOutResult.error && <p className="text-xs text-destructive">{voiceOutResult.error}</p>}
                 </div>
               )}
               {voiceProbe && (

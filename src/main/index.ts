@@ -35,6 +35,7 @@ import { installProxyAwareFetch } from './services/session/net-fetch'
 import { runChatBlockProbe } from './probes/chat-block'
 import { runInPlaceProbe, runReplyLatencyProbe } from './probes/latency'
 import { runOverlayGeometryProbe } from './probes/overlay-geometry'
+import { runVoiceOutProbe } from './probes/voice-out'
 import { loadSettings } from './services/settings'
 import { warmTranslator } from './services/session/durable-translator'
 import { suppressExperimentalSqliteWarning } from './services/session/warnings'
@@ -169,6 +170,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--match-report')) void runMatchReportProbe()
   if (process.argv.includes('--translate-cache-probe')) void runTranslateCacheProbe()
   if (process.argv.includes('--overlay-geometry-probe')) void runOverlayGeometryProbe()
+  if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()
   if (process.argv.includes('--input-probe')) void runInputProbe()
 
   const startup = loadSettings()
@@ -254,4 +256,4 @@ app.on('will-quit', () => {
   destroyTray()
   getInPlaceSender().dispose()
   getOverlayManager().destroy()
-})
+})

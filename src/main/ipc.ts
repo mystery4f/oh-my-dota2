@@ -22,6 +22,7 @@ import { buildSayTeamCommand, getConsoleSender } from './services/input/console-
 import { getInPlaceSender } from './services/input/chat-inplace'
 import { getChatSender, normalizeChatLine } from './services/input/chat-send'
 import { getWhisperAdapter } from './services/voice/whisper'
+import { getVoiceOutService } from './services/voice/voice-out'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
@@ -231,6 +232,8 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.VOICE_TTS_PREVIEW, (_e, text: string) =>
     getTtsAdapter().preview(String(text ?? ''))
   )
+  // 测试声出：固定英文句 → Edge 英文嗓 → 所选输出 → 自动按住说话键（voice-out 闭环的入口）。
+  ipcMain.handle(IPC.VOICE_OUT_TEST, () => getVoiceOutService().test())
   ipcMain.handle(IPC.OVERLAY_REPLY_CLOSE, (_e, submitted?: boolean) =>
     getOverlayManager().closeReply(Boolean(submitted))
   )
