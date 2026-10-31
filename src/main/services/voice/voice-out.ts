@@ -11,7 +11,6 @@ import {
   VOICE_OUT_VOICES,
   decideVoiceOutTest,
   normalizeVoiceOutEngine,
-  pickPlayableSegments,
   pttWatchdogMs,
   pttWindow,
   resolveVoiceOutSynth,
@@ -28,8 +27,8 @@ import { getPttKeySender } from '../input/ptt-key'
 import { getVoiceOutWindow } from '../../windows/voice-out'
 import { getOverlayManager } from '../../windows/overlay'
 
-/** 窗口侧枚举设备 + setSinkId + 解码读时长的总预算（页面里 metadata 自己还有 8 秒）。 */
-const READY_TIMEOUT_MS = 15_000
+/** 窗口侧枚举设备 + setSinkId + 解码读时长的总预算：必须盖过最坏路径——页面加载 8 s（PAGE_LOAD_TIMEOUT_MS）+ 页面内读音频时长 8 s = 16 s。 */
+const READY_TIMEOUT_MS = 17_000
 
 /** 顺序递增的请求号：窗口只认当前这一单，旧单的 READY/ENDED 一律忽略。 */
 let nextRequestId = 1
@@ -271,33 +270,27 @@ class VoiceOutService {
     const settings = loadSettings()
     // 长句先切（与朗读同款分句，上限读设置 ttsSpeakSegmentChars，10–60）。
     const segments = splitForSpeech(text, settings.ttsSpeakSegmentChars ?? 30)
-    // 与朗读同款：各段并行合成（越早越好），投递仍按序——第一段一就绪就进频道。
-    // 引擎/封装逐段按设置解析（票 07 后与测试腿同一个 resolveVoiceOutSynth）；
-    // 嗓键传空——对讲面向队友，不挑面板朗读音色：edge 出英文占位嗓、离线出清单首位、GV 不选嗓。
-    const audios = await Promise.all(
-      segments.map(async (segment): Promise<ReplySegmentAudio | null> => {
-        const synth = resolveVoiceOutSynth(settings.ttsOutEngine, '', segment)
-        let audio: Buffer | null
-        if (synth.engine === 'offline') {
-          audio = await synthesizeOffline(segment, synth.voice as OfflineVoiceId, settings.ttsRate)
-        } else if (synth.engine === 'sovits') {
-          // GV：音色由参考音频/音色包权重决定（切换复用现有 sovits 管线），语言看文本本身。
-          audio = await synthesizeSovits(segment, settings.ttsRate, synth.lang)
-        } else {
-          audio = await synthesizeEdge(segment, synth.voice, settings.ttsRate, settings.ttsPitch, VOICE_OUT_VOICES)
-        }
-        return audio === null ? null : { bytes: audio, audioMime: synth.audioMime }
-      })
-    )
-    const playable = pickPlayableSegments(segments, audios)
-    if (playable.length === 0) {
-      // 引擎跟设置走，别把「断网」误报给离线/GV 用户（与测试腿同一份提示表）。
-      const engine = normalizeVoiceOutEngine(settings.ttsOutEngine)
-      const error = SYNTH_FAIL_HINT[engine]
-      console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', engine, segments: segments.length }))
-      showHint(error)
-      return { spoken: false, error }
-    }
+    // 流水线：各段合成立刻并行开跑，播放循环里才按序 await——第一段一就绪就进频道，
+    // 不等最慢的段（GV 串行 api_v2 下批量等完，整句静默会被最慢段拉长）。
+    // 引擎/封装/嗓逐段按设置解析（票 07 后与测试腿同一个 resolveVoiceOutSynth）：
+    // 音色传面板「声出音色」（ttsOutVoice）——测试声出验的就是对讲要用的这把嗓；
+    // GV 本就不选嗓（音色由参考音频决定），解析层自己打回各引擎默认。
+    const synthJobs = segments.map(async (segment): Promise<ReplySegmentAudio | null> => {
+      const synth = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, segment)
+      let audio: Buffer | null
+      if (synth.engine === 'offline') {
+        audio = await synthesizeOffline(segment, synth.voice as OfflineVoiceId, settings.ttsRate)
+      } else if (synth.engine === 'sovits') {
+        // GV：音色由参考音频/音色包权重决定（切换复用现有 sovits 管线），语言看文本本身。
+        audio = await synthesizeSovits(segment, settings.ttsRate, synth.lang)
+      } else {
+        audio = await synthesizeEdge(segment, synth.voice, settings.ttsRate, settings.ttsPitch, VOICE_OUT_VOICES)
+      }
+      return audio === null ? null : { bytes: audio, audioMime: synth.audioMime }
+    })
+    // 播放循环万一半路抛出，没轮到的段就是孤儿 Promise：先挂空 catch 防 unhandled rejection，
+    // 原 Promise 稍后在循环里照常可 await（合成本体失败自己吞成 null，这里只是保险）。
+    for (const job of synthJobs) void job.catch(() => undefined)
 
     const window = getVoiceOutWindow()
     const vk = speakKeyVk(settings.ttsSpeakKey)
@@ -313,16 +306,19 @@ class VoiceOutService {
 
     let startedAny = false
     let audioPlayed = false
+    let synthOkAny = false
     try {
-      for (let index = 0; index < playable.length; index += 1) {
-        const segment = playable[index]
+      for (let index = 0; index < synthJobs.length; index += 1) {
+        const audio = await synthJobs[index]
+        if (audio === null) continue
+        synthOkAny = true
         const requestId = nextRequestId
         nextRequestId += 1
         const readyPromise = waitReady(requestId, READY_TIMEOUT_MS)
         await window.play({
           requestId,
-          audioBase64: segment.audio.bytes.toString('base64'),
-          audioMime: segment.audio.audioMime,
+          audioBase64: audio.bytes.toString('base64'),
+          audioMime: audio.audioMime,
           requestedDevice: settings.ttsOutputDevice
         })
         const ready = await readyPromise
@@ -370,6 +366,14 @@ class VoiceOutService {
       await releaseKey()
     }
 
+    if (!synthOkAny) {
+      // 全部段合成失败：不播、不按键，引擎跟设置走——别把「断网」误报给离线/GV 用户（与测试腿同一份提示表）。
+      const engine = normalizeVoiceOutEngine(settings.ttsOutEngine)
+      const error = SYNTH_FAIL_HINT[engine]
+      console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', engine, segments: segments.length }))
+      showHint(error)
+      return { spoken: false, error }
+    }
     if (!audioPlayed) return { spoken: false, error: '声出播放失败' }
     if (keyError) {
       // 音频播出去了（本地能听见），但频道没开——队友没听到，按失败算并说明原因。

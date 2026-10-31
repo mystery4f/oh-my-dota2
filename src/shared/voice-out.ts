@@ -239,7 +239,7 @@ export interface VoiceReplyPlan {
   speak: boolean
   /** 要念的文本（已 trim；译文原文照念）。 */
   text: string
-  /** 默认引擎（edge）下的英文占位嗓，仅信息展示：对讲不挑面板朗读音色，实际引擎/嗓由声出腿按设置逐段解析。 */
+  /** 默认引擎（edge）下的英文占位嗓，仅信息展示：对讲实际用的嗓由声出腿按设置逐段解析——引擎跟设置，音色取面板「声出音色」（GV 不选嗓）。 */
   voice: string
   skip: VoiceReplySkip | null
 }
