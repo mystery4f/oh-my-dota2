@@ -151,7 +151,17 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
   }
 }
 
-/** 把本拍新到达的译文交给浮层去念。手动那张照不念——点一下就冒出声会很惊吓。 */
+/**
+ * 本拍译文是否已过期：宣布（announce）时若已有更新的捕获到达，念它只会让朗读越排越落后——
+ * 「先念上一条再念当前」就是这么来的。合成队列层的丢弃（enqueueSovitsSpeak）只能掐掉
+ * 还在排队的，掐不掉「刚翻译完、正要宣布」的这一类，所以宣布时点也要拦一道。
+ */
+export function isAnnounceStale(entryTs: number, cutoff: number | undefined, drop: boolean): boolean {
+  return drop === true && cutoff !== undefined && entryTs < cutoff
+}
+/** 把本拍新到达的译文交给浮层去念。手动那张照不念——点一下就冒出声会很惊吓。
+ * cutoff=最新一次捕获的时间戳（capture 层传入）：ttsDropBacklog 开着时，宣布此刻已过期
+ * （捕获时间早于更新一拍）的条目直接跳过；宁可漏念旧的，也不让队列越念越落后。 */
 /**
  * 从设置组装 decideSpeak 的入参。engine 必须显式带进来：漏掉时 decideSpeak 会默认
  * edge，离线分支合成出的 WAV 在 deliver 里就被标成 audio/mpeg，浮层按 mp3 解不开。
@@ -179,7 +189,7 @@ export function speakOptionsFromSettings(settings: {
     voice: settings.ttsVoice
   }
 }
-export function announceEntries(entries: CaptureEntry[]): void {
+export function announceEntries(entries: CaptureEntry[], cutoff?: number): void {
   if (entries.length === 0) return
   const settings = loadSettings()
   if (!settings.ttsReadAloud) return
@@ -190,6 +200,11 @@ export function announceEntries(entries: CaptureEntry[]): void {
   lastSpeakAt = Date.now()
   for (const entry of entries) {
     const payload = decideSpeak(entry, options)
+    if (isAnnounceStale(entry.ts, cutoff, settings.ttsDropBacklog === true)) {
+      // 静默路径留痕：宣布时已被更新一拍顶掉——念它只会把队伍排反。
+      console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'announce', text: entry.original.slice(0, 30) }))
+      continue
+    }
     if (!payload) {
       // 静默路径留痕：own / pending / 空正文三种跳过在浮层上都一样（没声音），
       // 没有 TTS_SPEAK_SKIP 的话「怎么没念」只能靠翻代码猜。

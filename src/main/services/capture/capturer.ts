@@ -98,6 +98,9 @@ export class ChatCaptureService {
   private seq = 0
   private listeners = new Set<(entries: CaptureEntry[]) => void>()
   private updateListeners = new Set<(entries: CaptureEntry[]) => void>()
+  // 最新一拍捕获的时间戳：朗读在宣布（announce）时对照它丢弃已被更新一拍顶掉的旧条目，
+  // 否则上一条的译文晚到（翻译抖动可达十几秒）就会插在新消息之后被念出来。
+  private lastPushAt = 0
   private stateListeners = new Set<(status: CaptureStatus) => void>()
 
   onStateChange(callback: (status: CaptureStatus) => void): () => void {
@@ -135,6 +138,8 @@ export class ChatCaptureService {
   }
 
   pushMessages(messages: Array<{ text: string; own?: boolean; speaker?: string }>): void {
+    // 先盖章再构造条目：本拍条目的 ts 都 >= lastPushAt，宣布时不会被自己的 cutoff 判成过期。
+    this.lastPushAt = Date.now()
     const fresh = messages
       .map((line) => ({ text: line.text.trim(), own: line.own === true, speaker: line.speaker }))
       .filter((line) => normalizeLine(line.text).length >= 2)
@@ -165,7 +170,7 @@ export class ChatCaptureService {
       const done = settled.map((entry) => ({ ...entry, translated: null, pending: false }))
       this.broadcast(IPC.CAPTURE_UPDATE, done)
       // 不用翻 ≠ 不用念：中文玩家说的原话正是要听的内容。
-      announceEntries(done)
+      announceEntries(done, this.lastPushAt)
     }
     if (needs.length === 0) return
     this.translateChain = this.translateChain
@@ -215,7 +220,7 @@ export class ChatCaptureService {
       this.totalEntries += filled.length
       this.broadcast(IPC.CAPTURE_UPDATE, filled)
       // 译文落地就交给朗读：pending 的行会被 decideSpeak 拒掉，这里不必再判。
-      announceEntries(filled)
+      announceEntries(filled, this.lastPushAt)
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err)
     }

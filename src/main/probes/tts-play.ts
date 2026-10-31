@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, synthesizeEdge } from '../services/voice/edge'
-import { applyBacklogPolicy, decideSpeak, isSpeakStale, speakOptionsFromSettings, speakSkipReason } from '../services/voice/speech'
+import { applyBacklogPolicy, decideSpeak, isAnnounceStale, isSpeakStale, speakOptionsFromSettings, speakSkipReason } from '../services/voice/speech'
 import { lookupSovitsCache, resetSovitsCache, sovitsCacheSize, storeSovitsCache } from '../services/voice/sovits-cache'
 import { offlineReady, synthesizeOffline } from '../services/voice/offline'
 import type { OfflineVoiceId } from '../../shared/ipc'
@@ -37,6 +37,21 @@ export async function runTtsPlayProbe(): Promise<void> {
   })
   const speakOk = speakRows.every((row) => row.ok)
   console.log('TTS_SPEAK_CASES', JSON.stringify({ speakOk, rows: speakRows }))
+
+  // 宣布时点的过期判定：上一条还在翻译时捕获了新消息，旧译文落地就该被丢掉，
+  // 不然浮层会「先念上一条再念当前」。关掉丢积压或没有 cutoff 时一律不丢。
+  const staleCases = [
+    { name: '更新一拍已到，旧条目过期丢弃', ts: 100, cutoff: 200, drop: true, want: true },
+    { name: '同拍条目（ts>=cutoff）不算过期', ts: 200, cutoff: 200, drop: true, want: false },
+    { name: '没有更新一拍（cutoff=0）不丢', ts: 100, cutoff: 0, drop: true, want: false },
+    { name: '丢积压开关关着不丢', ts: 100, cutoff: 200, drop: false, want: false }
+  ]
+  const staleRows = staleCases.map((item) => {
+    const got = isAnnounceStale(item.ts, item.cutoff, item.drop)
+    return { name: item.name, want: item.want, got, ok: got === item.want }
+  })
+  const staleOk = staleRows.every((row) => row.ok)
+  console.log('TTS_ANNOUNCE_STALE_CASES', JSON.stringify({ staleOk, rows: staleRows }))
 
   // engine 必须从设置一路传进 payload：漏掉时 decideSpeak 默认 edge，离线 WAV 会被标成
   // audio/mpeg 投递，浮层解不开就静音——「离线朗读无效、联网正常」就是这么来的。
@@ -268,9 +283,10 @@ console.log('TTS_CACHE_CASES', JSON.stringify({ cacheOk, rows: cacheRows }))
   console.log(
     'TTS_PLAY_RESULT',
     JSON.stringify({
-      ok: speakOk && engineOk && ownOk && prefixOk && skipOk && backlogOk && cacheOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      ok: speakOk && staleOk && engineOk && ownOk && prefixOk && skipOk && backlogOk && cacheOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
       prefixOk,
       speakOk,
+      staleOk,
       engineOk,
       playOkCount,
       expectedPlays,
