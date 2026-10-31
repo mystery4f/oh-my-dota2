@@ -219,7 +219,7 @@ export function speakKeyVk(key: string): number | null {
 }
 
 /* ── 语音对讲一键到底（票 05）的纯决策 ─────────────────────────────
- * Alt+Shift+V 说中文 → whisper 识别 → prod 会话翻成英文 → Edge 英文嗓声出进语音频道。
+ * Alt+Shift+V 说中文 → whisper 识别 → prod 会话翻成英文 → 按设置的声出引擎合成进语音频道。
  * 什么时候触发声出、走哪条静默分支、段落怎么投、第三行写什么，都先在这里定死。 */
 
 /** 一键到底在哪一环停的：识别、翻译、声出。成功为 null。 */
@@ -239,7 +239,7 @@ export interface VoiceReplyPlan {
   speak: boolean
   /** 要念的文本（已 trim；译文原文照念）。 */
   text: string
-  /** 固定英文嗓：语音对讲面向队友，面板朗读音色不影响这里。 */
+  /** 默认引擎（edge）下的英文占位嗓，仅信息展示：对讲不挑面板朗读音色，实际引擎/嗓由声出腿按设置逐段解析。 */
   voice: string
   skip: VoiceReplySkip | null
 }

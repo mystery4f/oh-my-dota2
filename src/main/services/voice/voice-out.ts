@@ -10,12 +10,14 @@ import {
   VOICE_OUT_TEST_LINE,
   VOICE_OUT_VOICES,
   decideVoiceOutTest,
+  normalizeVoiceOutEngine,
   pickPlayableSegments,
   pttWatchdogMs,
   pttWindow,
   resolveVoiceOutSynth,
   speakKeyVk,
-  type VoiceOutEngine
+  type VoiceOutEngine,
+  type VoiceOutSynthPlan
 } from '@shared/voice-out'
 import { synthesizeEdge } from './edge'
 import { synthesizeOffline } from './offline'
@@ -99,6 +101,12 @@ export interface VoiceOutSpeakOutcome {
   spoken: boolean
   /** 首个失败说明（合成全败 / 键失败 / 播放失败）；成功为 null。 */
   error: string | null
+}
+
+/** 一段的合成产物：音频本体带上该段实际用的封装（引擎不同封装不同，播放按它解）。 */
+interface ReplySegmentAudio {
+  bytes: Buffer
+  audioMime: VoiceOutSynthPlan['audioMime']
 }
 
 /**
@@ -264,15 +272,29 @@ class VoiceOutService {
     // 长句先切（与朗读同款分句，上限读设置 ttsSpeakSegmentChars，10–60）。
     const segments = splitForSpeech(text, settings.ttsSpeakSegmentChars ?? 30)
     // 与朗读同款：各段并行合成（越早越好），投递仍按序——第一段一就绪就进频道。
+    // 引擎/封装逐段按设置解析（票 07 后与测试腿同一个 resolveVoiceOutSynth）；
+    // 嗓键传空——对讲面向队友，不挑面板朗读音色：edge 出英文占位嗓、离线出清单首位、GV 不选嗓。
     const audios = await Promise.all(
-      segments.map((segment) =>
-        synthesizeEdge(segment, DEFAULT_VOICE_OUT_VOICE, settings.ttsRate, settings.ttsPitch, VOICE_OUT_VOICES)
-      )
+      segments.map(async (segment): Promise<ReplySegmentAudio | null> => {
+        const synth = resolveVoiceOutSynth(settings.ttsOutEngine, '', segment)
+        let audio: Buffer | null
+        if (synth.engine === 'offline') {
+          audio = await synthesizeOffline(segment, synth.voice as OfflineVoiceId, settings.ttsRate)
+        } else if (synth.engine === 'sovits') {
+          // GV：音色由参考音频/音色包权重决定（切换复用现有 sovits 管线），语言看文本本身。
+          audio = await synthesizeSovits(segment, settings.ttsRate, synth.lang)
+        } else {
+          audio = await synthesizeEdge(segment, synth.voice, settings.ttsRate, settings.ttsPitch, VOICE_OUT_VOICES)
+        }
+        return audio === null ? null : { bytes: audio, audioMime: synth.audioMime }
+      })
     )
     const playable = pickPlayableSegments(segments, audios)
     if (playable.length === 0) {
-      const error = 'Edge 合成失败（断网或接口不可用），这句不出声'
-      console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', segments: segments.length }))
+      // 引擎跟设置走，别把「断网」误报给离线/GV 用户（与测试腿同一份提示表）。
+      const engine = normalizeVoiceOutEngine(settings.ttsOutEngine)
+      const error = SYNTH_FAIL_HINT[engine]
+      console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', engine, segments: segments.length }))
       showHint(error)
       return { spoken: false, error }
     }
@@ -299,8 +321,8 @@ class VoiceOutService {
         const readyPromise = waitReady(requestId, READY_TIMEOUT_MS)
         await window.play({
           requestId,
-          audioBase64: segment.audio.toString('base64'),
-          audioMime: 'audio/mpeg',
+          audioBase64: segment.audio.bytes.toString('base64'),
+          audioMime: segment.audio.audioMime,
           requestedDevice: settings.ttsOutputDevice
         })
         const ready = await readyPromise

@@ -4,7 +4,6 @@ import {
   DEFAULT_SINK_ID,
   DEFAULT_SPEAK_KEY,
   DEFAULT_VOICE_OUT_ENGINE,
-  DEFAULT_VOICE_OUT_VOICE,
   MIN_SPEAK_MS,
   PTT_MARGIN_MS,
   SINK_FALLBACK_HINT,
@@ -50,17 +49,19 @@ function push(name: string, ok: boolean, detail: string): void {
 
 export function runVoiceOutProbe(): void {
   // —— 决策一：念什么、哪个嗓、念不念 ——
+  // 票 07 后没有「固定嗓」常量可引用：默认嗓 = 默认引擎经 resolveVoiceOutSynth 解析出的那把。
+  const defaultSynth = resolveVoiceOutSynth(DEFAULT_VOICE_OUT_ENGINE, '', VOICE_OUT_TEST_LINE)
   push('测试句非空且纯 ASCII（合成端最稳）', VOICE_OUT_TEST_LINE.length > 0 && /^[\x20-\x7E]+$/.test(VOICE_OUT_TEST_LINE), VOICE_OUT_TEST_LINE)
   push(
     '默认嗓必须是英文占位嗓，且绝不能混进朗读下拉（EDGE_VOICES）',
-    VOICE_OUT_VOICES.some((voice) => voice.id === DEFAULT_VOICE_OUT_VOICE),
-    DEFAULT_VOICE_OUT_VOICE
+    VOICE_OUT_VOICES.some((voice) => voice.id === defaultSynth.voice),
+    defaultSynth.voice
   )
 
   const okPlan = decideVoiceOutTest(true)
   push('合成成功 → 念', okPlan.speak && okPlan.skip === null, JSON.stringify(okPlan))
   push('念的就是固定测试句', okPlan.text === VOICE_OUT_TEST_LINE.trim(), okPlan.text)
-  push('念的是英文占位嗓', okPlan.voice === DEFAULT_VOICE_OUT_VOICE, okPlan.voice)
+  push('念的是默认引擎解析出的英文占位嗓', okPlan.voice === defaultSynth.voice, okPlan.voice)
 
   const failPlan = decideVoiceOutTest(false)
   push(
@@ -104,7 +105,7 @@ export function runVoiceOutProbe(): void {
   const edgeFallback = resolveVoiceOutSynth('edge', 'zh-CN-YunxiNeural', VOICE_OUT_TEST_LINE)
   push(
     'edge 引擎音色不在声出清单里 → 打回默认英文占位嗓',
-    edgeFallback.voice === DEFAULT_VOICE_OUT_VOICE,
+    edgeFallback.voice === defaultSynth.voice,
     edgeFallback.voice
   )
 
@@ -284,9 +285,23 @@ export function runVoiceOutProbe(): void {
   )
   const replyPlan = decideVoiceOutReply({ recognized: ' 小心肉山 ', translated: ' Careful, they are doing Roshan. ' })
   push(
-    '拿到非空译文 → 念 trim 后的译文，固定英文嗓',
-    replyPlan.speak && replyPlan.text === 'Careful, they are doing Roshan.' && replyPlan.voice === DEFAULT_VOICE_OUT_VOICE && replyPlan.skip === null,
+    '拿到非空译文 → 念 trim 后的译文，默认引擎出英文占位嗓',
+    replyPlan.speak && replyPlan.text === 'Careful, they are doing Roshan.' && replyPlan.voice === defaultSynth.voice && replyPlan.skip === null,
     JSON.stringify(replyPlan)
+  )
+  // 票 07 后声出腿逐段按设置引擎解析（嗓键传空、不挑面板嗓）：封装配引擎，播放才不会拿错封装。
+  const replyEdge = resolveVoiceOutSynth('edge', '', replyPlan.text)
+  const replyOffline = resolveVoiceOutSynth('offline', '', replyPlan.text)
+  const replySovits = resolveVoiceOutSynth('sovits', '', replyPlan.text)
+  push(
+    '声出腿按设置引擎逐段解析（edge 英文占位 / offline 清单首位 / GV 不选嗓），封装各随引擎',
+    replyEdge.voice === defaultSynth.voice &&
+      replyOffline.voice === OFFLINE_VOICES[0].id &&
+      replySovits.voice === '' &&
+      replyEdge.audioMime === 'audio/mpeg' &&
+      replyOffline.audioMime === 'audio/wav' &&
+      replySovits.audioMime === 'audio/wav',
+    JSON.stringify({ edge: replyEdge, offline: replyOffline, sovits: replySovits })
   )
 
   // —— 决策六（票 05）：段落合成 → 可播列表 ——
