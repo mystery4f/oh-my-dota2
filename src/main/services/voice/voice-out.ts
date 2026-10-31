@@ -1,21 +1,23 @@
-import { ipcMain } from 'electron'
 import {
-  IPC,
+  type OfflineVoiceId,
   type VoiceOutEndedReport,
   type VoiceOutReadyReport,
   type VoiceOutTestResult
 } from '@shared/ipc'
 import {
-  DEFAULT_VOICE_OUT_VOICE,
   MIN_SPEAK_MS,
   VOICE_OUT_TEST_LINE,
   VOICE_OUT_VOICES,
   decideVoiceOutTest,
   pttWatchdogMs,
   pttWindow,
-  speakKeyVk
+  resolveVoiceOutSynth,
+  speakKeyVk,
+  type VoiceOutEngine
 } from '@shared/voice-out'
 import { synthesizeEdge } from './edge'
+import { synthesizeOffline } from './offline'
+import { synthesizeSovits } from './sovits'
 import { loadSettings } from '../settings'
 import { getPttKeySender } from '../input/ptt-key'
 import { getVoiceOutWindow } from '../../windows/voice-out'
@@ -26,6 +28,16 @@ const READY_TIMEOUT_MS = 15_000
 
 /** 顺序递增的请求号：窗口只认当前这一单，旧单的 READY/ENDED 一律忽略。 */
 let nextRequestId = 1
+
+/**
+ * 合成失败时浮层上的提示：引擎不同，失败的原因域也不同，别把「断网」误报给离线/GV 用户。
+ * 失败一律静默跳过这句（不念、不按键），绝不回退系统嗓子。
+ */
+const SYNTH_FAIL_HINT: Record<VoiceOutEngine, string> = {
+  edge: 'Edge 合成失败（断网或接口不可用），这句不出声',
+  offline: '离线引擎合成失败（模型没装好或推理失败），这句不出声',
+  sovits: 'GV 合成失败（api_v2 不在或参考没配），这句不出声'
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -80,8 +92,9 @@ function waitEnded(requestId: number, timeoutMs: number): Promise<VoiceOutEndedR
 }
 
 /**
- * 「测试声出」的最小闭环：固定英文句 → Edge 英文嗓合成 → 所选输出设备（VB-Cable）
- * → 自动按住说话键播完 → 松开。合成失败不念也不按键；ENDED 没回来也不能把键按死。
+ * 「测试声出」的最小闭环：固定英文句 → 按设置里的声出引擎合成（Edge 英文占位 /
+ * 离线本地 / GV 音色包）→ 所选输出设备（VB-Cable）→ 自动按住说话键播完 → 松开。
+ * 合成失败不念也不按键；ENDED 没回来也不能把键按死。
  */
 class VoiceOutService {
   private chain: Promise<VoiceOutTestResult> = Promise.resolve({ ok: true, durationMs: null, hint: null })
@@ -95,17 +108,34 @@ class VoiceOutService {
 
   private async run(): Promise<VoiceOutTestResult> {
     const settings = loadSettings()
-    const audioOrNull = await synthesizeEdge(
-      VOICE_OUT_TEST_LINE,
-      DEFAULT_VOICE_OUT_VOICE,
-      settings.ttsRate,
-      settings.ttsPitch,
-      VOICE_OUT_VOICES
+    const synth = resolveVoiceOutSynth(
+      settings.ttsOutEngine,
+      settings.ttsOutVoice,
+      VOICE_OUT_TEST_LINE
     )
-    const plan = decideVoiceOutTest(audioOrNull !== null)
+    let audioOrNull: Buffer | null
+    if (synth.engine === 'offline') {
+      audioOrNull = await synthesizeOffline(
+        VOICE_OUT_TEST_LINE,
+        synth.voice as OfflineVoiceId,
+        settings.ttsRate
+      )
+    } else if (synth.engine === 'sovits') {
+      // GV：音色由参考音频/音色包权重决定（切换复用现有 sovits 管线），语言看文本本身。
+      audioOrNull = await synthesizeSovits(VOICE_OUT_TEST_LINE, settings.ttsRate, synth.lang)
+    } else {
+      audioOrNull = await synthesizeEdge(
+        VOICE_OUT_TEST_LINE,
+        synth.voice,
+        settings.ttsRate,
+        settings.ttsPitch,
+        VOICE_OUT_VOICES
+      )
+    }
+    const plan = decideVoiceOutTest(audioOrNull !== null, VOICE_OUT_TEST_LINE, synth)
     if (!plan.speak || audioOrNull === null) {
-      const error = plan.skip === 'synth-failed' ? 'Edge 合成失败（断网或接口不可用），这句不出声' : '测试句为空'
-      console.log('VOICE_OUT_SKIP', JSON.stringify({ skip: plan.skip }))
+      const error = plan.skip === 'synth-failed' ? SYNTH_FAIL_HINT[synth.engine] : '测试句为空'
+      console.log('VOICE_OUT_SKIP', JSON.stringify({ skip: plan.skip, engine: synth.engine }))
       showHint(error)
       return { ok: false, durationMs: null, hint: null, error }
     }
@@ -119,7 +149,7 @@ class VoiceOutService {
     await window.play({
       requestId,
       audioBase64: audio.toString('base64'),
-      audioMime: 'audio/mpeg',
+      audioMime: plan.audioMime,
       requestedDevice: settings.ttsOutputDevice
     })
 
@@ -155,6 +185,7 @@ class VoiceOutService {
       'VOICE_OUT_SPEAK',
       JSON.stringify({
         requestId,
+        engine: plan.engine,
         voice: plan.voice,
         bytes: audio.length,
         durationMs,
@@ -202,9 +233,4 @@ let service: VoiceOutService | null = null
 export function getVoiceOutService(): VoiceOutService {
   if (!service) service = new VoiceOutService()
   return service
-}
-
-/** ipc.ts 注册用：面板上的「测试声出」按钮进来这里。 */
-export function registerVoiceOutTest(): void {
-  ipcMain.handle(IPC.VOICE_OUT_TEST, () => getVoiceOutService().test())
 }

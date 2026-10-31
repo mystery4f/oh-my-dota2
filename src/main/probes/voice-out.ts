@@ -1,7 +1,9 @@
 import { app } from 'electron'
+import { OFFLINE_VOICES } from '@shared/ipc'
 import {
   DEFAULT_SINK_ID,
   DEFAULT_SPEAK_KEY,
+  DEFAULT_VOICE_OUT_ENGINE,
   DEFAULT_VOICE_OUT_VOICE,
   MIN_SPEAK_MS,
   PTT_MARGIN_MS,
@@ -10,9 +12,11 @@ import {
   VOICE_OUT_VOICES,
   decideVoiceOutTest,
   normalizeSpeakKey,
+  normalizeVoiceOutEngine,
   pttWatchdogMs,
   pttWindow,
   resolveOutputSink,
+  resolveVoiceOutSynth,
   speakKeyVk,
   type AudioOutputDevice
 } from '@shared/voice-out'
@@ -21,8 +25,9 @@ import {
  * 声出探针（--voice-out-probe）：只验「脑子」，不碰网络、不碰驱动、不开游戏。
  *
  * 声出链路坏起来最迷惑的是「合成成功但频道里没人听见」——合成、路由、按键三段
- * 各自都在，决策接错了才会哑。这里把三层决策逐条钉死：
- * 念不念/念什么/哪个嗓（decideVoiceOutTest）、输出设备路由（resolveOutputSink）、
+ * 各自都在，决策接错了才会哑。这里把四层决策逐条钉死：
+ * 念不念/念什么/哪个嗓（decideVoiceOutTest）、引擎与音色路由（normalizeVoiceOutEngine /
+ * resolveVoiceOutSynth：edge 占位、offline 本地、GV 音色包）、输出设备路由（resolveOutputSink）、
  * 说话键时序（pttWindow / pttWatchdogMs / speakKeyVk）。
  * 物理层（VB-Cable 出声、游戏里听到、SendInput 真按键）走人工验收。
  */
@@ -61,6 +66,100 @@ export function runVoiceOutProbe(): void {
   )
   const emptyPlan = decideVoiceOutTest(true, '   ')
   push('测试句只剩空白 → 不念', !emptyPlan.speak && emptyPlan.skip === 'empty-line', JSON.stringify(emptyPlan))
+
+  // —— 决策一·引擎选择（声出引擎并入三引擎层：edge 占位 / offline 本地 / GV 音色包） ——
+  push(
+    '默认声出引擎是 edge（英文神经嗓占位，GV 和离线中文嗓都不是默认）',
+    DEFAULT_VOICE_OUT_ENGINE === 'edge',
+    DEFAULT_VOICE_OUT_ENGINE
+  )
+  push(
+    '引擎名合法值原样通过（edge/offline/sovits）',
+    normalizeVoiceOutEngine('edge') === 'edge' &&
+      normalizeVoiceOutEngine('offline') === 'offline' &&
+      normalizeVoiceOutEngine('sovits') === 'sovits',
+    'edge/offline/sovits 原样通过'
+  )
+  push(
+    '乱填一律打回 edge：system/空串/undefined/GV（大写）',
+    normalizeVoiceOutEngine('system') === 'edge' &&
+      normalizeVoiceOutEngine('') === 'edge' &&
+      normalizeVoiceOutEngine(undefined) === 'edge' &&
+      normalizeVoiceOutEngine('GV') === 'edge',
+    'all→edge'
+  )
+
+  const edgeSynth = resolveVoiceOutSynth('edge', 'en-US-AnaNeural', VOICE_OUT_TEST_LINE)
+  push(
+    'edge 引擎按选择出英文神经嗓，mp3',
+    edgeSynth.engine === 'edge' &&
+      edgeSynth.voice === 'en-US-AnaNeural' &&
+      edgeSynth.audioMime === 'audio/mpeg',
+    JSON.stringify(edgeSynth)
+  )
+  const edgeFallback = resolveVoiceOutSynth('edge', 'zh-CN-YunxiNeural', VOICE_OUT_TEST_LINE)
+  push(
+    'edge 引擎音色不在声出清单里 → 打回默认英文占位嗓',
+    edgeFallback.voice === DEFAULT_VOICE_OUT_VOICE,
+    edgeFallback.voice
+  )
+
+  const offlineSynth = resolveVoiceOutSynth('offline', 'eula', VOICE_OUT_TEST_LINE)
+  push(
+    'offline 引擎按选择出本地嗓，wav',
+    offlineSynth.engine === 'offline' &&
+      offlineSynth.voice === 'eula' &&
+      offlineSynth.audioMime === 'audio/wav',
+    JSON.stringify(offlineSynth)
+  )
+  const offlineFallback = resolveVoiceOutSynth(
+    'offline',
+    'zh-CN-XiaoxiaoNeural',
+    VOICE_OUT_TEST_LINE
+  )
+  push(
+    'offline 引擎音色不在离线清单里 → 打回 baker（清单首位）',
+    offlineFallback.voice === OFFLINE_VOICES[0].id,
+    offlineFallback.voice
+  )
+
+  const sovitsSynth = resolveVoiceOutSynth('sovits', 'whatever', VOICE_OUT_TEST_LINE)
+  push(
+    'GV 引擎不选嗓（音色由参考音频/音色包权重决定），wav',
+    sovitsSynth.engine === 'sovits' &&
+      sovitsSynth.voice === '' &&
+      sovitsSynth.audioMime === 'audio/wav',
+    JSON.stringify(sovitsSynth)
+  )
+
+  const zhSynth = resolveVoiceOutSynth('edge', '', '这波打得漂亮，好运！')
+  const gvLang = resolveVoiceOutSynth('sovits', '', VOICE_OUT_TEST_LINE)
+  push(
+    '合成语言看文本本身（与朗读 decideSpeak 同判据），不看设置',
+    zhSynth.lang === 'zh' && gvLang.lang === 'en',
+    `${zhSynth.lang} / ${gvLang.lang}`
+  )
+
+  const gvSynth = resolveVoiceOutSynth('sovits', '', VOICE_OUT_TEST_LINE)
+  const gvPlan = decideVoiceOutTest(true, VOICE_OUT_TEST_LINE, gvSynth)
+  push(
+    '引擎决策整体进「念」计划（GV → 引擎/空嗓/wav 原样携带）',
+    gvPlan.speak &&
+      gvPlan.engine === 'sovits' &&
+      gvPlan.voice === '' &&
+      gvPlan.audioMime === 'audio/wav',
+    JSON.stringify(gvPlan)
+  )
+  const offlineSynthPlan = resolveVoiceOutSynth('offline', 'eula', VOICE_OUT_TEST_LINE)
+  const offlineSkip = decideVoiceOutTest(false, VOICE_OUT_TEST_LINE, offlineSynthPlan)
+  push(
+    '合成失败 → 不念：引擎跟设置走，嗓不带出（说键绝不按）',
+    !offlineSkip.speak &&
+      offlineSkip.engine === 'offline' &&
+      offlineSkip.voice === '' &&
+      offlineSkip.skip === 'synth-failed',
+    JSON.stringify(offlineSkip)
+  )
 
   // —— 决策二：输出设备路由 ——
   const devices: AudioOutputDevice[] = [

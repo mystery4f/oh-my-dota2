@@ -22,6 +22,8 @@ const PERSISTED_FIELDS = [
   'ttsSpeakSegmentChars',
   'ttsOutputDevice',
   'ttsSpeakKey',
+  'ttsOutEngine',
+  'ttsOutVoice',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -67,6 +69,14 @@ function sentinelFor(
     case 'ttsSpeakKey':
       // 两个都是合法键：验的是「选中的那一个」而不是「任意字符串」。
       return (current.ttsSpeakKey === 'F5' ? 'F6' : 'F5') as AppSettings[typeof key]
+    case 'ttsOutEngine':
+      // 两个都是合法引擎（edge / offline）：合法值必须原样落盘原样读回。
+      return (current.ttsOutEngine === 'edge' ? 'offline' : 'edge') as AppSettings[typeof key]
+    case 'ttsOutVoice':
+      // 声出清单里真实存在的英文嗓，验证「选中的那一个」；音色字段不归一化（决策层打回）。
+      return (
+        current.ttsOutVoice === 'en-US-JennyNeural' ? 'en-US-AnaNeural' : 'en-US-JennyNeural'
+      ) as AppSettings[typeof key]
   }
 }
 

@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DEFAULT_SETTINGS, OFFLINE_VOICES, type AppSettings, type ProviderConfig } from '@shared/ipc'
-import { normalizeSpeakKey } from '@shared/voice-out'
+import { normalizeSpeakKey, normalizeVoiceOutEngine } from '@shared/voice-out'
 
 function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -48,6 +48,9 @@ export function loadSettings(): AppSettings {
     else merged.ttsSpeakSegmentChars = Math.min(60, Math.max(10, Math.round(rawSeg)))
     // 说话键：只认 F1–F12 和单个字母/数字（SendInput 的 VK 码能对上的集合），乱填打回 F5。
     merged.ttsSpeakKey = normalizeSpeakKey(merged.ttsSpeakKey)
+    // 声出引擎：只认三引擎层的合法值，乱填打回 edge（英文占位）；声出音色不在这里钳，
+    // resolveVoiceOutSynth 决策时对不上清单自会打回默认（和 ttsVoice 同一策略）。
+    merged.ttsOutEngine = normalizeVoiceOutEngine(merged.ttsOutEngine)
     return merged
   } catch (err) {
     console.error('settings: load failed, using defaults', err)

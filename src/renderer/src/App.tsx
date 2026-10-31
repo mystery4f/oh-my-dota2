@@ -26,6 +26,7 @@ import {
 } from '@shared/ipc'
 import type { UpdateState } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
+import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -1352,6 +1353,8 @@ export default function App(): React.ReactElement {
         whisperBinPath: settings.whisperBinPath,
         ttsOutputDevice: settings.ttsOutputDevice,
         ttsSpeakKey: settings.ttsSpeakKey,
+        ttsOutEngine: settings.ttsOutEngine,
+        ttsOutVoice: settings.ttsOutVoice,
       })
       setSettings(next)
       setSaveFlash('已保存')
@@ -1635,7 +1638,9 @@ export default function App(): React.ReactElement {
           <Card>
             <CardHeader>
               <CardTitle>语音链路</CardTitle>
-              <CardDescription>whisper.cpp 在本机运行（资源自动下载）；「测试声出」念一句固定英文并自动按住说话键送进频道。</CardDescription>
+              <CardDescription>
+                whisper.cpp 在本机运行（资源自动下载）；声出引擎可选 Edge / 离线 / GV，「测试声出」念一句固定英文并自动按住说话键送进频道。
+              </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="grid gap-2">
@@ -1646,6 +1651,74 @@ export default function App(): React.ReactElement {
                   onChange={(e) => setSettings((s) => ({ ...s, whisperBinPath: e.target.value }))}
                   placeholder="C:\\tools\\whisper.cpp\\whisper-cli.exe"
                 />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ttsOutEngine">声出引擎（译文合成人声送进频道的那条链）</Label>
+                <Select
+                  id="ttsOutEngine"
+                  value={settings.ttsOutEngine}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      ttsOutEngine: e.target.value as AppSettings['ttsOutEngine'],
+                    }))
+                  }
+                >
+                  <option value="edge">Edge · 英文神经嗓（默认占位）</option>
+                  <option value="offline">离线 · 本地模型</option>
+                  <option value="sovits">GV · GPT-SoVITS 音色包</option>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {settings.ttsOutEngine === 'sovits'
+                    ? '音色由参考音频决定：到浮层面板「GPT-SoVITS」区安装/切换音色包，权重自动切。英文包训练好后即插即用；中文包读英文会吞字，占位请回 Edge。'
+                    : settings.ttsOutEngine === 'offline'
+                      ? '离线模型是中文嗓，念英文会吞字——只用来验证链路，别当正式声出。'
+                      : '免费端点的英文神经嗓；合成失败（断网）时这句静默跳过，绝不回退系统嗓子。'}
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ttsOutVoice">声出音色</Label>
+                {settings.ttsOutEngine === 'sovits' ? (
+                  <Select id="ttsOutVoice" disabled value="">
+                    <option value="">音色由参考音频决定</option>
+                  </Select>
+                ) : settings.ttsOutEngine === 'offline' ? (
+                  <Select
+                    id="ttsOutVoice"
+                    value={
+                      OFFLINE_VOICES.some((v) => v.id === settings.ttsOutVoice)
+                        ? settings.ttsOutVoice
+                        : OFFLINE_VOICES[0].id
+                    }
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, ttsOutVoice: e.target.value }))
+                    }
+                  >
+                    {OFFLINE_VOICES.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label} · {option.note}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Select
+                    id="ttsOutVoice"
+                    value={
+                      VOICE_OUT_VOICES.some((v) => v.id === settings.ttsOutVoice)
+                        ? settings.ttsOutVoice
+                        : DEFAULT_VOICE_OUT_VOICE
+                    }
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, ttsOutVoice: e.target.value }))
+                    }
+                  >
+                    {VOICE_OUT_VOICES.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="ttsDevice">声出输出设备（游戏语音经它进频道）</Label>
