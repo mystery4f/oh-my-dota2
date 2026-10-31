@@ -12,6 +12,14 @@ import {
  * 单独开窗口而不是借用面板/浮层：测试声出要在后台播几秒，浮层会跟着对局走，
  * 面板可能没开；一个独立的小页面让「选设备、解码、播放」有自己的生命周期。
  */
+
+/** 页面加载等不到就放行：PLAY 发进虚空由 waitReady 的超时兑底，总比把整条链路卡死强。 */
+const PAGE_LOAD_TIMEOUT_MS = 8000
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 class VoiceOutWindowManager {
   private win: BrowserWindow | null = null
   private readyListeners = new Set<(report: VoiceOutReadyReport) => void>()
@@ -68,7 +76,9 @@ class VoiceOutWindowManager {
     } else {
       void target.loadFile(join(__dirname, '../renderer/voice-out.html'))
     }
-    await this.pageReady
+    // did-fail-load（文件缺失等）时 did-finish-load 永远不来：等不到就超时放行，
+    // 否则 ensure() 在这里永久卡住，链上排着的后续每一单全部跟着饿死。
+    await Promise.race([this.pageReady, delay(PAGE_LOAD_TIMEOUT_MS)])
     return target
   }
 

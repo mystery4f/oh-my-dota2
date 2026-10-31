@@ -10,16 +10,20 @@ import {
   SINK_FALLBACK_HINT,
   VOICE_OUT_TEST_LINE,
   VOICE_OUT_VOICES,
+  decideVoiceOutReply,
   decideVoiceOutTest,
   normalizeSpeakKey,
   normalizeVoiceOutEngine,
+  pickPlayableSegments,
   pttWatchdogMs,
   pttWindow,
   resolveOutputSink,
   resolveVoiceOutSynth,
   speakKeyVk,
+  spokenStatusLine,
   type AudioOutputDevice
 } from '@shared/voice-out'
+import { splitForSpeech } from '../services/voice/speech'
 
 /**
  * 声出探针（--voice-out-probe）：只验「脑子」，不碰网络、不碰驱动、不开游戏。
@@ -256,6 +260,84 @@ export function runVoiceOutProbe(): void {
   push('F1..F12 连续映射 0x70..0x7B', speakKeyVk('F1') === 0x70 && speakKeyVk('F12') === 0x7b, `${speakKeyVk('F1')}..${speakKeyVk('F12')}`)
   push('字母/数字 → ASCII 码（A=65, 5=53）', speakKeyVk('A') === 65 && speakKeyVk('5') === 53, `${speakKeyVk('A')},${speakKeyVk('5')}`)
   push('乱填（经归一化）永远解析得出 VK', speakKeyVk('ctrl') === speakKeyVk(DEFAULT_SPEAK_KEY), String(speakKeyVk('ctrl')))
+
+  // —— 决策五（票 05）：一键到底该不该声出、走哪条静默分支 ——
+  const noSpeech = decideVoiceOutReply({ recognized: '', translated: null })
+  push(
+    '识别为空 → 不出声，静默分支标 recognize',
+    !noSpeech.speak && noSpeech.skip === 'empty-recognition',
+    JSON.stringify(noSpeech)
+  )
+  const blankSpeech = decideVoiceOutReply({ recognized: '   ', translated: null })
+  push('识别只剩空白 → 同样静默', !blankSpeech.speak && blankSpeech.skip === 'empty-recognition', JSON.stringify(blankSpeech))
+  const noTranslation = decideVoiceOutReply({ recognized: '小心肉山', translated: null })
+  push(
+    '翻译失败（null）→ 不出声，绝不回退系统嗓子也不退文出',
+    !noTranslation.speak && noTranslation.skip === 'translate-failed',
+    JSON.stringify(noTranslation)
+  )
+  const blankTranslation = decideVoiceOutReply({ recognized: '小心肉山', translated: '   ' })
+  push(
+    '译文只剩空白 → 不出声',
+    !blankTranslation.speak && blankTranslation.skip === 'empty-translation',
+    JSON.stringify(blankTranslation)
+  )
+  const replyPlan = decideVoiceOutReply({ recognized: ' 小心肉山 ', translated: ' Careful, they are doing Roshan. ' })
+  push(
+    '拿到非空译文 → 念 trim 后的译文，固定英文嗓',
+    replyPlan.speak && replyPlan.text === 'Careful, they are doing Roshan.' && replyPlan.voice === DEFAULT_VOICE_OUT_VOICE && replyPlan.skip === null,
+    JSON.stringify(replyPlan)
+  )
+
+  // —— 决策六（票 05）：段落合成 → 可播列表 ——
+  const partial = pickPlayableSegments(['Push mid.', 'They do Roshan.', 'Careful.'], [null, 'B', null])
+  push(
+    '单段合成失败整段跳过，顺序保持不变',
+    partial.length === 1 && partial[0].text === 'They do Roshan.' && partial[0].audio === 'B',
+    JSON.stringify(partial)
+  )
+  push(
+    '全部合成失败 → 空列表（整句静默跳过）',
+    pickPlayableSegments(['a', 'b'], [null, undefined]).length === 0,
+    'all-null→[]'
+  )
+  push('没有段就没有声', pickPlayableSegments([], []).length === 0, 'empty→[]')
+  const ordered = pickPlayableSegments(['x', 'y'], ['Y', 'X'])
+  push(
+    '音频和文本按同一位次配对（不许错位）',
+    ordered.length === 2 && ordered[0].text === 'x' && ordered[0].audio === 'Y' && ordered[1].text === 'y' && ordered[1].audio === 'X',
+    JSON.stringify(ordered)
+  )
+
+  // —— 决策七（票 05）：已播状态的第三行 ——
+  const spokenOk = spokenStatusLine(true, null)
+  push('播成功 → 绿字「已播」', spokenOk.ok && spokenOk.text === '已播', JSON.stringify(spokenOk))
+  const spokenErr = spokenStatusLine(false, 'Edge 合成失败（断网或接口不可用），这句不出声')
+  push(
+    '播失败 → 红字带原因',
+    !spokenErr.ok && spokenErr.text.startsWith('✕ ') && spokenErr.text.includes('合成失败'),
+    JSON.stringify(spokenErr)
+  )
+  const spokenNoReason = spokenStatusLine(false, null)
+  push('没给原因也有兜底话术', !spokenNoReason.ok && spokenNoReason.text === '✕ 声出失败，这句没播', JSON.stringify(spokenNoReason))
+  push('空白原因同样走兜底', spokenStatusLine(false, '  ').text === '✕ 声出失败，这句没播', 'blank reason→default')
+
+  // —— 决策八（票 05）：英文译文复用朗读分句（join 等价 + 上限内） ——
+  const longReply = 'Push mid now, they are doing Roshan, ward their jungle and group up for the high ground push.'
+  const segmented = splitForSpeech(longReply, 30)
+  push(
+    '英文长句切段：拼回一字不差，每段不超上限',
+    segmented.join('') === longReply && segmented.every((segment) => segment.length <= 30),
+    `${segmented.length} 段: ${JSON.stringify(segmented)}`
+  )
+  push('短句单段直出', splitForSpeech('Push mid.', 30).length === 1, 'Push mid.')
+  const hardSlice = 'a'.repeat(73)
+  const sliced = splitForSpeech(hardSlice, 30)
+  push(
+    '无标点超长句硬切也不丢字',
+    sliced.join('') === hardSlice && sliced.every((segment) => segment.length <= 30),
+    `${sliced.length} 段`
+  )
 
   const failed = cases.filter((item) => !item.ok)
   for (const item of cases) {

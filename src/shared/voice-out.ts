@@ -217,3 +217,79 @@ export function speakKeyVk(key: string): number | null {
   if ((code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x5a)) return code
   return null
 }
+
+/* ── 语音对讲一键到底（票 05）的纯决策 ─────────────────────────────
+ * Alt+Shift+V 说中文 → whisper 识别 → prod 会话翻成英文 → Edge 英文嗓声出进语音频道。
+ * 什么时候触发声出、走哪条静默分支、段落怎么投、第三行写什么，都先在这里定死。 */
+
+/** 一键到底在哪一环停的：识别、翻译、声出。成功为 null。 */
+export type VoiceReplyStage = 'recognize' | 'translate' | 'voice-out'
+
+/** 识别 + 翻译之后、声出决策之前的输入。translated 为 null 表示翻译这一环已经失败。 */
+export interface VoiceReplyInput {
+  recognized: string
+  translated: string | null
+}
+
+/** 静默跳过的具体原因——绝不回退系统嗓子，也不退文出，浮层照实画红字。 */
+export type VoiceReplySkip = 'empty-recognition' | 'translate-failed' | 'empty-translation'
+
+/** 声出决策结果：speak=false 时 skip 说明为什么不出声。 */
+export interface VoiceReplyPlan {
+  speak: boolean
+  /** 要念的文本（已 trim；译文原文照念）。 */
+  text: string
+  /** 固定英文嗓：语音对讲面向队友，面板朗读音色不影响这里。 */
+  voice: string
+  skip: VoiceReplySkip | null
+}
+
+/**
+ * 该不该声出：识别为空 → 不出声；翻译失败（null）→ 不出声；译文为空白 → 不出声。
+ * 只有拿到非空译文才念，念的永远是译文（zh→en 单向，prod 会话负责翻）。
+ */
+export function decideVoiceOutReply(input: VoiceReplyInput): VoiceReplyPlan {
+  const recognized = typeof input.recognized === 'string' ? input.recognized.trim() : ''
+  if (!recognized) return { speak: false, text: '', voice: DEFAULT_VOICE_OUT_VOICE, skip: 'empty-recognition' }
+  if (input.translated === null) {
+    return { speak: false, text: '', voice: DEFAULT_VOICE_OUT_VOICE, skip: 'translate-failed' }
+  }
+  const translated = input.translated.trim()
+  if (!translated) {
+    return { speak: false, text: '', voice: DEFAULT_VOICE_OUT_VOICE, skip: 'empty-translation' }
+  }
+  return { speak: true, text: translated, voice: DEFAULT_VOICE_OUT_VOICE, skip: null }
+}
+
+/** 一段可播的语音：切段文本 + 合成出的音频。合成失败的段不占位。 */
+export interface PlayableSegment<T> {
+  text: string
+  audio: T
+}
+
+/**
+ * 合成结果收拢成可播列表：与切段一一对应，null（那一段合成失败）整段跳过，
+ * 顺序保持不变——队友听到的话必须一字不差按序播出。
+ */
+export function pickPlayableSegments<T>(segments: string[], audios: (T | null | undefined)[]): PlayableSegment<T>[] {
+  const playable: PlayableSegment<T>[] = []
+  for (let index = 0; index < segments.length; index += 1) {
+    const audio = audios[index]
+    if (audio === null || audio === undefined) continue
+    playable.push({ text: segments[index], audio })
+  }
+  return playable
+}
+
+/** 浮层第三行「已播状态」：绿字已播，红字带原因。 */
+export interface SpokenStatus {
+  text: string
+  ok: boolean
+}
+
+/** 已播那行的文案：成功只说「已播」；失败把原因带出来，没有原因就用兜底话术。 */
+export function spokenStatusLine(spoken: boolean, error: string | null | undefined): SpokenStatus {
+  if (spoken) return { text: '已播', ok: true }
+  const reason = error && error.trim() ? error.trim() : '声出失败，这句没播'
+  return { text: `✕ ${reason}`, ok: false }
+}
