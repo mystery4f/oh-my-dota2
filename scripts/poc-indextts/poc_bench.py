@@ -75,7 +75,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     import torch
-    from indextts.infer_v2 import IndexTTS2
+    from indextts.infer_v2_5 import IndexTTS2
 
     lines = list(zip(ZH_LINES, EN_LINES))
     if args.smoke:
