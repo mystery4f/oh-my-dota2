@@ -164,7 +164,7 @@ function renderFt(): void {
       ftLines.appendChild(chip)
     }
     const line = group.lines.find((item) => item.no === currentLineNo) ?? group.lines[0]
-    ftText.textContent = line ? `${line.no}. ${line.text}` : ''
+    ftText.textContent = line?.text ?? ''
   }
   const key = group.mode === 'free' ? takeKey(group.id, currentLineNo) : lineKey(group.id, currentLineNo)
   ftReplayBtn.disabled = !recs.has(key)
