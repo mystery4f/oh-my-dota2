@@ -2,6 +2,34 @@ import type { VoiceReplyStage } from './voice-out'
 
 import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train'
 
+
+/** ASR 微调读稿：一句原文。 */
+export interface FtScriptLine {
+  no: number
+  text: string
+}
+
+/** ASR 微调读稿：一组（lines 模式逐句录，free 模式自由说）。 */
+export interface FtScriptGroup {
+  id: string
+  title: string
+  mode: 'lines' | 'free'
+  lines: FtScriptLine[]
+  note: string
+}
+
+/** 读稿解析结果：error 非空表示内置资源缺失/解析失败。 */
+export interface FtScriptState {
+  groups: FtScriptGroup[]
+  error: string | null
+}
+
+/** 一条录音：key 形如 G01-L03（free 组是 G21-T01），durationMs 由 16k mono wav 字节数推算。 */
+export interface FtRecInfo {
+  key: string
+  bytes: number
+  durationMs: number
+}
 export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'custom'
 
 export interface ProviderConfig {
@@ -645,6 +673,12 @@ export const IPC = {
   TRAIN_SNAPSHOT: 'train:snapshot',
   /** 主进程广播训练快照（任务状态 + 日志尾），训练窗口订阅。 */
   TRAIN_STATE: 'train:state',
+  // ASR 微调录音（T4a）：内置读稿 + 录音存取，全部落在应用数据目录 asr-ft/ 下。
+  FT_SCRIPT_READ: 'ft:script-read',
+  FT_REC_LIST: 'ft:rec-list',
+  FT_REC_SAVE: 'ft:rec-save',
+  FT_REC_DELETE: 'ft:rec-delete',
+  FT_REC_READ: 'ft:rec-read',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
@@ -856,6 +890,16 @@ export interface WindowApi {
   trainSnapshot(): Promise<TrainSnapshot>
   /** 订阅训练状态广播（250ms 节流）。 */
   onTrainState(callback: (snapshot: TrainSnapshot) => void): () => void
+  /** 内置读稿（组 + 句），训练窗口录音区用。 */
+  ftScriptRead(): Promise<FtScriptState>
+  /** 已有录音清单（key → 字节数/时长）。 */
+  ftRecList(): Promise<FtRecInfo[]>
+  /** 保存一条录音（16k mono wav 字节），返回落盘信息。 */
+  ftRecSave(group: string, line: string, data: Uint8Array): Promise<FtRecInfo>
+  /** 删除一条录音（重录前清理用，也可以直接覆盖）。 */
+  ftRecDelete(group: string, line: string): Promise<void>
+  /** 读回一条录音字节（回放用）。 */
+  ftRecRead(group: string, line: string): Promise<Uint8Array>
 }
 
 /** 物理像素裁切矩形（相对显示器左上角）。 */

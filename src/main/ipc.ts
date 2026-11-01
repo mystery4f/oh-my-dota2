@@ -36,6 +36,7 @@ import { autoVoicePackSetup, deleteVoicePack, ensureSovitsSeedRef, installVoiceP
 import { getOverlayManager } from './windows/overlay'
 import { getTrainWindow } from './windows/train'
 import { getTrainManager } from './services/train/manager'
+import { ftRecDelete, ftRecList, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
 import type { TrainStartRequest } from '@shared/train'
 import { gsiStatus } from './services/gsi'
 
@@ -238,6 +239,12 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.TRAIN_START, (_e, request: TrainStartRequest) => getTrainManager().start(request))
   ipcMain.handle(IPC.TRAIN_STOP, () => getTrainManager().stop())
   ipcMain.handle(IPC.TRAIN_SNAPSHOT, () => getTrainManager().snapshot())
+  // ASR 微调录音（T4a）：读稿解析 + 录音 CRUD，文件全在 userData/asr-ft/ 下。
+  ipcMain.handle(IPC.FT_SCRIPT_READ, () => readFtScript())
+  ipcMain.handle(IPC.FT_REC_LIST, () => ftRecList())
+  ipcMain.handle(IPC.FT_REC_SAVE, (_e, group: string, line: string, data: Uint8Array) => ftRecSave(group, line, data))
+  ipcMain.handle(IPC.FT_REC_DELETE, (_e, group: string, line: string) => ftRecDelete(group, line))
+  ipcMain.handle(IPC.FT_REC_READ, (_e, group: string, line: string) => ftRecRead(group, line))
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
   ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))
   ipcMain.handle(IPC.OVERLAY_OPACITY, (_e, value: number) => getOverlayManager().setOpacity(value))

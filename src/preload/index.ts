@@ -144,6 +144,11 @@ const api: WindowApi = {
   trainStart: (request) => ipcRenderer.invoke(IPC.TRAIN_START, request),
   trainStop: () => ipcRenderer.invoke(IPC.TRAIN_STOP),
   trainSnapshot: () => ipcRenderer.invoke(IPC.TRAIN_SNAPSHOT),
+  ftScriptRead: () => ipcRenderer.invoke(IPC.FT_SCRIPT_READ),
+  ftRecList: () => ipcRenderer.invoke(IPC.FT_REC_LIST),
+  ftRecSave: (group, line, data) => ipcRenderer.invoke(IPC.FT_REC_SAVE, group, line, data),
+  ftRecDelete: (group, line) => ipcRenderer.invoke(IPC.FT_REC_DELETE, group, line),
+  ftRecRead: (group, line) => ipcRenderer.invoke(IPC.FT_REC_READ, group, line),
   onTrainState: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, snapshot: TrainSnapshot): void => callback(snapshot)
     ipcRenderer.on(IPC.TRAIN_STATE, listener)

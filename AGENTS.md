@@ -85,6 +85,9 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   `asr-models/` (Qwen3-ASR: the `sherpa-onnx-qwen3-asr-*.tar.bz2` the user drops here, extracted
   by the panel with the system tar.exe into `sherpa-onnx-qwen3-asr-*/`; SenseVoice was removed —
   engine is now whisper or qwen3 only),
+  `asr-ft/` (ASR accent fine-tune recordings from the training window's recording panel:
+  one wav per line, `Gxx/Gxx-Lnn.wav` (or `Gxx-Tnn.wav` for the free-speech group); the
+  recording script ships as a bundled resource, `resources/asr-ft-script.md`),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB
   (truncated and rewritten past that). Fields worth reading: `act` = `ocr|same|gap|idle|error|busy`,
   `src` = `stream|sources`, `brk`/`rst` = new-match streak and reset, plus `grabMs`/`ocrMs`/`chg`/`fresh`/`streak`. It is the only way to tell
@@ -163,6 +166,7 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   recognizer cache key includes them, so editing the list reloads the engine. Single-char
   corrections are never auto-added (noise); the correction loop only merges ≥2-char diffs.
 - Never commit `.tmp/` or `.pi/`.
+- App-owned data — including non-dependency artifacts the app produces (recordings, exports, reports, logs) — stays inside the portable data directory (`userData`), never scattered onto other drives. Never hardcode external paths (`D:\work\...`) as runtime dependencies: the installed build's data lives in the `<install>-data` sibling directory, and a fresh install must work with zero external paths. Developer-only tooling (e.g. the `D:\work\ft-qwen3` fine-tune workspace) lives outside the app and must never be a hardcoded app dependency; anything the app itself needs (scripts, model files) ships as a bundled resource under `resources/`, and its user data lands under `userData`.
 
 ## Shipping
 

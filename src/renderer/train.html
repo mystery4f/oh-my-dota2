@@ -32,6 +32,19 @@
       .status { min-height: 18px; margin-bottom: 8px; color: #9aa0a8; }
       .status b { color: #d7dae0; }
       .error { color: #e06c75; }
+      .ft-head { margin: 14px 0 6px; font-size: 14px; color: #d7dae0; }
+      .lines { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 10px; }
+      .chip {
+        border: 1px solid #3a3f47; border-radius: 4px; padding: 3px 7px;
+        font-size: 12px; color: #9aa0a8; background: #1c1f24; cursor: pointer;
+      }
+      .chip.done { color: #98c379; border-color: #2e4a33; }
+      .chip.current { color: #fff; border-color: #2f6fdb; background: #24406e; }
+      .text {
+        font-size: 22px; line-height: 1.5; min-height: 64px; padding: 10px;
+        background: #101216; border: 1px solid #2a2e35; border-radius: 4px; margin-bottom: 8px;
+      }
+      .hint { color: #9aa0a8; }
       pre {
         background: #101216;
         border: 1px solid #2a2e35;
@@ -67,5 +80,21 @@
     <div class="status" id="status">没有任务</div>
     <pre id="log"></pre>
     <script type="module" src="./train.ts"></script>
+    <!-- ASR 微调录音（T4a）：内置读稿逐句录，录音落 userData/asr-ft/。 -->
+    <div class="ft-head">ASR 口音微调 · 录音</div>
+    <div class="error" id="ftError"></div>
+    <div class="row">
+      <label for="ftGroup">录音组</label>
+      <select id="ftGroup"></select>
+      <span class="hint" id="ftGroupInfo"></span>
+    </div>
+    <div class="lines" id="ftLines"></div>
+    <div class="text" id="ftText"></div>
+    <div class="row">
+      <button id="ftRec" class="primary">录制（空格）</button>
+      <button id="ftStopRec" disabled>停</button>
+      <button id="ftReplay" disabled>回放</button>
+      <span class="hint" id="ftHint">点录制后念屏幕上的句子，停顿约 1 秒自动停</span>
+    </div>
   </body>
 </html>

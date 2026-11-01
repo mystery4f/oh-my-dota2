@@ -16,6 +16,9 @@ extraResources:
     to: tts-offline-worker.cjs
   - from: resources/asr-sherpa-worker.cjs
     to: asr-sherpa-worker.cjs
+  # ASR 微调录音读稿：训练窗口录音区照着念的稿子，随包分发才不依赖外部文件。
+  - from: resources/asr-ft-script.md
+    to: asr-ft-script.md
   # GPT-SoVITS 引擎包的解压器（LGPL，独立 7z-only 版）：应用内一键下载 8GB 后要用它解压，
   # 系统里未必装了 7-Zip，跟着安装包走才可靠。
   - from: resources/7zr.exe
