@@ -819,20 +819,26 @@ function OverlayCard(): React.ReactElement {
                     >
                       {sovitsPacks.map((pack) => (
                         <option key={pack.id} value={pack.id}>
-                          {pack.name} · {pack.downloading ? `下载中 ${Math.round(pack.progress * 100)}%` : pack.installed ? '已就绪' : '未下载'}
+                          {pack.name} · {pack.downloading ? `下载中 ${Math.round(pack.progress * 100)}%` : pack.upgradable ? '可升级' : pack.installed ? '已就绪' : '未下载'}
                         </option>
                       ))}
                     </select>
                   </label>
                   <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-muted/30 px-2 py-1.5 text-xs">
-                    {selected.installed ? (
+                    {selected.downloading ? (
+                      <span className="text-sky-600 dark:text-sky-400">↓ 下载中 {Math.round(selected.progress * 100)}%</span>
+                    ) : selected.upgradable ? (
+                      <span className="text-amber-600 dark:text-amber-400">● 有新版</span>
+                    ) : selected.installed ? (
                       <span className="text-emerald-600 dark:text-emerald-400">● 已就绪</span>
-                    ) : selected.downloading ? (
-                      <span className="text-amber-600 dark:text-amber-400">↓ 下载中 {Math.round(selected.progress * 100)}%</span>
                     ) : (
                       <span className="text-muted-foreground">○ 未下载</span>
                     )}
-                    <span className="text-muted-foreground">v{selected.version}</span>
+                    <span className="text-muted-foreground">
+                      {selected.upgradable && selected.installedVersion
+                        ? `v${selected.installedVersion} → v${selected.version}`
+                        : `v${selected.version}`}
+                    </span>
                     <span className="tabular-nums text-muted-foreground">
                       {selected.installed ? mb(selected.bytes) : `还需 ${mb(remaining)} / ${mb(selected.bytes)}`}
                     </span>
@@ -850,7 +856,12 @@ function OverlayCard(): React.ReactElement {
                         下载
                       </Button>
                     )}
-                    {selected.installed && (
+                    {selected.upgradable && !selected.downloading && (
+                      <Button size="sm" variant="outline" onClick={() => void window.api.sovitsVoicepackInstall(selected.id).then(setSovitsPacks)}>
+                        升级
+                      </Button>
+                    )}
+                    {selected.installed && !selected.upgradable && (
                       <>
                         <Button
                           size="sm"

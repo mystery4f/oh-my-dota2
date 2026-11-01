@@ -302,6 +302,30 @@ export function voicePackInstalled(pack: VoicePackDef, refsRoot: string, weights
 }
 
 /**
+ * refs.json 里属于这个包的原始条目：名字或音频路径对上就算（与 packRefsMerge 同一套配对规则），
+ * 坏索引/没配对返回 null。纯函数，探针用。
+ */
+export function findPackEntry(current: unknown, pack: VoicePackDef): Record<string, unknown> | null {
+  if (!Array.isArray(current)) return null
+  for (const item of current) {
+    if (typeof item !== 'object' || item === null) continue
+    const entry = item as Record<string, unknown>
+    if (entry.name === pack.name || entry.audio === pack.refAudio.relPath) return entry
+  }
+  return null
+}
+
+/** 条目里记录的安装版本；缺失/类型不对返回 null（功能上线前的旧安装没有这个字段）。 */
+export function packVersionFromEntry(entry: Record<string, unknown> | null): string | null {
+  return typeof entry?.packVersion === 'string' && entry.packVersion.length > 0 ? entry.packVersion : null
+}
+
+/** 升级判定（纯函数）：记录过版本且与清单版本不同才算可升级——版本只是短标签，只比相等。 */
+export function packUpgradable(installedVersion: string | null, manifestVersion: string): boolean {
+  return installedVersion !== null && installedVersion !== manifestVersion
+}
+
+/**
  * refs.json 合并（纯函数，探针用）：按 audio 键 upsert——同路径的旧条目整条替换
  * （音色包升级后转写/权重可能都变了），别人的条目原样保留，顺序稳定（追加在尾部）。
  */
@@ -323,11 +347,23 @@ function refsEntryFor(pack: VoicePackDef): Record<string, unknown> {
     promptText: pack.promptText,
     promptLang: pack.promptLang,
     gptWeights: pack.gptWeights.relPath,
-    sovitsWeights: pack.sovitsWeights.relPath
+    sovitsWeights: pack.sovitsWeights.relPath,
+    packId: pack.id,
+    packVersion: pack.version
   }
 }
 
 const packRuns = new Map<string, { downloading: boolean; progress: number; error: string | null }>()
+
+/** 读 refs.json 原始内容：文件缺失/坏 JSON 都当空表（与安装/删除路径同一套宽容）。 */
+function readRawRefs(refsFile: string): unknown {
+  if (!existsSync(refsFile)) return []
+  try {
+    return JSON.parse(readFileSync(refsFile, 'utf-8'))
+  } catch {
+    return []
+  }
+}
 
 /** 面板视图：目录 + 本地状态（在不在、下没下、进度、错误）合成一张表。 */
 export async function sovitsVoicePacks(): Promise<SovitsVoicePack[]> {
@@ -335,10 +371,12 @@ export async function sovitsVoicePacks(): Promise<SovitsVoicePack[]> {
   const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
   const activeRef = loadSettings().ttsSovitsRefAudio.trim().toLowerCase()
   const packs = await resolveVoicePacks()
+  const rawRefs = readRawRefs(join(refsRoot, 'refs.json'))
   return packs.map((pack) => {
     const run = packRuns.get(pack.id)
     const plan = planVoicePackFiles(pack, refsRoot, weightsRoot)
     const haveBytes = plan.reduce((sum, file) => sum + Math.min(file.have, file.bytes), 0)
+    const installedVersion = packVersionFromEntry(findPackEntry(rawRefs, pack))
     return {
       id: pack.id,
       name: pack.name,
@@ -348,6 +386,8 @@ export async function sovitsVoicePacks(): Promise<SovitsVoicePack[]> {
       bytes: plan.reduce((sum, file) => sum + file.bytes, 0),
       haveBytes,
       installed: voicePackInstalled(pack, refsRoot, weightsRoot),
+      installedVersion,
+      upgradable: packUpgradable(installedVersion, pack.version),
       downloading: run?.downloading ?? false,
       progress: run?.progress ?? 0,
       active: activeRef !== '' && activeRef === join(refsRoot, ...pack.refAudio.relPath.split('/')).toLowerCase(),
@@ -488,13 +528,19 @@ export async function ensureSovitsSeedRef(force = false): Promise<boolean> {
 
 /**
  * 引擎装好后的一键拉齐（装包完成钩子 + 启动钩子共用）：
- * 默认音色包不在就下它；晓晓保底参考缺了就现合成一条（自带幂等，已有则秒返回）——失败也不拦主流程。
+ * 默认音色包从没装过才自动下它（换版留给面板手动升级）；晓晓保底参考缺了就现合成一条（自带幂等，已有则秒返回）——失败也不拦主流程。
  */
 export async function autoVoicePackSetup(): Promise<void> {
   const refsRoot = sovitsRefsRoot(app.getPath('userData'))
   const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
   const fallback = (await resolveVoicePacks()).find((pack) => pack.default)
-  if (fallback && !voicePackInstalled(fallback, refsRoot, weightsRoot)) {
+  // 从没装过（refs 里没有记录）才自动装；换版留给面板手动升级，绝不悄悄重下 230MB。
+  if (!fallback) {
+    await ensureSovitsSeedRef()
+    return
+  }
+  const everInstalled = findPackEntry(readRawRefs(join(refsRoot, 'refs.json')), fallback) !== null
+  if (!voicePackInstalled(fallback, refsRoot, weightsRoot) && !everInstalled) {
     recordSovitsLog('TTS_SOVITS_PACK_AUTO_INSTALL', { id: fallback.id })
     await installVoicePack(fallback.id)
     return
