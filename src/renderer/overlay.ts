@@ -1,4 +1,4 @@
-import type { OverlayStatus } from '@shared/ipc'
+import type { OverlayStatus, SpeakPayload } from '@shared/ipc'
 import { moveBy, resizeFromLeft, resizeFromRight } from '@shared/overlay-geometry'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { encodeWav16k } from '@shared/wav'
@@ -98,14 +98,14 @@ function setTranslation(
     const failed = existing ?? document.createElement('div')
     failed.className = 'trans err'
     failed.textContent = '✕ 翻译失败'
-    failed.title = error
+    ;(failed as HTMLElement).title = error
     if (!existing) row.appendChild(failed)
     return
   }
   const trans = existing ?? document.createElement('div')
   trans.className = cached ? 'trans cached' : 'trans'
   trans.textContent = translated
-  trans.title = cached ? '来自翻译词库（未调用模型）' : '本次现翻'
+  ;(trans as HTMLElement).title = cached ? '来自翻译词库（未调用模型）' : '本次现翻'
   if (!existing) row.appendChild(trans)
 }
 
@@ -340,16 +340,7 @@ void window.api.overlayReplyState().then((state) => {
 // speechSynthesis 只在渲染进程可用：主进程决定「这句该念」，这里负责真的出声。
 // 队列很短：话说得比嘴快时宁可漏掉旧的，也不要越念越落后（落后的话反而误导）。
 const SPEAK_QUEUE_MAX = 6
-const speakQueue: {
-  text: string
-  lang: 'zh' | 'en'
-  rate: number
-  voice: string
-  engine?: 'system' | 'edge' | 'offline'
-  audio?: string
-  audioMime?: string
-  ts?: number
-}[] = []
+const speakQueue: SpeakPayload[] = []
 let speaking = false
 
 function pickVoice(lang: 'zh' | 'en', wanted: string): SpeechSynthesisVoice | null {

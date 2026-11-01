@@ -92,6 +92,7 @@ const recs = new Map<string, FtRecInfo>()
 let currentGroupId = ''
 let currentLineNo = 0 // lines 模式：当前句号；free 模式：0 表示还没选段
 let recording = false
+const chunks: Float32Array[] = [] // 当前这次录音的原始 PCM 段
 
 const lineKey = (groupId: string, no: number): string => `${groupId}-L${String(no).padStart(2, '0')}`
 const takeKey = (groupId: string, no: number): string => `${groupId}-T${String(no).padStart(2, '0')}`
@@ -177,6 +178,7 @@ async function loadScriptAndRecs(): Promise<void> {
   groups = script.groups
   ftError.textContent = script.error ?? ''
   recs.clear()
+  console.log('[train-ft] script groups=', groups.length, 'error=', script.error ?? 'none', 'recs=', list.length)
   for (const info of list) recs.set(info.key, info)
   ftGroupSel.textContent = ''
   for (const group of groups) {
@@ -225,6 +227,7 @@ async function saveChunks(): Promise<void> {
   if (!group) return
   const rate = recRate
   const durationMs = Math.round((chunks.reduce((sum, c) => sum + c.length, 0) / rate) * 1000)
+  console.log('[train-ft] save chunks=', chunks.length, 'durationMs=', durationMs)
   if (durationMs < MIN_MS) {
     ftHint.textContent = `太短（${durationMs}ms），丢弃了——重新点录制`
     chunks.length = 0
@@ -240,25 +243,32 @@ async function saveChunks(): Promise<void> {
   try {
     const info = await window.api.ftRecSave(group.id, line, bytes)
     recs.set(info.key, info)
+    console.log('[train-ft] saved', info.key)
     ftHint.textContent = `已存 ${info.key}（${(info.durationMs / 1000).toFixed(1)}s）`
     pickCurrent()
   } catch (err) {
     ftHint.textContent = `保存失败：${String(err)}`
+    console.log('[train-ft] save failed:', String(err))
   }
   renderFt()
 }
 
 async function beginRecording(): Promise<void> {
-  if (recording || !currentGroup()) return
+  if (recording || !currentGroup()) {
+    console.log('[train-ft] begin skipped recording=', recording, 'group=', currentGroup()?.id ?? 'null')
+    return
+  }
   try {
     recStream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
     })
   } catch (err) {
     ftHint.textContent = `拿不到麦克风：${String(err)}`
+    console.log('[train-ft] mic denied:', String(err))
     return
   }
   recording = true
+  console.log('[train-ft] begin recording')
   chunks.length = 0
   const startedAt = Date.now()
   let speechSeen = false
@@ -286,6 +296,7 @@ async function beginRecording(): Promise<void> {
       if (Date.now() - startedAt >= MAX_MS) void stopRecording('到 20s 上限')
     }
     recCtx.createMediaStreamSource(recStream).connect(recNode)
+    console.log('[train-ft] graph ok rate=', recRate)
     recNode.connect(recCtx.destination)
   } catch (err) {
     // 图建不起来就把状态退干净，别留下「录音中…」的僵尸态。
@@ -300,6 +311,7 @@ async function beginRecording(): Promise<void> {
 async function stopRecording(reason = ''): Promise<void> {
   if (!recording) return
   finishRecording()
+  console.log('[train-ft] stop reason=', reason || 'manual', 'chunks=', chunks.length)
   ftHint.textContent = reason ? `${reason}，保存中…` : '保存中…'
   await saveChunks()
 }
@@ -342,6 +354,7 @@ on('ftGroup', 'change', () => selectGroup(ftGroupSel.value))
 on('ftRec', 'click', () => void beginRecording())
 on('ftStopRec', 'click', () => void stopRecording())
 on('ftReplay', 'click', () => void replay())
+  console.log('[train-ft] listeners attached')
 // 空格开停录音（焦点不在输入框/下拉时），念稿时不用伸手点鼠标。
 window.addEventListener('keydown', (event) => {
   const tag = (event.target as HTMLElement | null)?.tagName ?? ''

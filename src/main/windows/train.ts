@@ -1,6 +1,17 @@
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+// 渲染进程 console 落盘，录制链路排障用（logs/train-window.log）
+function appendTrainRendererLog(line: string): void {
+  try {
+    const dir = join(app.getAppPath(), 'logs')
+    mkdirSync(dir, { recursive: true })
+    appendFileSync(join(dir, 'train-window.log'), `[${new Date().toISOString()}] ${line}\n`, 'utf8')
+  } catch {
+    // 日志失败不影响窗口
+  }
+}
 /**
  * 训练管理窗口：看进度、看日志、能停。训练跑多久都可能，独立窗口比面板里塞一块省心，
  * 也和「面板可以对局关掉」互不牵连。
@@ -24,6 +35,13 @@ class TrainWindowManager {
         sandbox: false,
         contextIsolation: true
       }
+    })
+    this.win.webContents.on('console-message', (payload) => {
+      const text = typeof payload === 'object' && payload !== null && 'message' in payload
+        ? String(payload.message)
+        : ''
+      if (text) appendTrainRendererLog(text)
+      else appendTrainRendererLog('(console-message: no message field, legacy form?)')
     })
     this.win.on('closed', () => {
       this.win = null
