@@ -4,19 +4,18 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * sherpa-onnx 识别的共用推理管道： SenseVoice / Qwen3 两个引擎共用同一个 Node 子进程
- * （resources/asr-sensevoice-worker.cjs），服务层只管模型目录与状态。
+ * sherpa-onnx 识别（Qwen3-ASR）的推理管道：唯一引擎共用一个 Node 子进程
+ * （resources/asr-sherpa-worker.cjs），服务层只管模型目录与状态。
  *
  * 为什么单开进程：sherpa-onnx 的原生插件在 Electron 主进程里抛
  * `External buffers are not allowed`（N-API 外部缓冲被禁），纯 Node 下正常。
  */
 
-/** 推理请求：engine 选模型配置，dir 是模型目录，language 仅 sensevoice 用（''=自动语种）。 */
+/** 推理请求：dir 是模型目录，hotwords 是热词表串（仅 Qwen3 支持，可空）。 */
 export interface SherpaAsrRequest {
-  engine: 'sensevoice' | 'qwen3'
   dir: string
   wav: string
-  language?: string
+  hotwords?: string
 }
 
 let nodeChecked = false
@@ -42,9 +41,9 @@ function workerScript(): string {
   // 探针从 out/main/index.js 起，app.getAppPath() 是 out/main，不能直接拼 resources；
   // 打包后在 resourcesPath 下（electron-builder.yml 的 extraResources 摆进去）。
   const candidates = [
-    join(process.resourcesPath ?? '', 'asr-sensevoice-worker.cjs'),
-    join(__dirname, '../../resources/asr-sensevoice-worker.cjs'),
-    join(app.getAppPath(), 'resources/asr-sensevoice-worker.cjs')
+    join(process.resourcesPath ?? '', 'asr-sherpa-worker.cjs'),
+    join(__dirname, '../../resources/asr-sherpa-worker.cjs'),
+    join(app.getAppPath(), 'resources/asr-sherpa-worker.cjs')
   ]
   return candidates.find((candidate) => candidate && existsSync(candidate)) ?? candidates[candidates.length - 1]
 }
@@ -105,16 +104,16 @@ export async function sherpaTranscribe(request: SherpaAsrRequest): Promise<{ tex
         clearTimeout(timer)
         resolve(value)
       })
-      child.stdin?.write(`${JSON.stringify({ id, wav: request.wav, engine: request.engine, dir: request.dir, language: request.language ?? '' })}\n`)
+      child.stdin?.write(`${JSON.stringify({ id, wav: request.wav, dir: request.dir, hotwords: request.hotwords ?? '' })}\n`)
     })
     if (!reply.ok || typeof reply.text !== 'string') {
-      console.log('ASR_SHERPA_FAILED', JSON.stringify({ engine: request.engine, ms: Date.now() - started, err: reply.err ?? 'unknown' }))
+      console.log('ASR_SHERPA_FAILED', JSON.stringify({ ms: Date.now() - started, err: reply.err ?? 'unknown' }))
       return null
     }
-    console.log('ASR_SHERPA_OK', JSON.stringify({ engine: request.engine, ms: Date.now() - started, chars: reply.text.length }))
+    console.log('ASR_SHERPA_OK', JSON.stringify({ ms: Date.now() - started, chars: reply.text.length }))
     return { text: reply.text }
   } catch (err) {
-    console.log('ASR_SHERPA_FAILED', JSON.stringify({ engine: request.engine, ms: Date.now() - started, err: err instanceof Error ? err.message : String(err) }))
+    console.log('ASR_SHERPA_FAILED', JSON.stringify({ ms: Date.now() - started, err: err instanceof Error ? err.message : String(err) }))
     return null
   }
 }

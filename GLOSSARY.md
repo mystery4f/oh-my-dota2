@@ -27,3 +27,15 @@ _Avoid_: 声音库、模型包
 **说话键（push-to-talk key）**：
 游戏内按住才发言的语音按键。
 _Avoid_: V 键、语音热键
+
+**识别引擎（ASR engine）**：
+本地转写用的引擎，本项目只保留 whisper ggml-small 与 Qwen3-ASR 两个；SenseVoice 已废弃移除。
+_Avoid_: 识别模型（与文件层的模型文件混淆）
+
+**热词（hotwords）**：
+喂给 Qwen3 做词汇偏置的词表，改词表即时生效，专治术语选错；只在 Qwen3 引擎生效。
+_Avoid_: 提示词、prompt、词典
+
+**纠错回路（correction loop）**：
+在识别记录里把错的转写改成对的，差异片段自动并入热词表的闭环。
+_Avoid_: 训练、学习（它不更新模型权重）

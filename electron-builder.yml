@@ -14,8 +14,8 @@ directories:
 extraResources:
   - from: resources/tts-offline-worker.cjs
     to: tts-offline-worker.cjs
-  - from: resources/asr-sensevoice-worker.cjs
-    to: asr-sensevoice-worker.cjs
+  - from: resources/asr-sherpa-worker.cjs
+    to: asr-sherpa-worker.cjs
   # GPT-SoVITS 引擎包的解压器（LGPL，独立 7z-only 版）：应用内一键下载 8GB 后要用它解压，
   # 系统里未必装了 7-Zip，跟着安装包走才可靠。
   - from: resources/7zr.exe

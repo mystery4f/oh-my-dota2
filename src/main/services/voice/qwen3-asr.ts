@@ -3,6 +3,7 @@ import { app } from 'electron'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { OfflineStatus } from '@shared/ipc'
+import { loadSettings } from '../settings'
 import { sherpaNodeBinary, sherpaTranscribe } from './sherpa-asr'
 
 /**
@@ -70,17 +71,19 @@ export function qwen3Status(): OfflineStatus {
 }
 
 /** 转写一段 16k 单声道 PCM16 WAV。失败返回 null（调用方按「这句不识别」画错误行）。 */
+/** 转写一段 16k 单声道 PCM16 WAV，热词表从设置读（仅 Qwen3 注入）。失败返回 null。 */
 export async function qwen3Transcribe(wavPath: string): Promise<{ text: string } | null> {
   if (!qwen3Ready()) return null
   if (!sherpaNodeBinary()) return null
-  return sherpaTranscribe({ engine: 'qwen3', dir: qwen3AsrDir(), wav: wavPath })
+  const settings = loadSettings()
+  return sherpaTranscribe({ dir: qwen3AsrDir(), wav: wavPath, hotwords: settings.asrHotwords })
 }
 
 const extractState = { busy: false, progress: 0, error: null as string | null }
 
 /**
  * 把用户放进 data\asr-models\ 的 sherpa-onnx-qwen3-asr-*.tar.bz2 解开（系统 tar.exe）。
- * 失败只写状态不抛——识别可以留在 whisper/SenseVoice 上，不能把主进程拖崩。
+ * 失败只写状态不抛——识别可以留在 whisper 上，不能把主进程拖崩。
  */
 export async function ensureQwen3Model(): Promise<OfflineStatus> {
   if (qwen3Ready()) return qwen3Status()

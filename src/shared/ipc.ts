@@ -116,10 +116,12 @@ export interface AppSettings {
   /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
   voiceTranscribeOnly: boolean
   /**
-   * 语音识别引擎：whisper（本地 whisper.cpp，ggml-small）、sensevoice（SenseVoice-small，
-   * 专治带口音的中文）或 qwen3（Qwen3-ASR 0.6B，方言/抗噪更强、自带标点，模型 ~980MB）。
+   * 语音识别引擎：whisper（本地 whisper.cpp，ggml-small）或 qwen3（Qwen3-ASR 0.6B，
+   * 方言/抗噪更强、自带标点，模型 ~980MB；唯一支持热词的引擎）。
    */
-  asrEngine: 'whisper' | 'sensevoice' | 'qwen3'
+  asrEngine: 'whisper' | 'qwen3'
+  /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
+  asrHotwords: string
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
   /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
@@ -231,6 +233,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
   asrEngine: 'whisper',
+  asrHotwords: '',
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
   autoStartCapture: true,
@@ -623,7 +626,7 @@ export const IPC = {
   VOICE_SPEAK: 'voice:speak',
   TTS_OFFLINE_STATE: 'tts:offline-state',
   TTS_OFFLINE_DOWNLOAD: 'tts:offline-download',
-  // 识别引擎（SenseVoice）状态与模型下载：和离线朗读同一套「状态 + 下载」面板节奏。
+  // 识别模型（Qwen3）状态与解压：和离线朗读同一套「状态 + 获取」面板节奏。
   ASR_STATUS: 'asr:status',
   ASR_DOWNLOAD: 'asr:download',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
@@ -664,11 +667,6 @@ export interface OfflineStatus {
 export const QWEN3_ASR_RELEASE_URL =
   'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2'
 
-/** 两个 sherpa 识别引擎各一份安装状态，面板按当前引擎取用。 */
-export interface AsrStatusMap {
-  sensevoice: OfflineStatus
-  qwen3: OfflineStatus
-}
 
 /** GPT-SoVITS：引擎包安装状态 + api_v2 服务状态 + 最近日志（面板一眼看出「起没起来」）。 */
 export interface SovitsStatus {
@@ -770,10 +768,10 @@ export interface WindowApi {
   ttsOfflineState(): Promise<OfflineStatus>
   /** 触发（或继续）一次离线模型下载；返回最新状态。 */
   ttsOfflineDownload(): Promise<OfflineStatus>
-  /** 两个 sherpa 识别引擎（SenseVoice/Qwen3）的安装状态；面板按当前引擎取用。 */
-  asrStatus(): Promise<AsrStatusMap>
-  /** 触发一次模型获取：sensevoice 走 hf-mirror 下载，qwen3 解压已放进数据目录的 tar.bz2。 */
-  asrDownload(engine: 'sensevoice' | 'qwen3'): Promise<OfflineStatus>
+  /** Qwen3-ASR 模型包的安装状态。 */
+  asrStatus(): Promise<OfflineStatus>
+  /** 触发一次模型获取：解压已放进数据目录的 tar.bz2。 */
+  asrDownload(): Promise<OfflineStatus>
   /** GPT-SoVITS 引擎包与服务状态（含最近日志）。 */
   sovitsStatus(): Promise<SovitsStatus>
   /** 一键安装：没有引擎包就下 8GB 再解压；压缩包已放进数据目录则只解压。 */

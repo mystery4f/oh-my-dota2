@@ -27,6 +27,7 @@ const PERSISTED_FIELDS = [
   'voiceOutTestMode',
   'voiceTranscribeOnly',
   'asrEngine',
+  'asrHotwords',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -88,7 +89,10 @@ function sentinelFor(
       return !current.voiceTranscribeOnly as AppSettings[typeof key]
     case 'asrEngine':
       // 识别引擎：非当前值落盘原样读回（枚举归一化在 loadSettings，探针喂合法值）。
-      return (current.asrEngine === 'sensevoice' ? 'whisper' : 'sensevoice') as AppSettings[typeof key]
+      return (current.asrEngine === 'qwen3' ? 'whisper' : 'qwen3') as AppSettings[typeof key]
+    case 'asrHotwords':
+      // 热词表：带中文逗号与顿号的串原样落盘原样读回（分隔符归一化只在读取热词时做）。
+      return (current.asrHotwords.includes('肉山') ? '买活,高地、风暴之灵' : '肉山，买活') as AppSettings[typeof key]
   }
 }
 

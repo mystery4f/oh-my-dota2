@@ -25,7 +25,8 @@ import {
   type SovitsVoicePack,
   SOVITS_SEED_REF_DIR
 } from '@shared/ipc'
-import type { AsrStatusMap, UpdateState } from '@shared/ipc'
+import type { OfflineStatus, UpdateState } from '@shared/ipc'
+import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { QWEN3_ASR_RELEASE_URL } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
@@ -40,8 +41,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type TestState = { status: 'idle' } | { status: 'running' } | { status: 'done'; result: TestResult }
 
-// 识别记录条目 = 链路结果 + 本地时间戳（主进程广播里没有时间，渲染端补）。
-type VoiceChainLogEntry = VoiceChainSummary & { at: number }
+// 识别记录条目 = 链路结果 + 本地时间戳（主进程广播里没有时间，渲染端补）；
+// corrected 标记这条被「纠错」改写过。
+type VoiceChainLogEntry = VoiceChainSummary & { at: number; corrected?: boolean }
 
 type CheckRow = { label: string; ok: boolean; detail: string }
 
@@ -1400,26 +1402,32 @@ export default function App(): React.ReactElement {
   // 每次说了什么、识别成什么、翻成什么都要看得见，不然「声音都是一个内容」这类问题没法定位。
   const [voiceRecording, setVoiceRecording] = useState(false)
   const [voiceChainLog, setVoiceChainLog] = useState<VoiceChainLogEntry[]>([])
+  // 纠错回路：正在改写的记录条目（at 时间戳定位）与草稿；保存时差异词自动并入热词表。
+  const [editingLogAt, setEditingLogAt] = useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  const saveCorrection = (entry: VoiceChainLogEntry): void => {
+    const additions = extractHotwordDiff(entry.transcript, editDraft)
+    if (additions.length > 0) void save({ asrHotwords: mergeHotwords(settings.asrHotwords, additions) })
+    setVoiceChainLog((log) => log.map((item) => (item.at === entry.at ? { ...item, transcript: editDraft.trim(), corrected: true } : item)))
+    setEditingLogAt(null)
+    setEditDraft('')
+  }
   useEffect(() => window.api.onVoiceRecordState((s) => setVoiceRecording(s.recording)), [])
-  // 两个 sherpa 识别引擎各一份状态，按当前引擎取用——切引擎不用重新拉一次。
-  const [asrStatusMap, setAsrStatusMap] = useState<AsrStatusMap | null>(null)
-  const asrStatus = settings.asrEngine === 'qwen3' ? asrStatusMap?.qwen3 : asrStatusMap?.sensevoice
+  // Qwen3 模型状态：进面板问一次 + 解压期间每秒刷——与离线朗读同一节奏，别让用户对着假进度等。
+  const [asrStatus, setAsrStatus] = useState<OfflineStatus | null>(null)
   useEffect(() => {
-    // 进面板问一次 + 下载/解压期间每秒刷：与离线朗读同一节奏，别让用户对着假进度等。
-    void window.api.asrStatus().then(setAsrStatusMap)
+    void window.api.asrStatus().then(setAsrStatus)
     if (!asrStatus?.downloading) return
-    const timer = setInterval(() => void window.api.asrStatus().then(setAsrStatusMap), 1000)
+    const timer = setInterval(() => void window.api.asrStatus().then(setAsrStatus), 1000)
     return () => clearInterval(timer)
   }, [asrStatus?.downloading])
   const downloadAsr = async (): Promise<void> => {
-    const engine = settings.asrEngine === 'qwen3' ? 'qwen3' : 'sensevoice'
-    const action = engine === 'qwen3' ? 'Qwen3 解压' : 'SenseVoice 下载'
     try {
-      await window.api.asrDownload(engine)
-      setAsrStatusMap(await window.api.asrStatus())
+      await window.api.asrDownload()
+      setAsrStatus(await window.api.asrStatus())
     } catch (err) {
       setVoiceChainLog((log) => [
-        { transcript: '', translated: null, spoken: false, stage: null, error: `${action}失败：${err instanceof Error ? err.message : String(err)}`, at: Date.now() },
+        { transcript: '', translated: null, spoken: false, stage: null, error: `Qwen3 解压失败：${err instanceof Error ? err.message : String(err)}`, at: Date.now() },
         ...log
       ])
     }
@@ -1796,64 +1804,58 @@ export default function App(): React.ReactElement {
                   placeholder="F5"
                 />
               </div>
-              {/* 识别引擎：whisper / SenseVoice / Qwen3——按口音与噪音的耐受度一步步升级。 */}
+              {/* 识别引擎：whisper / Qwen3——Qwen3 唯一支持热词注入。 */}
               <div className="grid gap-2">
                 <Label htmlFor="asrEngine">识别引擎</Label>
                 <Select
                   value={settings.asrEngine}
                   onChange={(e) => {
                     const value = e.target.value
-                    if (value === 'whisper' || value === 'sensevoice' || value === 'qwen3') void save({ asrEngine: value })
+                    if (value === 'whisper' || value === 'qwen3') void save({ asrEngine: value })
                   }}
                 >
                   <option value="whisper">whisper（ggml-small）</option>
-                  <option value="sensevoice">SenseVoice（对口音中文更稳，自带标点）</option>
                   <option value="qwen3">Qwen3（方言/抗噪更强，自带标点，模型 ~838MB）</option>
                 </Select>
-                {settings.asrEngine === 'sensevoice' && (
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {!asrStatus ? (
-                      <span>正在检查 SenseVoice 模型…</span>
-                    ) : asrStatus.ready ? (
-                      <span className="text-emerald-400">✓ 模型已就绪（{Math.round(asrStatus.bytes / 1024 / 1024)} MB）</span>
-                    ) : asrStatus.downloading ? (
-                      <span>下载中 {Math.round((asrStatus.progress ?? 0) * 100)}%…</span>
-                    ) : (
-                      <>
-                        <span className={asrStatus.error ? 'text-rose-400' : ''}>
-                          {asrStatus.error ? `上次下载失败：${asrStatus.error}` : '模型未下载（约 228 MB，hf-mirror 国内直连）'}
-                        </span>
-                        <Button variant="outline" size="sm" disabled={!asrStatus.available} onClick={() => void downloadAsr()}>
-                          下载 SenseVoice 模型
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
                 {settings.asrEngine === 'qwen3' && (
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {!asrStatus ? (
-                      <span>正在检查 Qwen3 模型…</span>
-                    ) : asrStatus.ready ? (
-                      <span className="text-emerald-400">✓ 模型已就绪（{Math.round(asrStatus.bytes / 1024 / 1024)} MB）</span>
-                    ) : asrStatus.downloading ? (
-                      <span>解压中…（~838MB，约 1~3 分钟）</span>
-                    ) : (
-                      <>
-                        <span className={asrStatus.error ? 'text-rose-400' : ''}>
-                          {asrStatus.error
-                            ? asrStatus.error
-                            : '模型未下载：点链接下载 tar.bz2，放进数据目录 data\\asr-models\\ 后点解压'}
-                        </span>
-                        <a className="underline hover:text-foreground" href={QWEN3_ASR_RELEASE_URL} target="_blank" rel="noreferrer">
-                          打开下载页
-                        </a>
-                        <Button variant="outline" size="sm" disabled={!asrStatus.available} onClick={() => void downloadAsr()}>
-                          解压 Qwen3 模型
-                        </Button>
-                      </>
-                    )}
-                  </div>
+                  <>
+                    <div className="grid gap-2">
+                      <Label htmlFor="asrHotwords">热词（逗号分隔，识别容易错的词：术语、英雄名……）</Label>
+                      <Input
+                        id="asrHotwords"
+                        value={settings.asrHotwords}
+                        onChange={(e) => setSettings((s) => ({ ...s, asrHotwords: e.target.value }))}
+                        onBlur={(e) => void save({ asrHotwords: e.currentTarget.value })}
+                        placeholder="肉山,买活,风暴之灵"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        只对 Qwen3 生效；识别记录里点「纠错」改对词，差异会自动并进这里。whisper 不支持。
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {!asrStatus ? (
+                        <span>正在检查 Qwen3 模型…</span>
+                      ) : asrStatus.ready ? (
+                        <span className="text-emerald-400">✓ 模型已就绪（{Math.round(asrStatus.bytes / 1024 / 1024)} MB）</span>
+                      ) : asrStatus.downloading ? (
+                        <span>解压中…（~838MB，约 1~3 分钟）</span>
+                      ) : (
+                        <>
+                          <span className={asrStatus.error ? 'text-rose-400' : ''}>
+                            {asrStatus.error
+                              ? asrStatus.error
+                              : '模型未下载：点链接下载 tar.bz2，放进数据目录 data\\asr-models\\ 后点解压'}
+                          </span>
+                          <a className="underline hover:text-foreground" href={QWEN3_ASR_RELEASE_URL} target="_blank" rel="noreferrer">
+                            打开下载页
+                          </a>
+                          <Button variant="outline" size="sm" disabled={!asrStatus.available} onClick={() => void downloadAsr()}>
+                            解压 Qwen3 模型
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </>
                 )}
                 {settings.asrEngine !== 'whisper' && asrStatus && !asrStatus.available && !asrStatus.ready && (
                   <p className="text-xs text-rose-400">本机没找到 node.exe，sherpa 推理跑不了——装 Node 后重启应用。</p>
@@ -1927,11 +1929,56 @@ export default function App(): React.ReactElement {
                         </span>{' '}
                         {entry.error ? (
                           <span className="text-rose-400">🎤 {entry.error}</span>
+                        ) : editingLogAt === entry.at ? (
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            <Input
+                              className="h-6 w-64 text-xs"
+                              value={editDraft}
+                              autoFocus
+                              onChange={(e) => setEditDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveCorrection(entry)
+                                if (e.key === 'Escape') {
+                                  setEditingLogAt(null)
+                                  setEditDraft('')
+                                }
+                              }}
+                            />
+                            <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => saveCorrection(entry)}>
+                              存（差异并入热词）
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-xs"
+                              onClick={() => {
+                                setEditingLogAt(null)
+                                setEditDraft('')
+                              }}
+                            >
+                              取消
+                            </Button>
+                          </span>
                         ) : (
                           <span>
+                            {entry.corrected ? '✏️ ' : ''}
                             🎤 原文「{entry.transcript || '（空）'}」→ 译文「
                             {entry.translated ?? (entry.stage === 'skipped' ? '（只看识别）' : '（翻译失败）')}」
-                            {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}
+                            {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}{' '}
+                            {entry.transcript ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 px-1.5 text-xs text-muted-foreground"
+                                title="改成对的，差异词自动并入热词表（仅 Qwen3 用）"
+                                onClick={() => {
+                                  setEditingLogAt(entry.at)
+                                  setEditDraft(entry.transcript)
+                                }}
+                              >
+                                纠错
+                              </Button>
+                            ) : null}
                           </span>
                         )}
                       </li>

@@ -51,11 +51,16 @@ export function loadSettings(): AppSettings {
     // 声出引擎：只认三引擎层的合法值，乱填打回 edge（英文占位）；声出音色不在这里钳，
     // resolveVoiceOutSynth 决策时对不上清单自会打回默认（和 ttsVoice 同一策略）。
     merged.ttsOutEngine = normalizeVoiceOutEngine(merged.ttsOutEngine)
-    // 识别引擎：只认 whisper / sensevoice / qwen3，乱填打回 whisper（模型没就绪时路由层
-    // 还会兜一层提示，这里只保证枚举干净）。
-    if (merged.asrEngine !== 'sensevoice' && merged.asrEngine !== 'whisper' && merged.asrEngine !== 'qwen3') {
+    // 识别引擎：只认 whisper / qwen3；老存档的 sensevoice（已废弃）迁移成 qwen3，
+    // 其他乱填打回 whisper（模型没就绪时路由层还会兜一层提示，这里只保证枚举干净）。
+    const rawEngine = merged.asrEngine as string
+    if (rawEngine === 'sensevoice') {
+      merged.asrEngine = 'qwen3'
+    } else if (rawEngine !== 'whisper' && rawEngine !== 'qwen3') {
       merged.asrEngine = DEFAULT_SETTINGS.asrEngine
     }
+    // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
+    if (typeof merged.asrHotwords !== 'string') merged.asrHotwords = DEFAULT_SETTINGS.asrHotwords
     return merged
   } catch (err) {
     console.error('settings: load failed, using defaults', err)

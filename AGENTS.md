@@ -41,6 +41,7 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   - `--tts-play-probe` the full speak delivery chain: pure decideSpeak cases (what to read, hero prefix, pending/symbol-only lines), engine propagation from settings through to the payload (`system`/`edge`/`offline` — losing the engine once made every offline WAV ship as `audio/mpeg` and play back silent while Edge kept working), then a hidden overlay window that really plays an Edge mp3 and, when the model is installed, an offline WAV, asserting `VOICE_PLAY_OK` for each. It also pins the own-line switch (`ttsReadOwn`): off (default) skips the player's own line, on reads it. Offline leg is skipped silently when the model is missing (CI has none).
   - `--translate-cache-probe` the translation ledger stores one pair per translation and answers in both directions (source→target and target→source), refuses to hand a Chinese answer to an English request, ignores tone on the reverse side, keeps the pre-recorded stats fields (direction/origin/length/word count/hits), and survives closing/reopening the sqlite file
   - `--voice-out-probe` the pure 声出 decision seam (`src/shared/voice-out.ts`): the fixed English test line is ASCII, `decideVoiceOutTest` (synthesis failed → no speak, plan carries the engine + voice + mime), engine selection `normalizeVoiceOutEngine`/`resolveVoiceOutSynth` (edge English placeholder by default, offline local voices, GV/SoVITS pack — voice left empty, weight switching stays in the existing voice-pack pipeline; garbage falls back per engine; synth language judged from the text), device routing `resolveOutputSink` (empty request = system default, match by deviceId then label, miss = fallback + hint), PTT timing `pttWindow`/`pttWatchdogMs` (audio +200 ms head +200 ms tail, watchdog ≥5 s), and speak-key mapping `normalizeSpeakKey`/`speakKeyVk` (F1–F12 → 0x70–0x7B, single alnum → ASCII). Ticket-05 one-shot chain decisions: `decideVoiceOutReply` (empty/blank recognition, translate-failed, empty translation → silent skip; non-empty translation → speak the trimmed text through the configured engine), `pickPlayableSegments` (failed segment synth skipped, order preserved, all-failed = whole line silent), `spokenStatusLine` (已播 green / ✕ reason red with fallback wording), and reply 分句 via `splitForSpeech` (English long reply: round-trip equality, per-segment cap, hard slice without punctuation). Pure only — zero network, zero game, zero driver; the physical VB-Cable/keystroke leg is manual acceptance.
+  - `--asr-hotwords-probe` the pure hotword seam (`src/shared/asr-hotwords.ts`): `parseHotwords` (CJK comma/顿号/semicolon/space splits, dedupe, empty in → empty out), `extractHotwordDiff` (common prefix/suffix trim then punctuation split; ≥2-char pieces only — single-char corrections return [], capped at 8 per edit), `mergeHotwords` (append-only, no duplicates). Pure only — the engine-side hotwords effect is real-machine A/B acceptance.
   - `--input-probe` draft → translate → command text (sends no keys)
 
 ## Hotkeys
@@ -80,10 +81,9 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   the real history.
 - Logs: `logs/inplace.log` (input bridge stages),
   `chat-inplace/` (deployed ps1), `console-send/`, `whisper/{bin,models}`, `tts-preview/`.
-  `asr-models/sense-voice/` (SenseVoice int8 model + tokens.txt, manual placement honored),
-  `asr-models/sherpa-onnx-qwen3-asr-*/` (Qwen3-ASR 0.6B int8: 3 onnx + tokenizer/, from the
-  `sherpa-onnx-qwen3-asr-*.tar.bz2` the user drops into `asr-models/`; the panel extracts it
-  with the system tar.exe),
+  `asr-models/` (Qwen3-ASR: the `sherpa-onnx-qwen3-asr-*.tar.bz2` the user drops here, extracted
+  by the panel with the system tar.exe into `sherpa-onnx-qwen3-asr-*/`; SenseVoice was removed —
+  engine is now whisper or qwen3 only),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB
   (truncated and rewritten past that). Fields worth reading: `act` = `ocr|same|gap|idle|error|busy`,
   `src` = `stream|sources`, `brk`/`rst` = new-match streak and reset, plus `grabMs`/`ocrMs`/`chg`/`fresh`/`streak`. It is the only way to tell
@@ -154,12 +154,13 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   Two voices trading places mid-match is the exact bug users report as "the voice suddenly sounds
   wrong". The free Edge endpoint needs a warm connection pool, one retry, and it returns 0 bytes
   instead of an error, so a byte-count check is the only reliable failure signal.
-- sherpa ASR (SenseVoice and Qwen3) runs in a plain `node` child
-  (`resources/asr-sensevoice-worker.cjs`, request `{id, wav, engine, dir, language}`) for the same
-  sherpa reason as the TTS worker; SenseVoice `tokens.txt` must have all 25,055 lines — a truncated
-  copy (e.g. an interrupted manual download) segfaults the decoder with no error at all, so the
-  worker logs `ASR_SHERPA_*` markers and the panel shows download progress instead of failing
-  silently. Qwen3 needs all three onnx files plus `tokenizer/` (vocab.json + merges.txt).
+- sherpa ASR (Qwen3 only; SenseVoice removed) runs in a plain `node` child
+  (`resources/asr-sherpa-worker.cjs`, request `{id, wav, dir, hotwords}`) for the same
+  sherpa reason as the TTS worker; the worker logs `ASR_SHERPA_*` markers.
+  Qwen3 needs all three onnx files plus `tokenizer/` (vocab.json + merges.txt).
+  Hotwords (`asrHotwords` setting, comma-separated) are a constructor-time config — the worker's
+  recognizer cache key includes them, so editing the list reloads the engine. Single-char
+  corrections are never auto-added (noise); the correction loop only merges ≥2-char diffs.
 - Never commit `.tmp/` or `.pi/`.
 
 ## Shipping
