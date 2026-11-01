@@ -1368,6 +1368,7 @@ export default function App(): React.ReactElement {
         voiceOutTestMode: draft.voiceOutTestMode,
         voiceTranscribeOnly: draft.voiceTranscribeOnly,
         asrEngine: draft.asrEngine,
+        asrHotwords: draft.asrHotwords,
       })
       setSettings(next)
       setSaveFlash('已保存')
