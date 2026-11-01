@@ -152,6 +152,7 @@ const api: WindowApi = {
   ftRecAsr: (group, line) => ipcRenderer.invoke(IPC.FT_REC_ASR, group, line),
   ftDatasetPrepare: () => ipcRenderer.invoke(IPC.FT_DATASET_PREPARE),
   ftAsrftStatus: () => ipcRenderer.invoke(IPC.FT_ASRFT_STATUS),
+  ftAsrftInstall: () => ipcRenderer.invoke(IPC.FT_ASRFT_INSTALL),
   ftAsrftApply: () => ipcRenderer.invoke(IPC.FT_ASRFT_APPLY),
   ftAsrftRollback: () => ipcRenderer.invoke(IPC.FT_ASRFT_ROLLBACK),
   onTrainState: (callback) => {

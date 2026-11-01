@@ -295,6 +295,25 @@
 - `delay()` 在 `src/main/windows/voice-out.ts:17` 与 `src/main/services/voice/voice-out.ts:31` 各有一份：两行工具函数，抽取的收益不如多一次跨模块耦合。
 - 教训：评审的 P2 逐条记录、逐条决策（修/不修 + 为什么），比默默留着强——下次动到同一片代码时有账可查。
 
+## ASR 微调（Qwen3）
+
+### G15 试点：底模 13/20 → 微调 19/20
+- 数据：G15 组 20 句（16k mono wav，2–3 秒/条），18 句训练 + 尾部 2 句验证，JSONL 用官方格式（`{"audio": ..., "text": "language Chinese<asr_text>句子"}`）。
+- 训练：官方 `qwen3_asr_sft.py`，RTX 4070S 上 36.5 分钟（batch 1 × grad_acc 4，lr 2e-5，66 epoch）。train_loss 掉到 0.0001 只是背熟句子，eval_loss 因验证集太小没有参考价值——**效果以真机 A/B 为准**。
+- 导出：`export_qwen3_asr_onnx.py` 出 fp32+int8（CPU 可跑），verify max_diff < 0.0001。
+- A/B 全量（每模型一个常驻 worker 进程喂 20 句）：微调 19/20 vs 底模 13/20，耗时持平。底模六类错（高地塔→高祭塔、符点→浮点、野怪→也怪、有眼→有野、绕后→路后、偷→头）全修；残余「肉山盾」→「六山盾」一处。
+
+### 换模的两个坑
+- sherpa worker 是常驻进程，启动时就把模型文件读进内存——**换文件不杀 worker 等于白换**。`resetSherpaWorker()` 先杀再让下句识别重新拉起。
+- 导出产物不带 `tokenizer/tokenizer_config.json`，但 sherpa 启动必须要它。词表没变（训练只动 encoder/decoder），从旧模型或备份借一份是安全的；`ensureTokenizerConfig()` 已固化这条借用链。
+
+### 一键环境安装器（M-B）的镜像清单
+- uv 单文件：npmmirror binary（`registry.npmmirror.com/-/binary/uv/`）；python 解释器：npmmirror python-build-standalone。
+- 依赖：PyPI 清华镜像；`torch==2.4.1+cu121` 不在 PyPI 上，`--find-links` 指南京大学 pytorch-wheels 镜像。
+- 底模 `Qwen/Qwen3-ASR-0.6B`：hf-mirror.com，huggingface-hub `snapshot_download` 自带断点续传。
+- 全部版本冻结自试点实测组合（`ASR_FT_PIP_SPEC`），别随手升级 torch/transformers——官方脚本对版本敏感。
+- 教训：uv 版本号不能按字符串排序挑「最新」，`0.10.2` 会输给 `0.9.5`——按段转数值比较（探针抓过一次）。
+
 ## 发版与更新
 
 ### 装好的应用查不到更新（latest.yml 没上传）

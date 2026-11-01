@@ -45,6 +45,7 @@ import {
   resolveAsrFtTrainRequest,
   rollbackAsrFtModel
 } from './services/train/asr-ft'
+import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
 import { normalizeTrainKind, type TrainStartRequest } from '@shared/train'
 import { gsiStatus } from './services/gsi'
 
@@ -275,7 +276,12 @@ export function registerIpc(): void {
   // 一键打包：录音 × 稿子 → 官方微调 JSONL（#14 的核心件，试点格式已验证）。
   ipcMain.handle(IPC.FT_DATASET_PREPARE, () => prepareFtDataset())
   // ASR 微调闭环（T5）：环境状态、应用新模型、回滚。
-  ipcMain.handle(IPC.FT_ASRFT_STATUS, () => asrFtStatus())
+  ipcMain.handle(IPC.FT_ASRFT_STATUS, async () => ({ ...(await asrFtStatus()), install: asrFtInstallState() }))
+  ipcMain.handle(IPC.FT_ASRFT_INSTALL, async () => {
+    // 启动即回，装到哪一步看 STATUS 轮询（整套装下来要十几分钟）。
+    void installAsrFtEnv()
+    return asrFtInstallState()
+  })
   ipcMain.handle(IPC.FT_ASRFT_APPLY, () => applyAsrFtModel())
   ipcMain.handle(IPC.FT_ASRFT_ROLLBACK, () => rollbackAsrFtModel())
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))

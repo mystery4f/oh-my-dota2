@@ -1,6 +1,7 @@
 import type { VoiceReplyStage } from './voice-out'
 
 import type {
+  AsrFtInstallState,
   AsrFtStatusResult,
   AsrFtSwapResult,
   FtDatasetPrepareResult,
@@ -696,6 +697,7 @@ export const IPC = {
   FT_ASRFT_STATUS: 'ft:asrft-status',
   FT_ASRFT_APPLY: 'ft:asrft-apply',
   FT_ASRFT_ROLLBACK: 'ft:asrft-rollback',
+  FT_ASRFT_INSTALL: 'ft:asrft-install',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
@@ -924,6 +926,8 @@ export interface WindowApi {
   ftDatasetPrepare(): Promise<FtDatasetPrepareResult>
   /** 微调环境 + 换模状态：缺什么、有没有可应用的新模型、能不能回滚。 */
   ftAsrftStatus(): Promise<AsrFtStatusResult>
+  /** 一键安装训练环境（uv+venv+依赖+底模）：启动即回，进度走 ftAsrftStatus 轮询。 */
+  ftAsrftInstall(): Promise<AsrFtInstallState>
   /** 应用新模型：导出产物转正，旧模型挪进 .bak（可回滚）。 */
   ftAsrftApply(): Promise<AsrFtSwapResult>
   /** 回滚上一版：现役删掉，.bak 归位。 */

@@ -202,6 +202,16 @@ export function asrFtRollbackSteps(state: { bakExists: boolean }): AsrFtSwapOp[]
 export interface AsrFtStatusResult {
   env: { ok: boolean; gaps: string[]; envRoot: string }
   swap: { activeExists: boolean; bakExists: boolean; nextExists: boolean; lastExportDir: string | null }
+  /** 一键安装的即时状态：null = 这次会话还没跑过安装。 */
+  install: AsrFtInstallState | null
+}
+
+/** M-B 一键安装的进行时状态：窗口轮询这块渲染进度。 */
+export interface AsrFtInstallState {
+  running: boolean
+  stage: string
+  progress: number
+  error: string | null
 }
 
 /** 换模/回滚动作的结果：失败带人话原因。 */

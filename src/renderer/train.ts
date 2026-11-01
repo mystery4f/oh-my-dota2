@@ -383,22 +383,46 @@ async function packDataset(): Promise<void> {
 // ---------- ASR 微调闭环（T5）：一键微调 + 换模/回滚 ----------
 
 const ftEnvEl = $<HTMLElement>('ftEnv')
+const ftInstallBtn = $<HTMLButtonElement>('ftInstall')
 const ftApplyBtn = $<HTMLButtonElement>('ftApply')
 const ftRollbackBtn = $<HTMLButtonElement>('ftRollback')
+/** 安装轮询句柄：安装进行中每 1.5s 刷一次环境行。 */
+let installTimer: ReturnType<typeof setInterval> | null = null
 
 /** 环境行 + 换模按钮：跟着主进程的检测走（缺什么念什么，有导出产物才允许应用）。 */
 async function refreshAsrft(): Promise<void> {
   try {
     const status = await window.api.ftAsrftStatus()
-    ftEnvEl.textContent = status.env.ok
-      ? `微调环境：就绪（${status.env.envRoot}）`
-      : `微调环境缺：${status.env.gaps.join('；')}`
-    ftApplyBtn.disabled = !status.swap.lastExportDir
+    const install = status.install
+    if (install?.running) {
+      ftEnvEl.textContent = `微调环境：${install.stage} ${install.progress}%（断网也能续，挂了再点一次）`
+      if (!installTimer) installTimer = setInterval(() => void refreshAsrft(), 1500)
+    } else {
+      if (installTimer) {
+        clearInterval(installTimer)
+        installTimer = null
+        if (install) ftAsrResult.textContent = install.error ? `环境安装失败：${install.error}` : '训练环境就绪'
+      }
+      ftEnvEl.textContent = status.env.ok
+        ? `微调环境：就绪（${status.env.envRoot}）`
+        : `微调环境缺：${status.env.gaps.join('；')}`
+    }
+    ftInstallBtn.hidden = Boolean(status.env.ok) || Boolean(install?.running)
+    ftApplyBtn.disabled = !status.swap.lastExportDir || Boolean(install?.running)
     ftApplyBtn.title = status.swap.lastExportDir ? `应用 ${status.swap.lastExportDir}` : '先跑一次「微调并替换模型」'
     ftRollbackBtn.disabled = !status.swap.bakExists
   } catch (err) {
     ftEnvEl.textContent = `微调环境：状态读取失败（${String(err)}）`
   }
+}
+
+/** 一键安装：启动后立刻转轮询；装完或失败由 refreshAsrft 收尾。 */
+async function startInstall(): Promise<void> {
+  ftInstallBtn.disabled = true
+  ftAsrResult.textContent = '开始安装训练环境（uv + Python + 依赖 + 底模，全程国内镜像，可断点续传）'
+  await window.api.ftAsrftInstall()
+  await refreshAsrft()
+  ftInstallBtn.disabled = false
 }
 
 /** 一键微调：打包 → 训练 → 导出是一个任务，跑完点「应用新模型」转正。 */
@@ -449,6 +473,7 @@ on('ftStopRec', 'click', () => void stopRecording())
 on('ftReplay', 'click', () => void replay())
 on('ftAsr', 'click', () => void testAsr())
 on('ftPack', 'click', () => void packDataset())
+on('ftInstall', 'click', () => void startInstall())
 on('startFt', 'click', () => void startFt())
 on('ftApply', 'click', () => void applyModel())
 on('ftRollback', 'click', () => void rollbackModel())

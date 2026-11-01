@@ -18,6 +18,7 @@ import {
   type FtDatasetGroupView,
   type TrainTaskStatus
 } from '@shared/train'
+import { pickLatestUvAsset, planAsrFtInstallSteps } from '../services/train/asr-ft-install'
 
 /**
  * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度）。
@@ -77,6 +78,8 @@ export function runTrainProbe(): void {
   push('换模：没有导出产物就是空序列', asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: false }).length === 0, '[]')
   push('回滚序列：有备份才动手', JSON.stringify(asrFtRollbackSteps({ bakExists: true })) === JSON.stringify(['rm-active', 'restore-bak']) && asrFtRollbackSteps({ bakExists: false }).length === 0, '')
   push('环境点名：全缺四项、全齐空数组', deriveAsrFtEnvGaps({}).length === 4 && deriveAsrFtEnvGaps({ venvOk: true, sftScript: 's', exportScript: 'e', baseModelDir: 'm' }).length === 0, String(deriveAsrFtEnvGaps({}).length))
+  push('安装步骤：全缺五步、全齐空序列', JSON.stringify(planAsrFtInstallSteps({ scripts: false, uv: false, venv: false, deps: false, model: false })).includes('下载 uv') && planAsrFtInstallSteps({ scripts: true, uv: true, venv: true, deps: true, model: true }).length === 0, String(planAsrFtInstallSteps({ scripts: false, uv: true, venv: false, deps: true, model: true }).length))
+  push('uv 资产挑最新 windows zip', pickLatestUvAsset([{ name: 'uv-0.9.5-x86_64-pc-windows-msvc.zip' }, { name: 'uv-0.10.2-x86_64-pc-windows-msvc.zip' }, { name: 'uv-0.10.2-aarch64-apple-darwin.tar.gz' }]) === 'uv-0.10.2-x86_64-pc-windows-msvc.zip' && pickLatestUvAsset([{ name: 'uv-installer.ps1' }]) === null, String(pickLatestUvAsset([{ name: 'uv-0.9.5-x86_64-pc-windows-msvc.zip' }])))
 
   // —— 日志行 → 进度 ——
   const p = (line: string): string => JSON.stringify(parseTrainProgress(line))
