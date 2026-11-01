@@ -326,12 +326,22 @@ async function init(): Promise<void> {
   await loadScriptAndRecs()
 }
 
-startBtn.addEventListener('click', () => void start())
-stopBtn.addEventListener('click', () => void stop())
-ftGroupSel.addEventListener('change', () => selectGroup(ftGroupSel.value))
-ftRecBtn.addEventListener('click', () => void beginRecording())
-ftStopRecBtn.addEventListener('click', () => void stopRecording())
-ftReplayBtn.addEventListener('click', () => void replay())
+// 元素缺失（比如页面文件和脚本版本错开）就跳过对应监听并打日志，别让整个模块静默死掉。
+function on(id: string, event: string, handler: () => void): void {
+  const el = document.getElementById(id)
+  if (!el) {
+    console.error(`[train] 缺元素 #${id}，${event} 监听没挂上（页面/脚本版本不一致？）`)
+    return
+  }
+  el.addEventListener(event, handler)
+}
+
+on('start', 'click', () => void start())
+on('stop', 'click', () => void stop())
+on('ftGroup', 'change', () => selectGroup(ftGroupSel.value))
+on('ftRec', 'click', () => void beginRecording())
+on('ftStopRec', 'click', () => void stopRecording())
+on('ftReplay', 'click', () => void replay())
 // 空格开停录音（焦点不在输入框/下拉时），念稿时不用伸手点鼠标。
 window.addEventListener('keydown', (event) => {
   const tag = (event.target as HTMLElement | null)?.tagName ?? ''
