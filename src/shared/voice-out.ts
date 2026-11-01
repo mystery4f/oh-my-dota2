@@ -222,8 +222,8 @@ export function speakKeyVk(key: string): number | null {
  * Alt+Shift+V 说中文 → whisper 识别 → prod 会话翻成英文 → 按设置的声出引擎合成进语音频道。
  * 什么时候触发声出、走哪条静默分支、段落怎么投、第三行写什么，都先在这里定死。 */
 
-/** 一键到底在哪一环停的：识别、翻译、声出。成功为 null。 */
-export type VoiceReplyStage = 'recognize' | 'translate' | 'voice-out'
+/** 一键到底在哪一环停的：识别、翻译、声出、skipped=只看识别模式（转写完直接跳过后续）。成功为 null。 */
+export type VoiceReplyStage = 'recognize' | 'translate' | 'voice-out' | 'skipped'
 
 /** 识别 + 翻译之后、声出决策之前的输入。translated 为 null 表示翻译这一环已经失败。 */
 export interface VoiceReplyInput {

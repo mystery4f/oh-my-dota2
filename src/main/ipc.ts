@@ -47,6 +47,10 @@ export async function voiceReply(transcript: string): Promise<VoiceReplyResult> 
   if (decideVoiceOutReply({ recognized, translated: null }).skip === 'empty-recognition') {
     return { translated: null, spoken: false, stage: 'recognize', error: '未识别到语音' }
   }
+  // 只看识别（测口音/调模型）：转写完就停，翻译、剪贴板、声出、按键全跳过。
+  if (settings.voiceTranscribeOnly) {
+    return { translated: null, spoken: false, stage: 'skipped', error: null }
+  }
   let translated: string | null
   try {
     translated = await translateReply(settings.provider, recognized, settings.replyTone)

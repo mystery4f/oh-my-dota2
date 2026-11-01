@@ -1774,6 +1774,14 @@ export default function App(): React.ReactElement {
                   title="开了之后声出只放音频到所选输出设备，不模拟按下说话键；游戏没开也能试听，F5 不会落到别的窗口上"
                 >
                   测试模式：{settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
+                  测试模式：{settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
+                </Button>
+                <Button
+                  variant={settings.voiceTranscribeOnly ? 'secondary' : 'outline'}
+                  onClick={() => setSettings((s) => ({ ...s, voiceTranscribeOnly: !s.voiceTranscribeOnly }))}
+                  title="开了之后「说一句试试」/Alt+Shift+V 只做识别、把原文写进识别记录，翻译和声出全跳过——测口音、调模型用，测完记得关掉"
+                >
+                  只看识别：{settings.voiceTranscribeOnly ? '开（不翻译不声出）' : '关'}
                 </Button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1829,8 +1837,9 @@ export default function App(): React.ReactElement {
                           <span className="text-rose-400">🎤 {entry.error}</span>
                         ) : (
                           <span>
-                            🎤 原文「{entry.transcript || '（空）'}」→ 译文「{entry.translated ?? '（翻译失败）」'}
-                            {entry.spoken ? ' · 已播放' : ' · 未播放'}
+                            🎤 原文「{entry.transcript || '（空）'}」→ 译文「
+                            {entry.translated ?? (entry.stage === 'skipped' ? '（只看识别）' : '（翻译失败）')}」
+                            {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}
                           </span>
                         )}
                       </li>

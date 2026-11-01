@@ -568,7 +568,7 @@ async function stopRecording(): Promise<void> {
     row.classList.add('sent')
     if (reply.translated) {
       setTranslation(row, reply.translated, false, reply.stage === 'translate' ? (reply.error ?? '翻译失败') : undefined)
-    } else {
+    } else if (reply.stage !== 'skipped') {
       setTranslation(row, null, false, reply.error ?? '翻译失败')
     }
     if (reply.stage === 'voice-out' || reply.spoken) {

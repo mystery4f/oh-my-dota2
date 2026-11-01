@@ -25,6 +25,7 @@ const PERSISTED_FIELDS = [
   'ttsOutEngine',
   'ttsOutVoice',
   'voiceOutTestMode',
+  'voiceTranscribeOnly',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -81,6 +82,9 @@ function sentinelFor(
     case 'voiceOutTestMode':
       // 布尔开关：非当前值落盘原样读回（无归一化，同 ttsReadOwn 一档）。
       return !current.voiceOutTestMode as AppSettings[typeof key]
+    case 'voiceTranscribeOnly':
+      // 布尔开关：非当前值落盘原样读回（无归一化，同 voiceOutTestMode 一档）。
+      return !current.voiceTranscribeOnly as AppSettings[typeof key]
   }
 }
 

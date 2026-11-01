@@ -112,6 +112,8 @@ export interface AppSettings {
   ttsSpeakKey: string
   /** 测试模式：开了只放音频到所选输出设备、不模拟按下说话键——游戏没开也能全链路试听，F5 不会落到别的窗口上。 */
   voiceOutTestMode: boolean
+  /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
+  voiceTranscribeOnly: boolean
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
   /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
@@ -221,6 +223,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsOutputDevice: '',
   ttsSpeakKey: 'F5',
   voiceOutTestMode: false,
+  voiceTranscribeOnly: false,
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
   autoStartCapture: true,
