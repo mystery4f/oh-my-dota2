@@ -679,6 +679,7 @@ export const IPC = {
   FT_REC_SAVE: 'ft:rec-save',
   FT_REC_DELETE: 'ft:rec-delete',
   FT_REC_READ: 'ft:rec-read',
+  FT_REC_ASR: 'ft:rec-asr',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
@@ -900,6 +901,8 @@ export interface WindowApi {
   ftRecDelete(group: string, line: string): Promise<void>
   /** 读回一条录音字节（回放用）。 */
   ftRecRead(group: string, line: string): Promise<Uint8Array>
+  /** 识别测试：一条已存录音喂给当前识别引擎，返回 {ok,text,error}（训练窗口对比稿子用）。 */
+  ftRecAsr(group: string, line: string): Promise<{ ok: boolean; text: string; error: string | null }>
 }
 
 /** 物理像素裁切矩形（相对显示器左上角）。 */

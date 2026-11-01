@@ -169,6 +169,7 @@ function renderFt(): void {
   }
   const key = group.mode === 'free' ? takeKey(group.id, currentLineNo) : lineKey(group.id, currentLineNo)
   ftReplayBtn.disabled = !recs.has(key)
+  ftAsrBtn.disabled = !recs.has(key)
   ftRecBtn.disabled = recording
   ftStopRecBtn.disabled = !recording
 }
@@ -327,6 +328,36 @@ async function replay(): Promise<void> {
   const audio = new Audio(url)
   audio.addEventListener('ended', () => URL.revokeObjectURL(url))
   void audio.play()
+  void audio.play()
+}
+
+// 识别测试：把当前这条录音喂给面板选的识别引擎，和稿子原文对比（标点/空白不参与比对）。
+const ftAsrBtn = $<HTMLButtonElement>('ftAsr')
+const ftAsrResult = $<HTMLElement>('ftAsrResult')
+const normalizeForCompare = (text: string): string => text.replace(/[\s\p{P}]+/gu, '')
+
+async function testAsr(): Promise<void> {
+  const group = currentGroup()
+  if (!group || ftAsrBtn.disabled) return
+  const line = group.mode === 'free' ? `T${String(currentLineNo).padStart(2, '0')}` : `L${String(currentLineNo).padStart(2, '0')}`
+  ftAsrBtn.disabled = true
+  ftAsrResult.textContent = '识别中…'
+  try {
+    const result = await window.api.ftRecAsr(group.id, line)
+    if (!result.ok) {
+      ftAsrResult.textContent = `识别失败：${result.error ?? '未知错误'}`
+      return
+    }
+    const expected = group.mode === 'free' ? '' : group.lines.find((item) => item.no === currentLineNo)?.text ?? ''
+    const match = expected !== '' && normalizeForCompare(expected) === normalizeForCompare(result.text)
+    const head = expected === '' ? '识别' : match ? '✓ 一致' : '✕ 不一致'
+    ftAsrResult.textContent = `${head}｜稿子：${expected || '（自由说，无标准答案）'}｜识别：${result.text}`
+    console.log('[train-ft] asr test', line, 'match=', match, 'text=', result.text)
+  } catch (err) {
+    ftAsrResult.textContent = `识别失败：${String(err)}`
+  } finally {
+    renderFt()
+  }
 }
 
 async function init(): Promise<void> {
@@ -354,6 +385,7 @@ on('ftGroup', 'change', () => selectGroup(ftGroupSel.value))
 on('ftRec', 'click', () => void beginRecording())
 on('ftStopRec', 'click', () => void stopRecording())
 on('ftReplay', 'click', () => void replay())
+on('ftAsr', 'click', () => void testAsr())
   console.log('[train-ft] listeners attached')
 // 空格开停录音（焦点不在输入框/下拉时），念稿时不用伸手点鼠标。
 window.addEventListener('keydown', (event) => {

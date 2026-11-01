@@ -149,6 +149,7 @@ const api: WindowApi = {
   ftRecSave: (group, line, data) => ipcRenderer.invoke(IPC.FT_REC_SAVE, group, line, data),
   ftRecDelete: (group, line) => ipcRenderer.invoke(IPC.FT_REC_DELETE, group, line),
   ftRecRead: (group, line) => ipcRenderer.invoke(IPC.FT_REC_READ, group, line),
+  ftRecAsr: (group, line) => ipcRenderer.invoke(IPC.FT_REC_ASR, group, line),
   onTrainState: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, snapshot: TrainSnapshot): void => callback(snapshot)
     ipcRenderer.on(IPC.TRAIN_STATE, listener)

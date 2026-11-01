@@ -36,7 +36,7 @@ import { autoVoicePackSetup, deleteVoicePack, ensureSovitsSeedRef, installVoiceP
 import { getOverlayManager } from './windows/overlay'
 import { getTrainWindow } from './windows/train'
 import { getTrainManager } from './services/train/manager'
-import { ftRecDelete, ftRecList, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
+import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
 import type { TrainStartRequest } from '@shared/train'
 import { gsiStatus } from './services/gsi'
 
@@ -245,6 +245,18 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.FT_REC_SAVE, (_e, group: string, line: string, data: Uint8Array) => ftRecSave(group, line, data))
   ipcMain.handle(IPC.FT_REC_DELETE, (_e, group: string, line: string) => ftRecDelete(group, line))
   ipcMain.handle(IPC.FT_REC_READ, (_e, group: string, line: string) => ftRecRead(group, line))
+  // 训练窗口「识别测试」：已存录音直接喂给当前识别引擎，和稿子原文对比。
+  ipcMain.handle(IPC.FT_REC_ASR, async (_e, group: string, line: string) => {
+    const wavPath = ftRecPath(String(group ?? ''), String(line ?? ''))
+    if (loadSettings().asrEngine === 'qwen3') {
+      if (!qwen3Status().ready) {
+        return { ok: false, text: '', error: 'Qwen3 模型未就绪：到面板「识别引擎」里点解压' }
+      }
+      const result = await qwen3Transcribe(wavPath)
+      return result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'Qwen3 识别失败' }
+    }
+    return getWhisperAdapter().transcribe(wavPath, 'zh')
+  })
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
   ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))
   ipcMain.handle(IPC.OVERLAY_OPACITY, (_e, value: number) => getOverlayManager().setOpacity(value))

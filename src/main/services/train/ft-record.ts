@@ -110,3 +110,8 @@ export async function ftRecRead(group: string, line: string): Promise<Uint8Array
 export async function ftRecDelete(group: string, line: string): Promise<void> {
   await unlink(recPath(group, line)).catch(() => undefined)
 }
+
+/** 训练窗口「识别测试」用：把已存录音的磁盘路径给 ASR 路由复用（键同样过白名单）。 */
+export function ftRecPath(group: string, line: string): string {
+  return recPath(group, line)
+}
