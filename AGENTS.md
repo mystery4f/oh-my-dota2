@@ -166,7 +166,8 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   recognizer cache key includes them, so editing the list reloads the engine. Single-char
   corrections are never auto-added (noise); the correction loop only merges ≥2-char diffs.
 - Never commit `.tmp/` or `.pi/`.
-- App-owned data — including non-dependency artifacts the app produces (recordings, exports, reports, logs) — stays inside the portable data directory (`userData`), never scattered onto other drives. Never hardcode external paths (`D:\work\...`) as runtime dependencies: the installed build's data lives in the `<install>-data` sibling directory, and a fresh install must work with zero external paths. Developer-only tooling (e.g. the `D:\work\ft-qwen3` fine-tune workspace) lives outside the app and must never be a hardcoded app dependency; anything the app itself needs (scripts, model files) ships as a bundled resource under `resources/`, and its user data lands under `userData`.
+- App-owned data — including non-dependency artifacts the app produces (recordings, exports, reports, logs) — stays inside the portable data directory (`userData`), never scattered onto other drives. Never hardcode external paths (`D:\work\...`) as runtime dependencies: the installed build's data lives in the `<install>-data` sibling directory, and a fresh install must work with zero external paths.
+- Developer-only tooling (e.g. the `D:\work\ft-qwen3` fine-tune workspace: training env, cloned upstream repos, base model weights) stays outside the repo, and app code must have ZERO references to it — no hardcoded paths, no imports, no spawn targets, no "it exists on this machine" assumptions. Before an app feature can use something that lives in a developer workspace, copy it into the project first: bundled resource under `resources/`, or generated into `userData`.
 
 ## Shipping
 
