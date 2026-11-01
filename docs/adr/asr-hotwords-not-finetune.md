@@ -17,7 +17,7 @@ tags: [asr, qwen3, hotwords, finetune, decision]
 
 | 引擎 | 热词/提示词 | 微调可行性 |
 | --- | --- | --- |
-| Qwen3-ASR（sherpa-onnx 0.6B int8） | `qwen3Asr.hotwords` 字段，A/B 实测生效（同一段语音，喂词表后标点与选词随词表变化） | 不可行：官方只放推理代码；本地跑的是 INT8 ONNX 导出版，只读格式改不了权重；微调 = 原版权重 + GPU + 自建管线 + 重新导出，无先例可抄 |
+| Qwen3-ASR（sherpa-onnx 0.6B int8） | `qwen3Asr.hotwords` 字段，A/B 实测生效（同一段语音，喂词表后标点与选词随词表变化） | ~~不可行~~ **已推翻（2026-11-02）**：`QwenLM/Qwen3-ASR` 开源仓库发布官方 SFT 脚本 `qwen3_asr_sft.py`（JSONL 音频-文本对、torchrun、断点续训）；导出走 `Wasser1462/Qwen3-ASR-onnx`（正是本项目的 0.6B int8 模型的来源脚本）。见文末更正 |
 | SenseVoice-small（sherpa-onnx） | 无任何热词/提示词机制（非自回归 CTC，配置仅 model/language/itn） | FunASR 有社区微调路线，但需 GPU + 造语料 + 导出回 ONNX，成本高 |
 | whisper ggml-small | `--prompt` 初始提示（已用于简体偏置） | 社区有 LoRA 微调 + 转 ggml 的路线，同样重 |
 
@@ -33,6 +33,16 @@ tags: [asr, qwen3, hotwords, finetune, decision]
 - 热词 + Qwen3 在真实口音下仍大面积错词，且错因是音段而非词汇
 - 用户愿意固定产出语料（≥1 小时录音+校对文本）
 - 有可用 GPU 且接受一次性的训练管线搭建成本
+
+## 更正（2026-11-02）
+
+本 ADR 立项时断言「Qwen3-ASR 不可微调」**是错的**——当时依据的是 Flash API 时代的信息。`QwenLM/Qwen3-ASR` 开源仓库现带官方微调脚本：
+
+- `finetuning/qwen3_asr_sft.py`：JSONL 音频-文本对（`{"audio":..,"text":"language Chinese<asr_text>.."}`），单卡/torchrun 多卡，断点续训
+- 导出：`Wasser1462/Qwen3-ASR-onnx` 转 ONNX（本项目在用的 0.6B int8 模型就是它转的），微调产物可原路回到 sherpa-onnx 通道
+- 风险点：官方脚本为全量 SFT 非 LoRA，8G 显存跑 0.6B 需小 batch + 梯度累积实测；不行再走社区 QLoRA（已有 0.6B QLoRA→ONNX INT8 先例）
+
+**后果**：微调目标从原计划的 SenseVoice-small 改为 Qwen3-ASR-0.6B（app 现役引擎、实测更准、热词/纠错回路围绕它建）。微调不再「记档不排期」，已立项（#29 训练管理页 + 第一轮手动微调）。
 
 ## 数据
 
