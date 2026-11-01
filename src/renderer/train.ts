@@ -202,8 +202,8 @@ function selectGroup(id: string): void {
 let recStream: MediaStream | null = null
 let recCtx: AudioContext | null = null
 let recNode: ScriptProcessorNode | null = null
-const chunks: Float32Array[] = []
 const RMS_THRESHOLD = 0.012
+let recRate = 48000 // 开录时从 AudioContext 记下，finishRecording 会把 ctx 置 null
 const QUIET_MS_TO_STOP = 1200
 const MIN_MS = 400
 const MAX_MS = 20000
@@ -223,7 +223,7 @@ function finishRecording(): void {
 async function saveChunks(): Promise<void> {
   const group = currentGroup()
   if (!group) return
-  const rate = recCtx?.sampleRate ?? 48000
+  const rate = recRate
   const durationMs = Math.round((chunks.reduce((sum, c) => sum + c.length, 0) / rate) * 1000)
   if (durationMs < MIN_MS) {
     ftHint.textContent = `太短（${durationMs}ms），丢弃了——重新点录制`
@@ -265,26 +265,36 @@ async function beginRecording(): Promise<void> {
   let quietSince = 0
   ftHint.textContent = '录音中…'
   renderFt()
-  recCtx = new AudioContext()
-  recNode = recCtx.createScriptProcessor(4096, 1, 1)
-  recNode.onaudioprocess = (event): void => {
-    const input = event.inputBuffer.getChannelData(0)
-    chunks.push(new Float32Array(input))
-    let energy = 0
-    for (const sample of input) energy += sample * sample
-    const rms = Math.sqrt(energy / input.length)
-    if (rms >= RMS_THRESHOLD) {
-      speechSeen = true
-      quietSince = 0
-    } else if (speechSeen) {
-      if (!quietSince) quietSince = Date.now()
-      // 说完连续安静 1.2 秒就自动停（读稿节奏就是句间停一秒）。
-      if (Date.now() - quietSince >= QUIET_MS_TO_STOP) void stopRecording('自动停')
+  try {
+    recCtx = new AudioContext()
+    recRate = recCtx.sampleRate
+    recNode = recCtx.createScriptProcessor(4096, 1, 1)
+    recNode.onaudioprocess = (event): void => {
+      const input = event.inputBuffer.getChannelData(0)
+      chunks.push(new Float32Array(input))
+      let energy = 0
+      for (const sample of input) energy += sample * sample
+      const rms = Math.sqrt(energy / input.length)
+      if (rms >= RMS_THRESHOLD) {
+        speechSeen = true
+        quietSince = 0
+      } else if (speechSeen) {
+        if (!quietSince) quietSince = Date.now()
+        // 说完连续安静 1.2 秒就自动停（读稿节奏就是句间停一秒）。
+        if (Date.now() - quietSince >= QUIET_MS_TO_STOP) void stopRecording('自动停')
+      }
+      if (Date.now() - startedAt >= MAX_MS) void stopRecording('到 20s 上限')
     }
-    if (Date.now() - startedAt >= MAX_MS) void stopRecording('到 20s 上限')
+    recCtx.createMediaStreamSource(recStream).connect(recNode)
+    recNode.connect(recCtx.destination)
+  } catch (err) {
+    // 图建不起来就把状态退干净，别留下「录音中…」的僵尸态。
+    finishRecording()
+    chunks.length = 0
+    ftHint.textContent = `录音初始化失败：${String(err)}`
+    renderFt()
+    return
   }
-  recStream.connect(recNode)
-  recNode.connect(recCtx.destination)
 }
 
 async function stopRecording(reason = ''): Promise<void> {
