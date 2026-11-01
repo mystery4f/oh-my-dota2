@@ -212,6 +212,7 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
   - 训练侧（应用外）：GV 英文包数据与微调，产物走现有音色包权重切换（`gptWeights`/`sovitsWeights`），应用侧零改动。
   - 引擎换型候选（2026-11-01 记录）：[IndexTTS](https://github.com/index-tts/index-tts)——若 GV 英文包训练成本/效果不理想，调研后考虑把 GV 换成它；未定，先记着。
 - `#28` 识别换型候选（2026-11-02 记录）：whisper 对重口音中文偏弱，ggml-small + 钉死 zh 先行；若仍不行，换 [SenseVoice-small](https://github.com/FunAudioLLM/SenseVoice)（FunASR，中文口音/短句明显更强，ONNX 快，可走 sherpa-onnx ASR 接入，项目已有 sherpa 依赖）。
+  - **已落地（2026-11-02，commit `758b270`）**：面板新增「识别引擎」选择（whisper / SenseVoice），SenseVoice-small int8（约 228 MB）走 sherpa-onnx 推理，模型不进安装包——首次选用时从 hf-mirror 下载，或手动放 `data\asr-models\sense-voice\`（model.int8.onnx + tokens.txt）。机器验证：合成中文测试句一字不差、自带标点。
 
 ### 已关闭（留档，别再当待办捡回来）
 

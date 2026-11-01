@@ -80,6 +80,7 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   the real history.
 - Logs: `logs/inplace.log` (input bridge stages),
   `chat-inplace/` (deployed ps1), `console-send/`, `whisper/{bin,models}`, `tts-preview/`.
+  `asr-models/sense-voice/` (SenseVoice int8 model + tokens.txt, manual placement honored),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB
   (truncated and rewritten past that). Fields worth reading: `act` = `ocr|same|gap|idle|error|busy`,
   `src` = `stream|sources`, `brk`/`rst` = new-match streak and reset, plus `grabMs`/`ocrMs`/`chg`/`fresh`/`streak`. It is the only way to tell
@@ -150,6 +151,10 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   Two voices trading places mid-match is the exact bug users report as "the voice suddenly sounds
   wrong". The free Edge endpoint needs a warm connection pool, one retry, and it returns 0 bytes
   instead of an error, so a byte-count check is the only reliable failure signal.
+- SenseVoice ASR runs in a plain `node` child (`resources/asr-sensevoice-worker.cjs`) for the same
+  sherpa reason as the TTS worker; `tokens.txt` must have all 25,055 lines — a truncated copy (e.g.
+  an interrupted manual download) segfaults the decoder with no error at all, so the worker logs
+  `ASR_SV_*` markers and the panel shows download progress instead of failing silently.
 - Never commit `.tmp/` or `.pi/`.
 
 ## Shipping
