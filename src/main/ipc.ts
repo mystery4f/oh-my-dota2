@@ -37,6 +37,7 @@ import { getOverlayManager } from './windows/overlay'
 import { getTrainWindow } from './windows/train'
 import { getTrainManager } from './services/train/manager'
 import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
+import { prepareFtDataset } from './services/train/ft-dataset'
 import type { TrainStartRequest } from '@shared/train'
 import { gsiStatus } from './services/gsi'
 
@@ -257,6 +258,8 @@ export function registerIpc(): void {
     }
     return getWhisperAdapter().transcribe(wavPath, 'zh')
   })
+  // 一键打包：录音 × 稿子 → 官方微调 JSONL（#14 的核心件，试点格式已验证）。
+  ipcMain.handle(IPC.FT_DATASET_PREPARE, () => prepareFtDataset())
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
   ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))
   ipcMain.handle(IPC.OVERLAY_OPACITY, (_e, value: number) => getOverlayManager().setOpacity(value))

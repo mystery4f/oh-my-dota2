@@ -137,3 +137,73 @@ export function parseTrainProgress(line: string): TrainProgress | null {
   if (bare) return { percent: Math.min(100, Number(bare[1])), stage: stageOf(text) }
   return null
 }
+
+/** 打包给训练脚本的一条数据：录音绝对路径 + 稿子原文。 */
+export interface FtDatasetEntry {
+  wavPath: string
+  text: string
+}
+
+/** 一键准备结果：两份 JSONL 的条数与落盘路径（error 非空时其余无意义）。 */
+export interface FtDatasetPrepareResult {
+  ok: boolean
+  trainCount: number
+  evalCount: number
+  trainPath: string
+  evalPath: string
+  error: string | null
+}
+
+/** 读稿组/句最小视图（免得共享类型互相循环依赖）。 */
+export interface FtDatasetGroupView {
+  id: string
+  mode: 'lines' | 'free'
+  lines: Array<{ no: number; text: string }>
+}
+
+/**
+ * 录音 × 稿子 → 训练条目。逐句组只收已录的；自由说组没有标准答案，监督训练用不了，整组跳过。
+ * hasRec/wavPath 由调用方注入（主进程给磁盘真值，探针给假值），这里不做任何 IO。
+ */
+export function buildFtDatasetEntries(
+  groups: FtDatasetGroupView[],
+  hasRec: (group: string, line: string) => boolean,
+  wavPath: (group: string, line: string) => string,
+): { entries: FtDatasetEntry[]; notRecorded: number } {
+  const entries: FtDatasetEntry[] = []
+  let notRecorded = 0
+  for (const group of groups) {
+    if (group.mode === 'free') continue
+    for (const line of group.lines) {
+      const key = `L${String(line.no).padStart(2, '0')}`
+      if (!hasRec(group.id, key)) {
+        notRecorded += 1
+        continue
+      }
+      entries.push({ wavPath: wavPath(group.id, key), text: line.text })
+    }
+  }
+  return { entries, notRecorded }
+}
+
+/**
+ * 训练/验证切分：尾部 holdout 条进验证集（录音天然按组序落盘，尾部=最晚录的）；
+ * 数据太少（≤2×holdout）就全给训练，验证集留空——试点别为切分浪费数据。
+ */
+export function splitTrainEval(
+  entries: FtDatasetEntry[],
+  holdout = 2,
+): { train: FtDatasetEntry[]; eval: FtDatasetEntry[] } {
+  if (entries.length <= holdout * 2) return { train: entries.slice(), eval: [] }
+  return { train: entries.slice(0, entries.length - holdout), eval: entries.slice(entries.length - holdout) }
+}
+
+/** 官方 qwen3_asr_sft.py 要的 JSONL 行：中文固定带 language 前缀（实测格式）。 */
+export function buildFtJsonlLine(entry: FtDatasetEntry): string {
+  return JSON.stringify({ audio: entry.wavPath, text: `language Chinese<asr_text>${entry.text}` })
+}
+
+export function buildFtJsonlText(entries: FtDatasetEntry[]): string {
+  if (entries.length === 0) return ''
+  return `${entries.map((entry) => buildFtJsonlLine(entry)).join('\n')}\n`
+}

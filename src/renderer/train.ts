@@ -360,6 +360,20 @@ async function testAsr(): Promise<void> {
   }
 }
 
+// 一键打包：已录句子 × 稿子 → 官方微调 JSONL（train/eval 两份，训脚本直接吃）。
+async function packDataset(): Promise<void> {
+  ftAsrResult.textContent = '打包中…'
+  try {
+    const result = await window.api.ftDatasetPrepare()
+    ftAsrResult.textContent = result.ok
+      ? `已打包：训练 ${result.trainCount} 条 / 验证 ${result.evalCount} 条 → ${result.trainPath}`
+      : `打包失败：${result.error ?? '未知错误'}`
+    console.log('[train-ft] pack', result.ok, result.trainCount, result.evalCount)
+  } catch (err) {
+    ftAsrResult.textContent = `打包失败：${String(err)}`
+  }
+}
+
 async function init(): Promise<void> {
   const settings = await window.api.getSettings()
   kindSel.value = settings.trainKind
@@ -386,6 +400,7 @@ on('ftRec', 'click', () => void beginRecording())
 on('ftStopRec', 'click', () => void stopRecording())
 on('ftReplay', 'click', () => void replay())
 on('ftAsr', 'click', () => void testAsr())
+on('ftPack', 'click', () => void packDataset())
   console.log('[train-ft] listeners attached')
 // 空格开停录音（焦点不在输入框/下拉时），念稿时不用伸手点鼠标。
 window.addEventListener('keydown', (event) => {

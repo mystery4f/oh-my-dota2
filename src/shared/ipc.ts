@@ -1,6 +1,6 @@
 import type { VoiceReplyStage } from './voice-out'
 
-import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train'
+import type { FtDatasetPrepareResult, TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train'
 
 
 /** ASR 微调读稿：一句原文。 */
@@ -680,6 +680,7 @@ export const IPC = {
   FT_REC_DELETE: 'ft:rec-delete',
   FT_REC_READ: 'ft:rec-read',
   FT_REC_ASR: 'ft:rec-asr',
+  FT_DATASET_PREPARE: 'ft:dataset-prepare',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
@@ -903,6 +904,8 @@ export interface WindowApi {
   ftRecRead(group: string, line: string): Promise<Uint8Array>
   /** 识别测试：一条已存录音喂给当前识别引擎，返回 {ok,text,error}（训练窗口对比稿子用）。 */
   ftRecAsr(group: string, line: string): Promise<{ ok: boolean; text: string; error: string | null }>
+  /** 一键打包：已录句子 × 稿子 → 官方微调 JSONL（train/eval 两份，落在 asr-ft-datasets/）。 */
+  ftDatasetPrepare(): Promise<FtDatasetPrepareResult>
 }
 
 /** 物理像素裁切矩形（相对显示器左上角）。 */

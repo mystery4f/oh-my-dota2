@@ -1,11 +1,15 @@
 import { app } from 'electron'
 import {
+  buildFtDatasetEntries,
+  buildFtJsonlLine,
   canStartTrain,
   deriveTrainPlan,
   normalizeTrainKind,
   parseTrainProgress,
   shouldPauseInference,
   shouldResumeInference,
+  splitTrainEval,
+  type FtDatasetGroupView,
   type TrainTaskStatus
 } from '@shared/train'
 
@@ -66,6 +70,25 @@ export function runTrainProbe(): void {
   push('普通日志行 → null（只进日志环）', parseTrainProgress('loss 0.42') === null && parseTrainProgress('loading dataset') === null, `${p('loss 0.42')}/${p('loading dataset')}`)
   push('空行/纯空白 → null', parseTrainProgress('') === null && parseTrainProgress('   ') === null, `${p('')}/${p('   ')}`)
 
+
+  // —— 一键打包纯缝（#14：录音×稿子→官方 JSONL） ——
+  const groups: FtDatasetGroupView[] = [
+    { id: 'G15', mode: 'lines', lines: [{ no: 1, text: '中路二塔快没了。' }, { no: 2, text: '下路野区刷了两组野怪。' }, { no: 3, text: '河道的神符刷新了。' }] },
+    { id: 'G21', mode: 'free', lines: [] }
+  ]
+  const built = buildFtDatasetEntries(
+    groups,
+    (group, line) => group === 'G15' && (line === 'L01' || line === 'L03'),
+    (group, line) => `X:/rec/${group}-${line}.wav`
+  )
+  push('打包只收已录的逐句句', built.entries.length === 2 && built.entries[0].wavPath.includes('G15-L01') && built.notRecorded === 1, JSON.stringify(built))
+  push('自由说组整组跳过（无标准答案）', built.entries.every((entry) => entry.wavPath.includes('G15')), JSON.stringify(built.entries.map((entry) => entry.wavPath)))
+  const jsonl = buildFtJsonlLine(built.entries[0])
+  push('JSONL 行带 language Chinese 前缀', jsonl.includes('"audio":"X:/rec/G15-L01.wav"') && jsonl.includes('language Chinese<asr_text>中路二塔快没了。'), jsonl)
+  const split = splitTrainEval(built.entries)
+  push('数据太少全归训练（验证留空）', split.train.length === 2 && split.eval.length === 0, `train=${split.train.length} eval=${split.eval.length}`)
+  const splitBig = splitTrainEval([1, 2, 3, 4, 5].map((no) => ({ wavPath: `w${no}`, text: `t${no}` })))
+  push('够量时尾部 2 条进验证', splitBig.train.length === 3 && splitBig.eval.length === 2 && splitBig.eval[0].wavPath === 'w4', `train=${splitBig.train.length} eval=${splitBig.eval.length}`)
   let failed = 0
   for (const item of cases) {
     if (!item.ok) failed++
