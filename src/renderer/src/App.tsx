@@ -1345,20 +1345,25 @@ export default function App(): React.ReactElement {
     patchProvider({ id, baseUrl: preset.baseUrl, model: preset.model })
   }
 
-  const save = async (): Promise<void> => {
+  // patch：开关类按钮「点了立即生效」用——setSettings 是异步的，直接在 onClick 里
+  // setSettings 再 save 读到的还是旧 state，所以把要盖的字段显式传进来。
+  const save = async (patch: Partial<AppSettings> = {}): Promise<void> => {
     try {
       // 只落本页拥有的字段。整对象回写会把别的页/主进程后来写的字段（音色包自动激活的
       // 参考路径、引擎选择）按本页挂载时的旧值盖回去——实测：填个 key 保存，就把已配好的
       // sovits 参考清空、引擎打回 edge。setSettings 的契约本来就是 Partial 补丁。
+      const draft = { ...settings, ...patch }
       const next = await window.api.setSettings({
-        provider: settings.provider,
-        proxyUrl: settings.proxyUrl,
-        targetLang: settings.targetLang,
-        whisperBinPath: settings.whisperBinPath,
-        ttsOutputDevice: settings.ttsOutputDevice,
-        ttsSpeakKey: settings.ttsSpeakKey,
-        ttsOutEngine: settings.ttsOutEngine,
-        ttsOutVoice: settings.ttsOutVoice,
+        provider: draft.provider,
+        proxyUrl: draft.proxyUrl,
+        targetLang: draft.targetLang,
+        whisperBinPath: draft.whisperBinPath,
+        ttsOutputDevice: draft.ttsOutputDevice,
+        ttsSpeakKey: draft.ttsSpeakKey,
+        ttsOutEngine: draft.ttsOutEngine,
+        ttsOutVoice: draft.ttsOutVoice,
+        voiceOutTestMode: draft.voiceOutTestMode,
+        voiceTranscribeOnly: draft.voiceTranscribeOnly,
       })
       setSettings(next)
       setSaveFlash('已保存')
@@ -1770,15 +1775,14 @@ export default function App(): React.ReactElement {
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant={settings.voiceOutTestMode ? 'secondary' : 'outline'}
-                  onClick={() => setSettings((s) => ({ ...s, voiceOutTestMode: !s.voiceOutTestMode }))}
+                  onClick={() => void save({ voiceOutTestMode: !settings.voiceOutTestMode })}
                   title="开了之后声出只放音频到所选输出设备，不模拟按下说话键；游戏没开也能试听，F5 不会落到别的窗口上"
                 >
-                  测试模式：{settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
                   测试模式：{settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
                 </Button>
                 <Button
                   variant={settings.voiceTranscribeOnly ? 'secondary' : 'outline'}
-                  onClick={() => setSettings((s) => ({ ...s, voiceTranscribeOnly: !s.voiceTranscribeOnly }))}
+                  onClick={() => void save({ voiceTranscribeOnly: !settings.voiceTranscribeOnly })}
                   title="开了之后「说一句试试」/Alt+Shift+V 只做识别、把原文写进识别记录，翻译和声出全跳过——测口音、调模型用，测完记得关掉"
                 >
                   只看识别：{settings.voiceTranscribeOnly ? '开（不翻译不声出）' : '关'}
