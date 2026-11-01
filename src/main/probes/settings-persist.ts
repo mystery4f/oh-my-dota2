@@ -28,6 +28,8 @@ const PERSISTED_FIELDS = [
   'voiceTranscribeOnly',
   'asrEngine',
   'asrHotwords',
+  'trainKind',
+  'trainDataset',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -93,6 +95,11 @@ function sentinelFor(
     case 'asrHotwords':
       // 热词表：带中文逗号与顿号的串原样落盘原样读回（分隔符归一化只在读取热词时做）。
       return (current.asrHotwords.includes('肉山') ? '买活,高地、风暴之灵' : '肉山，买活') as AppSettings[typeof key]
+    case 'trainKind':
+      // 训练任务类型：非当前值落盘原样读回（枚举归一化在 loadSettings，探针喂合法值）。
+      return (current.trainKind === 'demo' ? 'gv-sovits' : 'demo') as AppSettings[typeof key]
+    case 'trainDataset':
+      return (current.trainDataset.includes('ftv1') ? 'ftv2-dataset' : 'ftv1-dataset') as AppSettings[typeof key]
   }
 }
 

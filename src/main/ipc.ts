@@ -34,6 +34,9 @@ import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './s
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
 import { autoVoicePackSetup, deleteVoicePack, ensureSovitsSeedRef, installVoicePack, sovitsVoicePacks } from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
+import { getTrainWindow } from './windows/train'
+import { getTrainManager } from './services/train/manager'
+import type { TrainStartRequest } from '@shared/train'
 import { gsiStatus } from './services/gsi'
 
 /**
@@ -229,6 +232,12 @@ export function registerIpc(): void {
   ipcMain.on(IPC.OVERLAY_VOICE_RESULT, (_e, result: VoiceChainSummary) => {
     broadcast(IPC.VOICE_CHAIN_RESULT, result)
   })
+  // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
+  ipcMain.on(IPC.TRAIN_OPEN, () => getTrainWindow().open())
+  getTrainManager().onState((snapshot) => broadcast(IPC.TRAIN_STATE, snapshot))
+  ipcMain.handle(IPC.TRAIN_START, (_e, request: TrainStartRequest) => getTrainManager().start(request))
+  ipcMain.handle(IPC.TRAIN_STOP, () => getTrainManager().stop())
+  ipcMain.handle(IPC.TRAIN_SNAPSHOT, () => getTrainManager().snapshot())
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
   ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))
   ipcMain.handle(IPC.OVERLAY_OPACITY, (_e, value: number) => getOverlayManager().setOpacity(value))

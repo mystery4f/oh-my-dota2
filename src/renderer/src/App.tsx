@@ -1861,6 +1861,13 @@ export default function App(): React.ReactElement {
                   <p className="text-xs text-rose-400">本机没找到 node.exe，sherpa 推理跑不了——装 Node 后重启应用。</p>
                 )}
               </div>
+              {/* 训练管理（T1）：窗口骨架已就位，真实训练栈 T3/T5 接入。 */}
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Button variant="outline" onClick={() => window.api.trainOpen()}>
+                  训练管理
+                </Button>
+                <span>GV 音色微调与 ASR 口音微调的训练窗口（当前只有演示任务，真实训练栈陆续接入）。</span>
+              </div>
               {/* 测试模式：开了只放音频、不按说话键——游戏没开也能全链路试听（输出设备选耳机即可）。 */}
               <div className="flex flex-wrap items-center gap-2">
                 <Button

@@ -13,6 +13,7 @@ import {
   type VoiceChainSummary,
   type WindowApi
 } from '@shared/ipc'
+import type { TrainSnapshot } from '@shared/train'
 
 const api: WindowApi = {
   getSettings: () => ipcRenderer.invoke(IPC.SETTINGS_GET),
@@ -139,6 +140,15 @@ const api: WindowApi = {
     return () => ipcRenderer.removeListener(IPC.VOICE_SPEAK, listener)
   },
   voiceOutTest: () => ipcRenderer.invoke(IPC.VOICE_OUT_TEST),
+  trainOpen: () => ipcRenderer.send(IPC.TRAIN_OPEN),
+  trainStart: (request) => ipcRenderer.invoke(IPC.TRAIN_START, request),
+  trainStop: () => ipcRenderer.invoke(IPC.TRAIN_STOP),
+  trainSnapshot: () => ipcRenderer.invoke(IPC.TRAIN_SNAPSHOT),
+  onTrainState: (callback) => {
+    const listener = (_e: Electron.IpcRendererEvent, snapshot: TrainSnapshot): void => callback(snapshot)
+    ipcRenderer.on(IPC.TRAIN_STATE, listener)
+    return () => ipcRenderer.removeListener(IPC.TRAIN_STATE, listener)
+  },
   voiceOut: {
     onPlay: (callback) => {
       const listener = (_e: Electron.IpcRendererEvent, payload: VoiceOutPlayRequest): void => callback(payload)

@@ -1,5 +1,7 @@
 import type { VoiceReplyStage } from './voice-out'
 
+import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train'
+
 export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'custom'
 
 export interface ProviderConfig {
@@ -121,7 +123,12 @@ export interface AppSettings {
    */
   asrEngine: 'whisper' | 'qwen3'
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
+  /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
   asrHotwords: string
+  /** 训练窗口记住的任务类型：demo 演示任务；gv-gpt/gv-sovits/asr-ft 在 T3/T5 接入。 */
+  trainKind: 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
+  /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
+  trainDataset: string
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
   /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
@@ -233,6 +240,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
   asrEngine: 'whisper',
+  trainKind: 'demo',
+  trainDataset: '',
   asrHotwords: '',
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
@@ -629,6 +638,13 @@ export const IPC = {
   // 识别模型（Qwen3）状态与解压：和离线朗读同一套「状态 + 获取」面板节奏。
   ASR_STATUS: 'asr:status',
   ASR_DOWNLOAD: 'asr:download',
+  // 训练管理（T1：窗口骨架 + 任务模型；真实训练栈 T3/T5 接入）。
+  TRAIN_OPEN: 'train:open',
+  TRAIN_START: 'train:start',
+  TRAIN_STOP: 'train:stop',
+  TRAIN_SNAPSHOT: 'train:snapshot',
+  /** 主进程广播训练快照（任务状态 + 日志尾），训练窗口订阅。 */
+  TRAIN_STATE: 'train:state',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
@@ -831,6 +847,15 @@ export interface WindowApi {
   voiceOutTest(): Promise<VoiceOutTestResult>
   /** 声出隐藏窗口专用桥（面板用不到）。 */
   voiceOut: VoiceOutApi
+  /** 打开训练管理窗口（已开就置前）。 */
+  trainOpen(): void
+  /** 启动一个训练任务（T1 只有 demo 能真跑，其余 kind 会被拒绝并说明去向）。 */
+  trainStart(request: TrainStartRequest): Promise<TrainStartResult>
+  trainStop(): Promise<TrainStartResult>
+  /** 当前任务快照（状态 + 日志尾），窗口打开时先拉一次。 */
+  trainSnapshot(): Promise<TrainSnapshot>
+  /** 订阅训练状态广播（250ms 节流）。 */
+  onTrainState(callback: (snapshot: TrainSnapshot) => void): () => void
 }
 
 /** 物理像素裁切矩形（相对显示器左上角）。 */

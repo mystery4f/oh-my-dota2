@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DEFAULT_SETTINGS, OFFLINE_VOICES, type AppSettings, type ProviderConfig } from '@shared/ipc'
+import { normalizeTrainKind } from '@shared/train'
 import { normalizeSpeakKey, normalizeVoiceOutEngine } from '@shared/voice-out'
 
 function settingsFile(): string {
@@ -60,7 +61,11 @@ export function loadSettings(): AppSettings {
       merged.asrEngine = DEFAULT_SETTINGS.asrEngine
     }
     // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
+    // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
     if (typeof merged.asrHotwords !== 'string') merged.asrHotwords = DEFAULT_SETTINGS.asrHotwords
+    // 训练窗口记忆：kind 乱值打回 demo，dataset 只认字符串。
+    merged.trainKind = normalizeTrainKind(merged.trainKind)
+    if (typeof merged.trainDataset !== 'string') merged.trainDataset = DEFAULT_SETTINGS.trainDataset
     return merged
   } catch (err) {
     console.error('settings: load failed, using defaults', err)
