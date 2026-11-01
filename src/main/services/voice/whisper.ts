@@ -329,6 +329,9 @@ class WhisperAdapter {
         wavPath,
         '--language',
         language,
+        // 简体中文偏置：不加这句 whisper 会偏繁体输出；代价是标点会少，对翻译链路无碍。
+        '--prompt',
+        '以下是普通话的句子。',
         '--no-timestamps',
         '--output-txt',
         '--output-file',
