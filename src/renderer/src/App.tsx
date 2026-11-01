@@ -1820,16 +1820,15 @@ export default function App(): React.ReactElement {
                 {settings.asrEngine === 'qwen3' && (
                   <>
                     <div className="grid gap-2">
-                      <Label htmlFor="asrHotwords">热词（逗号分隔，识别容易错的词：术语、英雄名……）</Label>
+                      <Label htmlFor="asrHotwords">热词（空 = 不启用；把容易认错的词填进来）</Label>
                       <Input
                         id="asrHotwords"
                         value={settings.asrHotwords}
                         onChange={(e) => setSettings((s) => ({ ...s, asrHotwords: e.target.value }))}
-                        onBlur={(e) => void save({ asrHotwords: e.currentTarget.value })}
-                        placeholder="肉山,买活,风暴之灵"
+                        placeholder="示例：肉山,买活,风暴之灵（这行灰字不是已生效的词）"
                       />
                       <p className="text-xs text-muted-foreground">
-                        只对 Qwen3 生效；识别记录里点「纠错」改对词，差异会自动并进这里。whisper 不支持。
+                        填完点别处即保存，下一句录音就生效（不用重启）；只对 Qwen3 生效；识别记录里点「纠错」改对词，差异会自动并进这里。whisper 不支持。
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
