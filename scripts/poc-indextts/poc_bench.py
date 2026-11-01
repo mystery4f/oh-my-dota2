@@ -83,7 +83,7 @@ def main() -> None:
         lines = lines[:1]
 
     t0 = time.perf_counter()
-    tts = IndexTTS2(cfg_path=str(Path(args.model_dir) / "config.yaml"), model_dir=args.model_dir)
+    tts = IndexTTS2(cfg_path=str(Path(args.model_dir) / "config.yaml"), model_dir=args.model_dir, use_bf16=True)
     load_ms = (time.perf_counter() - t0) * 1000
 
     rows = []
