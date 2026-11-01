@@ -38,7 +38,14 @@ import { getTrainWindow } from './windows/train'
 import { getTrainManager } from './services/train/manager'
 import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
 import { prepareFtDataset } from './services/train/ft-dataset'
-import type { TrainStartRequest } from '@shared/train'
+import {
+  applyAsrFtModel,
+  asrFtStatus,
+  buildAsrFtExportPlan,
+  resolveAsrFtTrainRequest,
+  rollbackAsrFtModel
+} from './services/train/asr-ft'
+import { normalizeTrainKind, type TrainStartRequest } from '@shared/train'
 import { gsiStatus } from './services/gsi'
 
 /**
@@ -237,7 +244,14 @@ export function registerIpc(): void {
   // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
   ipcMain.on(IPC.TRAIN_OPEN, () => getTrainWindow().open())
   getTrainManager().onState((snapshot) => broadcast(IPC.TRAIN_STATE, snapshot))
-  ipcMain.handle(IPC.TRAIN_START, (_e, request: TrainStartRequest) => getTrainManager().start(request))
+  ipcMain.handle(IPC.TRAIN_START, async (_e, request: TrainStartRequest) => {
+    if (normalizeTrainKind(request.kind) !== 'asr-ft') return getTrainManager().start(request)
+    // asr-ft：先把环境/数据/目录备齐，再带着「训练完接导出」的链子交给 manager。
+    const resolved = await resolveAsrFtTrainRequest(String(request.dataset ?? ''))
+    if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
+    const exportRequest = resolved.request
+    return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest))
+  })
   ipcMain.handle(IPC.TRAIN_STOP, () => getTrainManager().stop())
   ipcMain.handle(IPC.TRAIN_SNAPSHOT, () => getTrainManager().snapshot())
   // ASR 微调录音（T4a）：读稿解析 + 录音 CRUD，文件全在 userData/asr-ft/ 下。
@@ -260,6 +274,10 @@ export function registerIpc(): void {
   })
   // 一键打包：录音 × 稿子 → 官方微调 JSONL（#14 的核心件，试点格式已验证）。
   ipcMain.handle(IPC.FT_DATASET_PREPARE, () => prepareFtDataset())
+  // ASR 微调闭环（T5）：环境状态、应用新模型、回滚。
+  ipcMain.handle(IPC.FT_ASRFT_STATUS, () => asrFtStatus())
+  ipcMain.handle(IPC.FT_ASRFT_APPLY, () => applyAsrFtModel())
+  ipcMain.handle(IPC.FT_ASRFT_ROLLBACK, () => rollbackAsrFtModel())
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
   ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))
   ipcMain.handle(IPC.OVERLAY_OPACITY, (_e, value: number) => getOverlayManager().setOpacity(value))

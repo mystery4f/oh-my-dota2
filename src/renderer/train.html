@@ -96,8 +96,14 @@
       <button id="ftReplay" disabled>回放</button>
       <button id="ftAsr" disabled>识别测试</button>
       <button id="ftPack">打包训练数据</button>
+      <button id="startFt" class="primary">微调并替换模型</button>
       <span class="hint" id="ftHint">点录制后念屏幕上的句子，停顿约 1 秒自动停</span>
     </div>
     <div class="hint" id="ftAsrResult"></div>
+    <div class="row" style="margin-top: 12px">
+      <span class="hint" id="ftEnv">微调环境：检测中…</span>
+      <button id="ftApply" disabled>应用新模型</button>
+      <button id="ftRollback" disabled>回滚上一版</button>
+    </div>
   </body>
 </html>

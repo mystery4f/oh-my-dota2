@@ -151,6 +151,9 @@ const api: WindowApi = {
   ftRecRead: (group, line) => ipcRenderer.invoke(IPC.FT_REC_READ, group, line),
   ftRecAsr: (group, line) => ipcRenderer.invoke(IPC.FT_REC_ASR, group, line),
   ftDatasetPrepare: () => ipcRenderer.invoke(IPC.FT_DATASET_PREPARE),
+  ftAsrftStatus: () => ipcRenderer.invoke(IPC.FT_ASRFT_STATUS),
+  ftAsrftApply: () => ipcRenderer.invoke(IPC.FT_ASRFT_APPLY),
+  ftAsrftRollback: () => ipcRenderer.invoke(IPC.FT_ASRFT_ROLLBACK),
   onTrainState: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, snapshot: TrainSnapshot): void => callback(snapshot)
     ipcRenderer.on(IPC.TRAIN_STATE, listener)

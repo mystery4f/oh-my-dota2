@@ -31,6 +31,8 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '失败',
   stopped: '已停止'
 }
+/** 上一次 render 画到的任务状态：只在跨进 done 的那一刻刷换模按钮，不每次广播都打 IPC。 */
+let lastRenderedStatus: string | null = null
 
 function fmtTime(at: number): string {
   const d = new Date(at)
@@ -63,6 +65,9 @@ function render(snap: TrainSnapshot): void {
   const follow = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 24
   logEl.textContent = snap.logs.map((line) => `${fmtTime(line.at)}  ${line.text}`).join('\n')
   if (follow) logEl.scrollTop = logEl.scrollHeight
+  // 任务刚走到 done：刷一次换模状态，让「应用新模型」亮起来。
+  if (task?.status === 'done' && lastRenderedStatus !== 'done') void refreshAsrft()
+  lastRenderedStatus = task?.status ?? null
 }
 
 async function start(): Promise<void> {
@@ -374,7 +379,50 @@ async function packDataset(): Promise<void> {
   }
 }
 
+
+// ---------- ASR 微调闭环（T5）：一键微调 + 换模/回滚 ----------
+
+const ftEnvEl = $<HTMLElement>('ftEnv')
+const ftApplyBtn = $<HTMLButtonElement>('ftApply')
+const ftRollbackBtn = $<HTMLButtonElement>('ftRollback')
+
+/** 环境行 + 换模按钮：跟着主进程的检测走（缺什么念什么，有导出产物才允许应用）。 */
+async function refreshAsrft(): Promise<void> {
+  try {
+    const status = await window.api.ftAsrftStatus()
+    ftEnvEl.textContent = status.env.ok
+      ? `微调环境：就绪（${status.env.envRoot}）`
+      : `微调环境缺：${status.env.gaps.join('；')}`
+    ftApplyBtn.disabled = !status.swap.lastExportDir
+    ftApplyBtn.title = status.swap.lastExportDir ? `应用 ${status.swap.lastExportDir}` : '先跑一次「微调并替换模型」'
+    ftRollbackBtn.disabled = !status.swap.bakExists
+  } catch (err) {
+    ftEnvEl.textContent = `微调环境：状态读取失败（${String(err)}）`
+  }
+}
+
+/** 一键微调：打包 → 训练 → 导出是一个任务，跑完点「应用新模型」转正。 */
+async function startFt(): Promise<void> {
+  if (!datasetInput.value.trim()) datasetInput.value = '微调'
+  kindSel.value = 'asr-ft'
+  ftAsrResult.textContent = '已开跑：打包 → 训练 → 导出（GPU，约半小时量级）；完成后点「应用新模型」'
+  await start()
+}
+
+async function applyModel(): Promise<void> {
+  ftApplyBtn.disabled = true
+  const result = await window.api.ftAsrftApply()
+  ftAsrResult.textContent = result.ok ? '新模型已转正，下一句识别就用它' : result.error ?? '应用失败'
+  await refreshAsrft()
+}
+
+async function rollbackModel(): Promise<void> {
+  const result = await window.api.ftAsrftRollback()
+  ftAsrResult.textContent = result.ok ? '已回滚到上一版模型' : result.error ?? '回滚失败'
+  await refreshAsrft()
+}
 async function init(): Promise<void> {
+  await refreshAsrft()
   const settings = await window.api.getSettings()
   kindSel.value = settings.trainKind
   datasetInput.value = settings.trainDataset
@@ -401,6 +449,9 @@ on('ftStopRec', 'click', () => void stopRecording())
 on('ftReplay', 'click', () => void replay())
 on('ftAsr', 'click', () => void testAsr())
 on('ftPack', 'click', () => void packDataset())
+on('startFt', 'click', () => void startFt())
+on('ftApply', 'click', () => void applyModel())
+on('ftRollback', 'click', () => void rollbackModel())
   console.log('[train-ft] listeners attached')
 // 空格开停录音（焦点不在输入框/下拉时），念稿时不用伸手点鼠标。
 window.addEventListener('keydown', (event) => {

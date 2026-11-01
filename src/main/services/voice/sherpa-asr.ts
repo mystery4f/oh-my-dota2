@@ -117,3 +117,9 @@ export async function sherpaTranscribe(request: SherpaAsrRequest): Promise<{ tex
     return null
   }
 }
+
+/** 换模型后把常驻 worker 杀掉：旧识别器连着旧模型文件，杀掉后下一次转写会用新目录重新拉起。 */
+export function resetSherpaWorker(): void {
+  if (worker && !worker.killed) worker.kill()
+  worker = null
+}

@@ -1,6 +1,13 @@
 import type { VoiceReplyStage } from './voice-out'
 
-import type { FtDatasetPrepareResult, TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train'
+import type {
+  AsrFtStatusResult,
+  AsrFtSwapResult,
+  FtDatasetPrepareResult,
+  TrainSnapshot,
+  TrainStartRequest,
+  TrainStartResult
+} from '@shared/train'
 
 
 /** ASR 微调读稿：一句原文。 */
@@ -156,7 +163,10 @@ export interface AppSettings {
   /** 训练窗口记住的任务类型：demo 演示任务；gv-gpt/gv-sovits/asr-ft 在 T3/T5 接入。 */
   trainKind: 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
   /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
+  /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
   trainDataset: string
+  /** ASR 微调环境根目录：空 = 用应用数据目录里的 asr-ft-env；手动搭的环境（试点那套）填根路径。 */
+  asrFtEnvDir: string
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
   /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
@@ -270,6 +280,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   asrEngine: 'whisper',
   trainKind: 'demo',
   trainDataset: '',
+  asrFtEnvDir: '',
   asrHotwords: '',
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
@@ -681,6 +692,10 @@ export const IPC = {
   FT_REC_READ: 'ft:rec-read',
   FT_REC_ASR: 'ft:rec-asr',
   FT_DATASET_PREPARE: 'ft:dataset-prepare',
+  // ASR 微调闭环（T5）：环境状态 / 换模 / 回滚，训练+导出走 TRAIN_START/STOP。
+  FT_ASRFT_STATUS: 'ft:asrft-status',
+  FT_ASRFT_APPLY: 'ft:asrft-apply',
+  FT_ASRFT_ROLLBACK: 'ft:asrft-rollback',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
@@ -905,7 +920,14 @@ export interface WindowApi {
   /** 识别测试：一条已存录音喂给当前识别引擎，返回 {ok,text,error}（训练窗口对比稿子用）。 */
   ftRecAsr(group: string, line: string): Promise<{ ok: boolean; text: string; error: string | null }>
   /** 一键打包：已录句子 × 稿子 → 官方微调 JSONL（train/eval 两份，落在 asr-ft-datasets/）。 */
+  /** 一键打包：已录句子 × 稿子 → 官方微调 JSONL（train/eval 两份，落在 asr-ft-datasets/）。 */
   ftDatasetPrepare(): Promise<FtDatasetPrepareResult>
+  /** 微调环境 + 换模状态：缺什么、有没有可应用的新模型、能不能回滚。 */
+  ftAsrftStatus(): Promise<AsrFtStatusResult>
+  /** 应用新模型：导出产物转正，旧模型挪进 .bak（可回滚）。 */
+  ftAsrftApply(): Promise<AsrFtSwapResult>
+  /** 回滚上一版：现役删掉，.bak 归位。 */
+  ftAsrftRollback(): Promise<AsrFtSwapResult>
 }
 
 /** 物理像素裁切矩形（相对显示器左上角）。 */

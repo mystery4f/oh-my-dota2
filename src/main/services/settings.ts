@@ -66,6 +66,8 @@ export function loadSettings(): AppSettings {
     // 训练窗口记忆：kind 乱值打回 demo，dataset 只认字符串。
     merged.trainKind = normalizeTrainKind(merged.trainKind)
     if (typeof merged.trainDataset !== 'string') merged.trainDataset = DEFAULT_SETTINGS.trainDataset
+    // 微调环境根目录：只认字符串，空串 = 用应用数据目录的 asr-ft-env。
+    if (typeof merged.asrFtEnvDir !== 'string') merged.asrFtEnvDir = DEFAULT_SETTINGS.asrFtEnvDir
     return merged
   } catch (err) {
     console.error('settings: load failed, using defaults', err)

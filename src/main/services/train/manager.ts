@@ -6,6 +6,7 @@ import {
   parseTrainProgress,
   shouldResumeInference,
   type TrainLogLine,
+  type TrainPlan,
   type TrainSnapshot,
   type TrainStartRequest,
   type TrainStartResult,
@@ -31,7 +32,10 @@ class TrainManager {
   private child: ChildProcess | null = null
   private listeners = new Set<(snapshot: TrainSnapshot) => void>()
   private lastBroadcastAt = 0
-
+  /** asr-ft 的两段式：训练腿跑完拿这条闭包拼导出腿；其他 kind 恒为 null。 */
+  private chain: (() => TrainPlan | null) | null = null
+  /** 本任务走过链式导出没有：决定 done 的收场文案。 */
+  private chained = false
   onState(listener: (snapshot: TrainSnapshot) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -65,14 +69,14 @@ class TrainManager {
     return check.status === 0 ? candidate : null
   }
 
-  start(request: TrainStartRequest): TrainStartResult {
+  start(request: TrainStartRequest, chain?: () => TrainPlan | null): TrainStartResult {
     const gate = canStartTrain(this.status())
     if (!gate.ok) return { ok: false, error: gate.reason }
     const kind: TrainTaskKind = normalizeTrainKind(request.kind)
     const plan = deriveTrainPlan({ kind, dataset: String(request.dataset ?? '') })
     if (plan.unavailable) return { ok: false, error: plan.unavailable }
     const node = this.nodeBin()
-    if (!node) return { ok: false, error: '没找到 node，演示任务跑不了（装 node 或设 OHMYDOTA2_NODE）' }
+    if (plan.exe === 'node' && !node) return { ok: false, error: '没找到 node，演示任务跑不了（装 node 或设 OHMYDOTA2_NODE）' }
 
     this.task = {
       id: `train-${Date.now()}`,
@@ -87,7 +91,23 @@ class TrainManager {
     this.logs = []
     this.emit(true)
 
-    const child = spawn(plan.exe === 'node' ? node : plan.exe, plan.args, {
+    this.chain = chain ?? null
+    this.chained = false
+    this.spawnChild(plan.exe === 'node' ? (node ?? 'node') : plan.exe, plan)
+    return { ok: true, error: null }
+  }
+
+  /** 训练腿成功且有链：同一任务接着跑导出腿，状态只换阶段不换任务。 */
+  private launchChain(plan: TrainPlan): void {
+    this.record('—— 训练完成，接着导出 ONNX（CPU，不占显卡）——')
+    this.chained = true
+    if (this.task) this.task = { ...this.task, status: 'running', progress: -1, stage: '导出 ONNX（CPU）' }
+    this.emit(true)
+    this.spawnChild(plan.exe, plan)
+  }
+
+  private spawnChild(exe: string, plan: TrainPlan): void {
+    const child = spawn(exe, plan.args, {
       cwd: plan.cwd ?? undefined,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
@@ -102,11 +122,24 @@ class TrainManager {
     child.on('exit', (code: number | null) => {
       // 迟到的旧进程退场不碰新任务（常驻桥的老规矩）。
       if (this.child !== child) return
-      if (this.task?.status === 'stopping') this.finish('stopped', code)
-      else if (code === 0) this.finish('done', code)
+      if (this.task?.status === 'stopping') {
+        this.finish('stopped', code)
+        return
+      }
+      if (code === 0 && this.chain) {
+        const next = this.chain()
+        this.chain = null
+        if (next) {
+          this.launchChain(next)
+          return
+        }
+        this.record('没找到训练产物（checkpoint-*），导出没法继续，按失败收场')
+        this.finish('failed', code)
+        return
+      }
+      if (code === 0) this.finish('done', code)
       else this.finish('failed', code)
     })
-    return { ok: true, error: null }
   }
 
   private onChunk(chunk: string): void {
@@ -138,7 +171,8 @@ class TrainManager {
   }
 
   private finish(status: Extract<TrainTaskStatus, 'done' | 'failed' | 'stopped'>, code: number | null): void {
-    const stage = status === 'done' ? '完成' : status === 'stopped' ? '已停止' : `失败 (exit ${code ?? '?'})`
+    const stage =
+      status === 'done' ? (this.chained ? '完成（可应用新模型）' : '完成') : status === 'stopped' ? '已停止' : `失败 (exit ${code ?? '?'})`
     if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
     this.child = null
     this.emit(true)

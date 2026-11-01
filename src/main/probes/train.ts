@@ -4,11 +4,17 @@ import {
   buildFtJsonlLine,
   canStartTrain,
   deriveTrainPlan,
+  deriveAsrFtEnvGaps,
+  asrFtRollbackSteps,
+  asrFtSwapSteps,
   normalizeTrainKind,
   parseTrainProgress,
+  pickLastCheckpointName,
+  planAsrFtExportArgv,
   shouldPauseInference,
   shouldResumeInference,
   splitTrainEval,
+  type AsrFtPaths,
   type FtDatasetGroupView,
   type TrainTaskStatus
 } from '@shared/train'
@@ -51,11 +57,26 @@ export function runTrainProbe(): void {
   const demo = deriveTrainPlan({ kind: 'demo', dataset: '' })
   push('demo：node -e 跑内联脚本，可直接启动', demo.exe === 'node' && demo.args[0] === '-e' && !demo.unavailable, JSON.stringify({ exe: demo.exe, arg0: demo.args[0] }))
   push('demo 脚本带 epoch 行与 10 轮上限', demo.args.join(' ').includes('epoch ${i}/${n}') && demo.args.join(' ').includes('const n = 10'), '内联脚本内容')
-  push('asr-ft：T1 拒启动并说明去向', (deriveTrainPlan({ kind: 'asr-ft', dataset: '' }).unavailable ?? '').includes('T5'), deriveTrainPlan({ kind: 'asr-ft', dataset: '' }).unavailable ?? '')
+  push('asr-ft：环境没附件就拒启动并说明原因', (deriveTrainPlan({ kind: 'asr-ft', dataset: '' }).unavailable ?? '').includes('环境没就绪'), deriveTrainPlan({ kind: 'asr-ft', dataset: '' }).unavailable ?? '')
   push('gv-gpt：T1 拒启动并说明去向', (deriveTrainPlan({ kind: 'gv-gpt', dataset: '' }).unavailable ?? '').includes('T3'), deriveTrainPlan({ kind: 'gv-gpt', dataset: '' }).unavailable ?? '')
   push('gv-sovits：T1 拒启动并说明去向', (deriveTrainPlan({ kind: 'gv-sovits', dataset: '' }).unavailable ?? '').includes('T3'), deriveTrainPlan({ kind: 'gv-sovits', dataset: '' }).unavailable ?? '')
   push('乱值 kind 打回 demo', normalizeTrainKind('bogus') === 'demo' && normalizeTrainKind(42) === 'demo', `${String(normalizeTrainKind('bogus'))}/${String(normalizeTrainKind(42))}`)
   push('合法 kind 原样通过', normalizeTrainKind('gv-sovits') === 'gv-sovits', normalizeTrainKind('gv-sovits'))
+
+  // —— asr-ft 真训练链（T5 闭环） ——
+  const ftPaths: AsrFtPaths = { pythonExe: 'P:/ython.exe', sftScript: 'S/ft.py', exportScript: 'E/export.py', baseModelDir: 'M/base' }
+  const ftData = { trainJsonl: 'T.jsonl', evalJsonl: 'V.jsonl', runDir: 'R' }
+  const ftPlan = deriveTrainPlan({ kind: 'asr-ft', dataset: '', asrFt: { paths: ftPaths, data: ftData, exportDir: 'X' } })
+  const epochAt = ftPlan.args.indexOf('--epochs')
+  push('asr-ft：带环境附件出真命令（python + 冻结的试点参数）', ftPlan.exe === ftPaths.pythonExe && epochAt >= 0 && ftPlan.args[epochAt + 1] === '66' && !ftPlan.unavailable, ftPlan.args.join(' '))
+  const exportArgv = planAsrFtExportArgv(ftPaths, 'R/checkpoint-330', 'X')
+  const deviceAt = exportArgv.indexOf('--device')
+  push('导出腿：CPU 上跑并带自校验', deviceAt >= 0 && exportArgv[deviceAt + 1] === 'cpu' && exportArgv.includes('--verify'), exportArgv.join(' '))
+  push('checkpoint 挑编号最大的', pickLastCheckpointName(['eval', 'checkpoint-150', 'checkpoint-330']) === 'checkpoint-330' && pickLastCheckpointName([]) === null && pickLastCheckpointName(['checkpoint-x']) === null, String(pickLastCheckpointName(['checkpoint-150', 'checkpoint-330'])))
+  push('换模序列：删旧备份→现役进备份→next 转正', JSON.stringify(asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: true })) === JSON.stringify(['rm-bak', 'bak-active', 'promote-next']), JSON.stringify(asrFtSwapSteps({ activeExists: false, bakExists: false, nextExists: true })))
+  push('换模：没有导出产物就是空序列', asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: false }).length === 0, '[]')
+  push('回滚序列：有备份才动手', JSON.stringify(asrFtRollbackSteps({ bakExists: true })) === JSON.stringify(['rm-active', 'restore-bak']) && asrFtRollbackSteps({ bakExists: false }).length === 0, '')
+  push('环境点名：全缺四项、全齐空数组', deriveAsrFtEnvGaps({}).length === 4 && deriveAsrFtEnvGaps({ venvOk: true, sftScript: 's', exportScript: 'e', baseModelDir: 'm' }).length === 0, String(deriveAsrFtEnvGaps({}).length))
 
   // —— 日志行 → 进度 ——
   const p = (line: string): string => JSON.stringify(parseTrainProgress(line))

@@ -34,8 +34,30 @@ export interface TrainSnapshot {
 export interface TrainStartRequest {
   kind: TrainTaskKind
   dataset: string
+  /** asr-ft 专用：主进程检测环境 + 打包数据后填进来；没填就按「环境没就绪」拒启动。 */
+  asrFt?: {
+    paths: AsrFtPaths
+    data: AsrFtDatasetPlan
+    /** 导出产物目录（训练成功后链式导出写这里，应用新模型从这里拷）。 */
+    exportDir: string
+  }
 }
 
+
+/** ASR 微调环境里跑真训练/导出要用的几条路径（检测服务负责填，纯缝只拼命令）。 */
+export interface AsrFtPaths {
+  pythonExe: string
+  sftScript: string
+  exportScript: string
+  baseModelDir: string
+}
+
+/** 一次 ASR 微调要吃的三样东西：打包产物和这次的输出目录。 */
+export interface AsrFtDatasetPlan {
+  trainJsonl: string
+  evalJsonl: string
+  runDir: string
+}
 export interface TrainStartResult {
   ok: boolean
   error: string | null
@@ -93,14 +115,109 @@ export function deriveTrainPlan(req: TrainStartRequest): TrainPlan {
   switch (req.kind) {
     case 'demo':
       return { exe: 'node', args: ['-e', DEMO_TRAIN_SCRIPT], cwd: null }
-    case 'asr-ft':
-      return { exe: '', args: [], cwd: null, unavailable: 'ASR 训练在 T5 接入（先手动跑通 qwen3_asr_sft.py 再上窗口）' }
+    case 'asr-ft': {
+      const asr = req.asrFt
+      if (!asr) {
+        return { exe: '', args: [], cwd: null, unavailable: 'ASR 微调环境没就绪：先在训练窗口里把环境装好（并至少录一条句子）' }
+      }
+      return { exe: asr.paths.pythonExe, args: planAsrFtTrainArgv(asr.paths, asr.data), cwd: null }
+    }
     case 'gv-gpt':
     case 'gv-sovits':
       return { exe: '', args: [], cwd: null, unavailable: 'GV 微调在 T3 接入（走 GPT-SoVITS runtime）' }
     default:
       return { exe: '', args: [], cwd: null, unavailable: `未知任务类型：${String(req.kind)}` }
   }
+}
+
+// —— ASR 微调（T5）：训练/导出命令与换模决策的纯缝 ——
+
+/** 训练参数：试点（G15，20 句）实测收敛的 v5 版本，参数冻结勿随手改。 */
+export function planAsrFtTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan): string[] {
+  return [
+    paths.sftScript,
+    '--model_path', paths.baseModelDir,
+    '--train_file', data.trainJsonl,
+    '--eval_file', data.evalJsonl,
+    '--output_dir', data.runDir,
+    '--batch_size', '1',
+    '--grad_acc', '4',
+    '--lr', '2e-5',
+    '--epochs', '66',
+    '--save_steps', '150',
+    '--save_total_limit', '3',
+    '--num_workers', '0',
+    '--pin_memory', '0',
+    '--persistent_workers', '0',
+    '--log_steps', '5'
+  ]
+}
+
+/** 导出参数：CPU 上量化 int8 并自校验，不占 GPU。 */
+export function planAsrFtExportArgv(paths: AsrFtPaths, checkpointDir: string, exportDir: string): string[] {
+  return [
+    paths.exportScript,
+    '--model', checkpointDir,
+    '--outdir', exportDir,
+    '--device', 'cpu',
+    '--max-total-len', '512',
+    '--verify'
+  ]
+}
+
+/** checkpoint-N 目录名里挑编号最大的一个（没有就 null）。 */
+export function pickLastCheckpointName(names: readonly string[]): string | null {
+  let best: string | null = null
+  let bestNo = -1
+  for (const name of names) {
+    const m = /^checkpoint-(\d+)$/.exec(name)
+    const no = m ? Number(m[1]) : -1
+    if (no > bestNo) {
+      bestNo = no
+      best = name
+    }
+  }
+  return best
+}
+
+export type AsrFtSwapOp = 'rm-bak' | 'bak-active' | 'promote-next' | 'rm-active' | 'restore-bak'
+
+/** 应用新模型的动作序列：旧备份先删，现役挪去备份，next 转正。next 不在 = 空序列（调用方报错）。 */
+export function asrFtSwapSteps(state: { activeExists: boolean; bakExists: boolean; nextExists: boolean }): AsrFtSwapOp[] {
+  if (!state.nextExists) return []
+  const steps: AsrFtSwapOp[] = []
+  if (state.bakExists) steps.push('rm-bak')
+  if (state.activeExists) steps.push('bak-active')
+  steps.push('promote-next')
+  return steps
+}
+
+/** 回滚动作序列：现役删掉、备份归位。没有备份 = 空序列。 */
+export function asrFtRollbackSteps(state: { bakExists: boolean }): AsrFtSwapOp[] {
+  if (!state.bakExists) return []
+  return ['rm-active', 'restore-bak']
+}
+
+/** 窗口要的微调环境 + 换模状态（检测服务填，这里只定形状）。 */
+export interface AsrFtStatusResult {
+  env: { ok: boolean; gaps: string[]; envRoot: string }
+  swap: { activeExists: boolean; bakExists: boolean; nextExists: boolean; lastExportDir: string | null }
+}
+
+/** 换模/回滚动作的结果：失败带人话原因。 */
+export interface AsrFtSwapResult {
+  ok: boolean
+  error: string | null
+}
+
+/** 环境缺什么：四条路径逐项点名，全齐 = 空数组。 */
+export function deriveAsrFtEnvGaps(paths: Partial<AsrFtPaths> & { venvOk?: boolean }): string[] {
+  const gaps: string[] = []
+  if (!paths.venvOk) gaps.push('Python 虚拟环境（venv/Scripts/python.exe，装 torch 等训练依赖）')
+  if (!paths.sftScript) gaps.push('官方微调脚本（sft/qwen3_asr_sft.py）')
+  if (!paths.exportScript) gaps.push('ONNX 导出脚本（export/export_qwen3_asr_onnx.py）')
+  if (!paths.baseModelDir) gaps.push('底模（models/Qwen3-ASR-0.6B，约 1.2GB）')
+  return gaps
 }
 
 export interface TrainProgress {
