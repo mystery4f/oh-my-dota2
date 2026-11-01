@@ -123,6 +123,8 @@ const api: WindowApi = {
   },
   ttsOfflineState: () => ipcRenderer.invoke(IPC.TTS_OFFLINE_STATE),
   ttsOfflineDownload: () => ipcRenderer.invoke(IPC.TTS_OFFLINE_DOWNLOAD),
+  asrStatus: () => ipcRenderer.invoke(IPC.ASR_STATUS),
+  asrDownload: () => ipcRenderer.invoke(IPC.ASR_DOWNLOAD),
   sovitsStatus: () => ipcRenderer.invoke(IPC.TTS_SOVITS_STATUS),
   sovitsInstall: () => ipcRenderer.invoke(IPC.TTS_SOVITS_INSTALL),
   sovitsRefs: () => ipcRenderer.invoke(IPC.TTS_SOVITS_REFS),

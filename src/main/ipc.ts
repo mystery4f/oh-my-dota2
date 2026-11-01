@@ -28,6 +28,7 @@ import { getWhisperAdapter } from './services/voice/whisper'
 import { getVoiceOutService } from './services/voice/voice-out'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
+import { ensureSenseVoiceModel, senseVoiceStatus, senseVoiceTranscribe } from './services/voice/sense-voice'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
@@ -259,6 +260,16 @@ export function registerIpc(): void {
     mkdirSync(dir, { recursive: true })
     const wavPath = join(dir, 'utterance.wav')
     writeFileSync(wavPath, Buffer.from(base64, 'base64'))
+    // 识别引擎路由：面板选了 SenseVoice 就走 sherpa-onnx；模型没就绪时给一句人话提示，
+    // 让用户去面板点下载，而不是吞掉录音。
+    if (loadSettings().asrEngine === 'sensevoice') {
+      if (!senseVoiceStatus().ready) {
+        return { ok: false, text: '', error: 'SenseVoice 模型未就绪：到面板「识别引擎」点下载（或手动放文件）' }
+      }
+      return senseVoiceTranscribe(wavPath).then((result) =>
+        result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'SenseVoice 识别失败' }
+      )
+    }
     return getWhisperAdapter().transcribe(wavPath, language ?? 'zh')
   })
   ipcMain.handle(IPC.TTS_OFFLINE_STATE, () => offlineStatus())
@@ -293,6 +304,9 @@ export function registerIpc(): void {
   // 首启保底：库一条参考都没有时，用 Edge 现场合成一条晓晓参考入库（零分发）。
   ipcMain.handle(IPC.TTS_SOVITS_SEED, () => ensureSovitsSeedRef(false))
   ipcMain.handle(IPC.TTS_OFFLINE_DOWNLOAD, () => ensureOfflineModel())
+  // SenseVoice 识别模型：面板的「状态 + 下载」按钮，与离线朗读同一节奏。
+  ipcMain.handle(IPC.ASR_STATUS, () => senseVoiceStatus())
+  ipcMain.handle(IPC.ASR_DOWNLOAD, () => ensureSenseVoiceModel())
   ipcMain.handle(IPC.VOICE_TTS_PREVIEW, (_e, text: string) =>
     getTtsAdapter().preview(String(text ?? ''))
   )

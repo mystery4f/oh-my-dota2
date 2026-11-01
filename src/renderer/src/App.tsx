@@ -25,7 +25,7 @@ import {
   type SovitsVoicePack,
   SOVITS_SEED_REF_DIR
 } from '@shared/ipc'
-import type { UpdateState } from '@shared/ipc'
+import type { OfflineStatus, UpdateState } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
 import { Badge } from '@/components/ui/badge'
@@ -1364,6 +1364,7 @@ export default function App(): React.ReactElement {
         ttsOutVoice: draft.ttsOutVoice,
         voiceOutTestMode: draft.voiceOutTestMode,
         voiceTranscribeOnly: draft.voiceTranscribeOnly,
+        asrEngine: draft.asrEngine,
       })
       setSettings(next)
       setSaveFlash('已保存')
@@ -1399,6 +1400,24 @@ export default function App(): React.ReactElement {
   const [voiceRecording, setVoiceRecording] = useState(false)
   const [voiceChainLog, setVoiceChainLog] = useState<VoiceChainLogEntry[]>([])
   useEffect(() => window.api.onVoiceRecordState((s) => setVoiceRecording(s.recording)), [])
+  const [asrStatus, setAsrStatus] = useState<OfflineStatus | null>(null)
+  useEffect(() => {
+    // 进面板问一次 + 下载期间每秒刷：与离线朗读同一节奏，别让用户对着假进度等。
+    void window.api.asrStatus().then(setAsrStatus)
+    if (!asrStatus?.downloading) return
+    const timer = setInterval(() => void window.api.asrStatus().then(setAsrStatus), 1000)
+    return () => clearInterval(timer)
+  }, [asrStatus?.downloading])
+  const downloadAsr = async (): Promise<void> => {
+    try {
+      setAsrStatus(await window.api.asrDownload())
+    } catch (err) {
+      setVoiceChainLog((log) => [
+        { transcript: '', translated: null, spoken: false, stage: null, error: `SenseVoice 下载失败：${err instanceof Error ? err.message : String(err)}`, at: Date.now() },
+        ...log
+      ])
+    }
+  }
   useEffect(
     () =>
       window.api.onVoiceChainResult((result) =>
@@ -1770,6 +1789,43 @@ export default function App(): React.ReactElement {
                   onChange={(e) => setSettings((s) => ({ ...s, ttsSpeakKey: e.target.value.toUpperCase() }))}
                   placeholder="F5"
                 />
+              </div>
+              {/* 识别引擎：whisper 换 SenseVoice——带口音的中文认 SenseVoice-small 更稳。 */}
+              <div className="grid gap-2">
+                <Label htmlFor="asrEngine">识别引擎</Label>
+                <Select
+                  value={settings.asrEngine}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    if (value === 'whisper' || value === 'sensevoice') void save({ asrEngine: value })
+                  }}
+                >
+                  <option value="whisper">whisper（ggml-small）</option>
+                  <option value="sensevoice">SenseVoice（对口音中文更稳，自带标点）</option>
+                </Select>
+                {settings.asrEngine === 'sensevoice' && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {!asrStatus ? (
+                      <span>正在检查 SenseVoice 模型…</span>
+                    ) : asrStatus.ready ? (
+                      <span className="text-emerald-400">✓ 模型已就绪（{Math.round(asrStatus.bytes / 1024 / 1024)} MB）</span>
+                    ) : asrStatus.downloading ? (
+                      <span>下载中 {Math.round((asrStatus.progress ?? 0) * 100)}%…</span>
+                    ) : (
+                      <>
+                        <span className={asrStatus.error ? 'text-rose-400' : ''}>
+                          {asrStatus.error ? `上次下载失败：${asrStatus.error}` : '模型未下载（约 228 MB，hf-mirror 国内直连）'}
+                        </span>
+                        <Button variant="outline" size="sm" disabled={!asrStatus.available} onClick={() => void downloadAsr()}>
+                          下载 SenseVoice 模型
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+                {settings.asrEngine === 'sensevoice' && asrStatus && !asrStatus.available && !asrStatus.ready && (
+                  <p className="text-xs text-rose-400">本机没找到 node.exe，sherpa 推理跑不了——装 Node 后重启应用。</p>
+                )}
               </div>
               {/* 测试模式：开了只放音频、不按说话键——游戏没开也能全链路试听（输出设备选耳机即可）。 */}
               <div className="flex flex-wrap items-center gap-2">

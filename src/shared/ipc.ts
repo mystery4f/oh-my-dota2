@@ -113,7 +113,10 @@ export interface AppSettings {
   /** 测试模式：开了只放音频到所选输出设备、不模拟按下说话键——游戏没开也能全链路试听，F5 不会落到别的窗口上。 */
   voiceOutTestMode: boolean
   /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
+  /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
   voiceTranscribeOnly: boolean
+  /** 语音识别引擎：whisper（本地 whisper.cpp，ggml-small）或 sensevoice（SenseVoice-small，专治带口音的中文）。 */
+  asrEngine: 'whisper' | 'sensevoice'
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
   /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
@@ -224,6 +227,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsSpeakKey: 'F5',
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
+  asrEngine: 'whisper',
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
   autoStartCapture: true,
@@ -616,6 +620,9 @@ export const IPC = {
   VOICE_SPEAK: 'voice:speak',
   TTS_OFFLINE_STATE: 'tts:offline-state',
   TTS_OFFLINE_DOWNLOAD: 'tts:offline-download',
+  // 识别引擎（SenseVoice）状态与模型下载：和离线朗读同一套「状态 + 下载」面板节奏。
+  ASR_STATUS: 'asr:status',
+  ASR_DOWNLOAD: 'asr:download',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
@@ -750,6 +757,10 @@ export interface WindowApi {
   ttsOfflineState(): Promise<OfflineStatus>
   /** 触发（或继续）一次离线模型下载；返回最新状态。 */
   ttsOfflineDownload(): Promise<OfflineStatus>
+  /** SenseVoice 识别模型的安装状态（是否就绪、占用多少磁盘、是否正在下载）。 */
+  asrStatus(): Promise<OfflineStatus>
+  /** 触发（或继续）一次 SenseVoice 模型下载；返回最新状态。 */
+  asrDownload(): Promise<OfflineStatus>
   /** GPT-SoVITS 引擎包与服务状态（含最近日志）。 */
   sovitsStatus(): Promise<SovitsStatus>
   /** 一键安装：没有引擎包就下 8GB 再解压；压缩包已放进数据目录则只解压。 */

@@ -26,6 +26,7 @@ const PERSISTED_FIELDS = [
   'ttsOutVoice',
   'voiceOutTestMode',
   'voiceTranscribeOnly',
+  'asrEngine',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -85,6 +86,9 @@ function sentinelFor(
     case 'voiceTranscribeOnly':
       // 布尔开关：非当前值落盘原样读回（无归一化，同 voiceOutTestMode 一档）。
       return !current.voiceTranscribeOnly as AppSettings[typeof key]
+    case 'asrEngine':
+      // 识别引擎：非当前值落盘原样读回（枚举归一化在 loadSettings，探针喂合法值）。
+      return (current.asrEngine === 'sensevoice' ? 'whisper' : 'sensevoice') as AppSettings[typeof key]
   }
 }
 

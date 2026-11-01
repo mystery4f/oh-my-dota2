@@ -51,6 +51,11 @@ export function loadSettings(): AppSettings {
     // 声出引擎：只认三引擎层的合法值，乱填打回 edge（英文占位）；声出音色不在这里钳，
     // resolveVoiceOutSynth 决策时对不上清单自会打回默认（和 ttsVoice 同一策略）。
     merged.ttsOutEngine = normalizeVoiceOutEngine(merged.ttsOutEngine)
+    // 识别引擎：只认 whisper / sensevoice，乱填打回 whisper（SenseVoice 模型没就绪时路由层
+    // 还会兜一层提示，这里只保证枚举干净）。
+    if (merged.asrEngine !== 'sensevoice' && merged.asrEngine !== 'whisper') {
+      merged.asrEngine = DEFAULT_SETTINGS.asrEngine
+    }
     return merged
   } catch (err) {
     console.error('settings: load failed, using defaults', err)
