@@ -29,6 +29,7 @@ import { getVoiceOutService } from './services/voice/voice-out'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { ensureSenseVoiceModel, senseVoiceStatus, senseVoiceTranscribe } from './services/voice/sense-voice'
+import { ensureQwen3Model, qwen3Status, qwen3Transcribe } from './services/voice/qwen3-asr'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
@@ -260,14 +261,22 @@ export function registerIpc(): void {
     mkdirSync(dir, { recursive: true })
     const wavPath = join(dir, 'utterance.wav')
     writeFileSync(wavPath, Buffer.from(base64, 'base64'))
-    // 识别引擎路由：面板选了 SenseVoice 就走 sherpa-onnx；模型没就绪时给一句人话提示，
-    // 让用户去面板点下载，而不是吞掉录音。
-    if (loadSettings().asrEngine === 'sensevoice') {
-      if (!senseVoiceStatus().ready) {
-        return { ok: false, text: '', error: 'SenseVoice 模型未就绪：到面板「识别引擎」点下载（或手动放文件）' }
+    // 识别引擎路由：sherpa 两引擎（SenseVoice/Qwen3）共用 worker；模型没就绪时给一句人话提示，
+    // 让用户去面板下载/解压，而不是吞掉录音。
+    const asrEngine = loadSettings().asrEngine
+    if (asrEngine === 'sensevoice' || asrEngine === 'qwen3') {
+      const status = asrEngine === 'qwen3' ? qwen3Status() : senseVoiceStatus()
+      const label = asrEngine === 'qwen3' ? 'Qwen3' : 'SenseVoice'
+      if (!status.ready) {
+        const hint =
+          asrEngine === 'qwen3'
+            ? `${label} 模型未就绪：下载 tar.bz2 放进 data\\asr-models\\，到面板「识别引擎」点解压`
+            : `${label} 模型未就绪：到面板「识别引擎」点下载（或手动放文件）`
+        return { ok: false, text: '', error: hint }
       }
-      return senseVoiceTranscribe(wavPath).then((result) =>
-        result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'SenseVoice 识别失败' }
+      const transcribe = asrEngine === 'qwen3' ? qwen3Transcribe(wavPath) : senseVoiceTranscribe(wavPath)
+      return transcribe.then((result) =>
+        result ? { ok: true, text: result.text } : { ok: false, text: '', error: `${label} 识别失败` }
       )
     }
     return getWhisperAdapter().transcribe(wavPath, language ?? 'zh')
@@ -304,9 +313,11 @@ export function registerIpc(): void {
   // 首启保底：库一条参考都没有时，用 Edge 现场合成一条晓晓参考入库（零分发）。
   ipcMain.handle(IPC.TTS_SOVITS_SEED, () => ensureSovitsSeedRef(false))
   ipcMain.handle(IPC.TTS_OFFLINE_DOWNLOAD, () => ensureOfflineModel())
-  // SenseVoice 识别模型：面板的「状态 + 下载」按钮，与离线朗读同一节奏。
-  ipcMain.handle(IPC.ASR_STATUS, () => senseVoiceStatus())
-  ipcMain.handle(IPC.ASR_DOWNLOAD, () => ensureSenseVoiceModel())
+  // sherpa 识别模型（SenseVoice/Qwen3）：面板的「状态 + 下载/解压」按钮，与离线朗读同一节奏。
+  ipcMain.handle(IPC.ASR_STATUS, () => ({ sensevoice: senseVoiceStatus(), qwen3: qwen3Status() }))
+  ipcMain.handle(IPC.ASR_DOWNLOAD, (_e, engine: 'sensevoice' | 'qwen3') =>
+    engine === 'qwen3' ? ensureQwen3Model() : ensureSenseVoiceModel()
+  )
   ipcMain.handle(IPC.VOICE_TTS_PREVIEW, (_e, text: string) =>
     getTtsAdapter().preview(String(text ?? ''))
   )
