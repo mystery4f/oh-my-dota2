@@ -51,16 +51,17 @@ def wav_seconds(path: Path) -> float:
         return -1.0
 
 
-def smi_vram_mib() -> str:
+def smi_vram_mib():
+    """Return (used_MiB, total_MiB) of the first GPU from nvidia-smi, or (0, 0)."""
     try:
         out = subprocess.run(
             ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=10,
-        ).stdout.strip()
-        return out.replace("\n", " | ")
-    except Exception as e:  # pragma: no cover - diagnostic only
-        return f"nvidia-smi unavailable: {e}"
-
+        ).stdout.strip().splitlines()[0]
+        used, total = (int(x.strip()) for x in out.split(","))
+        return used, total
+    except Exception:  # pragma: no cover - diagnostic only
+        return 0, 0
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="IndexTTS-2.5 zero-shot POC benchmark")
@@ -92,7 +93,7 @@ def main() -> None:
             wav_path = out / f"line{i:02d}_{tag}.wav"
             t1 = time.perf_counter()
             try:
-                tts.infer(spk_audio_prompt=args.ref, text=text, output_path=str(wav_path), verbose=False)
+                tts.infer(spk_audio_prompt=args.ref, text=text, output_path=str(wav_path), lang=tag, verbose=False)
                 ms = (time.perf_counter() - t1) * 1000
                 secs = wav_seconds(wav_path)
                 ok = secs > 0.5
@@ -103,7 +104,7 @@ def main() -> None:
                 print(f"line{i:02d} {tag}: FAILED {e!r}")
 
     good = [r["ms"] for r in rows if r["ok"]]
-    total_used, total_max = smi_vram_mib().split(" | ")[0], smi_vram_mib().split(" | ")[1]
+    total_used, total_max = smi_vram_mib()
     cuda_peak = torch.cuda.max_memory_allocated() / 2**30 if torch.cuda.is_available() else 0.0
     p50 = statistics.median(good) if good else 0
     verdict = "SMOKE" if args.smoke else ("PASS" if len(good) >= 18 and p50 < 3000 else "FAIL")
