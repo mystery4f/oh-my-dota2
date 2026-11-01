@@ -103,7 +103,8 @@ function lastExportDir(): string | null {
   return entries.length > 0 ? join(root, entries[entries.length - 1]) : null
 }
 
-export function asrFtStatus(): AsrFtStatusResult {
+/** 环境检测 + 换模视图；安装进行时由 ipc 层补（install 字段），避免和安装器互相 import。 */
+export function asrFtStatus(): Omit<AsrFtStatusResult, 'install'> {
   const env = detectAsrFtEnv()
   return {
     env: { ok: env.ok, gaps: env.gaps, envRoot: env.envRoot },
