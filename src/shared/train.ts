@@ -19,6 +19,29 @@ export interface TrainTaskInfo {
   stage: string
   startedAt: number
   endedAt: number | null
+  /** 互斥状态快照：任务在跑时 held/kept-off，退场后 released/release-failed，没碰过推理是 null。 */
+  inference: InferenceHoldState | null
+}
+
+/**
+ * 推理互斥状态（T2）：训练占卡期间 GV 推理让路的过程记录。
+ * held = 应用托管的推理服务已被暂停；kept-off = 端口上的服务不是应用拉的（或没在跑），不动它；
+ * released = 任务退干净后已恢复；release-failed = 恢复失败（引擎包不可用或启动超时）。
+ */
+export type InferenceHoldState = 'held' | 'kept-off' | 'released' | 'release-failed'
+
+/** 训练窗口的互斥状态文案：一句解释「为什么暂时没声」，别让人以为应用坏了。 */
+export function inferenceHoldLabel(state: InferenceHoldState): string {
+  switch (state) {
+    case 'held':
+      return '推理已暂停（显存让给训练）'
+    case 'kept-off':
+      return '推理服务未由应用托管，训练期间保持原样'
+    case 'released':
+      return '推理已恢复'
+    case 'release-failed':
+      return '推理恢复失败：引擎包不可用或启动超时，可在面板查看服务日志后重试'
+  }
 }
 
 export interface TrainLogLine {

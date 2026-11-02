@@ -1,6 +1,6 @@
 // 训练窗口页：上半是任务开/停与日志，下半是 ASR 微调录音（T4a）。
 // 决策（互斥、计划推导、进度解析、读稿解析）都在 shared/主进程，这里只是显示器 + 采样器。
-import { advanceRecording, canStartTrain, initialRecordingState, recordingKey, shouldKeepTake, takeLineId, type RecordingStepState, type TrainSnapshot } from '@shared/train'
+import { advanceRecording, canStartTrain, inferenceHoldLabel, initialRecordingState, recordingKey, shouldKeepTake, takeLineId, type RecordingStepState, type TrainSnapshot } from '@shared/train'
 import { encodeWav16k } from '@shared/wav'
 import type { FtRecInfo, FtScriptGroup } from '@shared/ipc'
 
@@ -56,6 +56,7 @@ function render(snap: TrainSnapshot): void {
       `状态：${STATUS_LABEL[task.status] ?? task.status}`,
       task.progress >= 0 ? `进度：${task.progress}%` : '进度：—',
       task.stage ? `阶段：${task.stage}` : '',
+      task.inference ? inferenceHoldLabel(task.inference) : '',
       `用时：${elapsed}s`
     ].filter(Boolean)
     statusEl.textContent = pieces.join(' · ')

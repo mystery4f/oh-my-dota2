@@ -163,6 +163,18 @@ spec #3（GitHub issue）：说中文 → 队友听到英文（虚拟声卡进�
 
 术语口径见 `GLOSSARY.md`（麦进 / 文出 / 声出 / GV / 音色包 / 说话键）。
 
+## 训练管理页（训练窗口）（2026-11-01 立项）
+
+spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 app 外手工命令搬进 app 内编排：下命令、收日志、管产物，训练本身跑在各自的 python 栈里。单任务互斥是 8G 显存硬约束。app 角色是编排器（ADR `docs/adr/train-manager-orchestrator.md`）：决策全进 `src/shared/train.ts` 纯缝，进程控制走人工验收。
+
+票（全部 ready-for-agent，均为 #10 的 sub-issue）：
+
+- [x] #11 T1 训练窗口骨架与任务模型：独立窗口 + 任务生命周期 + 决策缝 + `--train-probe`（c3d83df；探针 55/55）
+- [x] #12 T2 推理互斥接线：训练运行自动停 GV 推理、终态自动恢复、恢复失败窗口明示（blocked by #11）（本提交；`--train-probe` 56/56）
+- [ ] #13 T3 GV 侧 MVP：数据集登记、gv-gpt/gv-sovits 训练编排、产物注册音色包（blocked by #11、#12）
+- [ ] #14 T4 ASR 数据准备与录音组状态：组总览/回放在库，差准备报告与组完成总览（blocked by #11；开工以第一轮手动微调跑通为排期条件）
+- [ ] #15 T5 ASR 训练与部署：官方 SFT + ONNX 导出 + 部署口 + A/B 试音（blocked by #12、#14；asr-ft 安装/切换/回滚缝已在库）
+- [ ] #16 T6 验收与基线：ACCEPTANCE/BENCH/NOTES 回写（blocked by #13、#15）
 ## 候选方案（未排期）
 
 ### 监听控制台输出代替屏幕 OCR ❌ 已验证不可行（2026-11）

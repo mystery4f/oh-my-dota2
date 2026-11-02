@@ -10,6 +10,7 @@ import {
   buildFtJsonlLine,
   canStartTrain,
   deriveTrainPlan,
+  inferenceHoldLabel,
   deriveAsrFtEnvGaps,
   asrFtRollbackSteps,
   asrFtSwapSteps,
@@ -188,6 +189,15 @@ export function runTrainProbe(): void {
     '录音键 Gxx-Lnn / Gxx-Tnn，过 safeKeys 白名单正则',
     sampleKey === 'G01-L03' && /^G\d{2}-(?:L|T)\d{2}$/.test(sampleKey) && /^G\d{2}-(?:L|T)\d{2}$/.test(recordingKey('G01', 'free', 1)),
     sampleKey,
+  )
+  // —— 推理互斥状态文案（T2 训练窗口的「为什么暂时没声」）——
+  push(
+    '互斥文案四态齐全',
+    inferenceHoldLabel('held') === '推理已暂停（显存让给训练）' &&
+      inferenceHoldLabel('kept-off').includes('未由应用托管') &&
+      inferenceHoldLabel('released') === '推理已恢复' &&
+      inferenceHoldLabel('release-failed').includes('恢复失败'),
+    inferenceHoldLabel('held'),
   )
   let failed = 0
   for (const item of cases) {

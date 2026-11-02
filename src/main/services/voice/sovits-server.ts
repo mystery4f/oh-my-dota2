@@ -324,6 +324,22 @@ export function stopSovitsServer(): void {
   recordSovitsLog('TTS_SOVITS_SERVER_STOP', { pid })
 }
 
+export type SovitsPauseOutcome = 'paused' | 'untouched'
+
+/**
+ * 训练让路（T2 推理互斥）：只停应用自己拉起的服务；端口上的服务是用户自己起的
+ * （child 为空 = external）就绝不动它，训练照样开跑——那是用户的进程，不是我们的。
+ */
+export function pauseSovitsForTraining(): SovitsPauseOutcome {
+  if (!child) return 'untouched'
+  const pid = child.pid
+  child = null
+  if (pid) spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+  setPhase('off', '训练占用显卡，推理服务暂停')
+  recordSovitsLog('TTS_SOVITS_SERVER_PAUSE', { pid })
+  return 'paused'
+}
+
 /** 面板状态：现场重查端口（进程可能在我们不知道的时候死了），再叠加缓存的状态机。 */
 export async function sovitsServerStatus(): Promise<{
   phase: SovitsServerPhase

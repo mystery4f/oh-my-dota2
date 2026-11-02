@@ -2,8 +2,10 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import {
   canStartTrain,
   deriveTrainPlan,
+  inferenceHoldLabel,
   normalizeTrainKind,
   parseTrainProgress,
+  shouldPauseInference,
   shouldResumeInference,
   type TrainLogLine,
   type TrainPlan,
@@ -14,6 +16,7 @@ import {
   type TrainTaskKind,
   type TrainTaskStatus
 } from '@shared/train'
+import { ensureSovitsServer, pauseSovitsForTraining } from '../voice/sovits-server'
 
 /**
  * 训练任务管理器：同一时刻只允许一个训练进程（编排器约定）。
@@ -86,10 +89,17 @@ class TrainManager {
       progress: -1,
       stage: '启动中',
       startedAt: Date.now(),
-      endedAt: null
+      endedAt: null,
+      inference: null
     }
     this.logs = []
     this.emit(true)
+    if (shouldPauseInference(this.status()) && this.task) {
+      const outcome = pauseSovitsForTraining()
+      this.task = { ...this.task, inference: outcome === 'paused' ? 'held' : 'kept-off' }
+      this.record(inferenceHoldLabel(outcome === 'paused' ? 'held' : 'kept-off'))
+      this.emit(true)
+    }
 
     this.chain = chain ?? null
     this.chained = false
@@ -176,8 +186,18 @@ class TrainManager {
     if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
     this.child = null
     this.emit(true)
-    // 任务退干净就该恢复推理；T2 把这行换成真的恢复调用。
-    if (shouldResumeInference(this.status())) this.record('推理可恢复（T2 接线恢复调用）')
+    // 任务退干净就该恢复推理（T2 接线）；没停过（kept-off）不演恢复。
+    if (shouldResumeInference(this.status())) void this.resumeInference()
+  }
+
+  /** T2：把 GV 推理拉回来；失败在窗口里明说，别让「怎么没声」变成悬案。 */
+  private async resumeInference(): Promise<void> {
+    if (this.task?.inference !== 'held') return
+    const resumed = await ensureSovitsServer()
+    if (!this.task) return
+    this.task = { ...this.task, inference: resumed ? 'released' : 'release-failed' }
+    this.record(inferenceHoldLabel(resumed ? 'released' : 'release-failed'))
+    this.emit(true)
   }
 }
 
