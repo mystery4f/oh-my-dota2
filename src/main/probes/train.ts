@@ -1,5 +1,11 @@
 import { app } from 'electron'
 import {
+  advanceRecording,
+  initialRecordingState,
+  RECORDING_LIMITS,
+  recordingKey,
+  shouldKeepTake,
+  takeLineId,
   buildFtDatasetEntries,
   buildFtJsonlLine,
   canStartTrain,
@@ -21,7 +27,7 @@ import {
 import { pickLatestUvAsset, planAsrFtInstallSteps } from '../services/train/asr-ft-install'
 
 /**
- * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度）。
+ * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度/录音判定）。
  * 纯函数零进程零网络；进程生命周期（spawn/停/树杀）进 docs/ACCEPTANCE.md 人工验收。
  */
 
@@ -113,6 +119,76 @@ export function runTrainProbe(): void {
   push('数据太少全归训练（验证留空）', split.train.length === 2 && split.eval.length === 0, `train=${split.train.length} eval=${split.eval.length}`)
   const splitBig = splitTrainEval([1, 2, 3, 4, 5].map((no) => ({ wavPath: `w${no}`, text: `t${no}` })))
   push('够量时尾部 2 条进验证', splitBig.train.length === 3 && splitBig.eval.length === 2 && splitBig.eval[0].wavPath === 'w4', `train=${splitBig.train.length} eval=${splitBig.eval.length}`)
+  // —— 录音判定（T4a 录音面板）：开停/收尾/命名全在共享缝 ——
+  const t0 = 1_000_000
+  const st0 = initialRecordingState(t0)
+  push(
+    '初态：没说过话、静音未武装',
+    !st0.speechSeen && st0.quietSince === 0 && st0.startedAt === t0,
+    JSON.stringify(st0),
+  )
+  const stepQuiet = advanceRecording(st0, { rms: 0, nowMs: t0 + 500 })
+  push(
+    '没说过话：静多久都不武装、不停',
+    !stepQuiet.stop && stepQuiet.state.quietSince === 0,
+    JSON.stringify(stepQuiet.state),
+  )
+  const stepSpeak = advanceRecording(stepQuiet.state, { rms: RECORDING_LIMITS.rmsThreshold, nowMs: t0 + 510 })
+  push('超阈值 → speechSeen 置位', stepSpeak.state.speechSeen && !stepSpeak.stop, JSON.stringify(stepSpeak.state))
+  const stepArmed = advanceRecording(stepSpeak.state, { rms: 0, nowMs: t0 + 520 })
+  push(
+    '说完第一块安静样本 → 静音武装',
+    stepArmed.state.quietSince === t0 + 520 && !stepArmed.stop,
+    `quietSince=${stepArmed.state.quietSince}`,
+  )
+  const stepNotYet = advanceRecording(stepArmed.state, {
+    rms: 0,
+    nowMs: stepArmed.state.quietSince + RECORDING_LIMITS.quietMsToStop - 1,
+  })
+  push('静音不足 quietMsToStop → 不停', !stepNotYet.stop, `quietSince=${stepNotYet.state.quietSince}`)
+  const stepFired = advanceRecording(stepArmed.state, {
+    rms: 0,
+    nowMs: stepArmed.state.quietSince + RECORDING_LIMITS.quietMsToStop,
+  })
+  push('静音满 quietMsToStop → 自动停', stepFired.stop && stepFired.reason === '自动停', `${stepFired.stop}/${stepFired.reason}`)
+  const stepCap = advanceRecording(initialRecordingState(0), { rms: 0, nowMs: RECORDING_LIMITS.maxMs })
+  push(
+    `满 maxMs → 到 ${RECORDING_LIMITS.maxMs / 1000}s 上限停`,
+    stepCap.stop && stepCap.reason === `到 ${RECORDING_LIMITS.maxMs / 1000}s 上限`,
+    `${stepCap.stop}/${stepCap.reason}`,
+  )
+  const stepBoth = advanceRecording(stepArmed.state, {
+    rms: 0,
+    nowMs: stepArmed.state.quietSince + RECORDING_LIMITS.quietMsToStop + RECORDING_LIMITS.maxMs,
+  })
+  push('静音时限与上限同一步命中 → 先判中的（自动停）赢', stepBoth.stop && stepBoth.reason === '自动停', stepBoth.reason ?? '')
+  const tooShort = shouldKeepTake({ durationMs: RECORDING_LIMITS.minMs - 1, speechSeen: true })
+  push(
+    'minMs-1 → 太短丢',
+    !tooShort.keep && tooShort.reason === `太短（${RECORDING_LIMITS.minMs - 1}ms），丢弃了——重新点录制`,
+    tooShort.reason ?? '',
+  )
+  const okTake = shouldKeepTake({ durationMs: RECORDING_LIMITS.minMs, speechSeen: true })
+  push('minMs + 说过话 → 收', okTake.keep && okTake.reason === null, JSON.stringify(okTake))
+  const silentTake = shouldKeepTake({ durationMs: RECORDING_LIMITS.minMs, speechSeen: false })
+  push(
+    '说过话=false → 静音段丢（哑麦样本不进数据集）',
+    !silentTake.keep && silentTake.reason === '没检测到说话，丢弃——重新点录制',
+    silentTake.reason ?? '',
+  )
+  const shortSilent = shouldKeepTake({ durationMs: RECORDING_LIMITS.minMs - 1, speechSeen: false })
+  push('太短与静音同犯 → 时长判定在前', shortSilent.reason?.startsWith('太短') === true, shortSilent.reason ?? '')
+  push(
+    '段键：逐句 L、自由说 T，两位补零',
+    takeLineId('lines', 3) === 'L03' && takeLineId('lines', 12) === 'L12' && takeLineId('free', 1) === 'T01',
+    `${takeLineId('lines', 3)}/${takeLineId('lines', 12)}/${takeLineId('free', 1)}`,
+  )
+  const sampleKey = recordingKey('G01', 'lines', 3)
+  push(
+    '录音键 Gxx-Lnn / Gxx-Tnn，过 safeKeys 白名单正则',
+    sampleKey === 'G01-L03' && /^G\d{2}-(?:L|T)\d{2}$/.test(sampleKey) && /^G\d{2}-(?:L|T)\d{2}$/.test(recordingKey('G01', 'free', 1)),
+    sampleKey,
+  )
   let failed = 0
   for (const item of cases) {
     if (!item.ok) failed++

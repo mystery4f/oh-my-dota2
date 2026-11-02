@@ -1,6 +1,6 @@
 // 训练窗口页：上半是任务开/停与日志，下半是 ASR 微调录音（T4a）。
 // 决策（互斥、计划推导、进度解析、读稿解析）都在 shared/主进程，这里只是显示器 + 采样器。
-import { canStartTrain, type TrainSnapshot } from '@shared/train'
+import { advanceRecording, canStartTrain, initialRecordingState, recordingKey, shouldKeepTake, takeLineId, type RecordingStepState, type TrainSnapshot } from '@shared/train'
 import { encodeWav16k } from '@shared/wav'
 import type { FtRecInfo, FtScriptGroup } from '@shared/ipc'
 
@@ -99,8 +99,7 @@ let currentLineNo = 0 // lines 模式：当前句号；free 模式：0 表示还
 let recording = false
 const chunks: Float32Array[] = [] // 当前这次录音的原始 PCM 段
 
-const lineKey = (groupId: string, no: number): string => `${groupId}-L${String(no).padStart(2, '0')}`
-const takeKey = (groupId: string, no: number): string => `${groupId}-T${String(no).padStart(2, '0')}`
+let recState: RecordingStepState = initialRecordingState(0)
 
 function currentGroup(): FtScriptGroup | null {
   return groups.find((g) => g.id === currentGroupId) ?? null
@@ -110,10 +109,10 @@ function currentGroup(): FtScriptGroup | null {
 function doneCount(group: FtScriptGroup): number {
   if (group.mode === 'free') {
     let n = 0
-    while (recs.has(takeKey(group.id, n + 1))) n += 1
+    while (recs.has(recordingKey(group.id, group.mode, n + 1))) n += 1
     return n
   }
-  return group.lines.filter((line) => recs.has(lineKey(group.id, line.no))).length
+  return group.lines.filter((line) => recs.has(recordingKey(group.id, group.mode, line.no))).length
 }
 
 /** 当前要录的那句：lines 模式取第一个没录的句号（都录完就停在最后一句），free 模式下一段。 */
@@ -123,7 +122,7 @@ function pickCurrent(): void {
   if (group.mode === 'free') {
     currentLineNo = doneCount(group) + 1
   } else {
-    const missing = group.lines.find((line) => !recs.has(lineKey(group.id, line.no)))
+    const missing = group.lines.find((line) => !recs.has(recordingKey(group.id, group.mode, line.no)))
     currentLineNo = (missing ?? group.lines[group.lines.length - 1]).no
   }
 }
@@ -140,7 +139,7 @@ function renderFt(): void {
     for (let i = 1; i <= done; i += 1) {
       const chip = document.createElement('span')
       chip.className = 'chip done'
-      chip.textContent = takeKey(group.id, i)
+      chip.textContent = recordingKey(group.id, group.mode, i)
       chip.addEventListener('click', () => {
         currentLineNo = i
         renderFt()
@@ -149,7 +148,7 @@ function renderFt(): void {
     }
     const chip = document.createElement('span')
     chip.className = done === currentLineNo - 1 ? 'chip current' : 'chip'
-    chip.textContent = `+ ${takeKey(group.id, done + 1)}（自由说）`
+    chip.textContent = `+ ${recordingKey(group.id, group.mode, done + 1)}（自由说）`
     chip.addEventListener('click', () => {
       currentLineNo = done + 1
       renderFt()
@@ -158,9 +157,9 @@ function renderFt(): void {
     ftText.textContent = group.note || '自由说：用平时开黑的语气随便讲一段（10–20 秒）。'
   } else {
     for (const line of group.lines) {
-      const key = lineKey(group.id, line.no)
+      const key = recordingKey(group.id, group.mode, line.no)
       const chip = document.createElement('span')
-      chip.className = key === lineKey(group.id, currentLineNo) ? 'chip current' : recs.has(key) ? 'chip done' : 'chip'
+      chip.className = key === recordingKey(group.id, group.mode, currentLineNo) ? 'chip current' : recs.has(key) ? 'chip done' : 'chip'
       chip.textContent = String(line.no)
       chip.title = line.text
       chip.addEventListener('click', () => {
@@ -172,7 +171,7 @@ function renderFt(): void {
     const line = group.lines.find((item) => item.no === currentLineNo) ?? group.lines[0]
     ftText.textContent = line?.text ?? ''
   }
-  const key = group.mode === 'free' ? takeKey(group.id, currentLineNo) : lineKey(group.id, currentLineNo)
+  const key = recordingKey(group.id, group.mode, currentLineNo)
   ftReplayBtn.disabled = !recs.has(key)
   ftAsrBtn.disabled = !recs.has(key)
   ftRecBtn.disabled = recording
@@ -210,11 +209,7 @@ function selectGroup(id: string): void {
 let recStream: MediaStream | null = null
 let recCtx: AudioContext | null = null
 let recNode: ScriptProcessorNode | null = null
-const RMS_THRESHOLD = 0.012
 let recRate = 48000 // 开录时从 AudioContext 记下，finishRecording 会把 ctx 置 null
-const QUIET_MS_TO_STOP = 1200
-const MIN_MS = 400
-const MAX_MS = 20000
 
 function finishRecording(): void {
   recNode?.disconnect()
@@ -234,8 +229,10 @@ async function saveChunks(): Promise<void> {
   const rate = recRate
   const durationMs = Math.round((chunks.reduce((sum, c) => sum + c.length, 0) / rate) * 1000)
   console.log('[train-ft] save chunks=', chunks.length, 'durationMs=', durationMs)
-  if (durationMs < MIN_MS) {
-    ftHint.textContent = `太短（${durationMs}ms），丢弃了——重新点录制`
+  // 收尾判定收进共享缝 shouldKeepTake：太短丢；全程没探到说话（哑麦/漏探）的静音段也丢。
+  const verdict = shouldKeepTake({ durationMs, speechSeen: recState.speechSeen })
+  if (!verdict.keep) {
+    ftHint.textContent = verdict.reason ?? ''
     chunks.length = 0
     renderFt()
     return
@@ -245,7 +242,7 @@ async function saveChunks(): Promise<void> {
   const binary = atob(base64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-  const line = group.mode === 'free' ? `T${String(currentLineNo).padStart(2, '0')}` : `L${String(currentLineNo).padStart(2, '0')}`
+  const line = takeLineId(group.mode, currentLineNo)
   try {
     const info = await window.api.ftRecSave(group.id, line, bytes)
     recs.set(info.key, info)
@@ -276,9 +273,7 @@ async function beginRecording(): Promise<void> {
   recording = true
   console.log('[train-ft] begin recording')
   chunks.length = 0
-  const startedAt = Date.now()
-  let speechSeen = false
-  let quietSince = 0
+  recState = initialRecordingState(Date.now())
   ftHint.textContent = '录音中…'
   renderFt()
   try {
@@ -291,15 +286,9 @@ async function beginRecording(): Promise<void> {
       let energy = 0
       for (const sample of input) energy += sample * sample
       const rms = Math.sqrt(energy / input.length)
-      if (rms >= RMS_THRESHOLD) {
-        speechSeen = true
-        quietSince = 0
-      } else if (speechSeen) {
-        if (!quietSince) quietSince = Date.now()
-        // 说完连续安静 1.2 秒就自动停（读稿节奏就是句间停一秒）。
-        if (Date.now() - quietSince >= QUIET_MS_TO_STOP) void stopRecording('自动停')
-      }
-      if (Date.now() - startedAt >= MAX_MS) void stopRecording('到 20s 上限')
+      const step = advanceRecording(recState, { rms, nowMs: Date.now() })
+      recState = step.state
+      if (step.stop) void stopRecording(step.reason ?? '')
     }
     recCtx.createMediaStreamSource(recStream).connect(recNode)
     console.log('[train-ft] graph ok rate=', recRate)
@@ -325,14 +314,13 @@ async function stopRecording(reason = ''): Promise<void> {
 async function replay(): Promise<void> {
   const group = currentGroup()
   if (!group) return
-  const key = group.mode === 'free' ? takeKey(group.id, currentLineNo) : lineKey(group.id, currentLineNo)
+  const key = recordingKey(group.id, group.mode, currentLineNo)
   if (!recs.has(key)) return
-  const line = group.mode === 'free' ? `T${String(currentLineNo).padStart(2, '0')}` : `L${String(currentLineNo).padStart(2, '0')}`
+  const line = takeLineId(group.mode, currentLineNo)
   const bytes = await window.api.ftRecRead(group.id, line)
   const url = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: 'audio/wav' }))
   const audio = new Audio(url)
   audio.addEventListener('ended', () => URL.revokeObjectURL(url))
-  void audio.play()
   void audio.play()
 }
 
@@ -344,7 +332,7 @@ const normalizeForCompare = (text: string): string => text.replace(/[\s\p{P}]+/g
 async function testAsr(): Promise<void> {
   const group = currentGroup()
   if (!group || ftAsrBtn.disabled) return
-  const line = group.mode === 'free' ? `T${String(currentLineNo).padStart(2, '0')}` : `L${String(currentLineNo).padStart(2, '0')}`
+  const line = takeLineId(group.mode, currentLineNo)
   ftAsrBtn.disabled = true
   ftAsrResult.textContent = '识别中…'
   try {
