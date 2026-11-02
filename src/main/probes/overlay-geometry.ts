@@ -14,6 +14,7 @@ import {
   SNAP_PX,
   resizeFromRight
 } from '@shared/overlay-geometry'
+import { reduceOverlay, type OverlayState } from '@shared/overlay-state'
 
 const WORK = { x: 0, y: 0, width: 1920, height: 1040 }
 
@@ -164,6 +165,65 @@ export function runOverlayGeometryProbe(): void {
     captureHint({ running: true, gsiLive: true, lastError: 'boom' })?.includes('boom') === true,
     'error'
   )
+
+  // 状态归约（#31）：浮层自有状态的联动策略收进 shared/overlay-state，事件形状在这里枚举钉死。
+  const st = (overrides: Partial<OverlayState> = {}): OverlayState => ({
+    locked: true,
+    collapsed: false,
+    replyOpen: false,
+    expandedBounds: null,
+    custom: null,
+    textMode: 'translated',
+    opacity: 0.34,
+    hint: null,
+    ...overrides
+  })
+  const collapse = reduceOverlay({ type: 'collapse', geometryAtCollapse: base }, st())
+  push(
+    '收起顺手锁上并记住展开几何',
+    collapse.state.locked && collapse.state.collapsed && collapse.state.expandedBounds === base,
+    JSON.stringify(collapse.persist)
+  )
+  push('收起要落盘两个字段', collapse.persist.overlayLocked === true && collapse.persist.overlayCollapsed === true, 'collapse persist')
+  push('收起要拆闲置表', collapse.idle === 'clear', collapse.idle)
+  const expand = reduceOverlay({ type: 'expand' }, st({ collapsed: true }))
+  push('展开要落盘且广播', expand.persist.overlayCollapsed === false && expand.changed, 'expand')
+  const unlock = reduceOverlay({ type: 'set-locked', locked: false }, st({ locked: true }))
+  push('解锁布防闲置回锁并重算穿透', unlock.idle === 'arm' && unlock.clickThrough, unlock.idle)
+  const relock = reduceOverlay({ type: 'set-locked', locked: true }, st({ locked: true }))
+  push('重复锁定是空操作', !relock.changed && Object.keys(relock.persist).length === 0, 'idempotent')
+  const loudest = reduceOverlay({ type: 'set-opacity', value: 5 }, st())
+  push('不透明度夹回区间', loudest.state.opacity === 0.9 && loudest.persist.overlayOpacity === 0.9, String(loudest.state.opacity))
+  const hintSame = reduceOverlay({ type: 'set-hint', hint: null }, st({ hint: null }))
+  push('提示没变就不广播', !hintSame.changed, 'same hint')
+  const reply = reduceOverlay({ type: 'set-reply', open: true }, st({ locked: true }))
+  push('回复框压过穿透', reply.state.replyOpen && reply.clickThrough, 'reply open')
+  const origin = reduceOverlay(
+    {
+      type: 'move-collapsed-origin',
+      origin: { x: 300, y: 200 },
+      expandedBounds: { x: 0, y: 0, width: 340, height: 420 },
+      custom: { x: 10, y: 20, width: 340, height: 420 }
+    },
+    st({ collapsed: true })
+  )
+  push(
+    '收起拖动只挪展开记忆原点',
+    origin.state.expandedBounds?.x === 300 &&
+      origin.state.custom?.x === 300 &&
+      origin.persist.overlayBounds?.x === 300,
+    JSON.stringify(origin.persist)
+  )
+  const noCustom = reduceOverlay(
+    {
+      type: 'move-collapsed-origin',
+      origin: { x: 1, y: 1 },
+      expandedBounds: { x: 0, y: 0, width: 340, height: 420 },
+      custom: null
+    },
+    st({ collapsed: true })
+  )
+  push('没有用户几何就不写盘', Object.keys(noCustom.persist).length === 0, 'no persist')
 
   const failed = cases.filter((item) => !item.ok)
   for (const item of cases) {
