@@ -20,6 +20,16 @@ const PERSISTED_FIELDS = [
   'ttsReadOwn',
   'ttsDropBacklog',
   'ttsSpeakSegmentChars',
+  'ttsOutputDevice',
+  'ttsSpeakKey',
+  'ttsOutEngine',
+  'ttsOutVoice',
+  'voiceOutTestMode',
+  'voiceTranscribeOnly',
+  'asrEngine',
+  'asrHotwords',
+  'trainKind',
+  'trainDataset',
 ] as const
 
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
@@ -59,6 +69,37 @@ function sentinelFor(
     case 'ttsPitch':
       // 0.9 / 1.1 都是面板滑杆能到的值，验的是「滑杆位置真的落盘」。
       return (current.ttsPitch > 1 ? 0.9 : 1.1) as AppSettings[typeof key]
+    case 'ttsOutputDevice':
+      // 哨兵值是「一台不存在的设备」：存的是原样字符串还是原样回来（归一化不发生在写入侧）。
+      return (current.ttsOutputDevice === 'sink-sentinel-a' ? 'sink-sentinel-b' : 'sink-sentinel-a') as AppSettings[typeof key]
+    case 'ttsSpeakKey':
+      // 两个都是合法键：验的是「选中的那一个」而不是「任意字符串」。
+      return (current.ttsSpeakKey === 'F5' ? 'F6' : 'F5') as AppSettings[typeof key]
+    case 'ttsOutEngine':
+      // 两个都是合法引擎（edge / offline）：合法值必须原样落盘原样读回。
+      return (current.ttsOutEngine === 'edge' ? 'offline' : 'edge') as AppSettings[typeof key]
+    case 'ttsOutVoice':
+      // 声出清单里真实存在的英文嗓，验证「选中的那一个」；音色字段不归一化（决策层打回）。
+      return (
+        current.ttsOutVoice === 'en-US-JennyNeural' ? 'en-US-AnaNeural' : 'en-US-JennyNeural'
+      ) as AppSettings[typeof key]
+    case 'voiceOutTestMode':
+      // 布尔开关：非当前值落盘原样读回（无归一化，同 ttsReadOwn 一档）。
+      return !current.voiceOutTestMode as AppSettings[typeof key]
+    case 'voiceTranscribeOnly':
+      // 布尔开关：非当前值落盘原样读回（无归一化，同 voiceOutTestMode 一档）。
+      return !current.voiceTranscribeOnly as AppSettings[typeof key]
+    case 'asrEngine':
+      // 识别引擎：非当前值落盘原样读回（枚举归一化在 loadSettings，探针喂合法值）。
+      return (current.asrEngine === 'qwen3' ? 'whisper' : 'qwen3') as AppSettings[typeof key]
+    case 'asrHotwords':
+      // 热词表：带中文逗号与顿号的串原样落盘原样读回（分隔符归一化只在读取热词时做）。
+      return (current.asrHotwords.includes('肉山') ? '买活,高地、风暴之灵' : '肉山，买活') as AppSettings[typeof key]
+    case 'trainKind':
+      // 训练任务类型：非当前值落盘原样读回（枚举归一化在 loadSettings，探针喂合法值）。
+      return (current.trainKind === 'demo' ? 'gv-sovits' : 'demo') as AppSettings[typeof key]
+    case 'trainDataset':
+      return (current.trainDataset.includes('ftv1') ? 'ftv2-dataset' : 'ftv1-dataset') as AppSettings[typeof key]
   }
 }
 

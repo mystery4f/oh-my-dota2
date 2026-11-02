@@ -1,3 +1,43 @@
+import type { VoiceReplyStage } from './voice-out'
+
+import type {
+  AsrFtInstallState,
+  AsrFtStatusResult,
+  AsrFtSwapResult,
+  FtDatasetPrepareResult,
+  TrainSnapshot,
+  TrainStartRequest,
+  TrainStartResult
+} from '@shared/train'
+
+
+/** ASR 微调读稿：一句原文。 */
+export interface FtScriptLine {
+  no: number
+  text: string
+}
+
+/** ASR 微调读稿：一组（lines 模式逐句录，free 模式自由说）。 */
+export interface FtScriptGroup {
+  id: string
+  title: string
+  mode: 'lines' | 'free'
+  lines: FtScriptLine[]
+  note: string
+}
+
+/** 读稿解析结果：error 非空表示内置资源缺失/解析失败。 */
+export interface FtScriptState {
+  groups: FtScriptGroup[]
+  error: string | null
+}
+
+/** 一条录音：key 形如 G01-L03（free 组是 G21-T01），durationMs 由 16k mono wav 字节数推算。 */
+export interface FtRecInfo {
+  key: string
+  bytes: number
+  durationMs: number
+}
 export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'custom'
 
 export interface ProviderConfig {
@@ -59,6 +99,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 
 
 export type OfflineVoiceId = 'baker' | 'xiao_ya' | 'eula'
+export type VoiceOutEngine = 'edge' | 'offline' | 'sovits'
 
 export interface OfflineVoice {
   id: OfflineVoiceId
@@ -95,6 +136,38 @@ export interface AppSettings {
   targetLang: string
   whisperBinPath: string
   ttsOutputDevice: string
+  /**
+   * 声出引擎：edge = 英文神经嗓占位（默认）；offline = 本地离线模型（中文嗓，念英文吞字）；
+   * sovits = GV（GPT-SoVITS）音色包——音色由参考音频决定，权重切换走现有音色包管线。
+   */
+  ttsOutEngine: VoiceOutEngine
+  /** 声出音色：edge 存声出清单里的英文嗓 id，offline 存离线清单里的本地嗓 id；GV 不用（空串）。 */
+  ttsOutVoice: string
+  /**
+   * 说话键（push-to-talk）：游戏内按住才发言的按键，F1–F12 或单个字母/数字。
+   * 声出期间由应用自动按下/松开（合成成功才按，头尾各留 200ms 余量）；乱填打回 F5。
+   */
+  ttsSpeakKey: string
+  /** 测试模式：开了只放音频到所选输出设备、不模拟按下说话键——游戏没开也能全链路试听，F5 不会落到别的窗口上。 */
+  voiceOutTestMode: boolean
+  /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
+  /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
+  voiceTranscribeOnly: boolean
+  /**
+   * 语音识别引擎：whisper（本地 whisper.cpp，ggml-small）或 qwen3（Qwen3-ASR 0.6B，
+   * 方言/抗噪更强、自带标点，模型 ~980MB；唯一支持热词的引擎）。
+   */
+  asrEngine: 'whisper' | 'qwen3'
+  /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
+  /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
+  asrHotwords: string
+  /** 训练窗口记住的任务类型：demo 演示任务；gv-gpt/gv-sovits/asr-ft 在 T3/T5 接入。 */
+  trainKind: 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
+  /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
+  /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
+  trainDataset: string
+  /** ASR 微调环境根目录：空 = 用应用数据目录里的 asr-ft-env；手动搭的环境（试点那套）填根路径。 */
+  asrFtEnvDir: string
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
   /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
@@ -202,6 +275,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
   targetLang: 'zh-CN',
   whisperBinPath: '',
   ttsOutputDevice: '',
+  ttsSpeakKey: 'F5',
+  voiceOutTestMode: false,
+  voiceTranscribeOnly: false,
+  asrEngine: 'whisper',
+  trainKind: 'demo',
+  trainDataset: '',
+  asrFtEnvDir: '',
+  asrHotwords: '',
+  ttsOutEngine: 'edge',
+  ttsOutVoice: '',
   autoStartCapture: true,
   sendMode: 'inplace',
   consoleKey: '\\',
@@ -266,6 +349,73 @@ export interface SpeakPayload {
   audio?: string
   /** audio 的 MIME，缺省按 audio/mpeg 处理。 */
   audioMime?: string
+}
+
+/** 「测试声出」按钮的结果：念没念成、念了多久、有没有要给用户看的提示。 */
+export interface VoiceOutTestResult {
+  ok: boolean
+  /** 实际播放时长（毫秒）；没播出来为 null。 */
+  durationMs: number | null
+  /** 输出设备回退等提示；无提示为 null。 */
+  hint: string | null
+  /** 说话键按下/松开失败的说明（播放照常进行，只是频道没开）。 */
+  keyError?: string
+  /** 整体失败原因（合成失败 / 窗口超时等）。 */
+  error?: string
+}
+
+/** 主进程 → 声出窗口：播这段音频，并按 requestedDevice 选输出。 */
+export interface VoiceOutPlayRequest {
+  requestId: number
+  audioBase64: string
+  audioMime: string
+  requestedDevice: string
+}
+
+/** 声出窗口 → 主进程：元数据就绪（时长已知、setSinkId 已生效，可以开按说话键了）。 */
+export interface VoiceOutReadyReport {
+  requestId: number
+  ok: boolean
+  durationMs: number | null
+  sinkId: string
+  sinkLabel: string
+  fallback: boolean
+  hint: string | null
+  error?: string
+}
+
+/** 声出窗口 → 主进程：播放结束/失败；主进程据此松开说话键。 */
+export interface VoiceOutEndedReport {
+  requestId: number
+  ok: boolean
+  durationMs: number | null
+  error?: string
+}
+
+/** 语音对讲一键到底（票 05）的结果：译文 + 播没播出 + 停在哪一环。 */
+export interface VoiceReplyResult {
+  /** 译文（已 trim，可直接进剪贴板/频道）；翻译这环就失败了为 null。 */
+  translated: string | null
+  /** 音频完整播出且说话键全程按住（队友真能听见）。 */
+  spoken: boolean
+  /** 失败停在哪一环：识别/翻译/声出；成功为 null。 */
+  stage: VoiceReplyStage | null
+  /** 失败说明；成功为 null。 */
+  error: string | null
+}
+
+/** 语音链在面板上的回显：一条摘要覆盖 成功 / 某环失败 / 压根没识别到话。 */
+export interface VoiceChainSummary {
+  /** 识别到的原文；没识别到为空串。 */
+  transcript: string
+  /** 译文；翻译失败为 null。 */
+  translated: string | null
+  /** 声出是否完整播出。 */
+  spoken: boolean
+  /** 失败停在哪一环；成功为 null。 */
+  stage: VoiceReplyStage | null
+  /** 失败说明；成功为 null。 */
+  error: string | null
 }
 
 /** One deduped chat line pushed to the overlay / dashboard stream. */
@@ -502,9 +652,21 @@ export const IPC = {
   VOICE_WHISPER_SETUP: 'voice:whisper-setup',
   VOICE_WHISPER_PROGRESS: 'voice:whisper-progress',
   VOICE_TRANSCRIBE: 'voice:transcribe',
+  // 语音链状态回显：overlay 起录/停录/出结果时报给主进程，主进程广播给面板。
+  OVERLAY_VOICE_STATE: 'overlay:voice-record-state',
+  OVERLAY_VOICE_RESULT: 'overlay:voice-chain-result',
+  VOICE_RECORD_STATE: 'voice:record-state',
+  VOICE_CHAIN_RESULT: 'voice:chain-result',
+  VOICE_REPLY: 'voice:reply',
   VOICE_RECORD_TOGGLE: 'voice:record-toggle',
   VOICE_TTS_PREVIEW: 'voice:tts-preview',
+  VOICE_OUT_TEST: 'voice-out:test',
+  VOICE_OUT_PLAY: 'voice-out:play',
+  VOICE_OUT_START: 'voice-out:start',
+  VOICE_OUT_READY: 'voice-out:ready',
+  VOICE_OUT_ENDED: 'voice-out:ended',
   OVERLAY_TOGGLE: 'overlay:toggle',
+  OVERLAY_VOICE_TOGGLE: 'overlay:voice-record-toggle',
   OVERLAY_REPLY: 'overlay:reply',
   OVERLAY_REPLY_OPEN: 'overlay:reply-open',
   OVERLAY_REPLY_CLOSE: 'overlay:reply-close',
@@ -513,6 +675,29 @@ export const IPC = {
   VOICE_SPEAK: 'voice:speak',
   TTS_OFFLINE_STATE: 'tts:offline-state',
   TTS_OFFLINE_DOWNLOAD: 'tts:offline-download',
+  // 识别模型（Qwen3）状态与解压：和离线朗读同一套「状态 + 获取」面板节奏。
+  ASR_STATUS: 'asr:status',
+  ASR_DOWNLOAD: 'asr:download',
+  // 训练管理（T1：窗口骨架 + 任务模型；真实训练栈 T3/T5 接入）。
+  TRAIN_OPEN: 'train:open',
+  TRAIN_START: 'train:start',
+  TRAIN_STOP: 'train:stop',
+  TRAIN_SNAPSHOT: 'train:snapshot',
+  /** 主进程广播训练快照（任务状态 + 日志尾），训练窗口订阅。 */
+  TRAIN_STATE: 'train:state',
+  // ASR 微调录音（T4a）：内置读稿 + 录音存取，全部落在应用数据目录 asr-ft/ 下。
+  FT_SCRIPT_READ: 'ft:script-read',
+  FT_REC_LIST: 'ft:rec-list',
+  FT_REC_SAVE: 'ft:rec-save',
+  FT_REC_DELETE: 'ft:rec-delete',
+  FT_REC_READ: 'ft:rec-read',
+  FT_REC_ASR: 'ft:rec-asr',
+  FT_DATASET_PREPARE: 'ft:dataset-prepare',
+  // ASR 微调闭环（T5）：环境状态 / 换模 / 回滚，训练+导出走 TRAIN_START/STOP。
+  FT_ASRFT_STATUS: 'ft:asrft-status',
+  FT_ASRFT_APPLY: 'ft:asrft-apply',
+  FT_ASRFT_ROLLBACK: 'ft:asrft-rollback',
+  FT_ASRFT_INSTALL: 'ft:asrft-install',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
   TTS_SOVITS_REFS: 'tts:sovits-refs',
@@ -546,6 +731,11 @@ export interface OfflineStatus {
   progress: number
   error: string | null
 }
+
+/** Qwen3-ASR 模型包（GitHub release，~838MB）；国内网络建议浏览器手动下载。 */
+export const QWEN3_ASR_RELEASE_URL =
+  'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2'
+
 
 /** GPT-SoVITS：引擎包安装状态 + api_v2 服务状态 + 最近日志（面板一眼看出「起没起来」）。 */
 export interface SovitsStatus {
@@ -626,17 +816,31 @@ export interface WindowApi {
   testProvider(provider: ProviderConfig): Promise<TestResult>
   translate(text: string, direction?: TranslateDirection): Promise<string>
   translateReply(text: string, tone?: ReplyTone): Promise<ReplyResult>
+  /** 语音对讲一键到底：识别文本 → prod 翻译 → 剪贴板 → 声出。失败静默（不回退系统嗓子/文出）。 */
+  voiceReply(transcript: string): Promise<VoiceReplyResult>
   whisperProbe(binPath: string): Promise<VoiceProbeResult>
   whisperSetup(): Promise<VoiceAssetsResult>
   onWhisperProgress(callback: (progress: VoiceAssetProgress) => void): () => void
   /** Synthesize speech with the Edge neural TTS service and return mp3 bytes for playback. */
   transcribeAudio(wavBase64: string, language?: string): Promise<VoiceTranscribeResult>
   onVoiceRecordToggle(callback: () => void): () => void
+  /** overlay 录音状态上抛（起录/停录都会报），主进程广播给面板。 */
+  reportVoiceState(recording: boolean): void
+  /** 语音链结果上抛（含「没识别到话」这类提前收场），主进程广播给面板。 */
+  reportVoiceChain(result: VoiceChainSummary): void
+  /** 面板订阅录音状态：热键与按钮共用同一份状态。 */
+  onVoiceRecordState(callback: (state: { recording: boolean }) => void): () => void
+  /** 面板订阅语音链结果，用来在按钮下方回显原文/译文/已播。 */
+  onVoiceChainResult(callback: (result: VoiceChainSummary) => void): () => void
   ttsPreview(text: string): Promise<VoicePreviewResult>
   /** 离线朗读模型的安装状态（是否就绪、占用多少磁盘、是否正在下载）。 */
   ttsOfflineState(): Promise<OfflineStatus>
   /** 触发（或继续）一次离线模型下载；返回最新状态。 */
   ttsOfflineDownload(): Promise<OfflineStatus>
+  /** Qwen3-ASR 模型包的安装状态。 */
+  asrStatus(): Promise<OfflineStatus>
+  /** 触发一次模型获取：解压已放进数据目录的 tar.bz2。 */
+  asrDownload(): Promise<OfflineStatus>
   /** GPT-SoVITS 引擎包与服务状态（含最近日志）。 */
   sovitsStatus(): Promise<SovitsStatus>
   /** 一键安装：没有引擎包就下 8GB 再解压；压缩包已放进数据目录则只解压。 */
@@ -669,6 +873,7 @@ export interface WindowApi {
   sendReply(text: string): Promise<ReplySendResult>
   translateInPlace(): Promise<InPlaceResult>
   overlayToggle(): Promise<OverlayStatus>
+  overlayVoiceToggle(): Promise<{ ok: boolean }>
   overlaySetText(mode: OverlayTextMode): Promise<OverlayStatus>
   overlayOpenReply(): Promise<OverlayStatus>
   overlayCloseReply(submitted?: boolean): Promise<OverlayStatus>
@@ -691,6 +896,42 @@ export interface WindowApi {
   overlaySetOpacity(value: number): Promise<OverlayStatus>
   /** 常驻隐藏窗口里的桌面视频流（抓屏专用，不走 dashboard）。 */
   screenStream: ScreenStreamApi
+  /** 测试声出：合成固定英文句 → 路由到所选输出 → 自动按住说话键播放。 */
+  voiceOutTest(): Promise<VoiceOutTestResult>
+  /** 声出隐藏窗口专用桥（面板用不到）。 */
+  voiceOut: VoiceOutApi
+  /** 打开训练管理窗口（已开就置前）。 */
+  trainOpen(): void
+  /** 启动一个训练任务（T1 只有 demo 能真跑，其余 kind 会被拒绝并说明去向）。 */
+  trainStart(request: TrainStartRequest): Promise<TrainStartResult>
+  trainStop(): Promise<TrainStartResult>
+  /** 当前任务快照（状态 + 日志尾），窗口打开时先拉一次。 */
+  trainSnapshot(): Promise<TrainSnapshot>
+  /** 订阅训练状态广播（250ms 节流）。 */
+  onTrainState(callback: (snapshot: TrainSnapshot) => void): () => void
+  /** 内置读稿（组 + 句），训练窗口录音区用。 */
+  ftScriptRead(): Promise<FtScriptState>
+  /** 已有录音清单（key → 字节数/时长）。 */
+  ftRecList(): Promise<FtRecInfo[]>
+  /** 保存一条录音（16k mono wav 字节），返回落盘信息。 */
+  ftRecSave(group: string, line: string, data: Uint8Array): Promise<FtRecInfo>
+  /** 删除一条录音（重录前清理用，也可以直接覆盖）。 */
+  ftRecDelete(group: string, line: string): Promise<void>
+  /** 读回一条录音字节（回放用）。 */
+  ftRecRead(group: string, line: string): Promise<Uint8Array>
+  /** 识别测试：一条已存录音喂给当前识别引擎，返回 {ok,text,error}（训练窗口对比稿子用）。 */
+  ftRecAsr(group: string, line: string): Promise<{ ok: boolean; text: string; error: string | null }>
+  /** 一键打包：已录句子 × 稿子 → 官方微调 JSONL（train/eval 两份，落在 asr-ft-datasets/）。 */
+  /** 一键打包：已录句子 × 稿子 → 官方微调 JSONL（train/eval 两份，落在 asr-ft-datasets/）。 */
+  ftDatasetPrepare(): Promise<FtDatasetPrepareResult>
+  /** 微调环境 + 换模状态：缺什么、有没有可应用的新模型、能不能回滚。 */
+  ftAsrftStatus(): Promise<AsrFtStatusResult>
+  /** 一键安装训练环境（uv+venv+依赖+底模）：启动即回，进度走 ftAsrftStatus 轮询。 */
+  ftAsrftInstall(): Promise<AsrFtInstallState>
+  /** 应用新模型：导出产物转正，旧模型挪进 .bak（可回滚）。 */
+  ftAsrftApply(): Promise<AsrFtSwapResult>
+  /** 回滚上一版：现役删掉，.bak 归位。 */
+  ftAsrftRollback(): Promise<AsrFtSwapResult>
 }
 
 /** 物理像素裁切矩形（相对显示器左上角）。 */
@@ -699,6 +940,14 @@ export interface StreamRect {
   y: number
   width: number
   height: number
+}
+
+/** 声出窗口桥：主进程要播一段 → 隐藏窗口选好输出设备播放 → 回报就绪/结束。 */
+export interface VoiceOutApi {
+  onPlay(callback: (payload: VoiceOutPlayRequest) => void): () => void
+  onStart(callback: (requestId: number) => void): () => void
+  reportReady(report: VoiceOutReadyReport): void
+  reportEnded(report: VoiceOutEndedReport): void
 }
 
 /** 抓屏流桥：主进程要一帧 → 隐藏窗口从视频流裁切 → 回传 PNG base64。 */

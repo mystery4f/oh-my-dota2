@@ -35,6 +35,9 @@ import { installProxyAwareFetch } from './services/session/net-fetch'
 import { runChatBlockProbe } from './probes/chat-block'
 import { runInPlaceProbe, runReplyLatencyProbe } from './probes/latency'
 import { runOverlayGeometryProbe } from './probes/overlay-geometry'
+import { runVoiceOutProbe } from './probes/voice-out'
+import { runAsrHotwordsProbe } from './probes/asr-hotwords'
+import { runTrainProbe } from './probes/train'
 import { loadSettings } from './services/settings'
 import { warmTranslator } from './services/session/durable-translator'
 import { suppressExperimentalSqliteWarning } from './services/session/warnings'
@@ -169,6 +172,9 @@ app.whenReady().then(() => {
   if (process.argv.includes('--match-report')) void runMatchReportProbe()
   if (process.argv.includes('--translate-cache-probe')) void runTranslateCacheProbe()
   if (process.argv.includes('--overlay-geometry-probe')) void runOverlayGeometryProbe()
+  if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()
+  if (process.argv.includes('--asr-hotwords-probe')) void runAsrHotwordsProbe()
+  if (process.argv.includes('--train-probe')) void runTrainProbe()
   if (process.argv.includes('--input-probe')) void runInputProbe()
 
   const startup = loadSettings()
@@ -194,25 +200,32 @@ app.whenReady().then(() => {
   if (!probeRun && startup.overlayVisible) getOverlayManager().show()
   // 更新：装好的包里开机静默查一次，有就自己下，下完把「重启」挂在面板上等用户点。
   if (!probeRun) startUpdateCheck()
-  globalShortcut.register('Alt+Shift+O', () => {
+  // 注册失败不炸只记：别的软件（剪辑工具/输入法/游戏助手）占了这个全局热键时，
+  // 用户按了没反应，日志里能查到是哪一个键没抢到。
+  const registerHotkey = (accelerator: string, handler: () => void): void => {
+    if (!globalShortcut.register(accelerator, handler)) {
+      console.log('HOTKEY_REGISTER_FAIL', JSON.stringify({ accelerator }))
+    }
+  }
+  registerHotkey('Alt+Shift+O', () => {
     getOverlayManager().toggle()
   })
   // 锁定/解锁：锁定后浮层不吃鼠标；解锁后能拖动、拉两侧改宽度，拖完再锁定。
-  globalShortcut.register('Alt+Shift+P', () => {
+  registerHotkey('Alt+Shift+P', () => {
     const overlay = getOverlayManager()
     if (overlay.status().visible) overlay.setLocked(!overlay.status().locked)
   })
   // 收起/展开小图标：收起后如果是锁定状态就穿透点不到，只能靠这个热键收回来。
-  globalShortcut.register('Alt+Shift+B', () => {
+  registerHotkey('Alt+Shift+B', () => {
     const overlay = getOverlayManager()
     if (overlay.status().visible) overlay.toggleCollapse()
   })
   // 直发：inplace = 读游戏聊天框草稿 → 翻译 → 粘回并回车；其他通道 = 弹浮层输入框。
-  globalShortcut.register('Alt+Shift+T', () => {
+  registerHotkey('Alt+Shift+T', () => {
     if (loadSettings().sendMode === 'inplace') void translateInPlace()
     else getOverlayManager().openReply()
   })
-  globalShortcut.register('Alt+Shift+V', () => {
+  registerHotkey('Alt+Shift+V', () => {
     getOverlayManager().toggleVoiceCapture()
   })
 
@@ -254,4 +267,4 @@ app.on('will-quit', () => {
   destroyTray()
   getInPlaceSender().dispose()
   getOverlayManager().destroy()
-})
+})

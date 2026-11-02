@@ -22,6 +22,7 @@
   },
   "include": [
     "src/renderer/src/**/*",
+    "src/renderer/*.ts",
     "src/shared/**/*"
   ]
 }

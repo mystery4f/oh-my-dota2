@@ -2,6 +2,8 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DEFAULT_SETTINGS, OFFLINE_VOICES, type AppSettings, type ProviderConfig } from '@shared/ipc'
+import { normalizeTrainKind } from '@shared/train'
+import { normalizeSpeakKey, normalizeVoiceOutEngine } from '@shared/voice-out'
 
 function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -45,6 +47,27 @@ export function loadSettings(): AppSettings {
     const rawSeg = Number(merged.ttsSpeakSegmentChars)
     if (!Number.isFinite(rawSeg)) merged.ttsSpeakSegmentChars = DEFAULT_SETTINGS.ttsSpeakSegmentChars
     else merged.ttsSpeakSegmentChars = Math.min(60, Math.max(10, Math.round(rawSeg)))
+    // 说话键：只认 F1–F12 和单个字母/数字（SendInput 的 VK 码能对上的集合），乱填打回 F5。
+    merged.ttsSpeakKey = normalizeSpeakKey(merged.ttsSpeakKey)
+    // 声出引擎：只认三引擎层的合法值，乱填打回 edge（英文占位）；声出音色不在这里钳，
+    // resolveVoiceOutSynth 决策时对不上清单自会打回默认（和 ttsVoice 同一策略）。
+    merged.ttsOutEngine = normalizeVoiceOutEngine(merged.ttsOutEngine)
+    // 识别引擎：只认 whisper / qwen3；老存档的 sensevoice（已废弃）迁移成 qwen3，
+    // 其他乱填打回 whisper（模型没就绪时路由层还会兜一层提示，这里只保证枚举干净）。
+    const rawEngine = merged.asrEngine as string
+    if (rawEngine === 'sensevoice') {
+      merged.asrEngine = 'qwen3'
+    } else if (rawEngine !== 'whisper' && rawEngine !== 'qwen3') {
+      merged.asrEngine = DEFAULT_SETTINGS.asrEngine
+    }
+    // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
+    // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
+    if (typeof merged.asrHotwords !== 'string') merged.asrHotwords = DEFAULT_SETTINGS.asrHotwords
+    // 训练窗口记忆：kind 乱值打回 demo，dataset 只认字符串。
+    merged.trainKind = normalizeTrainKind(merged.trainKind)
+    if (typeof merged.trainDataset !== 'string') merged.trainDataset = DEFAULT_SETTINGS.trainDataset
+    // 微调环境根目录：只认字符串，空串 = 用应用数据目录的 asr-ft-env。
+    if (typeof merged.asrFtEnvDir !== 'string') merged.asrFtEnvDir = DEFAULT_SETTINGS.asrFtEnvDir
     return merged
   } catch (err) {
     console.error('settings: load failed, using defaults', err)

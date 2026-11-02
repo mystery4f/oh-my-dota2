@@ -14,6 +14,8 @@ import {
   type VoiceAssetProgress,
   type VoiceAssetsResult,
   type VoicePreviewResult,
+  type VoiceOutTestResult,
+  type VoiceChainSummary,
   type TranslatorStatus,
   type VoiceProbeResult,
   OFFLINE_VOICES,
@@ -23,8 +25,11 @@ import {
   type SovitsVoicePack,
   SOVITS_SEED_REF_DIR
 } from '@shared/ipc'
-import type { UpdateState } from '@shared/ipc'
+import type { OfflineStatus, UpdateState } from '@shared/ipc'
+import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
+import { QWEN3_ASR_RELEASE_URL } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
+import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -35,6 +40,10 @@ import { Select } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type TestState = { status: 'idle' } | { status: 'running' } | { status: 'done'; result: TestResult }
+
+// 识别记录条目 = 链路结果 + 本地时间戳（主进程广播里没有时间，渲染端补）；
+// corrected 标记这条被「纠错」改写过。
+type VoiceChainLogEntry = VoiceChainSummary & { at: number; corrected?: boolean }
 
 type CheckRow = { label: string; ok: boolean; detail: string }
 
@@ -1339,17 +1348,27 @@ export default function App(): React.ReactElement {
     patchProvider({ id, baseUrl: preset.baseUrl, model: preset.model })
   }
 
-  const save = async (): Promise<void> => {
+  // patch：开关类按钮「点了立即生效」用——setSettings 是异步的，直接在 onClick 里
+  // setSettings 再 save 读到的还是旧 state，所以把要盖的字段显式传进来。
+  const save = async (patch: Partial<AppSettings> = {}): Promise<void> => {
     try {
       // 只落本页拥有的字段。整对象回写会把别的页/主进程后来写的字段（音色包自动激活的
       // 参考路径、引擎选择）按本页挂载时的旧值盖回去——实测：填个 key 保存，就把已配好的
       // sovits 参考清空、引擎打回 edge。setSettings 的契约本来就是 Partial 补丁。
+      const draft = { ...settings, ...patch }
       const next = await window.api.setSettings({
-        provider: settings.provider,
-        proxyUrl: settings.proxyUrl,
-        targetLang: settings.targetLang,
-        whisperBinPath: settings.whisperBinPath,
-        ttsOutputDevice: settings.ttsOutputDevice,
+        provider: draft.provider,
+        proxyUrl: draft.proxyUrl,
+        targetLang: draft.targetLang,
+        whisperBinPath: draft.whisperBinPath,
+        ttsOutputDevice: draft.ttsOutputDevice,
+        ttsSpeakKey: draft.ttsSpeakKey,
+        ttsOutEngine: draft.ttsOutEngine,
+        ttsOutVoice: draft.ttsOutVoice,
+        voiceOutTestMode: draft.voiceOutTestMode,
+        voiceTranscribeOnly: draft.voiceTranscribeOnly,
+        asrEngine: draft.asrEngine,
+        asrHotwords: draft.asrHotwords,
       })
       setSettings(next)
       setSaveFlash('已保存')
@@ -1376,8 +1395,60 @@ export default function App(): React.ReactElement {
   const [voiceAssets, setVoiceAssets] = useState<VoiceAssetsResult | null>(null)
   const [ttsResult, setTtsResult] = useState<VoicePreviewResult | null>(null)
   const [voiceProgress, setVoiceProgress] = useState<VoiceAssetProgress | null>(null)
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([])
+  const [voiceOutBusy, setVoiceOutBusy] = useState(false)
+  const [voiceOutResult, setVoiceOutResult] = useState<VoiceOutTestResult | null>(null)
 
+  // 「说一句试试」的状态与回显：录音中按钮变样，链路结果（含失败原因）进「识别记录」列表——
+  // 每次说了什么、识别成什么、翻成什么都要看得见，不然「声音都是一个内容」这类问题没法定位。
+  const [voiceRecording, setVoiceRecording] = useState(false)
+  const [voiceChainLog, setVoiceChainLog] = useState<VoiceChainLogEntry[]>([])
+  // 纠错回路：正在改写的记录条目（at 时间戳定位）与草稿；保存时差异词自动并入热词表。
+  const [editingLogAt, setEditingLogAt] = useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  const saveCorrection = (entry: VoiceChainLogEntry): void => {
+    const additions = extractHotwordDiff(entry.transcript, editDraft)
+    if (additions.length > 0) void save({ asrHotwords: mergeHotwords(settings.asrHotwords, additions) })
+    setVoiceChainLog((log) => log.map((item) => (item.at === entry.at ? { ...item, transcript: editDraft.trim(), corrected: true } : item)))
+    setEditingLogAt(null)
+    setEditDraft('')
+  }
+  useEffect(() => window.api.onVoiceRecordState((s) => setVoiceRecording(s.recording)), [])
+  // Qwen3 模型状态：进面板问一次 + 解压期间每秒刷——与离线朗读同一节奏，别让用户对着假进度等。
+  const [asrStatus, setAsrStatus] = useState<OfflineStatus | null>(null)
+  useEffect(() => {
+    void window.api.asrStatus().then(setAsrStatus)
+    if (!asrStatus?.downloading) return
+    const timer = setInterval(() => void window.api.asrStatus().then(setAsrStatus), 1000)
+    return () => clearInterval(timer)
+  }, [asrStatus?.downloading])
+  const downloadAsr = async (): Promise<void> => {
+    try {
+      await window.api.asrDownload()
+      setAsrStatus(await window.api.asrStatus())
+    } catch (err) {
+      setVoiceChainLog((log) => [
+        { transcript: '', translated: null, spoken: false, stage: null, error: `Qwen3 解压失败：${err instanceof Error ? err.message : String(err)}`, at: Date.now() },
+        ...log
+      ])
+    }
+  }
+  useEffect(
+    () =>
+      window.api.onVoiceChainResult((result) =>
+        setVoiceChainLog((log) => [{ ...result, at: Date.now() }, ...log].slice(0, 6))
+      ),
+    []
+  )
   useEffect(() => window.api.onWhisperProgress((progress) => setVoiceProgress(progress)), [])
+
+  // 输出设备列表只用来展示：面板里枚举一次，插拔设备后重新打开页面就能看到。
+  useEffect(() => {
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((all) => setAudioOutputs(all.filter((d) => d.kind === 'audiooutput')))
+      .catch(() => setAudioOutputs([]))
+  }, [])
 
   const setupWhisper = async (): Promise<void> => {
     setVoiceBusy(true)
@@ -1425,6 +1496,23 @@ export default function App(): React.ReactElement {
       setTtsResult({ ok: false, error: e instanceof Error ? e.message : String(e) })
     } finally {
       setVoiceBusy(false)
+    }
+  }
+
+  const runVoiceOutTest = async (): Promise<void> => {
+    setVoiceOutBusy(true)
+    setVoiceOutResult(null)
+    try {
+      setVoiceOutResult(await window.api.voiceOutTest())
+    } catch (e) {
+      setVoiceOutResult({
+        ok: false,
+        durationMs: null,
+        hint: null,
+        error: e instanceof Error ? e.message : String(e)
+      })
+    } finally {
+      setVoiceOutBusy(false)
     }
   }
 
@@ -1605,7 +1693,9 @@ export default function App(): React.ReactElement {
           <Card>
             <CardHeader>
               <CardTitle>语音链路</CardTitle>
-              <CardDescription>whisper.cpp 在本机运行（资源自动下载）；麦克风采集与 TTS 均已接通。</CardDescription>
+              <CardDescription>
+                whisper.cpp 在本机运行（资源自动下载）；声出引擎可选 Edge / 离线 / GV。「测试声出」念一句固定英文送进频道（冒烟用）；想试自己的声音点「说一句试试」或按 Alt+Shift+V：说中文 → 识别 → 翻译 → 声出，测试模式开着时只放所选输出设备、不按说话键。
+              </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="grid gap-2">
@@ -1618,13 +1708,182 @@ export default function App(): React.ReactElement {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="ttsDevice">TTS 输出设备（虚拟声卡）</Label>
-                <Input
+                <Label htmlFor="ttsOutEngine">声出引擎（译文合成人声送进频道的那条链）</Label>
+                <Select
+                  id="ttsOutEngine"
+                  value={settings.ttsOutEngine}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      ttsOutEngine: e.target.value as AppSettings['ttsOutEngine'],
+                    }))
+                  }
+                >
+                  <option value="edge">Edge · 英文神经嗓（默认占位）</option>
+                  <option value="offline">离线 · 本地模型</option>
+                  <option value="sovits">GV · GPT-SoVITS 音色包</option>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {settings.ttsOutEngine === 'sovits'
+                    ? '音色由参考音频决定：到浮层面板「GPT-SoVITS」区安装/切换音色包，权重自动切。英文包训练好后即插即用；中文包读英文会吞字，占位请回 Edge。'
+                    : settings.ttsOutEngine === 'offline'
+                      ? '离线模型是中文嗓，念英文会吞字——只用来验证链路，别当正式声出。'
+                      : '免费端点的英文神经嗓；合成失败（断网）时这句静默跳过，绝不回退系统嗓子。'}
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ttsOutVoice">声出音色</Label>
+                {settings.ttsOutEngine === 'sovits' ? (
+                  <Select id="ttsOutVoice" disabled value="">
+                    <option value="">音色由参考音频决定</option>
+                  </Select>
+                ) : settings.ttsOutEngine === 'offline' ? (
+                  <Select
+                    id="ttsOutVoice"
+                    value={
+                      OFFLINE_VOICES.some((v) => v.id === settings.ttsOutVoice)
+                        ? settings.ttsOutVoice
+                        : OFFLINE_VOICES[0].id
+                    }
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, ttsOutVoice: e.target.value }))
+                    }
+                  >
+                    {OFFLINE_VOICES.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label} · {option.note}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Select
+                    id="ttsOutVoice"
+                    value={
+                      VOICE_OUT_VOICES.some((v) => v.id === settings.ttsOutVoice)
+                        ? settings.ttsOutVoice
+                        : DEFAULT_VOICE_OUT_VOICE
+                    }
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, ttsOutVoice: e.target.value }))
+                    }
+                  >
+                    {VOICE_OUT_VOICES.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ttsDevice">声出输出设备（游戏语音经它进频道）</Label>
+                <Select
                   id="ttsDevice"
                   value={settings.ttsOutputDevice}
                   onChange={(e) => setSettings((s) => ({ ...s, ttsOutputDevice: e.target.value }))}
-                  placeholder="CABLE Input (VB-Audio Virtual Cable)"
+                >
+                  <option value="">系统默认输出</option>
+                  {audioOutputs.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `输出设备 ${d.deviceId.slice(0, 8)}…`}
+                    </option>
+                  ))}
+                  {settings.ttsOutputDevice && !audioOutputs.some((d) => d.deviceId === settings.ttsOutputDevice) ? (
+                    <option value={settings.ttsOutputDevice}>（已保存，当前未接入）</option>
+                  ) : null}
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  选 VB-Cable 的「CABLE Input」；找不到已选设备时自动回退系统默认输出并提示。
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ttsSpeakKey">说话键（游戏里按住才能发言的那个键）</Label>
+                <Input
+                  id="ttsSpeakKey"
+                  value={settings.ttsSpeakKey}
+                  onChange={(e) => setSettings((s) => ({ ...s, ttsSpeakKey: e.target.value.toUpperCase() }))}
+                  placeholder="F5"
                 />
+              </div>
+              {/* 识别引擎：whisper / Qwen3——Qwen3 唯一支持热词注入。 */}
+              <div className="grid gap-2">
+                <Label htmlFor="asrEngine">识别引擎</Label>
+                <Select
+                  value={settings.asrEngine}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    if (value === 'whisper' || value === 'qwen3') void save({ asrEngine: value })
+                  }}
+                >
+                  <option value="whisper">whisper（ggml-small）</option>
+                  <option value="qwen3">Qwen3（方言/抗噪更强，自带标点，模型 ~838MB）</option>
+                </Select>
+                {settings.asrEngine === 'qwen3' && (
+                  <>
+                    <div className="grid gap-2">
+                      <Label htmlFor="asrHotwords">热词（空 = 不启用；把容易认错的词填进来）</Label>
+                      <Input
+                        id="asrHotwords"
+                        value={settings.asrHotwords}
+                        onChange={(e) => setSettings((s) => ({ ...s, asrHotwords: e.target.value }))}
+                        placeholder="示例：肉山,买活,风暴之灵（这行灰字不是已生效的词）"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        填完点别处即保存，下一句录音就生效（不用重启）；只对 Qwen3 生效；识别记录里点「纠错」改对词，差异会自动并进这里。whisper 不支持。
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {!asrStatus ? (
+                        <span>正在检查 Qwen3 模型…</span>
+                      ) : asrStatus.ready ? (
+                        <span className="text-emerald-400">✓ 模型已就绪（{Math.round(asrStatus.bytes / 1024 / 1024)} MB）</span>
+                      ) : asrStatus.downloading ? (
+                        <span>解压中…（~838MB，约 1~3 分钟）</span>
+                      ) : (
+                        <>
+                          <span className={asrStatus.error ? 'text-rose-400' : ''}>
+                            {asrStatus.error
+                              ? asrStatus.error
+                              : '模型未下载：点链接下载 tar.bz2，放进数据目录 data\\asr-models\\ 后点解压'}
+                          </span>
+                          <a className="underline hover:text-foreground" href={QWEN3_ASR_RELEASE_URL} target="_blank" rel="noreferrer">
+                            打开下载页
+                          </a>
+                          <Button variant="outline" size="sm" disabled={!asrStatus.available} onClick={() => void downloadAsr()}>
+                            解压 Qwen3 模型
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+                {settings.asrEngine !== 'whisper' && asrStatus && !asrStatus.available && !asrStatus.ready && (
+                  <p className="text-xs text-rose-400">本机没找到 node.exe，sherpa 推理跑不了——装 Node 后重启应用。</p>
+                )}
+              </div>
+              {/* 训练管理（T1）：窗口骨架已就位，真实训练栈 T3/T5 接入。 */}
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Button variant="outline" onClick={() => window.api.trainOpen()}>
+                  训练管理
+                </Button>
+                <span>GV 音色微调与 ASR 口音微调的训练窗口（当前只有演示任务，真实训练栈陆续接入）。</span>
+              </div>
+              {/* 测试模式：开了只放音频、不按说话键——游戏没开也能全链路试听（输出设备选耳机即可）。 */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant={settings.voiceOutTestMode ? 'secondary' : 'outline'}
+                  onClick={() => void save({ voiceOutTestMode: !settings.voiceOutTestMode })}
+                  title="开了之后声出只放音频到所选输出设备，不模拟按下说话键；游戏没开也能试听，F5 不会落到别的窗口上"
+                >
+                  测试模式：{settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
+                </Button>
+                <Button
+                  variant={settings.voiceTranscribeOnly ? 'secondary' : 'outline'}
+                  onClick={() => void save({ voiceTranscribeOnly: !settings.voiceTranscribeOnly })}
+                  title="开了之后「说一句试试」/Alt+Shift+V 只做识别、把原文写进识别记录，翻译和声出全跳过——测口音、调模型用，测完记得关掉"
+                >
+                  只看识别：{settings.voiceTranscribeOnly ? '开（不翻译不声出）' : '关'}
+                </Button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Button className="w-fit" onClick={() => void save()}>
@@ -1643,7 +1902,97 @@ export default function App(): React.ReactElement {
                 <Button variant="outline" disabled={voiceBusy} onClick={() => void previewTts()}>
                   试听 TTS
                 </Button>
+                <Button
+                  variant={voiceRecording ? 'secondary' : 'outline'}
+                  title="与 Alt+Shift+V 同一条链：点一下开始说话，再点一下结束；识别→翻译→声出全程照跑，测试模式开着时只放耳机不按说话键"
+                  onClick={() => {
+                    if (typeof window.api.overlayVoiceToggle !== 'function') {
+                      setVoiceChainLog((log) => [
+                        { transcript: '', translated: null, spoken: false, stage: null, error: '主进程还是旧版本（preload 里没有这个通道），请完全退出再 npm run dev', at: Date.now() },
+                        ...log
+                      ])
+                      return
+                    }
+                    void window.api.overlayVoiceToggle()
+                  }}
+                >
+                  {voiceRecording ? '● 录音中 · 再点一下结束' : '说一句试试'}
+                </Button>
+                <Button variant="outline" disabled={voiceOutBusy} onClick={() => void runVoiceOutTest()}>
+                  测试声出
+                </Button>
               </div>
+              {voiceRecording && (
+                <p className="text-xs text-amber-400">● 正在录音——对着麦克风说话，说完再点一次按钮（或按 Alt+Shift+V）结束。</p>
+              )}
+              {voiceChainLog.length > 0 && (
+                <div className="space-y-1.5 rounded-md bg-stone-900/60 p-3">
+                  <p className="text-xs font-medium">识别记录（新在上，最多留 6 条）</p>
+                  <ul className="space-y-1">
+                    {voiceChainLog.map((entry) => (
+                      <li key={entry.at} className="text-xs">
+                        <span className="text-muted-foreground">
+                          {new Date(entry.at).toLocaleTimeString('zh-CN', { hour12: false })}
+                        </span>{' '}
+                        {entry.error ? (
+                          <span className="text-rose-400">🎤 {entry.error}</span>
+                        ) : editingLogAt === entry.at ? (
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            <Input
+                              className="h-6 w-64 text-xs"
+                              value={editDraft}
+                              autoFocus
+                              onChange={(e) => setEditDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveCorrection(entry)
+                                if (e.key === 'Escape') {
+                                  setEditingLogAt(null)
+                                  setEditDraft('')
+                                }
+                              }}
+                            />
+                            <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => saveCorrection(entry)}>
+                              存（差异并入热词）
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-xs"
+                              onClick={() => {
+                                setEditingLogAt(null)
+                                setEditDraft('')
+                              }}
+                            >
+                              取消
+                            </Button>
+                          </span>
+                        ) : (
+                          <span>
+                            {entry.corrected ? '✏️ ' : ''}
+                            🎤 原文「{entry.transcript || '（空）'}」→ 译文「
+                            {entry.translated ?? (entry.stage === 'skipped' ? '（只看识别）' : '（翻译失败）')}」
+                            {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}{' '}
+                            {entry.transcript ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 px-1.5 text-xs text-muted-foreground"
+                                title="改成对的，差异词自动并入热词表（仅 Qwen3 用）"
+                                onClick={() => {
+                                  setEditingLogAt(entry.at)
+                                  setEditDraft(entry.transcript)
+                                }}
+                              >
+                                纠错
+                              </Button>
+                            ) : null}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {voiceProgress && (
                 <p className="text-xs text-muted-foreground">
                   正在下载 {voiceProgress.phase} · {voiceProgress.pct}%
@@ -1669,6 +2018,18 @@ export default function App(): React.ReactElement {
                     {ttsResult.ok ? `TTS 正常 · ${ttsResult.voice ?? ''}` : 'TTS 失败'}
                   </p>
                   {ttsResult.error && <p className="text-xs text-destructive">{ttsResult.error}</p>}
+                </div>
+              )}
+              {voiceOutResult && (
+                <div className="space-y-1 rounded-md bg-stone-900/60 p-3 text-sm">
+                  <p className={voiceOutResult.ok ? 'text-emerald-400' : 'text-red-400'}>
+                    {voiceOutResult.ok
+                      ? `声出测试通过${voiceOutResult.durationMs ? ` · ${(voiceOutResult.durationMs / 1000).toFixed(1)} 秒` : ''}`
+                      : '声出测试失败'}
+                  </p>
+                  {voiceOutResult.hint && <p className="text-xs text-amber-400">{voiceOutResult.hint}</p>}
+                  {voiceOutResult.keyError && <p className="text-xs text-destructive">{voiceOutResult.keyError}</p>}
+                  {voiceOutResult.error && <p className="text-xs text-destructive">{voiceOutResult.error}</p>}
                 </div>
               )}
               {voiceProbe && (

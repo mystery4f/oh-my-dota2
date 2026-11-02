@@ -7,11 +7,12 @@ import type { VoiceBackendStatus, VoiceAssetsResult, VoiceProbeResult, VoiceTran
 const PROBE_TIMEOUT_MS = 8000
 const RELEASE_TAG = 'b5454'
 const BIN_URL = `https://github.com/ggml-org/whisper.cpp/releases/download/${RELEASE_TAG}/whisper-bin-x64.zip`
+// small 档对带口音的中文明显更稳（base 在重口音下丢字、串英文）；CPU 6 线程短句仍在数秒级。
 const MODEL_URLS = [
-  'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.bin',
-  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin'
+  'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-small.bin',
+  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin'
 ]
-const MODEL_NAME = 'ggml-base.bin'
+const MODEL_NAME = 'ggml-small.bin'
 const PARALLEL_PARTS = 16
 
 function run(
@@ -44,7 +45,12 @@ function run(
       finish(
         code === 0
           ? { ok: true, output }
-          : { ok: false, output, error: `exit code ${code ?? 'null'}` }
+          : {
+              ok: false,
+              output,
+              // 把子进程自己的 stderr 尾巴带上，面板才能看到「为什么」而不是光秃秃的 exit code。
+              error: `exit code ${code ?? 'null'}: ${output.slice(-240).trim() || '(无输出)'}`
+            }
       )
     )
   })
@@ -84,8 +90,13 @@ function findBinary(dir: string): string | null {
     }
     if (entry.name.toLowerCase() === 'whisper-cli.exe') return full
   }
+  // 新版 whisper.cpp 已把 main.exe 换成「只打印弃用警告」的空壳（27KB），跑了必 exit 1；
+  // 小于 1MB 一律当空壳跳过，逼 ensureAssets 重新下载带 whisper-cli.exe 的正式包。
   for (const entry of entries) {
-    if (entry.isFile() && entry.name.toLowerCase() === 'main.exe') return join(dir, entry.name)
+    const full = join(dir, entry.name)
+    if (entry.isFile() && entry.name.toLowerCase() === 'main.exe' && statSync(full).size >= 1024 * 1024) {
+      return full
+    }
   }
   return null
 }
@@ -281,6 +292,15 @@ class WhisperAdapter {
     if (!result.ok && !banner.includes('whisper')) {
       return { ok: false, configured: true, error: result.error ?? '探测失败', detail: banner }
     }
+    // 弃用空壳也会打印带 whisper 字样的横幅，但它是干不了活的——单独立一道闸。
+    if (/deprecated/i.test(banner)) {
+      return {
+        ok: false,
+        configured: true,
+        error: '这个 main.exe 是弃用空壳，转写必然失败；重新下载 whisper 资源换 whisper-cli.exe',
+        detail: banner.slice(0, 160)
+      }
+    }
     return {
       ok: true,
       configured: true,
@@ -289,8 +309,11 @@ class WhisperAdapter {
     }
   }
 
-  /** Transcribe a 16 kHz mono WAV file with whisper-cli. */
-  async transcribe(wavPath: string, language = 'auto'): Promise<VoiceTranscribeResult> {
+  /**
+   * Transcribe a 16 kHz mono WAV file with whisper-cli.
+   * 语言默认钉死中文：对讲链路进来就是中文；auto 在短句+口音下容易误判语种或串英文。
+   */
+  async transcribe(wavPath: string, language = 'zh'): Promise<VoiceTranscribeResult> {
     const assets = await this.ensureAssets()
     if (!assets.ok || !assets.binaryPath || !assets.modelPath) {
       return { ok: false, text: '', error: assets.error ?? 'whisper 资源不可用' }
@@ -306,6 +329,9 @@ class WhisperAdapter {
         wavPath,
         '--language',
         language,
+        // 简体中文偏置：不加这句 whisper 会偏繁体输出；代价是标点会少，对翻译链路无碍。
+        '--prompt',
+        '以下是普通话的句子。',
         '--no-timestamps',
         '--output-txt',
         '--output-file',

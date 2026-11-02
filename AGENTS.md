@@ -40,6 +40,9 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   - `--tts-bench [n]` (default 10) synthesizes n Chinese sentences through the Edge neural voice, prints `ok/failed/p50/min/max` ms and bytes, and asserts `pitchOk` (the same line at pitch 0.75 vs 1.25 must return a different byte count, otherwise the pitch slider is decorative). Baseline: 10/10, p50 ≈ 0.8–1.2 s. A 429/0-byte streak means the free endpoint is throttling; `ms≈0` means a local argument check rejected the request (pitch takes Hz, not percent).
   - `--tts-play-probe` the full speak delivery chain: pure decideSpeak cases (what to read, hero prefix, pending/symbol-only lines), engine propagation from settings through to the payload (`system`/`edge`/`offline` — losing the engine once made every offline WAV ship as `audio/mpeg` and play back silent while Edge kept working), then a hidden overlay window that really plays an Edge mp3 and, when the model is installed, an offline WAV, asserting `VOICE_PLAY_OK` for each. It also pins the own-line switch (`ttsReadOwn`): off (default) skips the player's own line, on reads it. Offline leg is skipped silently when the model is missing (CI has none).
   - `--translate-cache-probe` the translation ledger stores one pair per translation and answers in both directions (source→target and target→source), refuses to hand a Chinese answer to an English request, ignores tone on the reverse side, keeps the pre-recorded stats fields (direction/origin/length/word count/hits), and survives closing/reopening the sqlite file
+  - `--voice-out-probe` the pure 声出 decision seam (`src/shared/voice-out.ts`): the fixed English test line is ASCII, `decideVoiceOutTest` (synthesis failed → no speak, plan carries the engine + voice + mime), engine selection `normalizeVoiceOutEngine`/`resolveVoiceOutSynth` (edge English placeholder by default, offline local voices, GV/SoVITS pack — voice left empty, weight switching stays in the existing voice-pack pipeline; garbage falls back per engine; synth language judged from the text), device routing `resolveOutputSink` (empty request = system default, match by deviceId then label, miss = fallback + hint), PTT timing `pttWindow`/`pttWatchdogMs` (audio +200 ms head +200 ms tail, watchdog ≥5 s), and speak-key mapping `normalizeSpeakKey`/`speakKeyVk` (F1–F12 → 0x70–0x7B, single alnum → ASCII). Ticket-05 one-shot chain decisions: `decideVoiceOutReply` (empty/blank recognition, translate-failed, empty translation → silent skip; non-empty translation → speak the trimmed text through the configured engine), `pickPlayableSegments` (failed segment synth skipped, order preserved, all-failed = whole line silent), `spokenStatusLine` (已播 green / ✕ reason red with fallback wording), and reply 分句 via `splitForSpeech` (English long reply: round-trip equality, per-segment cap, hard slice without punctuation). Pure only — zero network, zero game, zero driver; the physical VB-Cable/keystroke leg is manual acceptance.
+  - `--asr-hotwords-probe` the pure hotword seam (`src/shared/asr-hotwords.ts`): `parseHotwords` (CJK comma/顿号/semicolon/space splits, dedupe, empty in → empty out), `extractHotwordDiff` (common prefix/suffix trim then punctuation split; ≥2-char pieces only — single-char corrections return [], capped at 8 per edit), `mergeHotwords` (append-only, no duplicates). Pure only — the engine-side hotwords effect is real-machine A/B acceptance.
+  - `--train-probe` the pure training decision seam (`src/shared/train.ts`): `canStartTrain` mutex (preparing/running rejected, stopping rejected until drained, null/idle/done/failed/stopped free), `shouldPauseInference`/`shouldResumeInference` complementary per state (T2 wires the actual pause/resume calls), `deriveTrainPlan` (demo runs an inline node script; gv-gpt/gv-sovits rejected with "coming in T3" reasons; asr-ft is real and needs the injected attachment, see below; unknown kind → demo), and `parseTrainProgress` priority (epoch a/b percent → tqdm percent bar → step a/b → bare percent → null for plain log lines), the #14 dataset-packing seam (`buildFtDatasetEntries` recorded lines-only, free groups skipped; `splitTrainEval` tail-2 holdout that keeps everything in train for tiny sets; `buildFtJsonlLine` emitting the `language Chinese<asr_text>` prefix), and the T5 fine-tune chain seams: `deriveTrainPlan` asr-ft now requires the injected `asrFt` attachment ("环境没就绪" when missing), `pickLastCheckpointName` (highest checkpoint-N), `asrFtSwapSteps` (rm-bak → bak-active → promote-next; empty without an export dir), `asrFtRollbackSteps` (rm-active → restore-bak; empty without a backup), `deriveAsrFtEnvGaps` naming each missing env item, plus the installer seams in `asr-ft-install.ts`: `planAsrFtInstallSteps` (five-stage fill-what's-missing plan, empty when the env is complete) and `pickLatestUvAsset` (version-number comparison, not string sort — 0.10.2 must beat 0.9.5). Pure only — spawning the demo task and stopping it mid-run is manual acceptance.
   - `--input-probe` draft → translate → command text (sends no keys)
 
 ## Hotkeys
@@ -50,7 +53,7 @@ Everything interesting lives in the main process: GSI chat intake, translation s
 - `Alt+Shift+B` collapse / expand the overlay to its 132x34 icon
 - `Alt+Shift+O` show / hide the overlay
 - `Alt+Shift+R` re-pick the chat region
-- `Alt+Shift+V` hold to record voice (whisper.cpp)
+- `Alt+Shift+V` toggle record: speak Chinese → whisper.cpp transcribes → translate → the reply is spoken through voice-out (the panel 「说一句试试」 button runs the same chain; keyboard auto-repeat is debounced 500ms in `toggleVoiceCapture`)
 
 ## Environment constraints (China, Windows)
 
@@ -79,6 +82,12 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   the real history.
 - Logs: `logs/inplace.log` (input bridge stages),
   `chat-inplace/` (deployed ps1), `console-send/`, `whisper/{bin,models}`, `tts-preview/`.
+  `asr-models/` (Qwen3-ASR: the `sherpa-onnx-qwen3-asr-*.tar.bz2` the user drops here, extracted
+  by the panel with the system tar.exe into `sherpa-onnx-qwen3-asr-*/`; SenseVoice was removed —
+  engine is now whisper or qwen3 only),
+  `asr-ft/` (ASR accent fine-tune recordings from the training window's recording panel:
+  one wav per line, `Gxx/Gxx-Lnn.wav` (or `Gxx-Tnn.wav` for the free-speech group); the
+  recording script ships as a bundled resource, `resources/asr-ft-script.md`),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB
   (truncated and rewritten past that). Fields worth reading: `act` = `ocr|same|gap|idle|error|busy`,
   `src` = `stream|sources`, `brk`/`rst` = new-match streak and reset, plus `grabMs`/`ocrMs`/`chg`/`fresh`/`streak`. It is the only way to tell
@@ -149,7 +158,33 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   Two voices trading places mid-match is the exact bug users report as "the voice suddenly sounds
   wrong". The free Edge endpoint needs a warm connection pool, one retry, and it returns 0 bytes
   instead of an error, so a byte-count check is the only reliable failure signal.
+- sherpa ASR (Qwen3 only; SenseVoice removed) runs in a plain `node` child
+  (`resources/asr-sherpa-worker.cjs`, request `{id, wav, dir, hotwords}`) for the same
+  sherpa reason as the TTS worker; the worker logs `ASR_SHERPA_*` markers.
+  Qwen3 needs all three onnx files plus `tokenizer/` (vocab.json + merges.txt).
+  Hotwords (`asrHotwords` setting, comma-separated) are a constructor-time config — the worker's
+  recognizer cache key includes them, so editing the list reloads the engine. Single-char
+  corrections are never auto-added (noise); the correction loop only merges ≥2-char diffs.
+- GV (GPT-SoVITS) fine-tune data prep resolves every wav by BASENAME ONLY inside the flat `inp_wav_dir`
+  (`2-get-hubert-wav32k.py:116-118` strips the path, then joins it onto `inp_wav_dir`); files living in any
+  other directory fail to load and the surrounding try/except swallows the error SILENTLY. The zh/en voice
+  packs even share identical clip basenames. Rule: keep every dataset clip in ONE flat directory (prefix
+  collisions, e.g. `en_`), and after prep always assert name2text == semantic == wav32k == cleaned-list
+  count before training — a mismatch is data loss, not a formatting quirk (a half-English dataset once
+  shipped invisibly).
+- Retraining the same speaker overwrites same-named weight files in the package's `*_weights_v2/` dirs.
+  Rename the previous generation first (e.g. `<name>-old<dataset>-e15.ckpt`); the app-side copy under
+  `data/gpt-sovits/weights/<speaker>/` is the only other rollback.
+- api_v2 `POST /tts` (v2pro package) takes JSON fields `ref_audio_path` / `prompt_text` / `prompt_lang` /
+  `text` / `text_lang` — NOT the GET aliases `refer_wav_path`/`prompt_language`/`text_language`. POST the
+  payload from a file (`curl --data-binary @file`); CJK text in CLI args dies on the codepage.
+- Batch ASR outside the app (Qwen3 via `sherpa-onnx-node`): `require` must use the ABSOLUTE path into
+  `<project>/node_modules/sherpa-onnx-node` when the script lives outside the project tree; load the engine
+  once per process (~3 s/clip CPU warm vs ~10 s with cold load) and write resumable
+  `path|speaker|LANG|text` lists.
 - Never commit `.tmp/` or `.pi/`.
+- App-owned data — including non-dependency artifacts the app produces (recordings, exports, reports, logs) — stays inside the portable data directory (`userData`), never scattered onto other drives. Never hardcode external paths (`D:\work\...`) as runtime dependencies: the installed build's data lives in the `<install>-data` sibling directory, and a fresh install must work with zero external paths.
+- Developer-only tooling (e.g. the `D:\work\ft-qwen3` fine-tune workspace: training env, cloned upstream repos, base model weights) stays outside the repo, and app code must have ZERO references to it — no hardcoded paths, no imports, no spawn targets, no "it exists on this machine" assumptions. Before an app feature can use something that lives in a developer workspace, copy it into the project first: bundled resource under `resources/`, or generated into `userData`.
 
 ## Shipping
 

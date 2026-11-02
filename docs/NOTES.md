@@ -247,6 +247,73 @@
 - 修法：模块级状态只写常量初值（`available: false`），真实值在 `offlineStatus()` 里现算。
 - 教训：顶层初始化只允许「无依赖的常量」；任何会读模块内其他 `let`/`const` 的调用都要推迟到函数里。
 
+### 声出合成失败的提示要按引擎给（「断网」别误报给离线/GV 用户）
+- 症状：一键到底合入后，浮层把合成失败一律写成「Edge 合成失败（断网或接口不可用）」——离线/GV 引擎失败时用户按提示去查代理，方向全错。
+- 根因：集成修复前 `runReplyInner` 写死了 Edge 世界的提示串；三个引擎的失败原因域根本不同（Edge 是网络，离线是模型没装好，GV 是 api_v2 不在或参考没配）。
+- 修法：`SYNTH_FAIL_HINT: Record<VoiceOutEngine, string>`（`src/main/services/voice/voice-out.ts:41`）按引擎各给一句：`edge: 'Edge 合成失败（断网或接口不可用），这句不出声'` / `offline: '离线引擎合成失败（模型没装好或推理失败），这句不出声'` / `sovits: 'GV 合成失败（api_v2 不在或参考没配），这句不出声'`。
+- 教训：用户可感知的错误文案是接口的一部分，跟着引擎走，别在共享路径里写死某一个引擎的病因。
+
+### 说话键必须有松键保险（ENDED 丢了不能把键按死）
+- 症状（推演）：声出播放页崩了或导航走，`VOICE_OUT_ENDED` 永远回不来，说话键就永远按着——游戏里变成长开麦，比哑掉严重得多。
+- 根因：按键链路是「主进程 down → 渲染页播完 → ENDED 回来 → 主进程 up」，中间任何一环死了，up 就没人发。
+- 修法：`pttWatchdogMs = Math.max(5000, holdMs * 2 + 4000)`（`src/shared/voice-out.ts:196`）：`waitEnded` 超时即强制松键；同时 `finally` 里无条件 `releaseKey`，播完的尾巴仍是 `PTT_MARGIN_MS = 200` ms。单事件 down/up 走 ptt-key.ps1 的 SendInput，4 s 无确认判 `keyError`（此时音频照播但 `spoken: false`）。
+- 教训：跨进程的「播完了」不能当可靠信号用，按住的每一个键都要有独立的、比正常时长大几倍的松键兜底。
+
+### 输出设备路由：deviceId 命中 → label 兜底 → 都不中回退默认并提示
+- 症状（推演）：重插 USB 声卡/更新驱动后 Windows 会给设备发新的 id，按 id 精确匹配就再也选不中，声出哑掉且用户不知道为什么。
+- 根因：设备枚举 id 不稳定，label（「CABLE Input (VB-Audio Virtual Cable)」）才是人认得、重插也不变的那个。
+- 修法：`resolveOutputSink`（`src/shared/voice-out.ts`）空请求 = 系统默认；先按 deviceId 匹配，不中再按 label 匹配；都不中回退 `DEFAULT_SINK_ID` 并带 `SINK_FALLBACK_HINT = '找不到已选的输出设备，已回退系统默认输出'`（浮层提示），面板下拉对已保存但未接入的设备显示「（已保存，当前未接入）」。
+- 教训：设备选择保存的是偏好不是句柄，路由决策必须「尽力命中、失败可闻」，哑掉不如回退。
+
+### 声出音色清单是独立清单，别和朗读下拉混（英文嗓读中文会回空音频）
+- 症状（推演）：把 `VOICE_OUT_VOICES`（en-US-JennyNeural / en-US-AnaNeural）塞进朗读音色下拉，用户选它读中文 → Edge 念不了中文回空音频，还以为是引擎坏了。
+- 根因：两个用途的嗓音域不同：朗读是中文域，声出是英文域；声出的 GV 音色更特殊——音色由音色包参考音频决定，下拉本身是禁用的。
+- 修法：`VOICE_OUT_VOICES` 独立维护，默认 `en-US-JennyNeural`；`normalizeVoiceOutEngine`/`resolveVoiceOutSynth` 把引擎三选一（edge/offline/sovits）钉死在 `src/shared/voice-out.ts:46`，垃圾值回退 `edge`。
+- 教训：两套「音色」长得像，但域和失败模式不同，独立清单 + 独立默认值比共享下拉便宜得多。
+
+### 声出播放页的 START 监听要挂在模块顶层（多段播放不重建页面）
+- 症状（推演）：分段播放时把 `VOICE_OUT_START` 监听器注册在每次播放的流程里，隐藏窗口页面是复用的、不重载，监听器一层层叠上去，一段播放触发 N 次回调。
+- 根因：页面常驻复用是刻意的（省加载时间，READY 总预算 15 s 经不起每次重放），副作用是「注册一次」的时机只有模块加载这一次。
+- 修法：`src/renderer/voice-out.ts:138` 起 START 监听器挪到模块顶层，只注册一次。
+- 教训：复用的页面里，事件注册看生命周期不看出错时机——「谁常驻谁注册」。
+
+### GV 中文包念英文整词吞字（正式方案前只能 Edge 英文嗓占位）
+- 症状：2026-10-31 跨语种实测，风行者中文微调包直接读英文，整词吞字，完全不能听。
+- 根因：微调包的音素/语言域是训练数据决定的，中文包没有英文音素的覆盖，「凑合读」读不出人话。
+- 修法：英文声出用 Edge 英文神经嗓占位（`en-US-JennyNeural`）；GV 英文音色包训练是应用外前置，训练好后在面板把声出引擎切到 GV，走现有音色包权重切换，应用侧零改动（`ttsOutEngine: 'sovits'`）。
+- 教训：跨语种不能硬喂，音色包的语言域是硬边界；过渡方案的默认值要选「今天就能用」的那个。
+
+### 并行票合并会文本自洽、类型不自洽（TS2552 在集成 HEAD 才爆）
+- 症状：t-05（一键到底）+ t-07（引擎选择）各自工单门禁全绿，合并后 typecheck 红：`src/main/services/voice/voice-out.ts(269,33): error TS2552: Cannot find name 'DEFAULT_VOICE_OUT_VOICE'. Did you mean 'VOICE_OUT_VOICES'?`。
+- 根因：t-07 删掉了 t-04 时代的常量（引擎改由 `resolveVoiceOutSynth(engine, voiceKey, line)` 解析），t-05 是照 t-04 世界写的、还在引用它；git 的文本合并把两边的函数体自动拼在一起，文本上无冲突、类型上撞车。
+- 修法：集成时把 `runReplyInner` 改为按段 `resolveVoiceOutSynth(settings.ttsOutEngine, '', segment)` 解析引擎，探针只断言解析后的计划；顺手把写死的 Edge 提示换成上面的 `SYNTH_FAIL_HINT` 表。
+- 教训：每张票的门禁只在「自己的分支 + 自己的基线」上有效，**合并后的 HEAD 必须重跑全套门禁**，文本合并成功不等于语义合并成功。
+
+### 评审遗留小账（声出，已知、暂不动）
+- `src/renderer/src/overlay.ts:99-107` `setTranslation` 把 stage=translate 的失败一律画成「✕ 翻译失败」，真实原因在 title 悬停里——渲染层已预过滤大部分，纯防御路径，暂不改文案（改了要动三态渲染）。
+- `src/main/ipc.ts:64` 的 `'翻译失败'` 死分支与 `src/renderer/src/overlay.ts:561` 的死三元：不可达代码，留给下一次大改一起清。
+- `delay()` 在 `src/main/windows/voice-out.ts:17` 与 `src/main/services/voice/voice-out.ts:31` 各有一份：两行工具函数，抽取的收益不如多一次跨模块耦合。
+- 教训：评审的 P2 逐条记录、逐条决策（修/不修 + 为什么），比默默留着强——下次动到同一片代码时有账可查。
+
+## ASR 微调（Qwen3）
+
+### G15 试点：底模 13/20 → 微调 19/20
+- 数据：G15 组 20 句（16k mono wav，2–3 秒/条），18 句训练 + 尾部 2 句验证，JSONL 用官方格式（`{"audio": ..., "text": "language Chinese<asr_text>句子"}`）。
+- 训练：官方 `qwen3_asr_sft.py`，RTX 4070S 上 36.5 分钟（batch 1 × grad_acc 4，lr 2e-5，66 epoch）。train_loss 掉到 0.0001 只是背熟句子，eval_loss 因验证集太小没有参考价值——**效果以真机 A/B 为准**。
+- 导出：`export_qwen3_asr_onnx.py` 出 fp32+int8（CPU 可跑），verify max_diff < 0.0001。
+- A/B 全量（每模型一个常驻 worker 进程喂 20 句）：微调 19/20 vs 底模 13/20，耗时持平。底模六类错（高地塔→高祭塔、符点→浮点、野怪→也怪、有眼→有野、绕后→路后、偷→头）全修；残余「肉山盾」→「六山盾」一处。
+
+### 换模的两个坑
+- sherpa worker 是常驻进程，启动时就把模型文件读进内存——**换文件不杀 worker 等于白换**。`resetSherpaWorker()` 先杀再让下句识别重新拉起。
+- 导出产物不带 `tokenizer/tokenizer_config.json`，但 sherpa 启动必须要它。词表没变（训练只动 encoder/decoder），从旧模型或备份借一份是安全的；`ensureTokenizerConfig()` 已固化这条借用链。
+
+### 一键环境安装器（M-B）的镜像清单
+- uv 单文件：npmmirror binary（`registry.npmmirror.com/-/binary/uv/`）；python 解释器：npmmirror python-build-standalone。
+- 依赖：PyPI 清华镜像；`torch==2.4.1+cu121` 不在 PyPI 上，`--find-links` 指南京大学 pytorch-wheels 镜像。
+- 底模 `Qwen/Qwen3-ASR-0.6B`：hf-mirror.com，huggingface-hub `snapshot_download` 自带断点续传。
+- 全部版本冻结自试点实测组合（`ASR_FT_PIP_SPEC`），别随手升级 torch/transformers——官方脚本对版本敏感。
+- 教训：uv 版本号不能按字符串排序挑「最新」，`0.10.2` 会输给 `0.9.5`——按段转数值比较（探针抓过一次）。
+
 ## 发版与更新
 
 ### 装好的应用查不到更新（latest.yml 没上传）

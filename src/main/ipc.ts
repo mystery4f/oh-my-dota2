@@ -10,8 +10,11 @@ import {
   type OverlayGeometry,
   type ReplyResult,
   type ReplyTone,
-  type TranslateDirection
+  type TranslateDirection,
+  type VoiceReplyResult,
+  type VoiceChainSummary
 } from '@shared/ipc'
+import { decideVoiceOutReply } from '@shared/voice-out'
 import { loadSettings, saveSettings } from './services/settings'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
@@ -22,14 +25,75 @@ import { buildSayTeamCommand, getConsoleSender } from './services/input/console-
 import { getInPlaceSender } from './services/input/chat-inplace'
 import { getChatSender, normalizeChatLine } from './services/input/chat-send'
 import { getWhisperAdapter } from './services/voice/whisper'
+import { getVoiceOutService } from './services/voice/voice-out'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
+import { ensureQwen3Model, qwen3Status, qwen3Transcribe } from './services/voice/qwen3-asr'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
 import { autoVoicePackSetup, deleteVoicePack, ensureSovitsSeedRef, installVoicePack, sovitsVoicePacks } from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
+import { getTrainWindow } from './windows/train'
+import { getTrainManager } from './services/train/manager'
+import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
+import { prepareFtDataset } from './services/train/ft-dataset'
+import {
+  applyAsrFtModel,
+  asrFtStatus,
+  buildAsrFtExportPlan,
+  resolveAsrFtTrainRequest,
+  rollbackAsrFtModel
+} from './services/train/asr-ft'
+import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
+import { normalizeTrainKind, type TrainStartRequest } from '@shared/train'
 import { gsiStatus } from './services/gsi'
+
+/**
+ * 语音对讲一键到底（票 05）：识别文本 → prod 会话翻译（zh→en，复用 replyTone）→
+ * 译文进剪贴板 → 声出（按设置的声出引擎 → 所选输出 → 自动按住说话键）。
+ * 识别为空 / 翻译失败 / 合成失败一律静默跳过：绝不回退系统嗓子，也不退文出，
+ * 浮层错误行由渲染层按 stage 画。
+ */
+export async function voiceReply(transcript: string): Promise<VoiceReplyResult> {
+  const settings = loadSettings()
+  const recognized = String(transcript ?? '').trim()
+  if (decideVoiceOutReply({ recognized, translated: null }).skip === 'empty-recognition') {
+    return { translated: null, spoken: false, stage: 'recognize', error: '未识别到语音' }
+  }
+  // 只看识别（测口音/调模型）：转写完就停，翻译、剪贴板、声出、按键全跳过。
+  if (settings.voiceTranscribeOnly) {
+    return { translated: null, spoken: false, stage: 'skipped', error: null }
+  }
+  let translated: string | null
+  try {
+    translated = await translateReply(settings.provider, recognized, settings.replyTone)
+  } catch (err) {
+    return {
+      translated: null,
+      spoken: false,
+      stage: 'translate',
+      error: err instanceof Error ? err.message : String(err)
+    }
+  }
+  const plan = decideVoiceOutReply({ recognized, translated })
+  if (!plan.speak) {
+    return {
+      translated: null,
+      spoken: false,
+      stage: 'translate',
+      error: plan.skip === 'empty-translation' ? '翻译结果为空' : '翻译失败'
+    }
+  }
+  clipboard.writeText(plan.text)
+  const spoken = await getVoiceOutService().speakReply(plan.text)
+  return {
+    translated: plan.text,
+    spoken: spoken.spoken,
+    stage: spoken.spoken ? null : 'voice-out',
+    error: spoken.error
+  }
+}
 
 export async function sendReply(text: string): Promise<ReplySendResult> {
   const settings = loadSettings()
@@ -163,6 +227,63 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.CAPTURE_STATUS, () => ({ ...getCaptureService().status(), gsi: gsiStatus() }))
   ipcMain.handle(IPC.SESSION_STATUS, () => sessionStatus())
   ipcMain.handle(IPC.OVERLAY_TOGGLE, () => getOverlayManager().toggle())
+  // 面板按钮与 Alt+Shift+V 共用同一条录制链：起录/停录都由 overlay 窗口自己报状态。
+  ipcMain.handle(IPC.OVERLAY_VOICE_TOGGLE, () => {
+    getOverlayManager().toggleVoiceCapture()
+    return { ok: true }
+  })
+  // overlay 起录/停录/出结果时上抛，广播给所有窗口（面板按钮与回显行靠它活着）。
+  const broadcast = (channel: string, payload: unknown): void => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
+  }
+  ipcMain.on(IPC.OVERLAY_VOICE_STATE, (_e, recording: boolean) => {
+    broadcast(IPC.VOICE_RECORD_STATE, { recording: Boolean(recording) })
+  })
+  ipcMain.on(IPC.OVERLAY_VOICE_RESULT, (_e, result: VoiceChainSummary) => {
+    broadcast(IPC.VOICE_CHAIN_RESULT, result)
+  })
+  // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
+  ipcMain.on(IPC.TRAIN_OPEN, () => getTrainWindow().open())
+  getTrainManager().onState((snapshot) => broadcast(IPC.TRAIN_STATE, snapshot))
+  ipcMain.handle(IPC.TRAIN_START, async (_e, request: TrainStartRequest) => {
+    if (normalizeTrainKind(request.kind) !== 'asr-ft') return getTrainManager().start(request)
+    // asr-ft：先把环境/数据/目录备齐，再带着「训练完接导出」的链子交给 manager。
+    const resolved = await resolveAsrFtTrainRequest(String(request.dataset ?? ''))
+    if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
+    const exportRequest = resolved.request
+    return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest))
+  })
+  ipcMain.handle(IPC.TRAIN_STOP, () => getTrainManager().stop())
+  ipcMain.handle(IPC.TRAIN_SNAPSHOT, () => getTrainManager().snapshot())
+  // ASR 微调录音（T4a）：读稿解析 + 录音 CRUD，文件全在 userData/asr-ft/ 下。
+  ipcMain.handle(IPC.FT_SCRIPT_READ, () => readFtScript())
+  ipcMain.handle(IPC.FT_REC_LIST, () => ftRecList())
+  ipcMain.handle(IPC.FT_REC_SAVE, (_e, group: string, line: string, data: Uint8Array) => ftRecSave(group, line, data))
+  ipcMain.handle(IPC.FT_REC_DELETE, (_e, group: string, line: string) => ftRecDelete(group, line))
+  ipcMain.handle(IPC.FT_REC_READ, (_e, group: string, line: string) => ftRecRead(group, line))
+  // 训练窗口「识别测试」：已存录音直接喂给当前识别引擎，和稿子原文对比。
+  ipcMain.handle(IPC.FT_REC_ASR, async (_e, group: string, line: string) => {
+    const wavPath = ftRecPath(String(group ?? ''), String(line ?? ''))
+    if (loadSettings().asrEngine === 'qwen3') {
+      if (!qwen3Status().ready) {
+        return { ok: false, text: '', error: 'Qwen3 模型未就绪：到面板「识别引擎」里点解压' }
+      }
+      const result = await qwen3Transcribe(wavPath)
+      return result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'Qwen3 识别失败' }
+    }
+    return getWhisperAdapter().transcribe(wavPath, 'zh')
+  })
+  // 一键打包：录音 × 稿子 → 官方微调 JSONL（#14 的核心件，试点格式已验证）。
+  ipcMain.handle(IPC.FT_DATASET_PREPARE, () => prepareFtDataset())
+  // ASR 微调闭环（T5）：环境状态、应用新模型、回滚。
+  ipcMain.handle(IPC.FT_ASRFT_STATUS, async () => ({ ...(await asrFtStatus()), install: asrFtInstallState() }))
+  ipcMain.handle(IPC.FT_ASRFT_INSTALL, async () => {
+    // 启动即回，装到哪一步看 STATUS 轮询（整套装下来要十几分钟）。
+    void installAsrFtEnv()
+    return asrFtInstallState()
+  })
+  ipcMain.handle(IPC.FT_ASRFT_APPLY, () => applyAsrFtModel())
+  ipcMain.handle(IPC.FT_ASRFT_ROLLBACK, () => rollbackAsrFtModel())
   ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
   ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))
   ipcMain.handle(IPC.OVERLAY_OPACITY, (_e, value: number) => getOverlayManager().setOpacity(value))
@@ -194,7 +315,22 @@ export function registerIpc(): void {
     mkdirSync(dir, { recursive: true })
     const wavPath = join(dir, 'utterance.wav')
     writeFileSync(wavPath, Buffer.from(base64, 'base64'))
-    return getWhisperAdapter().transcribe(wavPath, language ?? 'auto')
+    // 识别引擎路由：Qwen3 走 sherpa worker；模型没就绪时给一句人话提示，
+    // 让用户去面板下载/解压，而不是吞掉录音。
+    const asrEngine = loadSettings().asrEngine
+    if (asrEngine === 'qwen3') {
+      if (!qwen3Status().ready) {
+        return {
+          ok: false,
+          text: '',
+          error: 'Qwen3 模型未就绪：下载 tar.bz2 放进 data\\asr-models\\，到面板「识别引擎」点解压'
+        }
+      }
+      return qwen3Transcribe(wavPath).then((result) =>
+        result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'Qwen3 识别失败' }
+      )
+    }
+    return getWhisperAdapter().transcribe(wavPath, language ?? 'zh')
   })
   ipcMain.handle(IPC.TTS_OFFLINE_STATE, () => offlineStatus())
   // GPT-SoVITS：面板每 3 秒问一次「包在不在、服务起没起、最近日志」，不再靠翻控制台猜。
@@ -228,9 +364,16 @@ export function registerIpc(): void {
   // 首启保底：库一条参考都没有时，用 Edge 现场合成一条晓晓参考入库（零分发）。
   ipcMain.handle(IPC.TTS_SOVITS_SEED, () => ensureSovitsSeedRef(false))
   ipcMain.handle(IPC.TTS_OFFLINE_DOWNLOAD, () => ensureOfflineModel())
+  // sherpa 识别模型（Qwen3）：面板的「状态 + 解压」按钮，与离线朗读同一节奏。
+  ipcMain.handle(IPC.ASR_STATUS, () => qwen3Status())
+  ipcMain.handle(IPC.ASR_DOWNLOAD, () => ensureQwen3Model())
   ipcMain.handle(IPC.VOICE_TTS_PREVIEW, (_e, text: string) =>
     getTtsAdapter().preview(String(text ?? ''))
   )
+  // 测试声出：固定英文句 → Edge 英文嗓 → 所选输出 → 自动按住说话键（voice-out 闭环的入口）。
+  ipcMain.handle(IPC.VOICE_OUT_TEST, () => getVoiceOutService().test())
+  // 一键到底：识别文本 → 翻译 → 剪贴板 → 声出（Alt+Shift+V 说中文的全链路）。
+  ipcMain.handle(IPC.VOICE_REPLY, (_e, transcript: string) => voiceReply(String(transcript ?? '')))
   ipcMain.handle(IPC.OVERLAY_REPLY_CLOSE, (_e, submitted?: boolean) =>
     getOverlayManager().closeReply(Boolean(submitted))
   )

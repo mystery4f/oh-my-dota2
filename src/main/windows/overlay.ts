@@ -43,6 +43,8 @@ class OverlayManager {
   private collapsed = loadSettings().overlayCollapsed
   private expandedBounds: OverlayGeometry | null = null
   private statusListeners = new Set<(state: OverlayStatus) => void>()
+  /** 上次语音录制的热键触发时刻：挡键盘自动重复的连发（见 toggleVoiceCapture）。 */
+  private lastVoiceToggleAt = 0
   /** 为什么取不到字；null = 一切正常，浮层上不显示任何提示。 */
   private hint: string | null = null
   /** 配置态闲置计时器：解锁后放着不管，自动回到穿透，避免忘了锁定后在游戏里误点。 */
@@ -255,6 +257,11 @@ class OverlayManager {
 
   /** Ask the overlay window to start or stop microphone capture (hotkey driven). */
   toggleVoiceCapture(): void {
+    // 按住不松会触发键盘自动重复（WM_HOTKEY 连发），一次长按 = 起录/停录疯狂翻面，
+    // 最后多半落在「录音太短已忽略」——观感就是「热键没效果」。500ms 内的连发一律当同一次。
+    const now = Date.now()
+    if (now - this.lastVoiceToggleAt < 500) return
+    this.lastVoiceToggleAt = now
     if (!this.win) this.win = this.createWindow()
     if (!this.win.isVisible()) this.show()
     this.win.webContents.send(IPC.VOICE_RECORD_TOGGLE)

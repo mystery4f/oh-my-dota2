@@ -9,8 +9,11 @@ import {
   type StreamRect,
   type UpdateState,
   type VoiceAssetProgress,
+  type VoiceOutPlayRequest,
+  type VoiceChainSummary,
   type WindowApi
 } from '@shared/ipc'
+import type { TrainSnapshot } from '@shared/train'
 
 const api: WindowApi = {
   getSettings: () => ipcRenderer.invoke(IPC.SETTINGS_GET),
@@ -18,6 +21,7 @@ const api: WindowApi = {
   testProvider: (provider) => ipcRenderer.invoke(IPC.PROVIDER_TEST, provider),
   translate: (text, direction) => ipcRenderer.invoke(IPC.PROVIDER_TRANSLATE, text, direction),
   translateReply: (text, tone) => ipcRenderer.invoke(IPC.REPLY_TRANSLATE, text, tone),
+  voiceReply: (transcript) => ipcRenderer.invoke(IPC.VOICE_REPLY, transcript),
   whisperProbe: (binPath) => ipcRenderer.invoke(IPC.VOICE_WHISPER_PROBE, binPath),
   whisperSetup: () => ipcRenderer.invoke(IPC.VOICE_WHISPER_SETUP),
   transcribeAudio: (wavBase64, language) => ipcRenderer.invoke(IPC.VOICE_TRANSCRIBE, wavBase64, language),
@@ -25,6 +29,18 @@ const api: WindowApi = {
     const listener = (): void => callback()
     ipcRenderer.on(IPC.VOICE_RECORD_TOGGLE, listener)
     return () => ipcRenderer.removeListener(IPC.VOICE_RECORD_TOGGLE, listener)
+  },
+  reportVoiceState: (recording: boolean) => ipcRenderer.send(IPC.OVERLAY_VOICE_STATE, recording),
+  reportVoiceChain: (result: VoiceChainSummary) => ipcRenderer.send(IPC.OVERLAY_VOICE_RESULT, result),
+  onVoiceRecordState: (callback: (state: { recording: boolean }) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, state: { recording: boolean }): void => callback(state)
+    ipcRenderer.on(IPC.VOICE_RECORD_STATE, listener)
+    return () => ipcRenderer.removeListener(IPC.VOICE_RECORD_STATE, listener)
+  },
+  onVoiceChainResult: (callback: (result: VoiceChainSummary) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, result: VoiceChainSummary): void => callback(result)
+    ipcRenderer.on(IPC.VOICE_CHAIN_RESULT, listener)
+    return () => ipcRenderer.removeListener(IPC.VOICE_CHAIN_RESULT, listener)
   },
   onWhisperProgress: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, progress: VoiceAssetProgress): void => callback(progress)
@@ -82,6 +98,7 @@ const api: WindowApi = {
       ipcRenderer.send(IPC.STREAM_FRAME, { requestId, pngBase64, error })
   },
   overlayToggle: () => ipcRenderer.invoke(IPC.OVERLAY_TOGGLE),
+  overlayVoiceToggle: () => ipcRenderer.invoke(IPC.OVERLAY_VOICE_TOGGLE),
   overlaySetText: (mode: OverlayTextMode) => ipcRenderer.invoke(IPC.OVERLAY_TEXT, mode),
   overlayOpenReply: () => ipcRenderer.invoke(IPC.OVERLAY_REPLY_OPEN),
   overlayCloseReply: (submitted) => ipcRenderer.invoke(IPC.OVERLAY_REPLY_CLOSE, submitted),
@@ -107,6 +124,8 @@ const api: WindowApi = {
   },
   ttsOfflineState: () => ipcRenderer.invoke(IPC.TTS_OFFLINE_STATE),
   ttsOfflineDownload: () => ipcRenderer.invoke(IPC.TTS_OFFLINE_DOWNLOAD),
+  asrStatus: () => ipcRenderer.invoke(IPC.ASR_STATUS),
+  asrDownload: () => ipcRenderer.invoke(IPC.ASR_DOWNLOAD),
   sovitsStatus: () => ipcRenderer.invoke(IPC.TTS_SOVITS_STATUS),
   sovitsInstall: () => ipcRenderer.invoke(IPC.TTS_SOVITS_INSTALL),
   sovitsRefs: () => ipcRenderer.invoke(IPC.TTS_SOVITS_REFS),
@@ -119,6 +138,41 @@ const api: WindowApi = {
     const listener = (_e: Electron.IpcRendererEvent, payload: SpeakPayload): void => callback(payload)
     ipcRenderer.on(IPC.VOICE_SPEAK, listener)
     return () => ipcRenderer.removeListener(IPC.VOICE_SPEAK, listener)
+  },
+  voiceOutTest: () => ipcRenderer.invoke(IPC.VOICE_OUT_TEST),
+  trainOpen: () => ipcRenderer.send(IPC.TRAIN_OPEN),
+  trainStart: (request) => ipcRenderer.invoke(IPC.TRAIN_START, request),
+  trainStop: () => ipcRenderer.invoke(IPC.TRAIN_STOP),
+  trainSnapshot: () => ipcRenderer.invoke(IPC.TRAIN_SNAPSHOT),
+  ftScriptRead: () => ipcRenderer.invoke(IPC.FT_SCRIPT_READ),
+  ftRecList: () => ipcRenderer.invoke(IPC.FT_REC_LIST),
+  ftRecSave: (group, line, data) => ipcRenderer.invoke(IPC.FT_REC_SAVE, group, line, data),
+  ftRecDelete: (group, line) => ipcRenderer.invoke(IPC.FT_REC_DELETE, group, line),
+  ftRecRead: (group, line) => ipcRenderer.invoke(IPC.FT_REC_READ, group, line),
+  ftRecAsr: (group, line) => ipcRenderer.invoke(IPC.FT_REC_ASR, group, line),
+  ftDatasetPrepare: () => ipcRenderer.invoke(IPC.FT_DATASET_PREPARE),
+  ftAsrftStatus: () => ipcRenderer.invoke(IPC.FT_ASRFT_STATUS),
+  ftAsrftInstall: () => ipcRenderer.invoke(IPC.FT_ASRFT_INSTALL),
+  ftAsrftApply: () => ipcRenderer.invoke(IPC.FT_ASRFT_APPLY),
+  ftAsrftRollback: () => ipcRenderer.invoke(IPC.FT_ASRFT_ROLLBACK),
+  onTrainState: (callback) => {
+    const listener = (_e: Electron.IpcRendererEvent, snapshot: TrainSnapshot): void => callback(snapshot)
+    ipcRenderer.on(IPC.TRAIN_STATE, listener)
+    return () => ipcRenderer.removeListener(IPC.TRAIN_STATE, listener)
+  },
+  voiceOut: {
+    onPlay: (callback) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: VoiceOutPlayRequest): void => callback(payload)
+      ipcRenderer.on(IPC.VOICE_OUT_PLAY, listener)
+      return () => ipcRenderer.removeListener(IPC.VOICE_OUT_PLAY, listener)
+    },
+    onStart: (callback) => {
+      const listener = (_e: Electron.IpcRendererEvent, requestId: number): void => callback(requestId)
+      ipcRenderer.on(IPC.VOICE_OUT_START, listener)
+      return () => ipcRenderer.removeListener(IPC.VOICE_OUT_START, listener)
+    },
+    reportReady: (report) => ipcRenderer.send(IPC.VOICE_OUT_READY, report),
+    reportEnded: (report) => ipcRenderer.send(IPC.VOICE_OUT_ENDED, report)
   }
 }
 

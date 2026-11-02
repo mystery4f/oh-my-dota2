@@ -56,10 +56,14 @@ export function sovitsServerLogs(): string[] {
  */
 function pipeProcessOutput(tag: string, stream: NodeJS.ReadableStream | null): void {
   if (!stream) return
+  // 显式 utf8（默认也是它，写出来防回归）；tqdm 进度行（"3%|█ | 26/1500 [...it/s]"）
+  // 纯刷屏，一行一帧淹没真日志，直接丢。
+  stream.setEncoding('utf8')
   const lines = createInterface({ input: stream, crlfDelay: Infinity })
   lines.on('line', (line: string) => {
     const text = line.trim()
     if (!text) return
+    if (/^\d+%\|/.test(text) || /\d+\/\d+ \[.*it\/s\]\s*$/.test(text)) return
     recordSovitsLog(tag, { line: text.slice(0, 500) })
   })
 }
@@ -257,6 +261,7 @@ export async function ensureSovitsServer(): Promise<boolean> {
       env: {
         ...process.env,
         PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
         PATH: `${join(home, 'runtime')};${process.env.PATH ?? ''}`
       }
     })

@@ -1,5 +1,6 @@
-import type { OverlayStatus } from '@shared/ipc'
+import type { OverlayStatus, SpeakPayload } from '@shared/ipc'
 import { moveBy, resizeFromLeft, resizeFromRight } from '@shared/overlay-geometry'
+import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { encodeWav16k } from '@shared/wav'
 
 /** 头像打包进仓库：中国网络直连 Steam CDN 会超时，运行时下载靠不住。 */
@@ -97,15 +98,24 @@ function setTranslation(
     const failed = existing ?? document.createElement('div')
     failed.className = 'trans err'
     failed.textContent = '✕ 翻译失败'
-    failed.title = error
+    ;(failed as HTMLElement).title = error
     if (!existing) row.appendChild(failed)
     return
   }
   const trans = existing ?? document.createElement('div')
   trans.className = cached ? 'trans cached' : 'trans'
   trans.textContent = translated
-  trans.title = cached ? '来自翻译词库（未调用模型）' : '本次现翻'
+  ;(trans as HTMLElement).title = cached ? '来自翻译词库（未调用模型）' : '本次现翻'
   if (!existing) row.appendChild(trans)
+}
+
+/** 语音对讲第三行（票 05）：已播状态。绿字已播 / 红字带原因，就地更新不另起一行。 */
+function setSpoken(row: HTMLElement, status: SpokenStatus): void {
+  const existing = row.querySelector('.spoken')
+  const line = (existing ?? document.createElement('div')) as HTMLElement
+  line.className = status.ok ? 'spoken ok' : 'spoken err'
+  line.textContent = status.text
+  if (!existing) row.appendChild(line)
 }
 
 /** 译文到达后就地替换，不再另起一行 —— 原文早就显示出来了。 */
@@ -330,16 +340,7 @@ void window.api.overlayReplyState().then((state) => {
 // speechSynthesis 只在渲染进程可用：主进程决定「这句该念」，这里负责真的出声。
 // 队列很短：话说得比嘴快时宁可漏掉旧的，也不要越念越落后（落后的话反而误导）。
 const SPEAK_QUEUE_MAX = 6
-const speakQueue: {
-  text: string
-  lang: 'zh' | 'en'
-  rate: number
-  voice: string
-  engine?: 'system' | 'edge' | 'offline'
-  audio?: string
-  audioMime?: string
-  ts?: number
-}[] = []
+const speakQueue: SpeakPayload[] = []
 let speaking = false
 
 function pickVoice(lang: 'zh' | 'en', wanted: string): SpeechSynthesisVoice | null {
@@ -477,7 +478,9 @@ async function startRecording(): Promise<void> {
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
     })
   } catch (err) {
-    appendRow('🎤 麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）', null)
+    const micError = '麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）'
+    appendRow('🎤 ' + micError, null)
+    window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: micError })
     console.error('overlay: getUserMedia failed', err)
     return
   }
@@ -491,6 +494,7 @@ async function startRecording(): Promise<void> {
   source.connect(recordNode)
   recordNode.connect(recordCtx.destination)
   recording = true
+  window.api.reportVoiceState(true)
   pill.textContent = '● 录音中 · Alt+Shift+V 结束'
   pill.classList.remove('through')
   recordTimer = setTimeout(() => void stopRecording(), RECORD_MAX_MS)
@@ -500,6 +504,7 @@ async function startRecording(): Promise<void> {
 async function stopRecording(): Promise<void> {
   if (!recording) return
   recording = false
+  window.api.reportVoiceState(false)
   if (recordTimer) clearTimeout(recordTimer)
   recordTimer = null
   const rate = recordCtx?.sampleRate ?? 48_000
@@ -515,6 +520,7 @@ async function stopRecording(): Promise<void> {
   const frames = chunks.reduce((total, chunk) => total + chunk.length, 0)
   if (frames < rate * 0.3) {
     appendRow('🎤 录音太短，已忽略', null)
+    window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: '录音太短（不足 0.3 秒）' })
     pill.textContent = '运行中 · Alt+Shift+O'
     return
   }
@@ -525,7 +531,9 @@ async function stopRecording(): Promise<void> {
   }
   const rms = Math.sqrt(energy / frames)
   if (rms < 0.012) {
-    appendRow(`🎤 没有检测到语音（音量 RMS ${rms.toFixed(4)}）`, null)
+    const quietError = `没有检测到语音（音量 RMS ${rms.toFixed(4)}）`
+    appendRow('🎤 ' + quietError, null)
+    window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: quietError })
     pill.textContent = '运行中 · Alt+Shift+O'
     return
   }
@@ -533,14 +541,38 @@ async function stopRecording(): Promise<void> {
   const result = await window.api.transcribeAudio(encodeWav16k(chunks, rate))
   const transcript = result.text.trim()
   if (!result.ok || !transcript) {
-    appendRow('🎤 ' + (result.error ?? '未识别到语音'), null)
+    const transcriptError = result.error ?? '未识别到语音'
+    appendRow('🎤 ' + transcriptError, null)
+    window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: transcriptError })
     pill.textContent = '运行中 · Alt+Shift+O'
     return
   }
-  appendRow('🎤 ' + transcript, null)
-  const reply = await window.api.translateReply(transcript)
-  if (reply.ok && reply.translated) appendRow(transcript, reply.translated, true)
-  else appendRow(transcript, reply.error ?? '翻译失败', false)
+  // 一键到底（票 05）：识别文本先落一行（pending 态压暗 + 「翻译中…」），译文与
+  // 已播状态就地补进同一行——原文/译文/已播三行，不再另起一行。
+  const rowId = `voice-${Date.now()}`
+  appendRow('🎤 ' + transcript, null, false, rowId, true)
+  pill.textContent = '翻译声出中…'
+  const reply = await window.api.voiceReply(transcript)
+  const row = rows.get(rowId)
+  if (row) {
+    row.classList.remove('pending')
+    row.classList.add('sent')
+    if (reply.translated) {
+      setTranslation(row, reply.translated, false, reply.stage === 'translate' ? (reply.error ?? '翻译失败') : undefined)
+    } else if (reply.stage !== 'skipped') {
+      setTranslation(row, null, false, reply.error ?? '翻译失败')
+    }
+    if (reply.stage === 'voice-out' || reply.spoken) {
+      setSpoken(row, spokenStatusLine(reply.spoken, reply.error))
+    }
+  }
+  window.api.reportVoiceChain({
+    transcript,
+    translated: reply.translated,
+    spoken: reply.spoken,
+    stage: reply.stage,
+    error: reply.error
+  })
   pill.textContent = '运行中 · Alt+Shift+O'
 }
 

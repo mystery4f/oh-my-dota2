@@ -31,7 +31,9 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('src/renderer/index.html'),
-          overlay: resolve('src/renderer/overlay.html')
+          overlay: resolve('src/renderer/overlay.html'),
+          'voice-out': resolve('src/renderer/voice-out.html'),
+          train: resolve('src/renderer/train.html')
         }
       }
     }

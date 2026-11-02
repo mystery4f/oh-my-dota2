@@ -47,6 +47,7 @@
 | `--overlay-probe`（文字层次） | 喂一条待翻译消息再补译文，断言四种视图：待翻译时原文可见且无译文（先上屏不空等）、`translated` 只留译文、`both` 两层都在、`original` 只留原文；末尾 `textLayerOk` 为真才退出 0；同一探针还喂一条「进了队列却没翻成」的行，断言浮层出现 `.trans.err`（文字 `✕ 翻译失败`、`title` 带原始报错），`errorOk` 与 `heroOk` 也必须为真 |
 | `--try-probe` | 翻译试用页走独立会话槽 |
 | `--overview-probe` | 面板总览卡渲染 |
+| `--voice-out-probe` | 声出链路的纯决策（零网络零驱动零游戏）：念不念/念什么/哪个嗓（`decideVoiceOutTest`/`decideVoiceOutReply`）、引擎与音色路由（`normalizeVoiceOutEngine`/`resolveVoiceOutSynth`：Edge 英文占位/离线/GV 音色包）、设备路由（`resolveOutputSink`：deviceId 命中 → label 兜底 → 回退默认输出并提示）、按键时序（`pttWindow` 头尾各 +200ms、`pttWatchdogMs` 松键保险、F1–F12 与单字母/数字 → VK）、失败静默与分段（`pickPlayableSegments`、`spokenStatusLine`、分句拼回与原文一字不差）；物理层（VB-Cable 出声、游戏内真听到、SendInput 真按键）走 ACCEPTANCE M14 人工验收 |
 
 ## 当前基线（2026-10-23，Ryzen 20 核 / 2560x1440@1.5）
 
@@ -174,6 +175,30 @@ actions           {ocr:98, gap:142, same:68, busy:75}   ← 修复前的数字
 前置条件：本机要有 `node`（`sherpa-onnx` 的原生插件在 Electron 运行时里必抛 `External buffers are not allowed`，详见 docs/NOTES.md）。模型 163 MB（MeloTTS 为 MIT，但体积会推翻 93 MB 的安装包），所以不进安装包，首次选用离线引擎时才下载到 `data/tts-models/`。
 
 坑：官方包里的 `model.int8.onnx` 只有 **133 字节**，是 Git LFS 指针不是模型，指过去会把推理子进程直接打崩（表现为探针静默无输出）。必须用 163 MB 的 `model.onnx`。
+
+## 声出（voice-out）延迟：说完停止 → 队友听到（2026-11，待真机回填）
+
+链路：`Alt+Shift+V` 停止录音 → whisper 转写 → prod 回复会话翻译（zh→en）→ 译文切段**并行**合成 → 隐藏窗口按输出设备路由播放 → 说话键提前 200ms 按住、播完 200ms 后松开。「队友听到的毫秒数」由五段构成，每段都有实测口径；端到端精确毫秒**待真机验收后回填本节**：
+
+```
+识别    whisper.cpp（本地转写，随录音长度变化）      未单独成基线；真机验收随录随量
+翻译    prod 回复会话（--reply-latency-probe 同口径）
+        热 676–988 ms（中位 867）· 冷 889–4475 ms（1.8 s 未回对冲直连）
+合成    首段合成决定「等多久才进频道」：
+        Edge 英文神经嗓  p50 ≈ 0.8–1.2 s（--tts-bench 口径，10/10）
+        离线 MeloTTS     稳定后 p50 111–249 ms（中文嗓，仅验链路）
+        GV（api_v2）     小请求地板 ~1.0–1.3 s/请求（与长度基本无关）；
+                         起服首句 CUDA/懒加载 4.6–5.5 s（预热已挪到起服时）；热句 2–5 s/20 字
+按键    pttWindow：头 +200 ms、尾 +200 ms；音频时长拿不到按 150 ms 兜底
+        SendInput 单事件 down/up，4 s 无确认判失败；ENDED 迟到由松键保险兜底（≥5 s）
+路由    声出隐藏窗口 READY 总预算 17 s（页面内读音频时长 8 s；页面加载超时 8 s；最坏相加 16 s）
+```
+
+- **端到端（无分段）** ≈ 识别 + 翻译 + 首段合成 + 200 ms。Edge 热态量级：0.9 s（翻译中位）+ ≈1 s（首段合成）+ 0.2 s ≈ **2 s 上下**；声出比文出多付的就是首段合成这一截。
+- **分段情形**（英文译文超分句长度，默认 30 字符、可设 10–60）：各段并行合成、按序投递，第一段一就绪就进频道（不等同全部合成完）；后续段接上一段尾巴连续播，说话键整句不松。整句收尾 = 各段播放时长之和 + 200 ms 尾巴；单段合成失败整段跳过不占位，其余照播，全败才整句静默 + 浮层提示。
+- 日志锚点：`VOICE_OUT_SPEAK`（durationMs/sink/keyHeld/holdMs）、`VOICE_REPLY_SEGMENT_OK`（逐段 durationMs）、`VOICE_REPLY_SKIP`（全段合成失败 + 引擎名）。
+
+真机测法：测试局里说固定中文句，从「停止录音」掐表到队友端（第二台设备录音）听到英文第一声；长句另数分段数与段间空隙；至少 3 次取中位，数字回填本节。
 
 ## 稳定的评测习惯
 
