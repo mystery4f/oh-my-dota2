@@ -211,7 +211,8 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
   - 已定：声出走虚拟声卡进游戏语音频道；`Alt+Shift+V` 一键到底；失败静默跳过不退文出；说话键 app 自动按住，**默认 F5、可配置**。
   - 待定：虚拟声卡选型（VB-Cable vs VoiceMeeter）、翻译是否反向。
   - 训练侧（应用外）：GV 英文包数据与微调，产物走现有音色包权重切换（`gptWeights`/`sovitsWeights`），应用侧零改动。
-  - 引擎换型（2026-11-01 POC，2026-11-02 判决）：[IndexTTS](https://github.com/index-tts/index-tts) **否决保留 GV**——零样本一般、LoRA 微调后质量可用，但 RTX 4060 Laptop 8GB 上 RTF 5.6-6.4（一句 3 秒语音要 16-20 秒）、峰值 ~7GB，与游戏同开不可能；判决存档见 issue #18。
+  - 双语包（2026-11-02 完成）：风行者至宝语音全量提取（中文 897 + 英文 898 条，vpk 经 Source2Viewer-CLI），中英一起微调，产物兼读双语，解决声出英文占位；风行者 854 条（e15-854/s1384）与米拉娜 2218 条中英（e15/e8_s3520）均已训练并部署，待用户验收听感。
+  - 引擎换型候选 IndexTTS-2.5（2026-11-01 POC，2026-11-02 终审**否决**）：克隆质量可（LoRA 微调后用户认可），但 RTF 5.6-6.4、显存峰值 ~7GB（官方标称 ~6GB），4060 Laptop 8GB 与游戏同开必然溢出共享显存（实测塌速 20-252×），速度红线 p50<3s 无望；GV（RTF 0.1、~2GB）完胜。判决存档 GitHub issue #18；票据 #17-21 已关；本地资产已删，配方留档 wiki（indextts-25-verdict-8gb）。
 - `#28` 识别个性化（2026-11-02 记录）：whisper 对重口音中文偏弱 → 先后上过 SenseVoice-small 与 Qwen3-ASR 两个 sherpa 引擎；**SenseVoice 已废弃移除（2026-11-02，用户拍板只留 Qwen3）**，识别引擎收窄为 whisper / qwen3（老存档的 sensevoice 自动迁移）。
   - **已落地（2026-11-02）**：Qwen3-ASR（0.6B int8，~838MB 手动下载 tar.bz2 面板解压）+ **热词注入**（`asrHotwords`，仅 Qwen3 生效）+ **纠错回路**（识别记录点「纠错」改对，≥2 字差异词自动并入热词表）；微调路线记档不排期（触发条件见 `docs/adr/asr-hotwords-not-finetune.md`）。
 
