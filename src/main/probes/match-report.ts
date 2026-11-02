@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { DatabaseSync } from 'node:sqlite'
-import { normalizeLine } from '../services/capture/chat-lines'
+import { normalizeLine } from '@shared/chat-line'
 
 /**
  * 一局成绩单：把 `gsi-chat.jsonl` 与翻译账本对一次账。

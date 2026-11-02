@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
-import { normalizeLine } from '../capture/chat-lines'
+import { hasHan, normalizeLine } from '@shared/chat-line'
 
 /**
  * 翻译记账本：一次翻译同时记下「你好 ↔ hello」这对，两个方向都能直接命中。
@@ -53,9 +53,6 @@ function wantsChinese(direction: string): boolean {
   return direction !== 'zh-en'
 }
 
-function hasHan(text: string): boolean {
-  return /[\u3400-\u9fff]/.test(text)
-}
 
 /**
  * 粗略词数：汉字逐字计，拉丁部分按空格切。

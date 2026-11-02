@@ -1,5 +1,6 @@
 import { app } from 'electron'
-import { hasHan, splitChatLine, takeHero, worthTranslating } from '../services/capture/capturer'
+import { hasHan, splitChatLine, takeHero, worthTranslating } from '@shared/chat-line'
+import { ChatCaptureService } from '../services/capture/capturer'
 import { sameText } from '../services/session/durable-translator'
 
 /**
@@ -62,10 +63,28 @@ export async function runChatBlockProbe(): Promise<void> {
     return got.hero === item.hero && got.text === item.text
   })
 
-  const ok = langOk && prefixOk && uselessOk && sameTextOk && heroOk
+  // 朗读边界（#32）：把 CaptureEffects 换成假实现，翻译账本就能脱离语音栈跑。
+  // 三行里只有中文行和 666 走 settled 腿；英文行走翻译链，但探针同步退出，微任务不落地、不发网络。
+  const announced: Array<{ entries: Array<{ translated: string | null; pending?: boolean }>; cutoff: number }> = []
+  const service = new ChatCaptureService({
+    onTranslated: (entries, cutoffMs) => announced.push({ entries: entries.map((entry) => ({ ...entry })), cutoff: cutoffMs }),
+  })
+  service.pushMessages([
+    { text: '[axe] [我] [Mystery] ⚔ 冲上路', speaker: 'Mystery' },
+    { text: '[pudge] 666' },
+    { text: '[pudge] push top pls' },
+  ])
+  const settled = announced[0]
+  const effectsOk =
+    announced.length === 1 &&
+    settled !== undefined &&
+    settled.cutoff > 0 &&
+    settled.entries.length === 2 &&
+    settled.entries.every((entry) => !entry.pending && entry.translated === null)
+  const ok = langOk && prefixOk && uselessOk && sameTextOk && heroOk && effectsOk
   console.log(
     'CHAT_BLOCK_PROBE',
-    JSON.stringify({ ok, langOk, prefixOk, uselessOk, sameTextOk, heroOk, langCases, uselessCases })
+    JSON.stringify({ ok, langOk, prefixOk, uselessOk, sameTextOk, heroOk, effectsOk, langCases, uselessCases })
   )
   app.exit(ok ? 0 : 1)
 }
