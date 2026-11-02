@@ -10,15 +10,16 @@ description: oh-my-dota2 训练音色包的发布与版本管理。当用户说�
 核心心智模型：**文件名就是版本号**（`windranger-e15.ckpt` = GPT 15 轮），**魔搭仓是唯一分发中心**，
 **发版不发 app**——重训只改魔搭仓里的文件和 `voicepacks.json`，用户端 5 分钟缓存内自动看到新版。
 
-## 资产地图（2026-10-31 盘点）
+## 资产地图（2026-11-02 盘点）
 
 | 资产 | 位置 | 独一份？ |
 |---|---|---|
-| 微调权重（在用 e15/e8） | `D:\AI\GPT-SoVITS-v2pro-20250604\{GPT,SoVITS}_weights_v2\` | 否，魔搭有 |
-| 中间轮权重（e5/e10/e4） | 同上 | **是，仅本地** |
-| 原始数据集（vpk 提取+ASR） | `D:\AI\windranger-finetune\`（4.4MB）、`D:\AI\mirana-finetune\`（43MB） | **是，仅本地，丢了无法重训** |
+| 微调权重（在用 wr e15-854/s1384、mira e15-s3520） | `D:\AI\GPT-SoVITS-v2pro-20250604\{GPT,SoVITS}_weights_v2\` | 否，魔搭有 |
+| 中间轮权重（wr e4/e5/e10+s692、mira e5/e10+s1760） | 同上 | **是，仅本地** |
+| 上一代在用权重（wr s192、mira s336，回滚用） | 同上 + 魔搭旧路径 | 否，魔搭有 |
+| 原始数据集（vpk 提取+ASR） | `D:\AI\windranger-finetune\`（137MB）、`D:\AI\mirana-finetune\`（173MB） | **是，仅本地，丢了无法重训** |
 | 训练配置 | `D:\AI\GPT-SoVITS-v2pro-20250604\logs\<hero>\config.json` | **是，仅本地** |
-| 分发仓 | 魔搭 `a1078185271/oh-my-dota2-voicepacks`（6 权重+voicepacks.json+README.md） | 云端 |
+| 分发仓 | 魔搭 `a1078185271/oh-my-dota2-voicepacks`（10 权重 2 代并存 + voicepacks.json + README.md） | 云端 |
 | 引擎 8.2GB | 魔搭 FlowerCry 镜像（可重下）+ `G:\oh-my-dota2-data\gpt-sovits\` | 云端 |
 | 溯源文档 | `docs/VOICEPACKS.md` | git 仓 |
 

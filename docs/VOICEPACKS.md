@@ -55,10 +55,15 @@
 
 | 音色 id | 名字 | 训练日期 | GPT 轮次 | SoVITS | 参考音频 | 参考转写 |
 |---|---|---|---|---|---|---|
+| 音色 id | 名字 | 训练日期 | GPT 轮次 | SoVITS | 参考音频 | 参考转写 |
+|---|---|---|---|---|---|---|
 | windranger | 风行者 | 2026-10 | e15 | e8/s192 | `windranger-arcana-ref-zh.wav`（至宝语音提取） | 谁能预测到这一幕？哦，等一下。是我。 |
 | mirana | 米拉娜 | 2026-10 | e15 | e8/s336 | `mira_per_spawn_13.mp3`（复活语音） | 从银夜森林到太阳帝权人们都是怀着敬畏和尊重说出我的名字 |
+| windranger | 风行者 | 2026-11-02 | e15-854 | e8/s1384 | `windranger-arcana-ref-zh.wav`（至宝语音提取） | 谁能预测到这一幕？哦，等一下。是我。 |
+| mirana | 米拉娜 | 2026-11-02 | e15-s3520 | e8/s3520 | `mira_per_spawn_13.mp3`（复活语音） | 从银夜森林到太阳帝权人们都是怀着敬畏和尊重说出我的名字 |
 
 - 训练底座：GPT-SoVITS v2Pro（`gsv-v2final-pretrained` 三件套，随 8.2GB 引擎包分发）
+- 2026-11-02 重训数据量：风行者 854 条（436 至宝 + 461 本体 + 58 旧），米拉娜 2218 条（ZH 1104 + EN 1114，龙之血人格套 mira_per 占 79%）
 - 增加零样本音色（如晓晓/晓伊）：不用训练，参考音频进 `tts/sovits-refs/` 的 refs.json 即可
   （不带 `gptWeights`/`sovitsWeights` 字段，走底座零样本推理）
 - 新英雄音色流程：训练 → 传魔搭仓 → `voicepacks.json` 加一条 → 完事，不需要发 app
@@ -72,10 +77,10 @@
 
 | 资产 | 位置 | 大小 | 说明 |
 |---|---|---|---|
-| 原始数据集（vpk 提取 + ASR 转写） | `D:\AI\windranger-finetune\` | 4.4MB | 风行者 58 条数据集的源头 |
-| 同上 | `D:\AI\mirana-finetune\` | 43MB | 米拉娜 209 条 |
+| 原始数据集（vpk 提取 + ASR 转写） | `D:\AI\windranger-finetune\` | 137MB | 风行者 854 条数据集的源头（raw2/ 为 vpk 全量提取） |
+| 同上 | `D:\AI\mirana-finetune\` | 173MB | 米拉娜 2218 条（audio/ 全量 vpk 提取；旧 raw/ 是 209 条时代） |
 | 训练配置 | `D:\AI\GPT-SoVITS-v2pro-20250604\logs\<hero>\config.json` | 2KB | 实验参数（语义/批次/轮次） |
-| 中间轮权重 e5/e10、e4 | `{GPT,SoVITS}_weights_v2\` | ~720MB | 在用版本已在魔搭，这些是备胎 |
+| 中间轮与上一代权重 | `{GPT,SoVITS}_weights_v2\` | ~1.5GB | 中间轮（wr e4/e5/e10、s692；mira e5/e10、s1760）仅本地；上一代在用版（wr s192、mira s336）魔搭有，作回滚 |
 
 在用权重、引擎、参考音频都在云端（魔搭）或数据根，上面这些是仅存本地的部分——换盘/重装前先打包这两个 finetune 目录。
 
