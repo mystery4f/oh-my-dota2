@@ -37,18 +37,19 @@ def main() -> int:
         i = args.index("--readme")
         readme = args[i + 1]
         del args[i : i + 2]
-
     pairs = []
-    if manifest:
-        pairs.append((manifest, "voicepacks.json"))
-    if readme:
-        pairs.append((readme, "README.md"))
     for a in args:
         if ":" not in a:
             print(f"BAD_ARG {a}: expected local_path:repo_path")
             return 1
         local, repo = a.rsplit(":", 1)
         pairs.append((local, repo.replace("\\", "/")))
+    # manifest/readme LAST: files must exist in the repo before the manifest
+    # points at them, or a client refreshing mid-upload sees broken downloads
+    if manifest:
+        pairs.append((manifest, "voicepacks.json"))
+    if readme:
+        pairs.append((readme, "README.md"))
 
     if not pairs:
         print(__doc__)
