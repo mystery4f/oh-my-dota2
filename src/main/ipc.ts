@@ -1,29 +1,14 @@
-import { BrowserWindow, app, clipboard, ipcMain } from 'electron'
+import { BrowserWindow, app, ipcMain } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  IPC,
-  type AppSettings,
-  type ReplySendResult,
-  type ProviderConfig,
-  type InPlaceResult,
-  type OverlayGeometry,
-  type ReplyResult,
-  type ReplyTone,
-  type TranslateDirection,
-  type VoiceReplyResult,
-  type VoiceChainSummary
-} from '@shared/ipc'
-import { decideVoiceOutReply } from '@shared/voice-out'
+import { IPC, ipcContract, type MainHandlers } from '@shared/ipc'
+import { sendReply, translateInPlace, translateReplyToClipboard, voiceReply } from './services/reply/reply-service'
 import { loadSettings, saveSettings } from './services/settings'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
 import { testProvider, translateText } from './services/providers'
-import { sessionStatus, translateReply, translateTry } from './services/session/durable-translator'
+import { sessionStatus, translateTry } from './services/session/durable-translator'
 import { getCaptureService } from './services/capture/capturer'
-import { buildSayTeamCommand, getConsoleSender } from './services/input/console-send'
-import { getInPlaceSender } from './services/input/chat-inplace'
-import { getChatSender, normalizeChatLine } from './services/input/chat-send'
 import { getWhisperAdapter } from './services/voice/whisper'
 import { getVoiceOutService } from './services/voice/voice-out'
 import { getTtsAdapter } from './services/voice/tts'
@@ -46,269 +31,77 @@ import {
   rollbackAsrFtModel
 } from './services/train/asr-ft'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
-import { normalizeTrainKind, type TrainStartRequest } from '@shared/train'
+import { normalizeTrainKind } from '@shared/train'
 import { gsiStatus } from './services/gsi'
 
-/**
- * 语音对讲一键到底（票 05）：识别文本 → prod 会话翻译（zh→en，复用 replyTone）→
- * 译文进剪贴板 → 声出（按设置的声出引擎 → 所选输出 → 自动按住说话键）。
- * 识别为空 / 翻译失败 / 合成失败一律静默跳过：绝不回退系统嗓子，也不退文出，
- * 浮层错误行由渲染层按 stage 画。
- */
-export async function voiceReply(transcript: string): Promise<VoiceReplyResult> {
-  const settings = loadSettings()
-  const recognized = String(transcript ?? '').trim()
-  if (decideVoiceOutReply({ recognized, translated: null }).skip === 'empty-recognition') {
-    return { translated: null, spoken: false, stage: 'recognize', error: '未识别到语音' }
-  }
-  // 只看识别（测口音/调模型）：转写完就停，翻译、剪贴板、声出、按键全跳过。
-  if (settings.voiceTranscribeOnly) {
-    return { translated: null, spoken: false, stage: 'skipped', error: null }
-  }
-  let translated: string | null
-  try {
-    translated = await translateReply(settings.provider, recognized, settings.replyTone)
-  } catch (err) {
-    return {
-      translated: null,
-      spoken: false,
-      stage: 'translate',
-      error: err instanceof Error ? err.message : String(err)
-    }
-  }
-  const plan = decideVoiceOutReply({ recognized, translated })
-  if (!plan.speak) {
-    return {
-      translated: null,
-      spoken: false,
-      stage: 'translate',
-      error: plan.skip === 'empty-translation' ? '翻译结果为空' : '翻译失败'
-    }
-  }
-  clipboard.writeText(plan.text)
-  const spoken = await getVoiceOutService().speakReply(plan.text)
-  return {
-    translated: plan.text,
-    spoken: spoken.spoken,
-    stage: spoken.spoken ? null : 'voice-out',
-    error: spoken.error
-  }
-}
 
-export async function sendReply(text: string): Promise<ReplySendResult> {
-  const settings = loadSettings()
-  const draft = text.trim()
-  if (!draft) return { ok: false, draft: '', translated: null, command: null, error: '内容为空' }
-
-  const overlay = getOverlayManager()
-  let translated: string | null = null
-  try {
-    translated = await translateReply(settings.provider, draft, settings.replyTone)
-  } catch (err) {
-    return {
-      ok: false,
-      draft,
-      translated: null,
-      command: null,
-      error: err instanceof Error ? err.message : String(err)
-    }
-  }
-  if (!translated) {
-    return { ok: false, draft, translated: null, command: null, error: '翻译结果为空' }
-  }
-
-  const line = normalizeChatLine(translated)
-  if (!line) {
-    return { ok: false, draft, translated, command: null, error: '译文没有可发送的英文字符' }
-  }
-  const command = settings.sendMode === 'console' ? buildSayTeamCommand(translated) : line
-  overlay.closeReply(false)
-  const sent =
-    settings.sendMode === 'console'
-      ? await getConsoleSender().send(command, settings.consoleKey)
-      : await getChatSender().send(line)
-  if (!sent.ok) {
-    overlay.openReply()
-    return { ok: false, draft, translated, command, error: sent.error ?? '发送失败' }
-  }
-  return { ok: true, draft, translated, command }
+/** 主进程 → 所有窗口的广播（面板按钮状态、语音链回显都靠它活着）。 */
+const broadcast = (channel: string, payload: unknown): void => {
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
 }
 
 /**
- * 读取游戏聊天框里已经打好但未发送的中文，翻译成英文后粘贴回同一个输入框并回车发送。
- * 全程不切换前台窗口，也不经过控制台。
+ * 契约 handler 表（#30）：每条 invoke/send 通道一行，签名由 MainHandlers 钉死；
+ * listen 通道是主进程推送侧，不进这张表。注册循环在 registerIpc 里。
  */
-export async function translateInPlace(): Promise<InPlaceResult> {
-  const settings = loadSettings()
-  const sender = getInPlaceSender()
-  const grabbed = await sender.grab()
-  if (!grabbed.ok || !grabbed.text) {
-    return {
-      ok: false,
-      draft: null,
-      translated: null,
-      grabMs: grabbed.ms,
-      error: grabbed.error ?? '没有读到聊天框内容'
-    }
-  }
-  const draft = grabbed.text
-  const translateStartedAt = Date.now()
-  let translated: string | null = null
-  try {
-    translated = await translateReply(settings.provider, draft, settings.replyTone)
-  } catch (err) {
-    return {
-      ok: false,
-      draft,
-      translated: null,
-      grabMs: grabbed.ms,
-      translateMs: Date.now() - translateStartedAt,
-      error: err instanceof Error ? err.message : String(err)
-    }
-  }
-  const translateMs = Date.now() - translateStartedAt
-  if (!translated) {
-    return { ok: false, draft, translated: null, grabMs: grabbed.ms, translateMs, error: '翻译结果为空' }
-  }
-  const line = normalizeChatLine(translated)
-  if (!line) {
-    return { ok: false, draft, translated, grabMs: grabbed.ms, translateMs, error: '译文没有可发送的英文字符' }
-  }
-  const sent = await sender.replace(line)
-  if (!sent.ok) {
-    return {
-      ok: false,
-      draft,
-      translated,
-      grabMs: grabbed.ms,
-      translateMs,
-      sendMs: sent.ms,
-      error: sent.error ?? '写回聊天框并发送失败'
-    }
-  }
-  return { ok: true, draft, translated: line, grabMs: grabbed.ms, translateMs, sendMs: sent.ms }
-}
-
-export function registerIpc(): void {
-  ipcMain.handle(IPC.SETTINGS_GET, () => loadSettings())
-  ipcMain.handle(IPC.CACHE_STATS, () => translationInsights())
-  ipcMain.handle(IPC.APP_VERSION, () => app.getVersion())
-  ipcMain.handle(IPC.UPDATE_CHECK, () => checkForUpdates())
-  ipcMain.handle(IPC.UPDATE_INSTALL, () => installUpdate())
-  ipcMain.handle(IPC.REPLY_INPLACE, () => translateInPlace())
-  ipcMain.handle(IPC.SETTINGS_SET, (_e, patch: Partial<AppSettings>) => saveSettings(patch))
-  ipcMain.handle(IPC.PROVIDER_TEST, (_e, provider: ProviderConfig) => testProvider(provider))
-  ipcMain.handle(IPC.PROVIDER_TRANSLATE, (_e, text: string, direction?: TranslateDirection) =>
+const handlers: MainHandlers = {
+  // 设置 / 提供商 / 翻译
+  getSettings: () => loadSettings(),
+  setSettings: (patch) => saveSettings(patch),
+  testProvider: (provider) => testProvider(provider),
+  translate: (text, direction) =>
     translateTry(loadSettings().provider, text, direction ?? 'en-zh').catch(() =>
       // 会话层失败时退回直连，保证「翻译试用」永远能给出结果或明确报错。
       translateText(loadSettings().provider, text, direction ?? 'en-zh')
-    )
-  )
-  ipcMain.handle(IPC.REPLY_TRANSLATE, async (_e, text: string, tone?: ReplyTone): Promise<ReplyResult> => {
-    const trimmed = String(text ?? '').trim()
-    if (!trimmed) return { ok: false, translated: null, copied: false, error: '内容为空' }
-    const settings = loadSettings()
-    try {
-      const translated = await translateReply(settings.provider, trimmed, tone ?? settings.replyTone)
-      clipboard.writeText(translated)
-      return { ok: true, translated, copied: true }
-    } catch (err) {
-      return {
-        ok: false,
-        translated: null,
-        copied: false,
-        error: err instanceof Error ? err.message : String(err)
-      }
-    }
-  })
-  ipcMain.handle(IPC.REPLY_SEND, (_e, text: string) => sendReply(text))
-  ipcMain.handle(IPC.CAPTURE_START, () => getCaptureService().start())
-  ipcMain.handle(IPC.CAPTURE_STOP, () => getCaptureService().stop())
-  ipcMain.handle(IPC.CAPTURE_STATUS, () => ({ ...getCaptureService().status(), gsi: gsiStatus() }))
-  ipcMain.handle(IPC.SESSION_STATUS, () => sessionStatus())
-  ipcMain.handle(IPC.OVERLAY_TOGGLE, () => getOverlayManager().toggle())
-  // 面板按钮与 Alt+Shift+V 共用同一条录制链：起录/停录都由 overlay 窗口自己报状态。
-  ipcMain.handle(IPC.OVERLAY_VOICE_TOGGLE, () => {
+    ),
+  translateReply: (text, tone) => translateReplyToClipboard(text, tone),
+  sendReply: (text) => sendReply(text),
+  translateInPlace: () => translateInPlace(),
+  translatorStatus: () => sessionStatus(),
+  cacheStats: () => translationInsights(),
+  // 捕获账本与更新
+  captureStart: () => getCaptureService().start(),
+  captureStop: () => getCaptureService().stop(),
+  captureStatus: () => ({ ...getCaptureService().status(), gsi: gsiStatus() }),
+  appVersion: () => app.getVersion(),
+  updateCheck: () => checkForUpdates(),
+  updateInstall: () => installUpdate(),
+  // 浮层：面板与热键共用同一条链
+  overlayToggle: () => getOverlayManager().toggle(),
+  overlayVoiceToggle: () => {
+    // 面板按钮与 Alt+Shift+V 共用同一条录制链：起录/停录都由 overlay 窗口自己报状态。
     getOverlayManager().toggleVoiceCapture()
     return { ok: true }
-  })
+  },
+  overlaySetText: (mode) => getOverlayManager().setText(mode),
+  overlayOpenReply: () => getOverlayManager().openReply(),
+  overlayCloseReply: (submitted) => getOverlayManager().closeReply(Boolean(submitted)),
+  overlayReplyState: () => getOverlayManager().status(),
+  overlaySetGeometry: (patch) => getOverlayManager().applyGeometry(patch ?? {}),
+  overlayResetGeometry: () => getOverlayManager().resetGeometry(),
+  overlaySetVoice: (read) => getOverlayManager().setVoice(Boolean(read)),
+  overlayToggleCollapse: () => getOverlayManager().toggleCollapse(),
+  overlayKeepAlive: () => getOverlayManager().keepAlive(),
+  overlayNudge: (dx, dy) => getOverlayManager().nudge(dx, dy),
+  overlaySnap: () => getOverlayManager().snap(),
+  overlaySetLocked: (locked) => getOverlayManager().setLocked(locked),
+  overlaySetOpacity: (value) => getOverlayManager().setOpacity(value),
+  voiceReply: (transcript) => voiceReply(String(transcript ?? '')),
   // overlay 起录/停录/出结果时上抛，广播给所有窗口（面板按钮与回显行靠它活着）。
-  const broadcast = (channel: string, payload: unknown): void => {
-    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
-  }
-  ipcMain.on(IPC.OVERLAY_VOICE_STATE, (_e, recording: boolean) => {
+  reportVoiceState: (recording) => {
     broadcast(IPC.VOICE_RECORD_STATE, { recording: Boolean(recording) })
-  })
-  ipcMain.on(IPC.OVERLAY_VOICE_RESULT, (_e, result: VoiceChainSummary) => {
+  },
+  reportVoiceChain: (result) => {
     broadcast(IPC.VOICE_CHAIN_RESULT, result)
-  })
-  // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
-  ipcMain.on(IPC.TRAIN_OPEN, () => getTrainWindow().open())
-  getTrainManager().onState((snapshot) => broadcast(IPC.TRAIN_STATE, snapshot))
-  ipcMain.handle(IPC.TRAIN_START, async (_e, request: TrainStartRequest) => {
-    if (normalizeTrainKind(request.kind) !== 'asr-ft') return getTrainManager().start(request)
-    // asr-ft：先把环境/数据/目录备齐，再带着「训练完接导出」的链子交给 manager。
-    const resolved = await resolveAsrFtTrainRequest(String(request.dataset ?? ''))
-    if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
-    const exportRequest = resolved.request
-    return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest))
-  })
-  ipcMain.handle(IPC.TRAIN_STOP, () => getTrainManager().stop())
-  ipcMain.handle(IPC.TRAIN_SNAPSHOT, () => getTrainManager().snapshot())
-  // ASR 微调录音（T4a）：读稿解析 + 录音 CRUD，文件全在 userData/asr-ft/ 下。
-  ipcMain.handle(IPC.FT_SCRIPT_READ, () => readFtScript())
-  ipcMain.handle(IPC.FT_REC_LIST, () => ftRecList())
-  ipcMain.handle(IPC.FT_REC_SAVE, (_e, group: string, line: string, data: Uint8Array) => ftRecSave(group, line, data))
-  ipcMain.handle(IPC.FT_REC_DELETE, (_e, group: string, line: string) => ftRecDelete(group, line))
-  ipcMain.handle(IPC.FT_REC_READ, (_e, group: string, line: string) => ftRecRead(group, line))
-  // 训练窗口「识别测试」：已存录音直接喂给当前识别引擎，和稿子原文对比。
-  ipcMain.handle(IPC.FT_REC_ASR, async (_e, group: string, line: string) => {
-    const wavPath = ftRecPath(String(group ?? ''), String(line ?? ''))
-    if (loadSettings().asrEngine === 'qwen3') {
-      if (!qwen3Status().ready) {
-        return { ok: false, text: '', error: 'Qwen3 模型未就绪：到面板「识别引擎」里点解压' }
-      }
-      const result = await qwen3Transcribe(wavPath)
-      return result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'Qwen3 识别失败' }
-    }
-    return getWhisperAdapter().transcribe(wavPath, 'zh')
-  })
-  // 一键打包：录音 × 稿子 → 官方微调 JSONL（#14 的核心件，试点格式已验证）。
-  ipcMain.handle(IPC.FT_DATASET_PREPARE, () => prepareFtDataset())
-  // ASR 微调闭环（T5）：环境状态、应用新模型、回滚。
-  ipcMain.handle(IPC.FT_ASRFT_STATUS, async () => ({ ...(await asrFtStatus()), install: asrFtInstallState() }))
-  ipcMain.handle(IPC.FT_ASRFT_INSTALL, async () => {
-    // 启动即回，装到哪一步看 STATUS 轮询（整套装下来要十几分钟）。
-    void installAsrFtEnv()
-    return asrFtInstallState()
-  })
-  ipcMain.handle(IPC.FT_ASRFT_APPLY, () => applyAsrFtModel())
-  ipcMain.handle(IPC.FT_ASRFT_ROLLBACK, () => rollbackAsrFtModel())
-  ipcMain.handle(IPC.OVERLAY_TEXT, (_e, mode) => getOverlayManager().setText(mode))
-  ipcMain.handle(IPC.OVERLAY_LOCK, (_e, locked: boolean) => getOverlayManager().setLocked(locked))
-  ipcMain.handle(IPC.OVERLAY_OPACITY, (_e, value: number) => getOverlayManager().setOpacity(value))
-  ipcMain.handle(IPC.OVERLAY_GEOMETRY, (_e, patch: Partial<OverlayGeometry>) =>
-    getOverlayManager().applyGeometry(patch ?? {})
-  )
-  ipcMain.handle(IPC.OVERLAY_GEOMETRY_RESET, () => getOverlayManager().resetGeometry())
-  ipcMain.handle(IPC.OVERLAY_VOICE, (_event, read: boolean) => getOverlayManager().setVoice(Boolean(read)))
-  ipcMain.handle(IPC.OVERLAY_COLLAPSE, () => getOverlayManager().toggleCollapse())
-  ipcMain.handle(IPC.OVERLAY_KEEPALIVE, () => getOverlayManager().keepAlive())
-  ipcMain.handle(IPC.OVERLAY_NUDGE, (_event, dx: number, dy: number) => getOverlayManager().nudge(dx, dy))
-  ipcMain.handle(IPC.OVERLAY_SNAP, () => getOverlayManager().snap())
-  ipcMain.handle(IPC.OVERLAY_REPLY_OPEN, () => getOverlayManager().openReply())
-  ipcMain.handle(IPC.OVERLAY_REPLY_STATE, () => getOverlayManager().status())
-  ipcMain.handle(IPC.VOICE_WHISPER_PROBE, (_e, binPath: string) =>
-    getWhisperAdapter().probe(String(binPath ?? ''))
-  )
-  ipcMain.handle(IPC.VOICE_WHISPER_SETUP, () =>
+  },
+  whisperProbe: (binPath) => getWhisperAdapter().probe(String(binPath ?? '')),
+  whisperSetup: () =>
     getWhisperAdapter().ensureAssets((phase, pct) => {
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send(IPC.VOICE_WHISPER_PROGRESS, { phase, pct })
       }
-    })
-  )
-  ipcMain.handle(IPC.VOICE_TRANSCRIBE, async (_e, wavBase64: string, language?: string) => {
+    }),
+  transcribeAudio: async (wavBase64, language) => {
     const base64 = String(wavBase64 ?? '')
     if (!base64) return { ok: false, text: '', error: '音频为空' }
     const dir = join(app.getPath('userData'), 'voice')
@@ -331,50 +124,90 @@ export function registerIpc(): void {
       )
     }
     return getWhisperAdapter().transcribe(wavPath, language ?? 'zh')
-  })
-  ipcMain.handle(IPC.TTS_OFFLINE_STATE, () => offlineStatus())
+  },
+  ttsPreview: (text) => getTtsAdapter().preview(String(text ?? '')),
+  voiceOutTest: () => getVoiceOutService().test(),
+  ttsOfflineState: () => offlineStatus(),
+  ttsOfflineDownload: () => ensureOfflineModel(),
+  asrStatus: () => qwen3Status(),
+  asrDownload: () => ensureQwen3Model(),
   // GPT-SoVITS：面板每 3 秒问一次「包在不在、服务起没起、最近日志」，不再靠翻控制台猜。
-  ipcMain.handle(IPC.TTS_SOVITS_STATUS, () => sovitsStatusSnapshot())
+  sovitsStatus: () => sovitsStatusSnapshot(),
   // 一键安装：.7z 已放数据目录就只解压；否则下 8GB 再解压。装完顺手把服务拉起来，
   // 再把默认音色包拉齐（三件套 → refs.json → 自动选中）。
-  ipcMain.handle(IPC.TTS_SOVITS_INSTALL, async () => {
+  sovitsInstall: async () => {
     const state = await ensureSovitsInstall()
     void ensureSovitsServer()
     if (state.phase === 'ready') void autoVoicePackSetup()
     return sovitsStatusSnapshot()
-  })
+  },
   // 参考音频库：读数据根下 tts/sovits-refs/refs.json，坏条目与缺失音频已在纯函数里滤掉。
-  ipcMain.handle(IPC.TTS_SOVITS_REFS, () =>
-    listSovitsRefs(sovitsRefsRoot(app.getPath('userData')), sovitsWeightsRoot(app.getPath('userData')))
-  )
+  sovitsRefs: () =>
+    listSovitsRefs(sovitsRefsRoot(app.getPath('userData')), sovitsWeightsRoot(app.getPath('userData'))),
   // 音色包：目录 + 本地状态一张表；安装 = 下载三件套 → refs.json 落条目 →（没选过音色）自动选中。
-  ipcMain.handle(IPC.TTS_SOVITS_VOICEPACKS, () => sovitsVoicePacks())
-  ipcMain.handle(IPC.TTS_SOVITS_VOICEPACK_INSTALL, (_e, id: unknown) => installVoicePack(String(id ?? '')))
-  ipcMain.handle(IPC.TTS_SOVITS_VOICEPACK_DELETE, (_e, id: unknown) => deleteVoicePack(String(id ?? '')))
+  sovitsVoicepacks: () => sovitsVoicePacks(),
+  sovitsVoicepackInstall: (id) => installVoicePack(String(id ?? '')),
+  sovitsVoicepackDelete: (id) => deleteVoicePack(String(id ?? '')),
   // 选定一条参考：统一走主进程「写设置 → 切权重 → 预热」，且只认库里真实存在的条目。
-  ipcMain.handle(IPC.TTS_SOVITS_SELECT_REF, async (_e, raw: unknown) => {
-    const wanted = typeof raw === 'object' && raw !== null ? (raw as { audioPath?: unknown }).audioPath : ''
-    if (typeof wanted !== 'string') return false
-    const entry = listSovitsRefs(sovitsRefsRoot(app.getPath('userData')), sovitsWeightsRoot(app.getPath('userData'))).find(
-      (item) => item.audioPath === wanted
-    )
-    if (!entry) return false
-    return activateSovitsRef(entry)
-  })
+  sovitsSelectRef: async (entry) => {
+    const known = listSovitsRefs(
+      sovitsRefsRoot(app.getPath('userData')),
+      sovitsWeightsRoot(app.getPath('userData'))
+    ).find((item) => item.audioPath === entry.audioPath)
+    return known ? activateSovitsRef(known) : false
+  },
   // 首启保底：库一条参考都没有时，用 Edge 现场合成一条晓晓参考入库（零分发）。
-  ipcMain.handle(IPC.TTS_SOVITS_SEED, () => ensureSovitsSeedRef(false))
-  ipcMain.handle(IPC.TTS_OFFLINE_DOWNLOAD, () => ensureOfflineModel())
-  // sherpa 识别模型（Qwen3）：面板的「状态 + 解压」按钮，与离线朗读同一节奏。
-  ipcMain.handle(IPC.ASR_STATUS, () => qwen3Status())
-  ipcMain.handle(IPC.ASR_DOWNLOAD, () => ensureQwen3Model())
-  ipcMain.handle(IPC.VOICE_TTS_PREVIEW, (_e, text: string) =>
-    getTtsAdapter().preview(String(text ?? ''))
-  )
-  // 测试声出：固定英文句 → Edge 英文嗓 → 所选输出 → 自动按住说话键（voice-out 闭环的入口）。
-  ipcMain.handle(IPC.VOICE_OUT_TEST, () => getVoiceOutService().test())
-  // 一键到底：识别文本 → 翻译 → 剪贴板 → 声出（Alt+Shift+V 说中文的全链路）。
-  ipcMain.handle(IPC.VOICE_REPLY, (_e, transcript: string) => voiceReply(String(transcript ?? '')))
-  ipcMain.handle(IPC.OVERLAY_REPLY_CLOSE, (_e, submitted?: boolean) =>
-    getOverlayManager().closeReply(Boolean(submitted))
-  )
+  sovitsSeed: () => ensureSovitsSeedRef(false),
+  // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
+  trainOpen: () => getTrainWindow().open(),
+  trainStart: async (request) => {
+    if (normalizeTrainKind(request.kind) !== 'asr-ft') return getTrainManager().start(request)
+    // asr-ft：先把环境/数据/目录备齐，再带着「训练完接导出」的链子交给 manager。
+    const resolved = await resolveAsrFtTrainRequest(String(request.dataset ?? ''))
+    if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
+    const exportRequest = resolved.request
+    return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest))
+  },
+  trainStop: () => getTrainManager().stop(),
+  trainSnapshot: () => getTrainManager().snapshot(),
+  // ASR 微调录音（T4a）：读稿解析 + 录音 CRUD，文件全在 userData/asr-ft/ 下。
+  ftScriptRead: () => readFtScript(),
+  ftRecList: () => ftRecList(),
+  ftRecSave: (group, line, data) => ftRecSave(group, line, data),
+  ftRecDelete: (group, line) => ftRecDelete(group, line),
+  ftRecRead: (group, line) => ftRecRead(group, line),
+  // 训练窗口「识别测试」：已存录音直接喂给当前识别引擎，和稿子原文对比。
+  ftRecAsr: async (group, line) => {
+    const wavPath = ftRecPath(String(group ?? ''), String(line ?? ''))
+    if (loadSettings().asrEngine === 'qwen3') {
+      if (!qwen3Status().ready) {
+        return { ok: false, text: '', error: 'Qwen3 模型未就绪：到面板「识别引擎」里点解压' }
+      }
+      const result = await qwen3Transcribe(wavPath)
+      return result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'Qwen3 识别失败' }
+    }
+    return getWhisperAdapter().transcribe(wavPath, 'zh')
+  },
+  // 一键打包：录音 × 稿子 → 官方微调 JSONL（#14 的核心件，试点格式已验证）。
+  ftDatasetPrepare: () => prepareFtDataset(),
+  // ASR 微调闭环（T5）：环境状态、应用新模型、回滚。
+  ftAsrftStatus: async () => ({ ...(await asrFtStatus()), install: asrFtInstallState() }),
+  // 启动即回，装到哪一步看 STATUS 轮询（整套装下来要十几分钟）。
+  ftAsrftInstall: async () => {
+    void installAsrFtEnv()
+    return asrFtInstallState()
+  },
+  ftAsrftApply: () => applyAsrFtModel(),
+  ftAsrftRollback: () => rollbackAsrFtModel()
+}
+
+export function registerIpc(): void {
+  // 注册循环：契约表整表一遍过。新增通道 = 契约加一行 + handler 表加一行，别处零改动。
+  for (const [name, def] of Object.entries(ipcContract)) {
+    const handler = (handlers as Record<string, (...args: unknown[]) => unknown>)[name]
+    if (def.kind === 'invoke') ipcMain.handle(def.channel, (_event, ...args: unknown[]) => handler(...args))
+    else ipcMain.on(def.channel, (_event, ...args: unknown[]) => handler(...args))
+  }
+  // 契约表之外的主进程接线：训练快照广播（listen 通道的推送侧）。
+  getTrainManager().onState((snapshot) => broadcast(IPC.TRAIN_STATE, snapshot))
 }

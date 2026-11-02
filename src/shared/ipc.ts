@@ -641,11 +641,6 @@ export const IPC = {
   UPDATE_INSTALL: 'update:install',
   UPDATE_STATUS: 'update:status',
   CAPTURE_UPDATE: 'capture:update',
-  STREAM_INIT: 'stream:init',
-  STREAM_GRAB: 'stream:grab',
-  STREAM_HELLO: 'stream:hello',
-  STREAM_READY: 'stream:ready',
-  STREAM_FRAME: 'stream:frame',
   SESSION_STATUS: 'session:status',
   REPLY_TRANSLATE: 'reply:translate',
   VOICE_WHISPER_PROBE: 'voice:whisper-probe',
@@ -814,152 +809,166 @@ export interface SovitsVoicePack {
   error: string | null
 }
 
-export interface WindowApi {
-  getSettings(): Promise<AppSettings>
-  setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
-  testProvider(provider: ProviderConfig): Promise<TestResult>
-  translate(text: string, direction?: TranslateDirection): Promise<string>
-  translateReply(text: string, tone?: ReplyTone): Promise<ReplyResult>
-  /** 语音对讲一键到底：识别文本 → prod 翻译 → 剪贴板 → 声出。失败静默（不回退系统嗓子/文出）。 */
-  voiceReply(transcript: string): Promise<VoiceReplyResult>
-  whisperProbe(binPath: string): Promise<VoiceProbeResult>
-  whisperSetup(): Promise<VoiceAssetsResult>
-  onWhisperProgress(callback: (progress: VoiceAssetProgress) => void): () => void
-  /** Synthesize speech with the Edge neural TTS service and return mp3 bytes for playback. */
-  transcribeAudio(wavBase64: string, language?: string): Promise<VoiceTranscribeResult>
-  onVoiceRecordToggle(callback: () => void): () => void
-  /** overlay 录音状态上抛（起录/停录都会报），主进程广播给面板。 */
-  reportVoiceState(recording: boolean): void
-  /** 语音链结果上抛（含「没识别到话」这类提前收场），主进程广播给面板。 */
-  reportVoiceChain(result: VoiceChainSummary): void
-  /** 面板订阅录音状态：热键与按钮共用同一份状态。 */
-  onVoiceRecordState(callback: (state: { recording: boolean }) => void): () => void
-  /** 面板订阅语音链结果，用来在按钮下方回显原文/译文/已播。 */
-  onVoiceChainResult(callback: (result: VoiceChainSummary) => void): () => void
-  ttsPreview(text: string): Promise<VoicePreviewResult>
-  /** 离线朗读模型的安装状态（是否就绪、占用多少磁盘、是否正在下载）。 */
-  ttsOfflineState(): Promise<OfflineStatus>
-  /** 触发（或继续）一次离线模型下载；返回最新状态。 */
-  ttsOfflineDownload(): Promise<OfflineStatus>
-  /** Qwen3-ASR 模型包的安装状态。 */
-  asrStatus(): Promise<OfflineStatus>
-  /** 触发一次模型获取：解压已放进数据目录的 tar.bz2。 */
-  asrDownload(): Promise<OfflineStatus>
-  /** GPT-SoVITS 引擎包与服务状态（含最近日志）。 */
-  sovitsStatus(): Promise<SovitsStatus>
-  /** 一键安装：没有引擎包就下 8GB 再解压；压缩包已放进数据目录则只解压。 */
-  sovitsInstall(): Promise<SovitsStatus>
-  /** 参考音频库清单：读 refs.json，坏条目与缺失音频已被主进程滤掉。 */
-  sovitsRefs(): Promise<SovitsRefEntry[]>
-  /** 音色包清单（远端 voicepacks.json 优先，拉不到用内置兜底；含本地状态与下载进度）。 */
-  sovitsVoicepacks(): Promise<SovitsVoicePack[]>
-  /** 下载/续装一个音色包：拉三件套 → refs.json 落条目 → 没选过音色就自动选中。 */
-  sovitsVoicepackInstall(id: string): Promise<SovitsVoicePack[]>
-  /** 删除音色包：三件套文件 + refs.json 条目一起清；正在使用的包会被拒绝。 */
-  sovitsVoicepackDelete(id: string): Promise<SovitsVoicePack[]>
-  /** 选定一条参考：主进程按「写设置 → 切权重 → 预热」的顺序激活，不再由渲染层各写各的。 */
-  sovitsSelectRef(entry: SovitsRefEntry): Promise<boolean>
-  /** 首启保底：参考库一条都没有时，用 Edge 现合成一条晓晓参考入库。 */
-  sovitsSeed(): Promise<boolean>
-  captureStart(): Promise<CaptureStatus>
-  captureStop(): Promise<CaptureStatus>
-  captureStatus(): Promise<CaptureStatus>
-  translatorStatus(): Promise<TranslatorStatus>
-  onCaptureEntries(callback: (entries: CaptureEntry[]) => void): () => void
-  onCaptureUpdate(callback: (entries: CaptureEntry[]) => void): () => void
-  /** 记账本的汇总数字（词库对数、命中次数、命中比）。 */
-  cacheStats(): Promise<CacheStats>
-  appVersion(): Promise<string>
-  updateCheck(): Promise<UpdateState>
-  updateInstall(): Promise<boolean>
-  onUpdateStatus(callback: (state: UpdateState) => void): () => void
-  onCaptureReplace(callback: (entries: CaptureEntry[]) => void): () => void
-  sendReply(text: string): Promise<ReplySendResult>
-  translateInPlace(): Promise<InPlaceResult>
-  overlayToggle(): Promise<OverlayStatus>
-  overlayVoiceToggle(): Promise<{ ok: boolean }>
-  overlaySetText(mode: OverlayTextMode): Promise<OverlayStatus>
-  overlayOpenReply(): Promise<OverlayStatus>
-  overlayCloseReply(submitted?: boolean): Promise<OverlayStatus>
-  overlayReplyState(): Promise<OverlayStatus>
-  onOverlayReply(callback: (open: boolean) => void): () => void
-  onOverlayState(callback: (state: OverlayStatus) => void): () => void
-  /** 主进程决定「这一句该念」，浮层只负责发声（speechSynthesis 在渲染进程）。 */
-  onVoiceSpeak(callback: (payload: SpeakPayload) => void): () => void
-  /** 拖动/拉伸浮层时提交新几何（只传要改的字段）。 */
-  overlaySetGeometry(patch: Partial<OverlayGeometry>): Promise<OverlayStatus>
-  /** 还原浮层：回到跟随捕获区域的默认位置与尺寸。 */
-  overlayResetGeometry(): Promise<OverlayStatus>
-  overlaySetVoice(read: boolean): Promise<OverlayStatus>
-  overlayToggleCollapse(): Promise<OverlayStatus>
-  overlayKeepAlive(): Promise<void>
-  overlayNudge(dx: number, dy: number): Promise<OverlayStatus>
-  overlaySnap(): Promise<OverlayStatus>
-  /** 锁定/解锁浮层：解锁才能拖，锁定时强制穿透。 */
-  overlaySetLocked(locked: boolean): Promise<OverlayStatus>
-  overlaySetOpacity(value: number): Promise<OverlayStatus>
-  /** 常驻隐藏窗口里的桌面视频流（抓屏专用，不走 dashboard）。 */
-  screenStream: ScreenStreamApi
-  /** 测试声出：合成固定英文句 → 路由到所选输出 → 自动按住说话键播放。 */
-  voiceOutTest(): Promise<VoiceOutTestResult>
-  /** 声出隐藏窗口专用桥（面板用不到）。 */
-  voiceOut: VoiceOutApi
-  /** 打开训练管理窗口（已开就置前）。 */
-  trainOpen(): void
-  /** 启动一个训练任务（T1 只有 demo 能真跑，其余 kind 会被拒绝并说明去向）。 */
-  trainStart(request: TrainStartRequest): Promise<TrainStartResult>
-  trainStop(): Promise<TrainStartResult>
-  /** 当前任务快照（状态 + 日志尾），窗口打开时先拉一次。 */
-  trainSnapshot(): Promise<TrainSnapshot>
-  /** 订阅训练状态广播（250ms 节流）。 */
-  onTrainState(callback: (snapshot: TrainSnapshot) => void): () => void
-  /** 内置读稿（组 + 句），训练窗口录音区用。 */
-  ftScriptRead(): Promise<FtScriptState>
-  /** 已有录音清单（key → 字节数/时长）。 */
-  ftRecList(): Promise<FtRecInfo[]>
-  /** 保存一条录音（16k mono wav 字节），返回落盘信息。 */
-  ftRecSave(group: string, line: string, data: Uint8Array): Promise<FtRecInfo>
-  /** 删除一条录音（重录前清理用，也可以直接覆盖）。 */
-  ftRecDelete(group: string, line: string): Promise<void>
-  /** 读回一条录音字节（回放用）。 */
-  ftRecRead(group: string, line: string): Promise<Uint8Array>
-  /** 识别测试：一条已存录音喂给当前识别引擎，返回 {ok,text,error}（训练窗口对比稿子用）。 */
-  ftRecAsr(group: string, line: string): Promise<{ ok: boolean; text: string; error: string | null }>
-  /** 一键打包：已录句子 × 稿子 → 官方微调 JSONL（train/eval 两份，落在 asr-ft-datasets/）。 */
-  /** 一键打包：已录句子 × 稿子 → 官方微调 JSONL（train/eval 两份，落在 asr-ft-datasets/）。 */
-  ftDatasetPrepare(): Promise<FtDatasetPrepareResult>
-  /** 微调环境 + 换模状态：缺什么、有没有可应用的新模型、能不能回滚。 */
-  ftAsrftStatus(): Promise<AsrFtStatusResult>
-  /** 一键安装训练环境（uv+venv+依赖+底模）：启动即回，进度走 ftAsrftStatus 轮询。 */
-  ftAsrftInstall(): Promise<AsrFtInstallState>
-  /** 应用新模型：导出产物转正，旧模型挪进 .bak（可回滚）。 */
-  ftAsrftApply(): Promise<AsrFtSwapResult>
-  /** 回滚上一版：现役删掉，.bak 归位。 */
-  ftAsrftRollback(): Promise<AsrFtSwapResult>
+/**
+ * IPC 通道契约（#30）：每条通道在契约表里只有一个家，通道名、参数、返回值、载荷都声明在同一行。
+ * 渲染层的 window.api、preload 的桥、主进程的 handler 表全部从契约推导——
+ * 加功能漏掉任何一步都是编译错，而不是运行时「点了没反应」的死选项。
+ */
+export interface InvokeChannel<A extends unknown[] = [], R = void> {
+  /** 渲染层请求、主进程应答（ipcRenderer.invoke / ipcMain.handle）。 */
+  kind: 'invoke'
+  channel: string
+  /** phantom：仅承载类型，运行时不存在。 */
+  args?: A
+  result?: R
 }
 
-/** 物理像素裁切矩形（相对显示器左上角）。 */
-export interface StreamRect {
-  x: number
-  y: number
-  width: number
-  height: number
+export interface SendChannel<A extends unknown[] = []> {
+  /** 渲染层单向发送、无应答（ipcRenderer.send / ipcMain.on）。 */
+  kind: 'send'
+  channel: string
+  /** phantom：仅承载类型，运行时不存在。 */
+  args?: A
 }
 
-/** 声出窗口桥：主进程要播一段 → 隐藏窗口选好输出设备播放 → 回报就绪/结束。 */
-export interface VoiceOutApi {
-  onPlay(callback: (payload: VoiceOutPlayRequest) => void): () => void
-  onStart(callback: (requestId: number) => void): () => void
-  reportReady(report: VoiceOutReadyReport): void
-  reportEnded(report: VoiceOutEndedReport): void
+export interface ListenChannel<P = void> {
+  /** 主进程推送、渲染层订阅（webContents.send / ipcRenderer.on）。 */
+  kind: 'listen'
+  channel: string
+  /** phantom：仅承载类型，运行时不存在。 */
+  payload?: P
 }
 
-/** 抓屏流桥：主进程要一帧 → 隐藏窗口从视频流裁切 → 回传 PNG base64。 */
-export interface ScreenStreamApi {
-  onInit(callback: (payload: { sourceId: string }) => void): () => void
-  onGrab(callback: (payload: { requestId: number; rect: StreamRect }) => void): () => void
-  /** 页面脚本就绪（可以接收 onGrab / onInit）。 */
-  reportHello(): void
-  reportReady(): void
-  reportFrame(requestId: number, pngBase64: string | null, error?: string): void
+const invoke = <A extends unknown[], R>(channel: string): InvokeChannel<A, R> => ({ kind: 'invoke', channel })
+const send = <A extends unknown[]>(channel: string): SendChannel<A> => ({ kind: 'send', channel })
+const listen = <P>(channel: string): ListenChannel<P> => ({ kind: 'listen', channel })
+
+/** 渲染层能调用的全部通道：invoke 请求应答、send 单向上抛、listen 主进程推送。 */
+export const ipcContract = {
+  // 设置 / 提供商 / 翻译
+  getSettings: invoke<[], AppSettings>(IPC.SETTINGS_GET),
+  setSettings: invoke<[Partial<AppSettings>], AppSettings>(IPC.SETTINGS_SET),
+  testProvider: invoke<[ProviderConfig], TestResult>(IPC.PROVIDER_TEST),
+  translate: invoke<[string, TranslateDirection?], string>(IPC.PROVIDER_TRANSLATE),
+  translateReply: invoke<[string, ReplyTone?], ReplyResult>(IPC.REPLY_TRANSLATE),
+  sendReply: invoke<[string], ReplySendResult>(IPC.REPLY_SEND),
+  translateInPlace: invoke<[], InPlaceResult>(IPC.REPLY_INPLACE),
+  translatorStatus: invoke<[], TranslatorStatus>(IPC.SESSION_STATUS),
+  cacheStats: invoke<[], CacheStats>(IPC.CACHE_STATS),
+  // 捕获账本与更新
+  captureStart: invoke<[], CaptureStatus>(IPC.CAPTURE_START),
+  captureStop: invoke<[], CaptureStatus>(IPC.CAPTURE_STOP),
+  captureStatus: invoke<[], CaptureStatus>(IPC.CAPTURE_STATUS),
+  onCaptureEntries: listen<CaptureEntry[]>(IPC.CAPTURE_ENTRIES),
+  onCaptureUpdate: listen<CaptureEntry[]>(IPC.CAPTURE_UPDATE),
+  onCaptureReplace: listen<CaptureEntry[]>(IPC.CAPTURE_REPLACE),
+  appVersion: invoke<[], string>(IPC.APP_VERSION),
+  updateCheck: invoke<[], UpdateState>(IPC.UPDATE_CHECK),
+  updateInstall: invoke<[], boolean>(IPC.UPDATE_INSTALL),
+  onUpdateStatus: listen<UpdateState>(IPC.UPDATE_STATUS),
+  // 浮层：面板与热键共用
+  overlayToggle: invoke<[], OverlayStatus>(IPC.OVERLAY_TOGGLE),
+  overlayVoiceToggle: invoke<[], { ok: boolean }>(IPC.OVERLAY_VOICE_TOGGLE),
+  overlaySetText: invoke<[OverlayTextMode], OverlayStatus>(IPC.OVERLAY_TEXT),
+  overlayOpenReply: invoke<[], OverlayStatus>(IPC.OVERLAY_REPLY_OPEN),
+  overlayCloseReply: invoke<[boolean?], OverlayStatus>(IPC.OVERLAY_REPLY_CLOSE),
+  overlayReplyState: invoke<[], OverlayStatus>(IPC.OVERLAY_REPLY_STATE),
+  onOverlayReply: listen<boolean>(IPC.OVERLAY_REPLY),
+  onOverlayState: listen<OverlayStatus>(IPC.OVERLAY_STATE),
+  onVoiceSpeak: listen<SpeakPayload>(IPC.VOICE_SPEAK),
+  overlaySetGeometry: invoke<[Partial<OverlayGeometry>], OverlayStatus>(IPC.OVERLAY_GEOMETRY),
+  overlayResetGeometry: invoke<[], OverlayStatus>(IPC.OVERLAY_GEOMETRY_RESET),
+  overlaySetVoice: invoke<[boolean], OverlayStatus>(IPC.OVERLAY_VOICE),
+  overlayToggleCollapse: invoke<[], OverlayStatus>(IPC.OVERLAY_COLLAPSE),
+  overlayKeepAlive: invoke<[], void>(IPC.OVERLAY_KEEPALIVE),
+  overlayNudge: invoke<[number, number], OverlayStatus>(IPC.OVERLAY_NUDGE),
+  overlaySnap: invoke<[], OverlayStatus>(IPC.OVERLAY_SNAP),
+  overlaySetLocked: invoke<[boolean], OverlayStatus>(IPC.OVERLAY_LOCK),
+  overlaySetOpacity: invoke<[number], OverlayStatus>(IPC.OVERLAY_OPACITY),
+  // 语音链：识别 / 翻译 / 声出
+  voiceReply: invoke<[string], VoiceReplyResult>(IPC.VOICE_REPLY),
+  reportVoiceState: send<[boolean]>(IPC.OVERLAY_VOICE_STATE),
+  reportVoiceChain: send<[VoiceChainSummary]>(IPC.OVERLAY_VOICE_RESULT),
+  onVoiceRecordToggle: listen<void>(IPC.VOICE_RECORD_TOGGLE),
+  onVoiceRecordState: listen<{ recording: boolean }>(IPC.VOICE_RECORD_STATE),
+  onVoiceChainResult: listen<VoiceChainSummary>(IPC.VOICE_CHAIN_RESULT),
+  whisperProbe: invoke<[string], VoiceProbeResult>(IPC.VOICE_WHISPER_PROBE),
+  whisperSetup: invoke<[], VoiceAssetsResult>(IPC.VOICE_WHISPER_SETUP),
+  onWhisperProgress: listen<VoiceAssetProgress>(IPC.VOICE_WHISPER_PROGRESS),
+  transcribeAudio: invoke<[string, string?], VoiceTranscribeResult>(IPC.VOICE_TRANSCRIBE),
+  ttsPreview: invoke<[string], VoicePreviewResult>(IPC.VOICE_TTS_PREVIEW),
+  voiceOutTest: invoke<[], VoiceOutTestResult>(IPC.VOICE_OUT_TEST),
+  ttsOfflineState: invoke<[], OfflineStatus>(IPC.TTS_OFFLINE_STATE),
+  ttsOfflineDownload: invoke<[], OfflineStatus>(IPC.TTS_OFFLINE_DOWNLOAD),
+  asrStatus: invoke<[], OfflineStatus>(IPC.ASR_STATUS),
+  asrDownload: invoke<[], OfflineStatus>(IPC.ASR_DOWNLOAD),
+  // GPT-SoVITS
+  sovitsStatus: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_STATUS),
+  sovitsInstall: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_INSTALL),
+  sovitsRefs: invoke<[], SovitsRefEntry[]>(IPC.TTS_SOVITS_REFS),
+  sovitsVoicepacks: invoke<[], SovitsVoicePack[]>(IPC.TTS_SOVITS_VOICEPACKS),
+  sovitsVoicepackInstall: invoke<[string], SovitsVoicePack[]>(IPC.TTS_SOVITS_VOICEPACK_INSTALL),
+  sovitsVoicepackDelete: invoke<[string], SovitsVoicePack[]>(IPC.TTS_SOVITS_VOICEPACK_DELETE),
+  sovitsSelectRef: invoke<[SovitsRefEntry], boolean>(IPC.TTS_SOVITS_SELECT_REF),
+  sovitsSeed: invoke<[], boolean>(IPC.TTS_SOVITS_SEED),
+  // 训练管理与 ASR 微调
+  trainOpen: send<[]>(IPC.TRAIN_OPEN),
+  trainStart: invoke<[TrainStartRequest], TrainStartResult>(IPC.TRAIN_START),
+  trainStop: invoke<[], TrainStartResult>(IPC.TRAIN_STOP),
+  trainSnapshot: invoke<[], TrainSnapshot>(IPC.TRAIN_SNAPSHOT),
+  onTrainState: listen<TrainSnapshot>(IPC.TRAIN_STATE),
+  ftScriptRead: invoke<[], FtScriptState>(IPC.FT_SCRIPT_READ),
+  ftRecList: invoke<[], FtRecInfo[]>(IPC.FT_REC_LIST),
+  ftRecSave: invoke<[string, string, Uint8Array], FtRecInfo>(IPC.FT_REC_SAVE),
+  ftRecDelete: invoke<[string, string], void>(IPC.FT_REC_DELETE),
+  ftRecRead: invoke<[string, string], Uint8Array>(IPC.FT_REC_READ),
+  ftRecAsr: invoke<[string, string], VoiceTranscribeResult>(IPC.FT_REC_ASR),
+  ftDatasetPrepare: invoke<[], FtDatasetPrepareResult>(IPC.FT_DATASET_PREPARE),
+  ftAsrftStatus: invoke<[], AsrFtStatusResult>(IPC.FT_ASRFT_STATUS),
+  ftAsrftInstall: invoke<[], AsrFtInstallState>(IPC.FT_ASRFT_INSTALL),
+  ftAsrftApply: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_APPLY),
+  ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK)
 }
+
+/** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */
+export const voiceOutContract = {
+  onPlay: listen<VoiceOutPlayRequest>(IPC.VOICE_OUT_PLAY),
+  onStart: listen<number>(IPC.VOICE_OUT_START),
+  reportReady: send<[VoiceOutReadyReport]>(IPC.VOICE_OUT_READY),
+  reportEnded: send<[VoiceOutEndedReport]>(IPC.VOICE_OUT_ENDED)
+}
+
+export type ChannelDef = InvokeChannel<unknown[], unknown> | SendChannel<unknown[]> | ListenChannel<unknown>
+
+/** 契约表 → 方法签名表：invoke 变 Promise 调用，send 变单向发送，listen 变订阅。 */
+export type ApiTable<T> = {
+  [K in keyof T]: T[K] extends InvokeChannel<infer A, infer R>
+    ? (...args: A) => Promise<R>
+    : T[K] extends SendChannel<infer A>
+      ? (...args: A) => void
+      : T[K] extends ListenChannel<infer P>
+        ? (callback: (payload: P) => void) => () => void
+        : never
+}
+
+/** 主进程 handler 表：listen 通道是推送侧、不进表；invoke 可同步或异步应答。 */
+export type MainHandlers = {
+  [K in keyof typeof ipcContract as (typeof ipcContract)[K] extends ListenChannel<unknown> ? never : K]:
+    (typeof ipcContract)[K] extends InvokeChannel<infer A, infer R>
+      ? (...args: A) => R | Promise<R>
+      : (typeof ipcContract)[K] extends SendChannel<infer A> ? (...args: A) => void : never
+}
+
+/** 声出隐藏窗口桥（window.api.voiceOut）。 */
+export type VoiceOutApi = ApiTable<typeof voiceOutContract>
+
+/** preload 暴露到 window.api 的完整契约（renderer 只认这个类型）。 */
+export type WindowApi = ApiTable<typeof ipcContract> & { voiceOut: VoiceOutApi }
+
+/** 死通道审计：通道常量没被任何契约表收编，就在这里炸成编译错。 */
+type UsedChannel =
+  | (typeof ipcContract)[keyof typeof ipcContract]['channel']
+  | (typeof voiceOutContract)[keyof typeof voiceOutContract]['channel']
+type DeadChannel = Exclude<typeof IPC[keyof typeof IPC], UsedChannel>
+type AssertNoDeadChannel = [DeadChannel] extends [never] ? true : DeadChannel
+export const deadChannelAudit: AssertNoDeadChannel = true
