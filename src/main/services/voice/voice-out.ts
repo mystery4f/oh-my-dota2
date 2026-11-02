@@ -16,12 +16,11 @@ import {
   resolveVoiceOutSynth,
   speakKeyVk,
   type VoiceOutEngine,
-  type VoiceOutSynthPlan
 } from '@shared/voice-out'
 import { synthesizeEdge } from './edge'
 import { synthesizeOffline } from './offline'
 import { synthesizeSovits } from './sovits'
-import { splitForSpeech } from './speech'
+import { speakPipeline } from './speech-pipeline'
 import { loadSettings } from '../settings'
 import { getPttKeySender } from '../input/ptt-key'
 import { getVoiceOutWindow } from '../../windows/voice-out'
@@ -102,11 +101,6 @@ export interface VoiceOutSpeakOutcome {
   error: string | null
 }
 
-/** 一段的合成产物：音频本体带上该段实际用的封装（引擎不同封装不同，播放按它解）。 */
-interface ReplySegmentAudio {
-  bytes: Buffer
-  audioMime: VoiceOutSynthPlan['audioMime']
-}
 
 /**
  * 「测试声出」的最小闭环：固定英文句 → 按设置里的声出引擎合成（Edge 英文占位 /
@@ -272,29 +266,10 @@ class VoiceOutService {
 
   private async runReplyInner(text: string): Promise<VoiceOutSpeakOutcome> {
     const settings = loadSettings()
-    // 长句先切（与朗读同款分句，上限读设置 ttsSpeakSegmentChars，10–60）。
-    const segments = splitForSpeech(text, settings.ttsSpeakSegmentChars ?? 30)
-    // 流水线：各段合成立刻并行开跑，播放循环里才按序 await——第一段一就绪就进频道，
-    // 不等最慢的段（GV 串行 api_v2 下批量等完，整句静默会被最慢段拉长）。
-    // 引擎/封装/嗓逐段按设置解析（票 07 后与测试腿同一个 resolveVoiceOutSynth）：
-    // 音色传面板「声出音色」（ttsOutVoice）——测试声出验的就是对讲要用的这把嗓；
-    // GV 本就不选嗓（音色由参考音频决定），解析层自己打回各引擎默认。
-    const synthJobs = segments.map(async (segment): Promise<ReplySegmentAudio | null> => {
-      const synth = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, segment)
-      let audio: Buffer | null
-      if (synth.engine === 'offline') {
-        audio = await synthesizeOffline(segment, synth.voice as OfflineVoiceId, settings.ttsRate)
-      } else if (synth.engine === 'sovits') {
-        // GV：音色由参考音频/音色包权重决定（切换复用现有 sovits 管线），语言看文本本身。
-        audio = await synthesizeSovits(segment, settings.ttsRate, synth.lang)
-      } else {
-        audio = await synthesizeEdge(segment, synth.voice, settings.ttsRate, settings.ttsPitch, VOICE_OUT_VOICES)
-      }
-      return audio === null ? null : { bytes: audio, audioMime: synth.audioMime }
-    })
-    // 播放循环万一半路抛出，没轮到的段就是孤儿 Promise：先挂空 catch 防 unhandled rejection，
-    // 原 Promise 稍后在循环里照常可 await（合成本体失败自己吞成 null，这里只是保险）。
-    for (const job of synthJobs) void job.catch(() => undefined)
+    // 引擎/封装/嗓逐段按设置解析（与测试腿同一个 resolveVoiceOutSynth）：音色传面板「声出音色」
+    // （ttsOutVoice）——测试声出验的就是对讲要用的这把嗓；GV 本就不选嗓（音色由参考音频决定），
+    // 解析层自己打回各引擎默认。
+    const plan = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, text)
 
     const window = getVoiceOutWindow()
     const vk = speakKeyVk(settings.ttsSpeakKey)
@@ -311,60 +286,79 @@ class VoiceOutService {
     let startedAny = false
     let audioPlayed = false
     let synthOkAny = false
+    let segmentCount = 0
     try {
-      for (let index = 0; index < synthJobs.length; index += 1) {
-        const audio = await synthJobs[index]
-        if (audio === null) continue
-        synthOkAny = true
-        const requestId = nextRequestId
-        nextRequestId += 1
-        const readyPromise = waitReady(requestId, READY_TIMEOUT_MS)
-        await window.play({
-          requestId,
-          audioBase64: audio.bytes.toString('base64'),
-          audioMime: audio.audioMime,
-          requestedDevice: settings.ttsOutputDevice
-        })
-        const ready = await readyPromise
-        if (!ready || !ready.ok) {
-          // 单段翻车不毁整句：跳过这段继续下一段，日志里数得清丢了几段。
-          const reason = ready?.error ?? '声出窗口没有就绪（超时）'
-          console.log('VOICE_REPLY_SEGMENT_SKIP', JSON.stringify({ requestId, index, error: reason }))
-          if (ready?.hint) showHint(ready.hint)
-          continue
-        }
-        if (ready.fallback && ready.hint) showHint(ready.hint)
-
-        // 说话键从第一段就绪起按住，整句话期间绝不松——中途松键频道会露缝。
-        // 测试模式下整段按键逻辑跳过（keyHeld 恒 false，finally 的松键自然空转）。
-        if (!settings.voiceOutTestMode && !keyHeld && !keyError) {
-          if (vk === null) {
-            keyError = '说话键无法识别（检查设置里的说话键）'
-          } else {
-            const down = await getPttKeySender().down(vk)
-            if (down.ok) keyHeld = true
-            else keyError = down.error ?? null
+      // 合成→按序投递收进 speech-pipeline：切段并行合成（GV 走它自带的懒队列），这里只管「一段怎么播」——
+      // 等窗口就绪、按住说话键、起播等结束；单段翻车跳过这段继续。
+      await speakPipeline(
+        {
+          text,
+          engine: plan.engine,
+          split: true,
+          segmentChars: settings.ttsSpeakSegmentChars,
+          voice: plan.voice,
+          edgeVoices: VOICE_OUT_VOICES,
+          rate: settings.ttsRate,
+          pitch: settings.ttsPitch,
+          resolveSegment: (segment) => {
+            const synth = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, segment)
+            return { voice: synth.voice, offlineVoice: synth.voice, lang: synth.lang }
           }
-          if (keyError) console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, index, error: keyError }))
-        }
+        },
+        async (segment) => {
+          segmentCount += 1
+          if (segment.audio === null) return
+          synthOkAny = true
+          const requestId = nextRequestId
+          nextRequestId += 1
+          const readyPromise = waitReady(requestId, READY_TIMEOUT_MS)
+          await window.play({
+            requestId,
+            audioBase64: segment.audio.toString('base64'),
+            audioMime: segment.audioMime ?? 'audio/mpeg',
+            requestedDevice: settings.ttsOutputDevice
+          })
+          const ready = await readyPromise
+          if (!ready || !ready.ok) {
+            // 单段翻车不毁整句：跳过这段继续下一段，日志里数得清丢了几段。
+            const reason = ready?.error ?? '声出窗口没有就绪（超时）'
+            console.log('VOICE_REPLY_SEGMENT_SKIP', JSON.stringify({ requestId, index: segment.index, error: reason }))
+            if (ready?.hint) showHint(ready.hint)
+            return
+          }
+          if (ready.fallback && ready.hint) showHint(ready.hint)
 
-        const hold = pttWindow(ready.durationMs ?? MIN_SPEAK_MS)
-        // 头部余量只等一次（第一次起播前）；后续段接着上一段的尾巴连续播。
-        if (!startedAny) await delay(hold.leadMs)
-        startedAny = true
-        window.start(requestId)
-        const ended = await waitEnded(requestId, pttWatchdogMs(hold))
-        if (!ended) {
-          console.log('VOICE_REPLY_SEGMENT_TIMEOUT', JSON.stringify({ requestId, index }))
-          continue
+          // 说话键从第一段就绪起按住，整句话期间绝不松——中途松键频道会露缝。
+          // 测试模式下整段按键逻辑跳过（keyHeld 恒 false，finally 的松键自然空转）。
+          if (!settings.voiceOutTestMode && !keyHeld && !keyError) {
+            if (vk === null) {
+              keyError = '说话键无法识别（检查设置里的说话键）'
+            } else {
+              const down = await getPttKeySender().down(vk)
+              if (down.ok) keyHeld = true
+              else keyError = down.error ?? null
+            }
+            if (keyError) console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, index: segment.index, error: keyError }))
+          }
+
+          const hold = pttWindow(ready.durationMs ?? MIN_SPEAK_MS)
+          // 头部余量只等一次（第一次起播前）；后续段接着上一段的尾巴连续播。
+          if (!startedAny) await delay(hold.leadMs)
+          startedAny = true
+          window.start(requestId)
+          const ended = await waitEnded(requestId, pttWatchdogMs(hold))
+          if (!ended) {
+            console.log('VOICE_REPLY_SEGMENT_TIMEOUT', JSON.stringify({ requestId, index: segment.index }))
+            return
+          }
+          if (!ended.ok) {
+            console.log('VOICE_REPLY_SEGMENT_FAIL', JSON.stringify({ requestId, index: segment.index, error: ended.error }))
+            return
+          }
+          audioPlayed = true
+          console.log('VOICE_REPLY_SEGMENT_OK', JSON.stringify({ requestId, index: segment.index, durationMs: ended.durationMs ?? ready.durationMs }))
         }
-        if (!ended.ok) {
-          console.log('VOICE_REPLY_SEGMENT_FAIL', JSON.stringify({ requestId, index, error: ended.error }))
-          continue
-        }
-        audioPlayed = true
-        console.log('VOICE_REPLY_SEGMENT_OK', JSON.stringify({ requestId, index, durationMs: ended.durationMs ?? ready.durationMs }))
-      }
+      )
     } finally {
       if (keyHeld) await delay(PTT_MARGIN_MS) // 尾巴：最后一截音频收进频道再松键。
       // 任何一条提前 return / 抛错的路径都必须松键——说话键卡死比这句没播出严重得多。
@@ -375,7 +369,7 @@ class VoiceOutService {
       // 全部段合成失败：不播、不按键，引擎跟设置走——别把「断网」误报给离线/GV 用户（与测试腿同一份提示表）。
       const engine = normalizeVoiceOutEngine(settings.ttsOutEngine)
       const error = SYNTH_FAIL_HINT[engine]
-      console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', engine, segments: segments.length }))
+      console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', engine, segments: segmentCount }))
       showHint(error)
       return { spoken: false, error }
     }

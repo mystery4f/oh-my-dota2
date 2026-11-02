@@ -22,7 +22,7 @@ import {
   spokenStatusLine,
   type AudioOutputDevice
 } from '@shared/voice-out'
-import { splitForSpeech } from '../services/voice/speech'
+import { splitForSpeech } from '../services/voice/speech-pipeline'
 
 /**
  * 声出探针（--voice-out-probe）：只验「脑子」，不碰网络、不碰驱动、不开游戏。

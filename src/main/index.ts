@@ -18,8 +18,9 @@ import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-se
 import { autoVoicePackSetup } from './services/voice/sovits-voicepack'
 import { runTtsBenchProbe } from './probes/tts-bench'
 import { runTtsOfflineProbe } from './probes/tts-offline'
-import { runTtsVoicesProbe } from './probes/tts-voices'
 import { runTtsPlayProbe } from './probes/tts-play'
+import { runTtsPipelineProbe } from './probes/tts-pipeline'
+import { runTtsVoicesProbe } from './probes/tts-voices'
 import { runGsiProbe } from './probes/gsi'
 import { runSettingsPersistProbe } from './probes/settings-persist'
 import { runGsiDumpProbe } from './probes/gsi-dump'
@@ -161,6 +162,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--tts-bench')) void runTtsBenchProbe()
   if (process.argv.includes('--tts-offline-probe')) void runTtsOfflineProbe()
   if (process.argv.includes('--tts-voices-probe')) void runTtsVoicesProbe()
+  if (process.argv.includes('--tts-pipeline-probe')) void runTtsPipelineProbe()
   if (process.argv.includes('--tts-play-probe')) void runTtsPlayProbe()
   if (process.argv.includes('--chat-block-probe')) void runChatBlockProbe()
   if (process.argv.includes('--gsi-probe')) void runGsiProbe()

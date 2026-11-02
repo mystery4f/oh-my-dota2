@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { DEFAULT_EDGE_VOICE, synthesizeEdge } from '../services/voice/edge'
-import { splitForSpeech } from '../services/voice/speech'
+import { splitForSpeech } from '../services/voice/speech-pipeline'
 
 /** 十句典型对局台词：只量「合成一次要多久、成功率多少」，不碰播放。 */
 const LINES = [

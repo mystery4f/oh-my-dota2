@@ -2,9 +2,8 @@ import { BrowserWindow } from 'electron'
 import { IPC, type CaptureEntry, type SpeakPayload } from '@shared/ipc'
 import { loadSettings } from '../settings'
 import { heroChinese } from '../hero-names'
-import { synthesizeEdge, warmEdge } from './edge'
-import { synthesizeOffline } from './offline'
-import { synthesizeSovits } from './sovits'
+import { warmEdge } from './edge'
+import { speakPipeline, type SpeechSegment } from './speech-pipeline'
 
 /** 单句上限：再长就不念了——一整段口播会把后面的消息全挤到后面。 */
 export const SPEAK_MAX_CHARS = 60
@@ -30,40 +29,6 @@ export function speakText(raw: string): string {
   return text.trim()
 }
 
-/**
- * 长句切段：先前几十个字先出声，剩下的在播放时合成。
- * 为什么不是排版问题：Edge 每段都要一次跨境往返（实测整句 0.7–1.6 s），
- * 一句话 40 个字等一次往返，听众会以为「朗读坏了」。按标点切成小段后（上限面板可配，默认 30），
- * 只切标点，不动字面：切完拼回来必须和原文一模一样（探针会断言）。
- */
-export function splitForSpeech(text: string, maxChars = 20): string[] {
-  const raw = text.trim()
-  if (!raw) return []
-  if (raw.length <= maxChars) return [raw]
-  // 标点跟着前一段走，拼回来才不会丢符号。
-  const parts = raw.match(/[^，。！？；、,!?;]+[，。！？；、,!?;]?/gu) ?? [raw]
-  const pieces: string[] = []
-  let current = ''
-  for (const part of parts) {
-    if (current && current.length + part.length > maxChars) {
-      pieces.push(current)
-      current = part
-    } else {
-      current += part
-    }
-  }
-  if (current) pieces.push(current)
-  // 极端输入（一句 60 字不带标点）：硬切，宁可断在词中间也不要整句等一次往返。
-  const out: string[] = []
-  for (const piece of pieces) {
-    if (piece.length <= maxChars) {
-      out.push(piece)
-      continue
-    }
-    for (let index = 0; index < piece.length; index += maxChars) out.push(piece.slice(index, index + maxChars))
-  }
-  return out
-}
 
 export interface SpeakOptions {
   /** 朗读引擎：edge 用神经语音，system 用系统嗓子，sovits 走本机 GPT-SoVITS 服务。默认 edge。 */
@@ -156,8 +121,8 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
 
 /**
  * 本拍译文是否已过期：宣布（announce）时若已有更新的捕获到达，念它只会让朗读越排越落后——
- * 「先念上一条再念当前」就是这么来的。合成队列层的丢弃（enqueueSovitsSpeak）只能掐掉
- * 还在排队的，掐不掉「刚翻译完、正要宣布」的这一类，所以宣布时点也要拦一道。
+ * 「先念上一条再念当前」就是这么来的。队列与投递两道闸都收进了 speech-pipeline：
+ * 它们掐得到还在排队的，掐不掉「刚翻译完、正要宣布」的这一类，所以宣布时点也要拦一道。
  */
 export function isAnnounceStale(entryTs: number, cutoff: number | undefined, drop: boolean): boolean {
   return drop === true && cutoff !== undefined && entryTs < cutoff
@@ -195,10 +160,7 @@ export function speakOptionsFromSettings(settings: {
   }
 }
 export function announceEntries(entries: CaptureEntry[], cutoff?: number): void {
-  // 先记账再干活：latestCaptureAt 是投递层判过期的基准——即使这拍全部跳过（没开朗读、没新译文），
-  // 「已经有更新的捕获」这个事实也得记下来。
-  if (cutoff !== undefined && cutoff > latestCaptureAt) latestCaptureAt = cutoff
-  if (entries.length === 0) return
+  // 截止线随每句进管线记账（speech-pipeline 里的 latestCaptureAt）：投递闸靠它拦合成期间变旧的。
   const settings = loadSettings()
   if (!settings.ttsReadAloud) return
   const options = speakOptionsFromSettings(settings)
@@ -234,129 +196,37 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
       })
     )
     // 合成先并行跑，投递仍按顺序：串行合成会让「一句 = 一次网络往返」累加成几秒的延迟，
-    // 连发三句就要等三次，听起来就是「反应慢半拍」。
-    // 离线引擎在本地推理（实测 81–193 ms），不需要等网络；它同样是「先合成、再按序投递」。
-    if (engine === 'offline') {
-      speakChain = speakChain
-        .then(() => deliver(payload, synthesizeOffline(payload.text, settings.ttsOfflineVoice, payload.rate)))
-        .catch(() => undefined)
-      continue
-    }
-    // GPT-SoVITS：本机 api_v2，音色由参考音频决定。与 Edge 同样切段并行、按序投递；
-    // 服务不在 / 参考没配，合成得 null，浮层整句跳过——绝不回退系统嗓子。
-    // GPT-SoVITS：本机 api_v2，音色由参考音频决定。走专用队列（见 enqueueSovitsSpeak）：
-    // 一次只合成一条、可丢弃积压——预发全部请求会让本机显卡被服务端排队按死。
-    // 服务不在 / 参考没配，合成得 null，浮层整句跳过——绝不回退系统嗓子。
-    if (engine === 'sovits') {
-      enqueueSovitsSpeak(payload, settings.ttsDropBacklog === true, options.segmentChars ?? 30)
-      continue
-    }
-    if (engine !== 'edge') {
-      speakChain = speakChain.then(() => deliver(payload, null)).catch(() => undefined)
-      continue
-    }
-    // Edge：整句切成小段，各段同时发起合成，再按原顺序投递——第一段先出声。
-    const segments = splitForSpeech(payload.text, options.segmentChars ?? 30)
-    const audios = segments.map((segment) => synthesizeEdge(segment, payload.voice, payload.rate, payload.pitch))
-    segments.forEach((segment, index) => {
-      const audio = audios[index]
-      speakChain = speakChain.then(() => deliver({ ...payload, text: segment }, audio)).catch(() => undefined)
-    })
+    // 一句交给管线：切段、并行合成、按序投递、丢弃与失败策略全在管内（见 speech-pipeline）。
+    // lane='announce' 保证同一拍多条、跨拍多条都按到达顺序出声；GV 的懒队列由管线自带。
+    void speakPipeline(
+      {
+        text: payload.text,
+        engine,
+        ts: payload.ts,
+        cutoff,
+        dropStale: settings.ttsDropBacklog === true,
+        split: true,
+        segmentChars: options.segmentChars,
+        voice: payload.voice,
+        offlineVoice: settings.ttsOfflineVoice,
+        rate: payload.rate,
+        pitch: payload.pitch,
+        lang: payload.lang,
+        lane: 'announce'
+      },
+      (segment) => broadcast(payload, segment)
+    ).catch(() => undefined)
   }
 }
 
 let lastSpeakAt = 0
-/** 最新一次捕获的时间戳：deliver 投递时对照它——合成这几秒里来了更新的消息，旧的就不投了。 */
-let latestCaptureAt = 0
 
-let speakChain: Promise<void> = Promise.resolve()
-
-/**
- * GPT-SoVITS 专用朗读队列。与 Edge 不同，sovits 在本机显卡上推理（游戏吃着显卡时一句
- * 2–7 s），「进队列就把所有段的合成请求都发出去」会让 api_v2 服务端堆一串排不完的活，
- * 显卡被按住几十秒——游戏掉帧，读到的还是过时消息。这里改成：
- * - 合成懒启动：轮到谁才合成谁，同一时刻服务端最多积一段（段间预取保连续）；
- * - 「丢弃积压」开启时，新消息一来就顶掉整条队列，被顶掉的永不合成（TTS_SPEAK_DROP）；
- *   消息放到一半来了新的，剩下的段也当场作废。
- */
-interface SovitsJob {
-  payload: SpeakPayload
-  segments: string[]
-  gen: number
-}
-
-/** 丢弃积压（纯函数，探针断言）：开关开着且队里已有待读消息时，队列只保留新来的这条。 */
-export function applyBacklogPolicy<T>(queue: T[], drop: boolean, incoming: T): { queue: T[]; dropped: T[] } {
-  if (!drop || queue.length === 0) return { queue: [...queue, incoming], dropped: [] }
-  return { queue: [incoming], dropped: [...queue] }
-}
-
-/** 这条是否已被更新的消息顶掉（纯函数）：只在「丢弃积压」开启时才淘汰旧代。 */
-export const isSpeakStale = (drop: boolean, jobGen: number, currentGen: number): boolean => drop && jobGen !== currentGen
-
-const sovitsQueue: SovitsJob[] = []
-let sovitsGen = 0
-let sovitsPumping = false
-
-function enqueueSovitsSpeak(payload: SpeakPayload, drop: boolean, segmentChars = 30): void {
-  const plan = applyBacklogPolicy(sovitsQueue, drop, {
-    payload,
-    segments: splitForSpeech(payload.text, segmentChars),
-    gen: sovitsGen + 1
-  })
-  sovitsGen += 1
-  sovitsQueue.length = 0
-  sovitsQueue.push(...plan.queue)
-  if (plan.dropped.length > 0) {
-    console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'queued', dropped: plan.dropped.length, keep: payload.text.slice(0, 30) }))
-  }
-  void pumpSovits(drop)
-}
-
-async function pumpSovits(drop: boolean): Promise<void> {
-  if (sovitsPumping) return
-  sovitsPumping = true
-  try {
-    while (sovitsQueue.length > 0) {
-      const job = sovitsQueue.shift()!
-      // 预取下一段：当前段在浮层播放时下一段已在合成，长句听完不出空窗。
-      let prefetch: Promise<Buffer | null> | null = null
-      for (let index = 0; index < job.segments.length; index += 1) {
-        if (isSpeakStale(drop, job.gen, sovitsGen)) {
-          console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'stale', text: job.segments[index].slice(0, 20) }))
-          break
-        }
-        const audio = prefetch ?? (await synthesizeSovits(job.segments[index], job.payload.rate, job.payload.lang))
-        prefetch = null
-        // 合成期间来了新消息：这条剩下的段不再投递（音频已花掉，认了）。
-        if (isSpeakStale(drop, job.gen, sovitsGen)) {
-          console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'synthesized', text: job.segments[index].slice(0, 20) }))
-          break
-        }
-        prefetch =
-          index + 1 < job.segments.length
-            ? synthesizeSovits(job.segments[index + 1], job.payload.rate, job.payload.lang)
-            : null
-        await deliver({ ...job.payload, text: job.segments[index] }, audio ? Promise.resolve(audio) : null)
-      }
-    }
-  } finally {
-    sovitsPumping = false
-  }
-}
-
-async function deliver(payload: SpeakPayload, audioPromise: Promise<Buffer | null> | null): Promise<void> {
-  // 投递时点再拦一道：合成这几秒里可能已经来了更新的消息——旧的再开口，
-  // 就是「收到第二条还在念第一条」。announce 层只拦宣布时就过期的，这里拦合成期间变旧的。
-  if (loadSettings().ttsDropBacklog === true && payload.ts !== undefined && payload.ts < latestCaptureAt) {
-    console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'deliver', text: payload.text.slice(0, 30) }))
-    return
-  }
-  let packet = payload
-  if (audioPromise) {
-    const audio = await audioPromise
-    // 合成失败就不带 audio 下发：渲染层对 edge/offline/sovits 一律整句跳过，不临时换系统嗓子。
-    if (audio) packet = { ...payload, audio: audio.toString('base64'), audioMime: payload.engine === 'offline' || payload.engine === 'sovits' ? 'audio/wav' : 'audio/mpeg' }
-  }
+/** 把管线产出的一段交给浮层发声。system 引擎不带音频（浮层用系统嗓子念）；
+ * 其余引擎合成失败就不下发——浮层对 edge/offline/sovits 一律整句跳过，绝不临时换系统嗓子。 */
+function broadcast(payload: SpeakPayload, segment: SpeechSegment): void {
+  const packet: SpeakPayload =
+    segment.audio && segment.audioMime
+      ? { ...payload, text: segment.text, audio: segment.audio.toString('base64'), audioMime: segment.audioMime }
+      : { ...payload, text: segment.text }
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IPC.VOICE_SPEAK, packet)
 }
