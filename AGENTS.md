@@ -165,6 +165,23 @@ Everything interesting lives in the main process: GSI chat intake, translation s
   Hotwords (`asrHotwords` setting, comma-separated) are a constructor-time config — the worker's
   recognizer cache key includes them, so editing the list reloads the engine. Single-char
   corrections are never auto-added (noise); the correction loop only merges ≥2-char diffs.
+- GV (GPT-SoVITS) fine-tune data prep resolves every wav by BASENAME ONLY inside the flat `inp_wav_dir`
+  (`2-get-hubert-wav32k.py:116-118` strips the path, then joins it onto `inp_wav_dir`); files living in any
+  other directory fail to load and the surrounding try/except swallows the error SILENTLY. The zh/en voice
+  packs even share identical clip basenames. Rule: keep every dataset clip in ONE flat directory (prefix
+  collisions, e.g. `en_`), and after prep always assert name2text == semantic == wav32k == cleaned-list
+  count before training — a mismatch is data loss, not a formatting quirk (a half-English dataset once
+  shipped invisibly).
+- Retraining the same speaker overwrites same-named weight files in the package's `*_weights_v2/` dirs.
+  Rename the previous generation first (e.g. `<name>-old<dataset>-e15.ckpt`); the app-side copy under
+  `data/gpt-sovits/weights/<speaker>/` is the only other rollback.
+- api_v2 `POST /tts` (v2pro package) takes JSON fields `ref_audio_path` / `prompt_text` / `prompt_lang` /
+  `text` / `text_lang` — NOT the GET aliases `refer_wav_path`/`prompt_language`/`text_language`. POST the
+  payload from a file (`curl --data-binary @file`); CJK text in CLI args dies on the codepage.
+- Batch ASR outside the app (Qwen3 via `sherpa-onnx-node`): `require` must use the ABSOLUTE path into
+  `<project>/node_modules/sherpa-onnx-node` when the script lives outside the project tree; load the engine
+  once per process (~3 s/clip CPU warm vs ~10 s with cold load) and write resumable
+  `path|speaker|LANG|text` lists.
 - Never commit `.tmp/` or `.pi/`.
 - App-owned data — including non-dependency artifacts the app produces (recordings, exports, reports, logs) — stays inside the portable data directory (`userData`), never scattered onto other drives. Never hardcode external paths (`D:\work\...`) as runtime dependencies: the installed build's data lives in the `<install>-data` sibling directory, and a fresh install must work with zero external paths.
 - Developer-only tooling (e.g. the `D:\work\ft-qwen3` fine-tune workspace: training env, cloned upstream repos, base model weights) stays outside the repo, and app code must have ZERO references to it — no hardcoded paths, no imports, no spawn targets, no "it exists on this machine" assumptions. Before an app feature can use something that lives in a developer workspace, copy it into the project first: bundled resource under `resources/`, or generated into `userData`.
