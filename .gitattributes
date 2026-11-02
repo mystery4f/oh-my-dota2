@@ -1,0 +1,3 @@
+# Normalize every detected-text file: LF in the repo, CRLF in the worktree.
+# Fixes mixed-EOL files breaking IDE patch-apply hunk matching.
+* text=auto eol=crlf
