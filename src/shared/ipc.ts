@@ -802,6 +802,10 @@ export interface SovitsVoicePack {
   /** 盘上已有且字节数对得上的部分（.part 不算），差 bytes-haveBytes 才是要下的。 */
   haveBytes: number
   installed: boolean
+  /** 本地 refs.json 条目里记录的安装版本；旧安装没记录时为 null。 */
+  installedVersion: string | null
+  /** 清单版本与已装记录版本不同（换版了），面板据此把「下载」换「升级」。 */
+  upgradable: boolean
   downloading: boolean
   /** 0–1；已就绪恒为 1。 */
   progress: number

@@ -211,7 +211,7 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
   - 已定：声出走虚拟声卡进游戏语音频道；`Alt+Shift+V` 一键到底；失败静默跳过不退文出；说话键 app 自动按住，**默认 F5、可配置**。
   - 待定：虚拟声卡选型（VB-Cable vs VoiceMeeter）、翻译是否反向。
   - 训练侧（应用外）：GV 英文包数据与微调，产物走现有音色包权重切换（`gptWeights`/`sovitsWeights`），应用侧零改动。
-  - 引擎换型候选（2026-11-01 记录）：[IndexTTS](https://github.com/index-tts/index-tts)——若 GV 英文包训练成本/效果不理想，调研后考虑把 GV 换成它；未定，先记着。
+  - 引擎换型（2026-11-01 POC，2026-11-02 判决）：[IndexTTS](https://github.com/index-tts/index-tts) **否决保留 GV**——零样本一般、LoRA 微调后质量可用，但 RTX 4060 Laptop 8GB 上 RTF 5.6-6.4（一句 3 秒语音要 16-20 秒）、峰值 ~7GB，与游戏同开不可能；判决存档见 issue #18。
 - `#28` 识别个性化（2026-11-02 记录）：whisper 对重口音中文偏弱 → 先后上过 SenseVoice-small 与 Qwen3-ASR 两个 sherpa 引擎；**SenseVoice 已废弃移除（2026-11-02，用户拍板只留 Qwen3）**，识别引擎收窄为 whisper / qwen3（老存档的 sensevoice 自动迁移）。
   - **已落地（2026-11-02）**：Qwen3-ASR（0.6B int8，~838MB 手动下载 tar.bz2 面板解压）+ **热词注入**（`asrHotwords`，仅 Qwen3 生效）+ **纠错回路**（识别记录点「纠错」改对，≥2 字差异词自动并入热词表）；微调路线记档不排期（触发条件见 `docs/adr/asr-hotwords-not-finetune.md`）。
 

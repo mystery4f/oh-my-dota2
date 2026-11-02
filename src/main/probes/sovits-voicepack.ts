@@ -7,9 +7,12 @@ import { applySovitsVoice } from '../services/voice/sovits-server'
 import {
   cleanupStalePackFiles,
   downloadPackFile,
+  findPackEntry,
   mergeRefsJson,
   mergeVoicePacks,
   packRefsMerge,
+  packUpgradable,
+  packVersionFromEntry,
   parseVoicePackManifest,
   planVoicePackFiles,
   resolveVoicePacks,
@@ -80,6 +83,13 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
           refAudio: { path: 'new-hero/ref.wav', bytes: 1 }, gptWeights: { path: 'new-hero/g.ckpt', bytes: 2 }, sovitsWeights: { path: 'new-hero/s.pth', bytes: 3 } }
       ]
     }
+    const manifestV2 = {
+      ...manifestOk,
+      packs: [
+        { ...manifestOk.packs[0], version: 'e31', gptWeights: { path: 'windranger/windranger-e31.ckpt', bytes: 155_312_334 } },
+        manifestOk.packs[1]
+      ]
+    }
     const parsed = parseVoicePackManifest(manifestOk)
     push('合法清单解析出两个包', parsed !== null && parsed.length === 2, parsed ? `${parsed.length}` : 'null')
     push('version 与 URL 透传', parsed !== null && parsed[0].version === 'e30' && parsed[0].gptWeights.url.includes('windranger-e30.ckpt'))
@@ -121,6 +131,19 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
     const sameAudioMerged = packRefsMerge([{ name: '别名', audio: VOICE_PACKS[0].refAudio.relPath, promptText: 'x', promptLang: 'zh' }], VOICE_PACKS[0])
     push('同音频不同名也替换', sameAudioMerged.list.length === 1 && sameAudioMerged.staleAudio.length === 0)
 
+    // —— 纯函数：安装版本记录与升级判定 ——
+    const versionedEntry = (packRefsMerge([], VOICE_PACKS[0]).list.at(-1) ?? {}) as Record<string, unknown>
+    push('新条目记录包 id 与版本', versionedEntry.packId === VOICE_PACKS[0].id && versionedEntry.packVersion === VOICE_PACKS[0].version)
+    push('findPackEntry 按名配对', findPackEntry([{ name: VOICE_PACKS[0].name, audio: 'x/x.wav' }], VOICE_PACKS[0]) !== null)
+    push('findPackEntry 按音频配对', findPackEntry([{ name: '别名', audio: VOICE_PACKS[0].refAudio.relPath }], VOICE_PACKS[0]) !== null)
+    push('findPackEntry 不配对返回 null', findPackEntry([{ name: '路人', audio: 'x/x.wav' }], VOICE_PACKS[0]) === null)
+    push('findPackEntry 容忍坏索引', findPackEntry('nope', VOICE_PACKS[0]) === null)
+    push('条目缺版本读成 null', packVersionFromEntry({ name: '风行者' }) === null)
+    push('版本字段类型不对读成 null', packVersionFromEntry({ packVersion: 42 }) === null)
+    push('换版判定：版本不同算可升级', packUpgradable('e15', 'e30'))
+    push('同版本不算升级', !packUpgradable('e30', 'e30'))
+    push('没记录版本不乱报升级', !packUpgradable(null, 'e30'))
+
     const packV2 = { ...VOICE_PACKS[0], gptWeights: { ...VOICE_PACKS[0].gptWeights, relPath: 'windranger/windranger-e30.ckpt' } }
     const wDir = join(weightsRoot, 'windranger')
     mkdirSync(wDir, { recursive: true })
@@ -136,11 +159,25 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
     // —— 集成：远端清单经本地 HTTP 生效（resolveVoicePacks 可注入 URL） ——
     const manifestServer = await startHttpServer((req, reply) => {
       if (req.url === '/voicepacks.json') reply(Buffer.from(JSON.stringify(manifestOk)), 200, { 'content-type': 'application/json' })
+      else if (req.url === '/voicepacks-v2.json') reply(Buffer.from(JSON.stringify(manifestV2)), 200, { 'content-type': 'application/json' })
       else reply(Buffer.from('nope'), 404)
     })
     try {
       const fromHttp = await resolveVoicePacks({ url: `http://127.0.0.1:${manifestServer.port}/voicepacks.json` })
       push('远端清单优先于内置', fromHttp.find((item) => item.id === 'windranger')?.version === 'e30' && fromHttp.some((item) => item.id === 'new-hero'))
+      const fromV2 = await resolveVoicePacks({ url: `http://127.0.0.1:${manifestServer.port}/voicepacks-v2.json` })
+      const v2Pack = fromV2.find((item) => item.id === 'windranger')
+      if (v2Pack) {
+        push('升级链路：远端清单推到 e31', v2Pack.version === 'e31')
+        push('升级链路：旧安装记录判可升级', packUpgradable('e30', v2Pack.version))
+        const oldEntry = findPackEntry([{ name: '风行者', audio: 'windranger/windranger-arcana-ref-zh.wav', packVersion: 'e30' }], v2Pack)
+        push(
+          '升级链路：老条目按名配对且版本可读',
+          oldEntry !== null && packVersionFromEntry(oldEntry) === 'e30' && packUpgradable(packVersionFromEntry(oldEntry), v2Pack.version)
+        )
+      } else {
+        push('升级链路：远端清单推到 e31', false, 'v2 清单里没有 windranger')
+      }
       const fallbackPacks = await resolveVoicePacks({ url: `http://127.0.0.1:${manifestServer.port}/missing.json` })
       push(
         '清单 404 落回内置兜底',
