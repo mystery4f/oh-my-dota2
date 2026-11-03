@@ -314,6 +314,17 @@
 - 全部版本冻结自试点实测组合（`ASR_FT_PIP_SPEC`），别随手升级 torch/transformers——官方脚本对版本敏感。
 - 教训：uv 版本号不能按字符串排序挑「最新」，`0.10.2` 会输给 `0.9.5`——按段转数值比较（探针抓过一次）。
 
+## GV 微调（GPT-SoVITS v2pro 包）
+
+### 训练命令真相源（读自上游 webui.py，2026-11-04）
+- SoVITS 腿：`<runtime>/python -s GPT_SoVITS/s2_train.py --config <tmp_s2.json>`（webui.py:542，v3/v4 才换 s2_train_v3_lora.py）；GPT 腿：`-s GPT_SoVITS/s1_train.py --config_file <tmp_s1.yaml>`（webui.py:636）；cwd 一律在引擎包根。
+- 配置不是命令行参数，是**先写文件再启动**：s2 写 `tmp/tmp_s2.json`（webui open1Ba :485-555 在模板上 patch：epochs/batch_size/pretrained_s2G、s2D 路径/save_weight_dir 等）；s1 写 `tmp/tmp_s1.yaml`（open1Bb :586-645：half_weights_save_dir、`6-name2semantic.tsv`、`2-name2text.txt` 路径等）。应用的 `buildS2TrainConfigData`/`buildS1TrainConfigData`（`src/shared/train.ts`）照抄这两段 patch，模板取包内 `s2{ver}.json` / `s1longer-v2.yaml`。
+- 版本→底模/权重目录映射全在包内 `config.py`（v2ProPlus → gsv-v4-pretrained/s1v3.ckpt + v2Pro/s2Gv2ProPlus.pth，权重目录 `*_weights_v2ProPlus`）；应用内 `GV_VERSION_INFO` 与它一一对应，探针钉住六版全表。
+- 备料四件套（官方 1-get-text / 2-get-hubert-wav32k / 3-get-semantic 的产物）：`2-name2text.txt`、`4-cnhubert/`、`5-wav32k/`、`6-name2semantic.tsv`——`judgeGvDataset` 按这个验收 `logs/<实验名>/`，齐了数据集下拉才显示「就绪」。切分/标注仍走官方 webui（官方有降噪和试听，应用不重造）。
+- 产物注册：两腿各自 `*_weights_v2*` 目录里挑 `<实验名>_` 前缀 mtime 最新的 ckpt/pth 拷进 `data/gpt-sovits/weights/<音色名>/`，参考音频取 `.list` 第一行（丢了从 `5-wav32k/` 兜底），refs.json 按音色名 upsert。
+- 坑（读源码证实）：备料脚本解析 wav 时**只按文件名**在 `inp_wav_dir` 平铺目录里找（2-get-hubert-wav32k.py:116-118 剥掉路径再拼），路径不对会被 try/except 静默吞掉——数据集必须平铺、前缀防撞（en_/zh_）。重训同名实验会覆盖包内同名权重，注册时拷走一份正好兼作回滚点。
+- 待真机回填：真训练时长与显存（batch 8 在 8G 卡上是否吃得下）、训练日志里 tqdm 的具体形态（`parseTrainProgress` 已按 epoch/tqdm/step/裸百分数四级兜底，真跑一次看命中哪级）。
+
 ## 发版与更新
 
 ### 装好的应用查不到更新（latest.yml 没上传）
