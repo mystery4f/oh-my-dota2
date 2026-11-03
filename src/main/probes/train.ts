@@ -7,6 +7,7 @@ import {
   shouldKeepTake,
   takeLineId,
   buildFtDatasetEntries,
+  buildFtGroupProgress,
   buildFtJsonlLine,
   canStartTrain,
   deriveTrainPlan,
@@ -124,6 +125,15 @@ export function runTrainProbe(): void {
   )
   push('打包只收已录的逐句句', built.entries.length === 2 && built.entries[0].wavPath.includes('G15-L01') && built.notRecorded === 1, JSON.stringify(built))
   push('自由说组整组跳过（无标准答案）', built.entries.every((entry) => entry.wavPath.includes('G15')), JSON.stringify(built.entries.map((entry) => entry.wavPath)))
+  const progress = buildFtGroupProgress(
+    groups,
+    (key) => (key === 'G15-L01' ? 1500 : key === 'G15-L03' ? 2300 : key.startsWith('G21-T') && !key.includes('T03') && Number(key.slice(-2)) <= 2 ? 800 : null)
+  )
+  push(
+    '组进度：缺句报名、时长累加、free 组断链即止',
+    progress[0].done === 2 && progress[0].total === 3 && progress[0].missing[0] === 2 && progress[0].durationMs === 3800 && progress[1].done === 2 && progress[1].total === 2 && progress[1].missing.length === 0,
+    JSON.stringify(progress)
+  )
   const jsonl = buildFtJsonlLine(built.entries[0])
   push('JSONL 行带 language Chinese 前缀', jsonl.includes('"audio":"X:/rec/G15-L01.wav"') && jsonl.includes('language Chinese<asr_text>中路二塔快没了。'), jsonl)
   const split = splitTrainEval(built.entries)

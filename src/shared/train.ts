@@ -376,6 +376,53 @@ export function buildFtJsonlText(entries: FtDatasetEntry[]): string {
   return `${entries.map((entry) => buildFtJsonlLine(entry)).join('\n')}\n`
 }
 
+/** 组进度视图（T4 总览/准备报告共用）：done/时长/缺句清单，一组一行。 */
+export interface FtGroupProgress {
+  id: string
+  mode: 'lines' | 'free'
+  done: number
+  /** lines 组 = 句子总数；free 组没有目标长度，等于 done。 */
+  total: number
+  durationMs: number
+  /** lines 组没录的句号；free 组恒空。 */
+  missing: number[]
+}
+
+/**
+ * 录音 × 稿子 → 组进度。recDurationMs 按完整键（recordingKey 产物）回时长，没录回 null；
+ * free 组顺数 T01、T02…断链即止（自由说组没有标准长度，尾段就是终点）。
+ */
+export function buildFtGroupProgress(
+  groups: FtDatasetGroupView[],
+  recDurationMs: (key: string) => number | null,
+): FtGroupProgress[] {
+  const result: FtGroupProgress[] = []
+  for (const group of groups) {
+    let done = 0
+    let durationMs = 0
+    const missing: number[] = []
+    if (group.mode === 'free') {
+      for (let n = 1; ; n += 1) {
+        const ms = recDurationMs(recordingKey(group.id, 'free', n))
+        if (ms === null) break
+        done += 1
+        durationMs += ms
+      }
+    } else {
+      for (const line of group.lines) {
+        const ms = recDurationMs(recordingKey(group.id, 'lines', line.no))
+        if (ms === null) missing.push(line.no)
+        else {
+          done += 1
+          durationMs += ms
+        }
+      }
+    }
+    result.push({ id: group.id, mode: group.mode, done, total: group.mode === 'free' ? done : group.lines.length, durationMs, missing })
+  }
+  return result
+}
+
 // —— 录音判定（录音面板）：何时停、收不收、段叫什么 ——
 /** 试点（G15，20 句）实测阈值；改任何一项之前先过 --train-probe，再真人试录一遍。 */
 export const RECORDING_LIMITS = {

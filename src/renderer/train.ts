@@ -9,7 +9,8 @@ import {
   GV_VERSION_INFO,
   type GvDatasetJudgement,
   type GvVersion,
-  type TrainStartRequest
+  type TrainStartRequest,
+  buildFtGroupProgress
 } from '@shared/train'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
@@ -30,6 +31,7 @@ const ftReplayBtn = $<HTMLButtonElement>('ftReplay')
 const ftHint = $<HTMLElement>('ftHint')
 const ftError = $<HTMLDivElement>('ftError')
 const gvError = $<HTMLDivElement>('gvError')
+const ftOverview = $<HTMLElement>('ftOverview')
 const gvDatasetSel = $<HTMLSelectElement>('gvDataset')
 const gvDatasetInfo = $<HTMLElement>('gvDatasetInfo')
 const gvVersionSel = $<HTMLSelectElement>('gvVersion')
@@ -229,6 +231,23 @@ function doneCount(group: FtScriptGroup): number {
   return group.lines.filter((line) => recs.has(recordingKey(group.id, group.mode, line.no))).length
 }
 
+/** T4 组总览：一句汇总（已录段数/总时长/逐句组完成度）+ 只列没录满的组（缺句清单）。 */
+function renderFtOverview(): void {
+  const progress = buildFtGroupProgress(
+    groups.map((g) => ({ id: g.id, mode: g.mode, lines: g.lines.map((l) => ({ no: l.no, text: l.text })) })),
+    (key) => recs.get(key)?.durationMs ?? null
+  )
+  const takes = progress.reduce((n, p) => n + p.done, 0)
+  const totalMs = progress.reduce((n, p) => n + p.durationMs, 0)
+  const linesGroups = progress.filter((p) => p.mode === 'lines')
+  const completeGroups = linesGroups.filter((p) => p.missing.length === 0).length
+  const parts = [`已录 ${takes} 段 · ${Math.round(totalMs / 1000)}s · 逐句组完成 ${completeGroups}/${linesGroups.length}`]
+  for (const p of linesGroups.filter((x) => x.missing.length > 0)) {
+    parts.push(`${p.id} 缺 ${p.missing.map((no) => takeLineId('lines', no)).join('、')}`)
+  }
+  ftOverview.textContent = parts.join(' ｜ ')
+}
+
 /** 当前要录的那句：lines 模式取第一个没录的句号（都录完就停在最后一句），free 模式下一段。 */
 function pickCurrent(): void {
   const group = currentGroup()
@@ -244,6 +263,7 @@ function pickCurrent(): void {
 function renderFt(): void {
   const group = currentGroup()
   if (!group) return
+  renderFtOverview()
   const done = doneCount(group)
   const total = group.mode === 'free' ? Math.max(done, 20) : group.lines.length
   ftGroupInfo.textContent = `${group.id} ${group.title} · 已录 ${done}/${total}`
