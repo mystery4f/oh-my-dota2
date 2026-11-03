@@ -23,12 +23,18 @@ import {
   splitTrainEval,
   type AsrFtPaths,
   type FtDatasetGroupView,
-  type TrainTaskStatus
+  type TrainTaskStatus,
+  GV_VERSION_INFO,
+  GV_VERSION_DEFAULT,
+  normalizeGvVersion,
+  buildS2TrainConfigData,
+  buildS1TrainConfigData,
+  judgeGvDataset
 } from '@shared/train'
 import { pickLatestUvAsset, planAsrFtInstallSteps } from '../services/train/asr-ft-install'
 
 /**
- * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度/录音判定）。
+ * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度/录音判定/GV 微调配置）。
  * 纯函数零进程零网络；进程生命周期（spawn/停/树杀）进 docs/ACCEPTANCE.md 人工验收。
  */
 
@@ -66,8 +72,12 @@ export function runTrainProbe(): void {
   push('demo：node -e 跑内联脚本，可直接启动', demo.exe === 'node' && demo.args[0] === '-e' && !demo.unavailable, JSON.stringify({ exe: demo.exe, arg0: demo.args[0] }))
   push('demo 脚本带 epoch 行与 10 轮上限', demo.args.join(' ').includes('epoch ${i}/${n}') && demo.args.join(' ').includes('const n = 10'), '内联脚本内容')
   push('asr-ft：环境没附件就拒启动并说明原因', (deriveTrainPlan({ kind: 'asr-ft', dataset: '' }).unavailable ?? '').includes('环境没就绪'), deriveTrainPlan({ kind: 'asr-ft', dataset: '' }).unavailable ?? '')
-  push('gv-gpt：T1 拒启动并说明去向', (deriveTrainPlan({ kind: 'gv-gpt', dataset: '' }).unavailable ?? '').includes('T3'), deriveTrainPlan({ kind: 'gv-gpt', dataset: '' }).unavailable ?? '')
-  push('gv-sovits：T1 拒启动并说明去向', (deriveTrainPlan({ kind: 'gv-sovits', dataset: '' }).unavailable ?? '').includes('T3'), deriveTrainPlan({ kind: 'gv-sovits', dataset: '' }).unavailable ?? '')
+  push(
+    'gv-*：没 gvResolved 备料就拒启动并说明原因（T3 起是真训练，备料在主进程做）',
+    (deriveTrainPlan({ kind: 'gv-gpt', dataset: '' }).unavailable ?? '').includes('没就绪') &&
+      (deriveTrainPlan({ kind: 'gv-sovits', dataset: '' }).unavailable ?? '').includes('没就绪'),
+    deriveTrainPlan({ kind: 'gv-gpt', dataset: '' }).unavailable ?? ''
+  )
   push('乱值 kind 打回 demo', normalizeTrainKind('bogus') === 'demo' && normalizeTrainKind(42) === 'demo', `${String(normalizeTrainKind('bogus'))}/${String(normalizeTrainKind(42))}`)
   push('合法 kind 原样通过', normalizeTrainKind('gv-sovits') === 'gv-sovits', normalizeTrainKind('gv-sovits'))
 
@@ -198,6 +208,97 @@ export function runTrainProbe(): void {
       inferenceHoldLabel('released') === '推理已恢复' &&
       inferenceHoldLabel('release-failed').includes('恢复失败'),
     inferenceHoldLabel('held'),
+  )
+  // —— GV 微调（T3）：版本表 / 配置构造 / 备料验收 / 计划接线 ——
+  const gvVersions = Object.keys(GV_VERSION_INFO)
+  push(
+    'GV 版本表六版齐全，缺省 v2ProPlus',
+    gvVersions.length === 6 &&
+      gvVersions.includes('v2ProPlus') &&
+      normalizeGvVersion('v2') === 'v2' &&
+      normalizeGvVersion('whatever') === GV_VERSION_DEFAULT,
+    gvVersions.join(','),
+  )
+  const s2Built = buildS2TrainConfigData(
+    { train: { batch_size: 4 }, data: { a: 1 }, model: { version: 'v2' } },
+    {
+      train: { version: 'v2ProPlus', batchSize: 8, epochs: 8 },
+      expName: 'demo',
+      pretrainedG: 'g.pth',
+      pretrainedD: 'd.pth',
+      sovitsWeightsRoot: 'SoVITS_weights_v2ProPlus'
+    }
+  )
+  const s2Train = (s2Built?.train ?? null) as Record<string, unknown> | null
+  push(
+    's2 配置构造：批/轮/底模/实验目录/权重落点/版本全就位',
+    !!s2Built &&
+      !!s2Train &&
+      s2Train['batch_size'] === 8 &&
+      s2Train['epochs'] === 8 &&
+      s2Train['pretrained_s2G'] === 'g.pth' &&
+      s2Built['version'] === 'v2ProPlus' &&
+      s2Built['s2_ckpt_dir'] === 'logs/demo' &&
+      s2Built['save_weight_dir'] === 'SoVITS_weights_v2ProPlus' &&
+      s2Built['name'] === 'demo',
+    JSON.stringify(s2Built),
+  )
+  const s1Built = buildS1TrainConfigData(
+    { train: { batch_size: 4, epochs: 20 } },
+    { train: { version: 'v2ProPlus', batchSize: 8, epochs: 15 }, expName: 'demo', pretrainedS1: 's1.ckpt', gptWeightsRoot: 'GPT_weights_v2ProPlus' }
+  )
+  const s1Train = (s1Built?.train ?? null) as Record<string, unknown> | null
+  push(
+    's1 配置构造：批/轮/DPO/底模/三路径全就位',
+    !!s1Built &&
+      !!s1Train &&
+      s1Train['batch_size'] === 8 &&
+      s1Train['epochs'] === 15 &&
+      s1Train['if_dpo'] === true &&
+      s1Train['half_weights_save_dir'] === 'GPT_weights_v2ProPlus' &&
+      s1Built['pretrained_s1'] === 's1.ckpt' &&
+      s1Built['train_semantic_path'] === 'logs/demo/6-name2semantic.tsv' &&
+      s1Built['train_phoneme_path'] === 'logs/demo/2-name2text.txt' &&
+      s1Built['output_dir'] === 'logs/demo/logs_s1_v2ProPlus',
+    JSON.stringify(s1Built),
+  )
+  push(
+    '配置构造对缺节点模板回 null（引擎包不完整时拒写）',
+    buildS2TrainConfigData({}, { train: { version: 'v2', batchSize: 8, epochs: 8 }, expName: 'x', pretrainedG: '', pretrainedD: '', sovitsWeightsRoot: '' }) === null &&
+      buildS1TrainConfigData(null, { train: { version: 'v2', batchSize: 8, epochs: 8 }, expName: 'x', pretrainedS1: '', gptWeightsRoot: '' }) === null,
+    'null-guard',
+  )
+  const allThere = judgeGvDataset({ expName: 'demo', phonemes: true, semantic: true, hubert: true, wav32k: true })
+  const noSemantic = judgeGvDataset({ expName: 'demo', phonemes: true, semantic: false, hubert: true, wav32k: true })
+  push(
+    '备料验收：四件套齐 = 可开训，缺一件报名',
+    allThere.ready && allThere.missing.length === 0 && !noSemantic.ready && noSemantic.missing.some((m) => m.includes('语义表')),
+    `${allThere.missing.length} | ${noSemantic.missing.join(',')}`,
+  )
+  const gvBare = deriveTrainPlan({ kind: 'gv-sovits', dataset: 'demo' })
+  const gvWired = deriveTrainPlan({
+    kind: 'gv-gpt',
+    dataset: 'demo',
+    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', script: 'GPT_SoVITS/s1_train.py' }
+  })
+  push(
+    'GV 计划：没备料拒启动；备好了 argv/cwd 全对（s1 用 --config_file）',
+    gvBare.unavailable?.includes('没就绪') === true &&
+      gvWired.unavailable === undefined &&
+      gvWired.exe === 'P' &&
+      JSON.stringify(gvWired.args) === JSON.stringify(['-s', 'GPT_SoVITS/s1_train.py', '--config_file', 'C']) &&
+      gvWired.cwd === 'H',
+    `${gvBare.unavailable ?? '-'} | ${gvWired.args.join(' ')}`,
+  )
+  const gvSovitsArgs = deriveTrainPlan({
+    kind: 'gv-sovits',
+    dataset: 'demo',
+    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', script: 'GPT_SoVITS/s2_train.py' }
+  })
+  push(
+    'GV s2 计划用 --config（非 GET 别名，照抄 webui）',
+    JSON.stringify(gvSovitsArgs.args) === JSON.stringify(['-s', 'GPT_SoVITS/s2_train.py', '--config', 'C']),
+    gvSovitsArgs.args.join(' '),
   )
   let failed = 0
   for (const item of cases) {

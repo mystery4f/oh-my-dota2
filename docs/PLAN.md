@@ -171,7 +171,7 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 
 - [x] #11 T1 训练窗口骨架与任务模型：独立窗口 + 任务生命周期 + 决策缝 + `--train-probe`（c3d83df；探针 55/55）
 - [x] #12 T2 推理互斥接线：训练运行自动停 GV 推理、终态自动恢复、恢复失败窗口明示（blocked by #11）（本提交；`--train-probe` 56/56）
-- [ ] #13 T3 GV 侧 MVP：数据集登记、gv-gpt/gv-sovits 训练编排、产物注册音色包（blocked by #11、#12）
+- [x] #13 T3 GV 侧 MVP：数据集登记（备料四件套验收 + webui 开关）、gv-gpt/gv-sovits 真训练编排（s2 `--config` / s1 `--config_file`，配置照抄 webui open1Ba/open1Bb）、产物一键注册音色包（两腿最新权重 + 参考音频 upsert refs）（blocked by #11、#12）（本提交；`--train-probe` 62/62；降噪/切分/标注仍走官方 webui）
 - [ ] #14 T4 ASR 数据准备与录音组状态：组总览/回放在库，差准备报告与组完成总览（blocked by #11；开工以第一轮手动微调跑通为排期条件）
 - [ ] #15 T5 ASR 训练与部署：官方 SFT + ONNX 导出 + 部署口 + A/B 试音（blocked by #12、#14；asr-ft 安装/切换/回滚缝已在库）
 - [ ] #16 T6 验收与基线：ACCEPTANCE/BENCH/NOTES 回写（blocked by #13、#15）

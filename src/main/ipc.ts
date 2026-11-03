@@ -31,6 +31,8 @@ import {
   rollbackAsrFtModel
 } from './services/train/asr-ft'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
+import { closeGvWebui, openGvWebui, registerGvWeights, resolveGvTrainRequest, scanGvDatasets } from './services/train/gv'
+import { discoverSovitsHome } from './services/voice/sovits-server'
 import { normalizeTrainKind } from '@shared/train'
 import { gsiStatus } from './services/gsi'
 
@@ -161,13 +163,30 @@ const handlers: MainHandlers = {
   // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
   trainOpen: () => getTrainWindow().open(),
   trainStart: async (request) => {
-    if (normalizeTrainKind(request.kind) !== 'asr-ft') return getTrainManager().start(request)
+    const kind = normalizeTrainKind(request.kind)
+    // gv-*：先把引擎包/底模/数据集/配置文件备齐，缺口在这里就报出来，不进 manager。
+    if (kind === 'gv-gpt' || kind === 'gv-sovits') {
+      const resolved = resolveGvTrainRequest(request)
+      return resolved.ok && resolved.request
+        ? getTrainManager().start(resolved.request)
+        : { ok: false, error: resolved.error ?? 'GV 训练备料失败' }
+    }
+    if (kind !== 'asr-ft') return getTrainManager().start(request)
     // asr-ft：先把环境/数据/目录备齐，再带着「训练完接导出」的链子交给 manager。
     const resolved = await resolveAsrFtTrainRequest(String(request.dataset ?? ''))
     if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
     const exportRequest = resolved.request
     return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest))
   },
+  trainGvDatasets: () => {
+    const home = discoverSovitsHome()
+    return home ? scanGvDatasets(home) : []
+  },
+  trainGvWebui: ({ open }) => {
+    const result = open ? openGvWebui() : closeGvWebui()
+    return { ...result, running: open }
+  },
+  trainGvRegister: (payload) => registerGvWeights(payload),
   trainStop: () => getTrainManager().stop(),
   trainSnapshot: () => getTrainManager().snapshot(),
   // ASR 微调录音（T4a）：读稿解析 + 录音 CRUD，文件全在 userData/asr-ft/ 下。

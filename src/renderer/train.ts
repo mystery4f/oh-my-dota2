@@ -3,6 +3,14 @@
 import { advanceRecording, canStartTrain, inferenceHoldLabel, initialRecordingState, recordingKey, shouldKeepTake, takeLineId, type RecordingStepState, type TrainSnapshot } from '@shared/train'
 import { encodeWav16k } from '@shared/wav'
 import type { FtRecInfo, FtScriptGroup } from '@shared/ipc'
+import {
+  GV_DEFAULTS,
+  GV_VERSION_DEFAULT,
+  GV_VERSION_INFO,
+  type GvDatasetJudgement,
+  type GvVersion,
+  type TrainStartRequest
+} from '@shared/train'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 const kindSel = $<HTMLSelectElement>('kind')
@@ -21,6 +29,16 @@ const ftStopRecBtn = $<HTMLButtonElement>('ftStopRec')
 const ftReplayBtn = $<HTMLButtonElement>('ftReplay')
 const ftHint = $<HTMLElement>('ftHint')
 const ftError = $<HTMLDivElement>('ftError')
+const gvError = $<HTMLDivElement>('gvError')
+const gvDatasetSel = $<HTMLSelectElement>('gvDataset')
+const gvDatasetInfo = $<HTMLElement>('gvDatasetInfo')
+const gvVersionSel = $<HTMLSelectElement>('gvVersion')
+const gvBatchInput = $<HTMLInputElement>('gvBatch')
+const gvEpochsInput = $<HTMLInputElement>('gvEpochs')
+const gvWebuiBtn = $<HTMLButtonElement>('gvWebui')
+const gvNameInput = $<HTMLInputElement>('gvName')
+const gvRegisterBtn = $<HTMLButtonElement>('gvRegister')
+const gvHint = $<HTMLElement>('gvHint')
 
 const STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -73,13 +91,28 @@ function render(snap: TrainSnapshot): void {
 
 async function start(): Promise<void> {
   const kind = kindSel.value as 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
-  const dataset = datasetInput.value.trim()
+  const isGv = kind === 'gv-gpt' || kind === 'gv-sovits'
+  const dataset = isGv ? gvDatasetSel.value : datasetInput.value.trim()
   // 记住这单的选择，下次开窗自动填（setSettings 在主进程落盘）。
   void window.api.setSettings({ trainKind: kind, trainDataset: dataset })
-  const result = await window.api.trainStart({ kind, dataset })
+  const request: TrainStartRequest = { kind, dataset }
+  // gv-*：数据集下拉就是实验名；备料/配置文件由主进程准备，缺口会原样报回。
+  if (isGv) {
+    request.gv = {
+      version: gvVersionSel.value as GvVersion,
+      batchSize: Number(gvBatchInput.value),
+      epochs: Number(gvEpochsInput.value)
+    }
+  }
+  const result = await window.api.trainStart(request)
   if (!result.ok && result.error) {
-    statusEl.textContent = result.error
-    statusEl.classList.add('error')
+    if (isGv) {
+      gvError.textContent = result.error
+      void refreshGvDatasets()
+    } else {
+      statusEl.textContent = result.error
+      statusEl.classList.add('error')
+    }
   }
 }
 
@@ -91,6 +124,86 @@ async function stop(): Promise<void> {
   }
 }
 
+
+// ---------- GV（GPT-SoVITS）微调（T3） ----------
+
+let gvDatasets: GvDatasetJudgement[] = []
+let gvWebuiOpen = false
+
+/** 版本下拉一次成型；六版全来自 shared 的 GV_VERSION_INFO，缺省 v2ProPlus。 */
+function initGvVersionSel(): void {
+  for (const [version, info] of Object.entries(GV_VERSION_INFO)) {
+    const opt = document.createElement('option')
+    opt.value = version
+    opt.textContent = version
+    opt.title = info.s2PretrainedG
+    gvVersionSel.appendChild(opt)
+  }
+  gvVersionSel.value = GV_VERSION_DEFAULT
+}
+
+/** 批/轮随任务类型走默认（GV_DEFAULTS 照抄 webui 的保守值）。 */
+function applyGvDefaults(): void {
+  const def = kindSel.value === 'gv-gpt' ? GV_DEFAULTS['gv-gpt'] : GV_DEFAULTS['gv-sovits']
+  gvBatchInput.value = String(def.batchSize)
+  gvEpochsInput.value = String(def.epochs)
+}
+
+function applyGvDatasetInfo(): void {
+  const picked = gvDatasets.find((d) => d.expName === gvDatasetSel.value)
+  gvDatasetInfo.textContent = picked
+    ? picked.ready
+      ? '备料齐全，可开训'
+      : `缺：${picked.missing.join('、')}`
+    : '没有实验；打开 webui 备好数据集后点刷新'
+}
+
+async function refreshGvDatasets(): Promise<void> {
+  try {
+    gvDatasets = await window.api.trainGvDatasets()
+  } catch (err) {
+    gvError.textContent = `备料清单读取失败（${String(err)}）`
+    return
+  }
+  gvError.textContent = ''
+  const previous = gvDatasetSel.value
+  gvDatasetSel.replaceChildren()
+  for (const d of gvDatasets) {
+    const opt = document.createElement('option')
+    opt.value = d.expName
+    opt.textContent = d.ready ? d.expName : `${d.expName}（备料不全）`
+    gvDatasetSel.appendChild(opt)
+  }
+  if (previous && gvDatasets.some((d) => d.expName === previous)) gvDatasetSel.value = previous
+  applyGvDatasetInfo()
+}
+
+/** webui 开关：切分、打标注、备料三步都在 webui 里做，这里只负责开关与清单刷新。 */
+async function toggleGvWebui(): Promise<void> {
+  gvWebuiBtn.disabled = true
+  const result = await window.api.trainGvWebui({ open: !gvWebuiOpen })
+  gvWebuiBtn.disabled = false
+  if (!result.ok) {
+    gvError.textContent = result.error ?? 'webui 操作失败'
+    return
+  }
+  gvWebuiOpen = !gvWebuiOpen
+  gvWebuiBtn.textContent = gvWebuiOpen ? '关闭 webui' : '打开 webui'
+  if (gvWebuiOpen) setTimeout(() => void refreshGvDatasets(), 3000)
+}
+
+/** 产物登记：把当前实验两腿的最新权重 + 参考音频收进音色包库。 */
+async function registerGv(): Promise<void> {
+  const name = gvNameInput.value.trim()
+  if (!name) {
+    gvHint.textContent = '先填音色名'
+    return
+  }
+  gvRegisterBtn.disabled = true
+  const result = await window.api.trainGvRegister({ expName: gvDatasetSel.value, version: gvVersionSel.value, name })
+  gvRegisterBtn.disabled = false
+  gvHint.textContent = result.ok ? `已注册「${name}」，语音出面板里就能选` : (result.error ?? '注册失败')
+}
 // ---------- ASR 微调录音（T4a） ----------
 
 let groups: FtScriptGroup[] = []
@@ -435,6 +548,9 @@ async function rollbackModel(): Promise<void> {
   await refreshAsrft()
 }
 async function init(): Promise<void> {
+  initGvVersionSel()
+  applyGvDefaults()
+  await refreshGvDatasets()
   await refreshAsrft()
   const settings = await window.api.getSettings()
   kindSel.value = settings.trainKind
@@ -466,6 +582,11 @@ on('ftInstall', 'click', () => void startInstall())
 on('startFt', 'click', () => void startFt())
 on('ftApply', 'click', () => void applyModel())
 on('ftRollback', 'click', () => void rollbackModel())
+on('gvRefresh', 'click', () => void refreshGvDatasets())
+on('gvDataset', 'change', applyGvDatasetInfo)
+on('gvWebui', 'click', () => void toggleGvWebui())
+on('gvRegister', 'click', () => void registerGv())
+on('kind', 'change', applyGvDefaults)
   console.log('[train-ft] listeners attached')
 // 空格开停录音（焦点不在输入框/下拉时），念稿时不用伸手点鼠标。
 window.addEventListener('keydown', (event) => {

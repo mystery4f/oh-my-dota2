@@ -63,6 +63,19 @@ _Avoid_: 训练页
 **推理互斥（inference hold）**：
 训练任务占卡期间应用托管（app-managed）的 GV 推理服务自动暂停、任务退场自动恢复的互斥机制；端口上的外部服务不受影响。状态叫推理互斥状态（inference hold state）。
 
+
+**实验名（experiment name）**：
+GPT-SoVITS 引擎包 `logs/` 下一次备料实验的目录名；训练窗口的 GV 数据集下拉列的就是它。
+_Avoid_: 数据集名
+
+**备料（dataset preparation）**：
+跑真训练前 webui 三步（1a 打标注 / 1b 微调训练 / 1c 语义）留下的四件套：音素表 `2-name2text.txt`、语义表 `6-name2semantic.tsv`、Hubert 特征 `4-cnhubert/`、32k 音频 `5-wav32k/`；四件套齐 = 可开训。
+_Avoid_: 数据准备
+
+**两腿（two legs）**：
+GV 微调的两条训练线——SoVITS 声学模型（`s2_train.py`，`--config`）和 GPT 语义模型（`s1_train.py`，`--config_file`）；注册音色包要两腿的产物都有。
+_Avoid_: 阶段
+
 **录音组（recording group）**：
 训练窗口按读稿 `## Gxx` 划分的录音单元；有编号句的叫逐句组（lines），没有的叫自由说组（free）。
 _Avoid_: 组（口语泛指）

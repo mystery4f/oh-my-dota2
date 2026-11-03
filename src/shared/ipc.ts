@@ -5,6 +5,9 @@ import type {
   AsrFtStatusResult,
   AsrFtSwapResult,
   FtDatasetPrepareResult,
+  GvDatasetJudgement,
+  GvRegisterPayload,
+  GvRegisterResult,
   TrainSnapshot,
   TrainStartRequest,
   TrainStartResult
@@ -680,6 +683,10 @@ export const IPC = {
   TRAIN_SNAPSHOT: 'train:snapshot',
   /** 主进程广播训练快照（任务状态 + 日志尾），训练窗口订阅。 */
   TRAIN_STATE: 'train:state',
+  // GV（GPT-SoVITS）微调（T3）：备料清单 / webui 开关 / 产物登记。
+  TRAIN_GV_DATASETS: 'train:gv-datasets',
+  TRAIN_GV_WEBUI: 'train:gv-webui',
+  TRAIN_GV_REGISTER: 'train:gv-register',
   // ASR 微调录音（T4a）：内置读稿 + 录音存取，全部落在应用数据目录 asr-ft/ 下。
   FT_SCRIPT_READ: 'ft:script-read',
   FT_REC_LIST: 'ft:rec-list',
@@ -917,6 +924,9 @@ export const ipcContract = {
   trainStop: invoke<[], TrainStartResult>(IPC.TRAIN_STOP),
   trainSnapshot: invoke<[], TrainSnapshot>(IPC.TRAIN_SNAPSHOT),
   onTrainState: listen<TrainSnapshot>(IPC.TRAIN_STATE),
+  trainGvDatasets: invoke<[], GvDatasetJudgement[]>(IPC.TRAIN_GV_DATASETS),
+  trainGvWebui: invoke<[{ open: boolean }], { ok: boolean; running: boolean; error?: string }>(IPC.TRAIN_GV_WEBUI),
+  trainGvRegister: invoke<[GvRegisterPayload], GvRegisterResult>(IPC.TRAIN_GV_REGISTER),
   ftScriptRead: invoke<[], FtScriptState>(IPC.FT_SCRIPT_READ),
   ftRecList: invoke<[], FtRecInfo[]>(IPC.FT_REC_LIST),
   ftRecSave: invoke<[string, string, Uint8Array], FtRecInfo>(IPC.FT_REC_SAVE),

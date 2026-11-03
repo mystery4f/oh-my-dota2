@@ -80,6 +80,30 @@
     <div class="status" id="status">没有任务</div>
     <pre id="log"></pre>
     <script type="module" src="./train.ts"></script>
+    <!-- GV（GPT-SoVITS）微调（T3）：备料验收、训练参数、webui 开关、产物登记。 -->
+    <div class="ft-head">GV 微调 · GPT-SoVITS</div>
+    <div class="error" id="gvError"></div>
+    <div class="row">
+      <label for="gvDataset">数据集</label>
+      <select id="gvDataset"></select>
+      <button id="gvRefresh">刷新备料</button>
+      <span class="hint" id="gvDatasetInfo"></span>
+    </div>
+    <div class="row">
+      <label for="gvVersion">版本</label>
+      <select id="gvVersion"></select>
+      <label for="gvBatch">批大小</label>
+      <input id="gvBatch" type="number" min="1" max="64" style="width: 60px" />
+      <label for="gvEpochs">轮数</label>
+      <input id="gvEpochs" type="number" min="1" max="200" style="width: 60px" />
+      <button id="gvWebui">打开 webui</button>
+    </div>
+    <div class="row">
+      <label for="gvName">音色名</label>
+      <input id="gvName" type="text" placeholder="训练完注册成音色包" style="width: 180px" />
+      <button id="gvRegister">注册为音色包</button>
+      <span class="hint" id="gvHint"></span>
+    </div>
     <!-- ASR 微调录音（T4a）：内置读稿逐句录，录音落 userData/asr-ft/。 -->
     <div class="ft-head">ASR 口音微调 · 录音</div>
     <div class="error" id="ftError"></div>
