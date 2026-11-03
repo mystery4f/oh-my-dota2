@@ -173,7 +173,7 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 - [x] #12 T2 推理互斥接线：训练运行自动停 GV 推理、终态自动恢复、恢复失败窗口明示（blocked by #11）（本提交；`--train-probe` 56/56）
 - [x] #13 T3 GV 侧 MVP：数据集登记（备料四件套验收 + webui 开关）、gv-gpt/gv-sovits 真训练编排（s2 `--config` / s1 `--config_file`，配置照抄 webui open1Ba/open1Bb）、产物一键注册音色包（两腿最新权重 + 参考音频 upsert refs）（blocked by #11、#12）（本提交；`--train-probe` 62/62；降噪/切分/标注仍走官方 webui）
 - [x] #14 T4 ASR 数据准备与录音组状态：组总览/回放在库，差准备报告与组完成总览（blocked by #11；开工以第一轮手动微调跑通为排期条件）（本提交；组完成总览 = `buildFtGroupProgress` 纯缝 + 窗口常驻总览条「已录 X 段 · Ys · 逐句组完成 a/b ｜ Gxx 缺 Lnn」；句数/总时长/失败清单齐；`--train-probe` 63/63；真实录音→打包演示验收留给 T6 清单）
-- [ ] #15 T5 ASR 训练与部署：官方 SFT + ONNX 导出 + 部署口 + A/B 试音（blocked by #12、#14；asr-ft 安装/切换/回滚缝已在库）
+- [x] #15 T5 ASR 训练与部署：官方 SFT + ONNX 导出 + 部署口 + A/B 试音（blocked by #12、#14；asr-ft 安装/切换/回滚缝已在库）（闭环已在库并真机验证过：272adcc 一键微调+换模闭环、abbe673 一键环境安装器；G15 试点 19/20 vs 底模 13/20；`--resume` 未接——每次开新 run 目录，参数已冻结，留待真需要时再接）
 - [ ] #16 T6 验收与基线：ACCEPTANCE/BENCH/NOTES 回写（blocked by #13、#15）
 ## 候选方案（未排期）
 
