@@ -210,7 +210,7 @@ function OverviewCard(): React.ReactElement {
             {busy ? '检查中…' : '一键自检'}
           </Button>
           <span className="text-xs text-muted-foreground">
-            热键可在「浮层与对局 → 热键」里改。
+            五个热键在下面单独列出；改键在「浮层与对局 → 热键」。
           </span>
         </div>
 
