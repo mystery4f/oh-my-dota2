@@ -7,6 +7,7 @@ dist/
 # pi agent session state
 .pi/*
 !.pi/skills/
+!.pi/settings.json
 .DS_Store
 .tmp/
 
