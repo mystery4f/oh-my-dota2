@@ -1,4 +1,6 @@
 import type { VoiceReplyStage } from './voice-out'
+import type { HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
+import { DEFAULT_HOTKEYS } from './hotkeys'
 
 import type {
   AsrFtInstallState,
@@ -256,12 +258,29 @@ export interface AppSettings {
   overlayLocked: boolean
   /** 上次退出时浮层是收起的小图标还是整块；启动时照此还原（2026-10-28「记忆收起」）。 */
   overlayCollapsed: boolean
-  /** 上次退出时浮层是显示还是被 Alt+Shift+O 藏了；启动时照此还原（「记忆隐藏」）。 */
+  /** 上次退出时浮层是显示还是被「显示/隐藏浮层」热键藏了；启动时照此还原（「记忆隐藏」）。 */
   overlayVisible: boolean
   /** 每行底色不透明度（0.05–0.9）：游戏画面亮的时候要淡，暗图要深一点才看得清。 */
   overlayOpacity: number
   /** 用户调过的浮层几何；null = 跟随捕获区域自动摆放。 */
   overlayBounds: OverlayGeometry | null
+  /**
+   * 全局热键表：动作 id → canonical 组合键，空串 = 该动作不绑键。
+   * 单独一项而不是五个平铺字段——面板一次改整张表，平铺就要五个归一化分支加五处探针。
+   */
+  hotkeys: Record<HotkeyActionId, string>
+}
+
+/**
+ * 热键注册结果（动作 id → 抢到 / 被别的软件占了 / 这个动作没绑键）。
+ * 只在主进程内存里，不落盘：它描述的是「这一次启动，系统有没有把键给到我们」。
+ */
+export type HotkeyVerdicts = Partial<Record<HotkeyActionId, HotkeyVerdict>>
+
+/** 面板拿它一次画完整张热键表：动作 + 当前键 + 注册结果。 */
+export interface HotkeysResult extends HotkeyState {
+  /** 整张表被拒的原因（冲突/非法键）；null = 存好了。 */
+  error: string | null
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -313,7 +332,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayCollapsed: false,
   overlayVisible: false,
   overlayOpacity: 0.34,
-  overlayBounds: null
+  overlayBounds: null,
+  hotkeys: { ...DEFAULT_HOTKEYS }
 }
 
 export type TranslateDirection = 'en-zh' | 'zh-en' | 'auto-zh'
@@ -601,6 +621,11 @@ export interface OverlayStatus {
   geometry: OverlayGeometry
   /** 为什么取不到字（null = 一切正常）——只在异常时显示，正常时整块保持干净。 */
   hint: string | null
+  /**
+   * 当前配置的键名（给人看的写法），只带浮层自己要写的那两个动作。
+   * 浮层没有设置访问权，键名不随状态下来就只能写死在渲染端里。
+   */
+  hotkeys: Partial<Record<HotkeyActionId, string>>
 }
 
 /** 浮层的位置与尺寸，全部是 DIP（和 `screen` 报的是同一套坐标）。 */
@@ -622,6 +647,10 @@ export interface ReplyResult {
 export const IPC = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
+  /** 读整张热键表 + 本次启动的注册结果。 */
+  HOTKEYS_GET: 'hotkeys:get',
+  /** 存整张热键表并立刻重注册；表里有冲突/非法键时整张拒收。 */
+  HOTKEYS_SET: 'hotkeys:set',
   PROVIDER_TEST: 'provider:test',
   PROVIDER_TRANSLATE: 'provider:translate',
   CAPTURE_START: 'capture:start',
@@ -816,6 +845,10 @@ export interface SovitsVoicePack {
 
 export interface WindowApi {
   getSettings(): Promise<AppSettings>
+  /** 整张热键表 + 注册结果；面板打开时读一次。 */
+  getHotkeys(): Promise<HotkeysResult>
+  /** 存整张热键表并立刻重注册；有冲突/非法键时 error 非空、表不落盘。 */
+  setHotkeys(map: Record<HotkeyActionId, string>): Promise<HotkeysResult>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
   testProvider(provider: ProviderConfig): Promise<TestResult>
   translate(text: string, direction?: TranslateDirection): Promise<string>

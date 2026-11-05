@@ -18,6 +18,8 @@ import type { TrainSnapshot } from '@shared/train'
 const api: WindowApi = {
   getSettings: () => ipcRenderer.invoke(IPC.SETTINGS_GET),
   setSettings: (patch) => ipcRenderer.invoke(IPC.SETTINGS_SET, patch),
+  getHotkeys: () => ipcRenderer.invoke(IPC.HOTKEYS_GET),
+  setHotkeys: (map) => ipcRenderer.invoke(IPC.HOTKEYS_SET, map),
   testProvider: (provider) => ipcRenderer.invoke(IPC.PROVIDER_TEST, provider),
   translate: (text, direction) => ipcRenderer.invoke(IPC.PROVIDER_TRANSLATE, text, direction),
   translateReply: (text, tone) => ipcRenderer.invoke(IPC.REPLY_TRANSLATE, text, tone),

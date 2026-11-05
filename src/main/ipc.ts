@@ -16,6 +16,7 @@ import {
 } from '@shared/ipc'
 import { decideVoiceOutReply } from '@shared/voice-out'
 import { loadSettings, saveSettings } from './services/settings'
+import { hotkeysState, saveHotkeysState } from './services/hotkeys'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
 import { testProvider, translateText } from './services/providers'
@@ -197,6 +198,8 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.UPDATE_INSTALL, () => installUpdate())
   ipcMain.handle(IPC.REPLY_INPLACE, () => translateInPlace())
   ipcMain.handle(IPC.SETTINGS_SET, (_e, patch: Partial<AppSettings>) => saveSettings(patch))
+  ipcMain.handle(IPC.HOTKEYS_GET, () => hotkeysState())
+  ipcMain.handle(IPC.HOTKEYS_SET, (_e, map: unknown) => saveHotkeysState(map))
   ipcMain.handle(IPC.PROVIDER_TEST, (_e, provider: ProviderConfig) => testProvider(provider))
   ipcMain.handle(IPC.PROVIDER_TRANSLATE, (_e, text: string, direction?: TranslateDirection) =>
     translateTry(loadSettings().provider, text, direction ?? 'en-zh').catch(() =>
@@ -227,7 +230,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.CAPTURE_STATUS, () => ({ ...getCaptureService().status(), gsi: gsiStatus() }))
   ipcMain.handle(IPC.SESSION_STATUS, () => sessionStatus())
   ipcMain.handle(IPC.OVERLAY_TOGGLE, () => getOverlayManager().toggle())
-  // 面板按钮与 Alt+Shift+V 共用同一条录制链：起录/停录都由 overlay 窗口自己报状态。
+  // 面板按钮与「语音对讲」热键共用同一条录制链：起录/停录都由 overlay 窗口自己报状态。
   ipcMain.handle(IPC.OVERLAY_VOICE_TOGGLE, () => {
     getOverlayManager().toggleVoiceCapture()
     return { ok: true }
@@ -372,7 +375,7 @@ export function registerIpc(): void {
   )
   // 测试声出：固定英文句 → Edge 英文嗓 → 所选输出 → 自动按住说话键（voice-out 闭环的入口）。
   ipcMain.handle(IPC.VOICE_OUT_TEST, () => getVoiceOutService().test())
-  // 一键到底：识别文本 → 翻译 → 剪贴板 → 声出（Alt+Shift+V 说中文的全链路）。
+  // 一键到底：识别文本 → 翻译 → 剪贴板 → 声出（「语音对讲」说中文的全链路）。
   ipcMain.handle(IPC.VOICE_REPLY, (_e, transcript: string) => voiceReply(String(transcript ?? '')))
   ipcMain.handle(IPC.OVERLAY_REPLY_CLOSE, (_e, submitted?: boolean) =>
     getOverlayManager().closeReply(Boolean(submitted))

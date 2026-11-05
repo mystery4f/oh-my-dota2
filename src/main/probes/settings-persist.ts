@@ -155,7 +155,49 @@ export async function runSettingsPersistProbe(): Promise<void> {
       )
     }
 
-    // 一个字段的写入不能把别的字段冲掉：写了 7 项之后，第一项必须还在。
+    // 热键表是嵌套对象，单独验：整表落盘能读回、只改一项不会把别的动作冲掉、
+    // 未绑定的空串也能存下来（否则「我不想要这个键」重启后会自动复活）。
+    const hotkeySentinel = { ...before.hotkeys, overlayToggle: 'Ctrl+Shift+F9', voiceCapture: '' }
+    saveSettings({ hotkeys: hotkeySentinel })
+    const hotkeysBack = loadSettings().hotkeys
+    push(
+      '热键表整表落盘可读回',
+      JSON.stringify(hotkeysBack) === JSON.stringify(hotkeySentinel),
+      `${JSON.stringify(before.hotkeys)} → ${JSON.stringify(hotkeysBack)}`
+    )
+    saveSettings({ hotkeys: { ...hotkeysBack, overlayLock: 'Ctrl+F10' } })
+    const partialHotkeys = loadSettings().hotkeys
+    push(
+      '只改一个动作不冲掉别的动作',
+      partialHotkeys.overlayLock === 'Ctrl+F10' && partialHotkeys.overlayToggle === 'Ctrl+Shift+F9',
+      JSON.stringify(partialHotkeys)
+    )
+    push(
+      '未绑定的空串能存活重启',
+      partialHotkeys.voiceCapture === '',
+      JSON.stringify(partialHotkeys.voiceCapture)
+    )
+    // 手编文件塞进非法键/非字符串：逐项回落默认，不能把整张表打成默认或者直接崩。
+    const fileNow = readFileSettings() ?? {}
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...fileNow,
+        hotkeys: { overlayToggle: 'Ctrl+Shift+F8', overlayLock: 42, overlayCollapse: 'nonsense' }
+      }),
+      'utf-8'
+    )
+    const salvaged = loadSettings().hotkeys
+    push(
+      '坏掉的热键项逐项回落默认',
+      salvaged.overlayToggle === 'Ctrl+Shift+F8' &&
+        salvaged.overlayLock === DEFAULT_SETTINGS.hotkeys.overlayLock &&
+        salvaged.overlayCollapse === DEFAULT_SETTINGS.hotkeys.overlayCollapse &&
+        salvaged.inplaceSend === DEFAULT_SETTINGS.hotkeys.inplaceSend,
+      JSON.stringify(salvaged)
+    )
+
+    // 一个字段的写入不能把别的字段冲掉：写了整轮之后，第一项必须还在。
     const firstKey = PERSISTED_FIELDS[0]
     const afterAll = loadSettings()
     push(

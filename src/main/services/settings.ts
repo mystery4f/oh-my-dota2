@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { DEFAULT_SETTINGS, OFFLINE_VOICES, type AppSettings, type ProviderConfig } from '@shared/ipc'
 import { normalizeTrainKind } from '@shared/train'
 import { normalizeSpeakKey, normalizeVoiceOutEngine } from '@shared/voice-out'
+import { normalizeHotkeyMap } from '@shared/hotkeys'
 
 function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -17,7 +18,10 @@ export function loadSettings(): AppSettings {
     const merged: AppSettings = {
       ...structuredClone(DEFAULT_SETTINGS),
       ...parsed,
-      provider: { ...DEFAULT_SETTINGS.provider, ...(parsed.provider ?? {}) } as ProviderConfig
+      provider: { ...DEFAULT_SETTINGS.provider, ...(parsed.provider ?? {}) } as ProviderConfig,
+      // 热键表要按动作深合并：浅合并会让「只改一个键」的存档把另外四个动作抹成 undefined。
+      // 具体哪一项该回落默认交给 normalizeHotkeyMap 逐项兜底（未知 id 丢掉、非法值回默认）。
+      hotkeys: normalizeHotkeyMap({ ...DEFAULT_SETTINGS.hotkeys, ...(parsed.hotkeys ?? {}) })
     }
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。
     // 这里只认还在售的 id，认不出就归位到默认，不抛错——设置文件是用户数据，不该因为改版而炸。
@@ -80,7 +84,9 @@ export function saveSettings(patch: Partial<AppSettings>): AppSettings {
   const next: AppSettings = {
     ...current,
     ...patch,
-    provider: { ...current.provider, ...(patch.provider ?? {}) } as ProviderConfig
+    provider: { ...current.provider, ...(patch.provider ?? {}) } as ProviderConfig,
+    // 面板一次提交整张热键表，但别的调用方可能只 patch 一个动作：按动作合并，没提到的保持原样。
+    hotkeys: normalizeHotkeyMap({ ...current.hotkeys, ...(patch.hotkeys ?? {}) })
   }
   const file = settingsFile()
   mkdirSync(dirname(file), { recursive: true })

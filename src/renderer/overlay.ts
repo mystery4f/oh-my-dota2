@@ -152,7 +152,7 @@ window.api.onCaptureReplace((batch) => {
     appendRow(entry.original, entry.translated, false, entry.id, entry.pending === true, entry.hero, entry.cached === true, entry.error)
   }
   if (batch.length === 0) pill.textContent = '没有识别到聊天内容'
-  else pill.textContent = '已刷新 ' + batch.length + ' 条 · Alt+Shift+C'
+  else pill.textContent = '已刷新 ' + batch.length + ' 条'
 })
 
 window.api.onOverlayState((state: OverlayStatus) => applyState(state))
@@ -186,6 +186,20 @@ let lastDragMoved = false
 let overlayState: OverlayStatus | null = null
 
 /**
+ * 浮层上写的键名全部走这里：主进程把当前配置的键随状态一起发下来，
+ * 浮层自己绝不写死——写死就会出现「用户改了键，浮层还在教旧键」。
+ */
+function hotkeyLabel(id: 'overlayToggle' | 'voiceCapture'): string {
+  return overlayState?.hotkeys?.[id] ?? ''
+}
+
+/** 平时那行状态：点名当前配置的展开键；那个动作没绑键就只写「运行中」。 */
+function runningLabel(): string {
+  const key = hotkeyLabel('overlayToggle')
+  return key ? `运行中 · ${key}` : '运行中'
+}
+
+/**
  * 渲染进程只算「相对起点的增量」，边界收口在主进程。
  * 拿不到显示器工作区，就给一个足够大的虚拟工作区让偏移不被提前截断；
  * 真正会不会拖出屏幕，由 OverlayManager.applyGeometry 的 clamp 决定。
@@ -204,7 +218,7 @@ function applyState(state: OverlayStatus): void {
   document.body.dataset.locked = state.locked ? 'true' : 'false'
   // 收起 = 整窗缩成一个小图标；展开回来由同一个按钮负责。
   document.body.dataset.collapsed = state.collapsed ? 'true' : 'false'
-  // 小图标也要能看出锁定状态：锁定 = 穿透点不到，只能按 Alt+Shift+B 展开。
+  // 小图标也要能看出锁定状态：锁定 = 穿透点不到，只能靠收起/展开那个热键展回来。
   // 浮层上不挂任何 title：鼠标划过就弹提示，在游戏里很碍事。
   mini.textContent = state.locked ? '🔒 翻译区' : '🔓 翻译区'
   barVoice.textContent = state.readAloud ? '朗读：开' : '朗读：关'
@@ -495,7 +509,7 @@ async function startRecording(): Promise<void> {
   recordNode.connect(recordCtx.destination)
   recording = true
   window.api.reportVoiceState(true)
-  pill.textContent = '● 录音中 · Alt+Shift+V 结束'
+  pill.textContent = `● 录音中${hotkeyLabel('voiceCapture') ? ` · ${hotkeyLabel('voiceCapture')} 结束` : ''}`
   pill.classList.remove('through')
   recordTimer = setTimeout(() => void stopRecording(), RECORD_MAX_MS)
 }
@@ -521,7 +535,7 @@ async function stopRecording(): Promise<void> {
   if (frames < rate * 0.3) {
     appendRow('🎤 录音太短，已忽略', null)
     window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: '录音太短（不足 0.3 秒）' })
-    pill.textContent = '运行中 · Alt+Shift+O'
+    pill.textContent = runningLabel()
     return
   }
   // whisper hallucinates text on silence, so skip the request when the mic is quiet.
@@ -534,7 +548,7 @@ async function stopRecording(): Promise<void> {
     const quietError = `没有检测到语音（音量 RMS ${rms.toFixed(4)}）`
     appendRow('🎤 ' + quietError, null)
     window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: quietError })
-    pill.textContent = '运行中 · Alt+Shift+O'
+    pill.textContent = runningLabel()
     return
   }
   pill.textContent = '识别中…'
@@ -544,7 +558,7 @@ async function stopRecording(): Promise<void> {
     const transcriptError = result.error ?? '未识别到语音'
     appendRow('🎤 ' + transcriptError, null)
     window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: transcriptError })
-    pill.textContent = '运行中 · Alt+Shift+O'
+    pill.textContent = runningLabel()
     return
   }
   // 一键到底（票 05）：识别文本先落一行（pending 态压暗 + 「翻译中…」），译文与
@@ -573,7 +587,7 @@ async function stopRecording(): Promise<void> {
     stage: reply.stage,
     error: reply.error
   })
-  pill.textContent = '运行中 · Alt+Shift+O'
+  pill.textContent = runningLabel()
 }
 
 

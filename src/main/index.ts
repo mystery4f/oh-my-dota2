@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, session } from 'electron'
+import { app, BrowserWindow, session } from 'electron'
 
 // 隐藏抓屏窗口必须持续出帧：Chromium 默认会节流被遮挡/后台的渲染进程，视频流会冻住。
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
@@ -36,10 +36,12 @@ import { installProxyAwareFetch } from './services/session/net-fetch'
 import { runChatBlockProbe } from './probes/chat-block'
 import { runInPlaceProbe, runReplyLatencyProbe } from './probes/latency'
 import { runOverlayGeometryProbe } from './probes/overlay-geometry'
+import { runHotkeyProbe } from './probes/hotkeys'
 import { runVoiceOutProbe } from './probes/voice-out'
 import { runAsrHotwordsProbe } from './probes/asr-hotwords'
 import { runTrainProbe } from './probes/train'
 import { loadSettings } from './services/settings'
+import { hotkeysState, installHotkeys, releaseHotkeys } from './services/hotkeys'
 import { warmTranslator } from './services/session/durable-translator'
 import { suppressExperimentalSqliteWarning } from './services/session/warnings'
 import { getOverlayManager } from './windows/overlay'
@@ -174,6 +176,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--match-report')) void runMatchReportProbe()
   if (process.argv.includes('--translate-cache-probe')) void runTranslateCacheProbe()
   if (process.argv.includes('--overlay-geometry-probe')) void runOverlayGeometryProbe()
+  if (process.argv.includes('--hotkey-probe')) void runHotkeyProbe()
   if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()
   if (process.argv.includes('--asr-hotwords-probe')) void runAsrHotwordsProbe()
   if (process.argv.includes('--train-probe')) void runTrainProbe()
@@ -202,33 +205,31 @@ app.whenReady().then(() => {
   if (!probeRun && startup.overlayVisible) getOverlayManager().show()
   // 更新：装好的包里开机静默查一次，有就自己下，下完把「重启」挂在面板上等用户点。
   if (!probeRun) startUpdateCheck()
-  // 注册失败不炸只记：别的软件（剪辑工具/输入法/游戏助手）占了这个全局热键时，
-  // 用户按了没反应，日志里能查到是哪一个键没抢到。
-  const registerHotkey = (accelerator: string, handler: () => void): void => {
-    if (!globalShortcut.register(accelerator, handler)) {
-      console.log('HOTKEY_REGISTER_FAIL', JSON.stringify({ accelerator }))
+  // 全局热键：处理函数只交一次，键本身来自设置表（面板可改）。
+  // 抢不到不炸只记：别的软件（剪辑工具/输入法/游戏助手）占了这个键时，
+  // 用户按了没反应，面板里能直接看到是哪一个动作被占了。
+  installHotkeys({
+    overlayToggle: () => {
+      getOverlayManager().toggle()
+    },
+    // 锁定/解锁：锁定后浮层不吃鼠标；解锁后能拖动、拉两侧改宽度，拖完再锁定。
+    overlayLock: () => {
+      const overlay = getOverlayManager()
+      if (overlay.status().visible) overlay.setLocked(!overlay.status().locked)
+    },
+    // 收起/展开小图标：收起后如果是锁定状态就穿透点不到，只能靠这个热键收回来。
+    overlayCollapse: () => {
+      const overlay = getOverlayManager()
+      if (overlay.status().visible) overlay.toggleCollapse()
+    },
+    // 直发：inplace = 读游戏聊天框草稿 → 翻译 → 粘回并回车；其他通道 = 弹浮层输入框。
+    inplaceSend: () => {
+      if (loadSettings().sendMode === 'inplace') void translateInPlace()
+      else getOverlayManager().openReply()
+    },
+    voiceCapture: () => {
+      getOverlayManager().toggleVoiceCapture()
     }
-  }
-  registerHotkey('Alt+Shift+O', () => {
-    getOverlayManager().toggle()
-  })
-  // 锁定/解锁：锁定后浮层不吃鼠标；解锁后能拖动、拉两侧改宽度，拖完再锁定。
-  registerHotkey('Alt+Shift+P', () => {
-    const overlay = getOverlayManager()
-    if (overlay.status().visible) overlay.setLocked(!overlay.status().locked)
-  })
-  // 收起/展开小图标：收起后如果是锁定状态就穿透点不到，只能靠这个热键收回来。
-  registerHotkey('Alt+Shift+B', () => {
-    const overlay = getOverlayManager()
-    if (overlay.status().visible) overlay.toggleCollapse()
-  })
-  // 直发：inplace = 读游戏聊天框草稿 → 翻译 → 粘回并回车；其他通道 = 弹浮层输入框。
-  registerHotkey('Alt+Shift+T', () => {
-    if (loadSettings().sendMode === 'inplace') void translateInPlace()
-    else getOverlayManager().openReply()
-  })
-  registerHotkey('Alt+Shift+V', () => {
-    getOverlayManager().toggleVoiceCapture()
   })
 
   // 浮层上只留「为什么没字」一行提示：正常时它是空的，异常时由它替用户回答。
@@ -244,7 +245,9 @@ app.whenReady().then(() => {
             gsiLive:
               capture.gsi?.gameState === 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS' ||
               capture.gsi?.gameState === 'DOTA_GAMERULES_STATE_PRE_GAME',
-            lastError: capture.lastError
+            lastError: capture.lastError,
+            // 提示里点名当前配置的键：用户改了键，这条提示不能还在教旧键。
+            toggleKey: hotkeysState().actions.find((item) => item.id === 'overlayToggle')?.display
           })
         )
       } catch {
@@ -263,7 +266,7 @@ app.on('window-all-closed', () => {})
 
 app.on('will-quit', () => {
   quitting = true
-  globalShortcut.unregisterAll()
+  releaseHotkeys()
   stopGsi()
   stopSovitsServer()
   destroyTray()

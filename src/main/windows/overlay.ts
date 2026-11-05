@@ -8,6 +8,7 @@ import {
 } from '@shared/ipc'
 import { loadSettings, saveSettings } from '../services/settings'
 import { clampGeometry, miniGeometry, shouldIgnoreMouse, snapToEdges } from '@shared/overlay-geometry'
+import { formatAccelerator } from '@shared/hotkeys'
 
 /** 配置态（可拖可点）闲置多久后自动锁回穿透。 */
 const CONFIG_IDLE_MS = 5000
@@ -50,17 +51,30 @@ class OverlayManager {
   /** 配置态闲置计时器：解锁后放着不管，自动回到穿透，避免忘了锁定后在游戏里误点。 */
   private idleTimer: NodeJS.Timeout | null = null
 
+  /**
+   * 每次读一次设置：热键可以在面板里随时改，缓存住就会出现「改了键状态里还是旧的」。
+   * 一次 status() 读一次文件，但它只在状态变化和 2 秒一次的提示计时器里被调用。
+   */
   status(): OverlayStatus {
+    // 一次读出整份设置：朗读开关和四个键名都来自它，别每行各读一遍文件。
+    const settings = loadSettings()
     return {
       visible: this.win !== null && this.win.isVisible(),
       textMode: this.textMode,
       replyOpen: this.replyOpen,
       locked: this.locked,
       collapsed: this.collapsed,
-      readAloud: loadSettings().ttsReadAloud,
+      readAloud: settings.ttsReadAloud,
       opacity: this.opacity,
       geometry: this.currentGeometry(),
-      hint: this.hint
+      hint: this.hint,
+      // 浮层要写的两个键随状态一起下发：它拿不到设置，键名只能从主进程带过去。
+      hotkeys: {
+        overlayToggle: formatAccelerator(settings.hotkeys.overlayToggle),
+        overlayLock: formatAccelerator(settings.hotkeys.overlayLock),
+        overlayCollapse: formatAccelerator(settings.hotkeys.overlayCollapse),
+        voiceCapture: formatAccelerator(settings.hotkeys.voiceCapture)
+      }
     }
   }
 
@@ -78,7 +92,7 @@ class OverlayManager {
   private applyClickThrough(): void {
     if (!this.win) return
     // 锁定 / 解锁对收起的小图标同样生效：锁定就穿透，防误点；
-    // 要展开就按 Alt+Shift+B（全局热键，不依赖点得到）或先按 Alt+Shift+P 解锁。
+    // 要展开就按「收起/展开」热键（全局热键，不依赖点得到）或先解锁。
     const ignore = shouldIgnoreMouse(this.locked, this.replyOpen)
     this.win.setIgnoreMouseEvents(ignore, { forward: true })
     // 防截屏默认开着（否则手动截图会把浮层自己的行 OCR 回来再翻一遍），
@@ -276,7 +290,7 @@ class OverlayManager {
   toggle(): OverlayStatus {
     if (this.status().visible) {
       this.win?.hide()
-      // 藏起来要跨启动记住：用户明确按了 Alt+Shift+O，下次启动就别自己蹦出来。
+      // 藏起来要跨启动记住：用户明确按了「显示/隐藏浮层」，下次启动就别自己蹦出来。
       saveSettings({ overlayVisible: false })
     } else {
       this.show()
