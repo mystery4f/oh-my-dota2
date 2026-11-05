@@ -281,7 +281,8 @@ export interface KeyChordInput {
   metaKey: boolean
 }
 
-export type HotkeyProblem = 'need-modifier' | 'illegal-key'
+/** 录制到的组合键为什么不能用：只有「少了修饰键」一种——认不出的主键在录制阶段就当待定，不算填好。 */
+export type HotkeyProblem = 'need-modifier'
 
 export type ChordResult =
   /** 只按了修饰键（或认不出的键）：给个待定预览，不当成填好。 */
@@ -319,10 +320,6 @@ export function chordFromKeyEvent(input: KeyChordInput): ChordResult {
   return { complete: true, accelerator, problem }
 }
 
-/** 冲突原因文案（面板直接显示）。 */
-export function conflictReason(accelerator: string): string {
-  return `${formatAccelerator(accelerator)} 已被另一个动作占用`
-}
 
 /** 面板/IPC 共用的状态表：动作表 + 当前键 + 注册结果。 */
 export function describeHotkeys(

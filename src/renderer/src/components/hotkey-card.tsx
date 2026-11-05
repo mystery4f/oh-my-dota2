@@ -76,10 +76,6 @@ export function HotkeyCard(): React.ReactElement {
         setError(`${chord.accelerator} 会抢走游戏里打字，至少加 Ctrl/Alt/Shift/Win 之一`)
         return
       }
-      if (chord.problem === 'illegal-key') {
-        setError(`${chord.accelerator} 这个键不支持`)
-        return
-      }
       setError(null)
       setDraft((prev) => ({ ...prev, [capturing]: chord.accelerator }))
       setCapturing(null)
@@ -125,9 +121,14 @@ export function HotkeyCard(): React.ReactElement {
           {HOTKEY_ACTIONS.map((action) => {
             const accelerator = draft[action.id]
             const current = state?.actions.find((item) => item.id === action.id)
-            const verdict: HotkeyVerdict = conflictIds.has(action.id)
+            // 改过还没存的行不能显示上一次的注册结果：那个结果是旧键的。
+            const saved = current?.accelerator ?? ''
+            const changed = accelerator !== saved
+            const verdict: HotkeyVerdict | null = conflictIds.has(action.id)
               ? 'rejected'
-              : (current?.verdict ?? 'unbound')
+              : changed
+                ? null
+                : (current?.verdict ?? 'unbound')
             const isCapturing = capturing === action.id
             return (
               <div key={action.id} className="flex flex-wrap items-center gap-3 px-3 py-2">
@@ -146,8 +147,8 @@ export function HotkeyCard(): React.ReactElement {
                 >
                   {isCapturing ? (pending || '按下组合键…') : labelOf(accelerator)}
                 </Button>
-                <Badge variant={VERDICT_VARIANT[verdict]}>
-                  {conflictIds.has(action.id) ? '撞键' : VERDICT_TEXT[verdict]}
+                <Badge variant={verdict ? VERDICT_VARIANT[verdict] : 'outline'}>
+                  {conflictIds.has(action.id) ? '撞键' : verdict ? VERDICT_TEXT[verdict] : '未保存'}
                 </Badge>
                 <Button
                   variant="ghost"

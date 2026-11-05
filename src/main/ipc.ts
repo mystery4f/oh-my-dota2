@@ -199,7 +199,13 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.REPLY_INPLACE, () => translateInPlace())
   ipcMain.handle(IPC.SETTINGS_SET, (_e, patch: Partial<AppSettings>) => saveSettings(patch))
   ipcMain.handle(IPC.HOTKEYS_GET, () => hotkeysState())
-  ipcMain.handle(IPC.HOTKEYS_SET, (_e, map: unknown) => saveHotkeysState(map))
+  // 存完热键要重发一次浮层状态：浮层和自己那行提示上的键名都来自 status()，
+  // 不重发就会出现「键改了、浮层还在教旧键」，直到下一次状态变化。
+  ipcMain.handle(IPC.HOTKEYS_SET, (_e, map: unknown) => {
+    const result = saveHotkeysState(map)
+    if (!result.error) getOverlayManager().refreshStatus()
+    return result
+  })
   ipcMain.handle(IPC.PROVIDER_TEST, (_e, provider: ProviderConfig) => testProvider(provider))
   ipcMain.handle(IPC.PROVIDER_TRANSLATE, (_e, text: string, direction?: TranslateDirection) =>
     translateTry(loadSettings().provider, text, direction ?? 'en-zh').catch(() =>

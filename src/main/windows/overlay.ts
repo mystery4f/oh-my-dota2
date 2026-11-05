@@ -158,6 +158,11 @@ class OverlayManager {
     this.broadcast()
   }
 
+  /** 设置变了但窗口自身状态没变（例如刚改完热键）：重发一次，让浮层上的键名跟上。 */
+  refreshStatus(): void {
+    this.broadcast()
+  }
+
   /**
    * 配置态闲置回退：解锁是「临时操作窗口」，不是常驻状态。
    * 用户拖完就去看游戏了，很可能忘了锁定——那样浮层会一直吃鼠标。

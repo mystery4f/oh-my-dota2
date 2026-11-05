@@ -25,7 +25,7 @@ let handlers: HotkeyHandlers | null = null
 /** 上一次注册的结果：面板读热键表时连它一起显示。 */
 let verdicts: HotkeyVerdicts = {}
 
-/** 入口在 whenReady 里调用一次；重复调用只换处理函数，不动已注册的键。 */
+/** 入口在 whenReady 里调用一次；重复调用只换处理函数，并按当前设置里的表重新注册。 */
 export function installHotkeys(next: HotkeyHandlers): void {
   handlers = next
   applyHotkeys(loadSettings().hotkeys)
