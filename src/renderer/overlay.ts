@@ -524,6 +524,7 @@ async function startRecording(): Promise<void> {
     appendRow('🎤 ' + micError, null)
     window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: micError })
     console.error('overlay: getUserMedia failed', err)
+    transientLabel('麦克风不可用', 2500)
     return
   }
   recordCtx = new AudioContext()
