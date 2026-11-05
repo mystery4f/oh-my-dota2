@@ -192,11 +192,6 @@ function hotkeyLabel(id: 'overlayToggle' | 'voiceCapture'): string {
   return overlayState?.hotkeys?.[id] ?? ''
 }
 
-/**
- * 临时的阶段行（录音中 / 识别中 / 声出中 / 已刷新 N 条）。
- * 平时锁定且无异常时那行整块是隐藏的，所以这里必须自己把它显出来，
- * 否则「按了录音键却看不到任何反馈」——那正是这行字存在的理由。
- */
 let stageLabel: string | null = null
 let stageTimer: ReturnType<typeof setTimeout> | null = null
 
