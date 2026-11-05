@@ -99,3 +99,19 @@ _Avoid_: 内置训练
 **推理互斥（inference preemption）**：
 训练运行时自动暂停 GV 推理服务、训练结束自动恢复，防止 8G 显存打架。
 _Avoid_: 显存管理
+
+**供应商（provider）**：
+一个可切换的翻译接入，面板一次只有一家「当前生效」；内置六家 id（deepseek/openai/ollama/mimo/zhipu/custom），换供应商不丢各自的 key 与推理开关。
+_Avoid_: 厂商、渠道、服务端
+
+**预设（preset）**：
+内置供应商表 `PROVIDER_PRESETS` 的一行：接口地址、模型、可选 `authStyle` 与声明的推理开关；换预设即换家，声明过的字段载入时以声明为准。
+_Avoid_: 模板、方案
+
+**密钥归档（key archive）**：
+settings 里按供应商 id 各记一把的 API Key 表（`providerKeys`）；key 框只是当前生效那把的编辑面，切供应商从归档取回，载入时非空活值永远写回归档。
+_Avoid_: 密钥库、钥匙串、缓存
+
+**推理开关（reasoning toggle）**：
+让模型先思考再回答的开关，按供应商各记各的：当前格 `provider.reasoning` + 归档 `providerReasoning`；默认关——翻译是短句任务，思考只加延迟。
+_Avoid_: 思考模式、深度思考
