@@ -1594,9 +1594,9 @@ export default function App(): React.ReactElement {
   const preset = PROVIDER_PRESETS.find((p) => p.id === settings.provider.id)
 
   return (
-    <div className="min-h-screen">
-      {/* 覆盖式标题栏：整条可拖动，右侧留给系统的三颗按钮（pr-32 让开它们） */}
-      <header className="app-drag sticky top-0 z-20 flex h-[38px] items-center justify-between border-b border-border/60 bg-background/85 pr-32 backdrop-blur">
+    <div className="flex h-screen flex-col overflow-hidden">
+      {/* 标题栏固定、内容区自己滚：内容不许从 drag 带底下穿过，否则输入框滚进带子里点了没反应 */}
+      <header className="app-drag flex h-[38px] shrink-0 items-center justify-between border-b border-border/60 bg-background pr-32">
         <div className="flex items-center gap-2 pl-3 text-[13px] font-medium tracking-tight">
           <span className="h-1.5 w-1.5 rounded-full bg-primary" />
           oh-my-dota2
@@ -1605,6 +1605,7 @@ export default function App(): React.ReactElement {
         <UpdateBadge />
       </header>
 
+      <main className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-6xl px-6 pb-12 pt-5">
       <div className="mb-5 flex items-center justify-between">
         <div>
@@ -2184,6 +2185,7 @@ export default function App(): React.ReactElement {
         </TabsContent>
       </Tabs>
       </div>
+      </main>
     </div>
   )
 }
