@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { DEFAULT_SETTINGS, OFFLINE_VOICES, type AppSettings, type ProviderConfig } from '@shared/ipc'
+import { DEFAULT_SETTINGS, OFFLINE_VOICES, PROVIDER_PRESETS, type AppSettings, type ProviderConfig } from '@shared/ipc'
 import { normalizeTrainKind } from '@shared/train'
 import { normalizeSpeakKey, normalizeVoiceOutEngine } from '@shared/voice-out'
 import { normalizeHotkeyMap } from '@shared/hotkeys'
@@ -22,6 +22,16 @@ export function loadSettings(): AppSettings {
       // 热键表要按动作深合并：浅合并会让「只改一个键」的存档把另外四个动作抹成 undefined。
       // 具体哪一项该回落默认交给 normalizeHotkeyMap 逐项兜底（未知 id 丢掉、非法值回默认）。
       hotkeys: normalizeHotkeyMap({ ...DEFAULT_SETTINGS.hotkeys, ...(parsed.hotkeys ?? {}) })
+    }
+    // 换预设会残留上一家的 authStyle（MiMo 的 api-key 头风格）：GLM 收不到 Authorization 报 401。
+    // 面板从不单独编辑 authStyle，一律以预设声明的为准，存档里的野值在这里归位。
+    const preset = PROVIDER_PRESETS.find((item) => item.id === merged.provider.id)
+    if (preset && merged.provider.authStyle !== preset.authStyle) merged.provider.authStyle = preset.authStyle
+    // 旧存档只有 provider.apiKey 没有 providerKeys：把当前这把按 id 种进表里，
+    // 否则切走再切回来，这把 key 就找不回了。只种非空值——空串会顶掉已记住的 key。
+    if (!merged.providerKeys || typeof merged.providerKeys !== 'object') merged.providerKeys = {}
+    if (merged.provider.apiKey && !merged.providerKeys[merged.provider.id]) {
+      merged.providerKeys[merged.provider.id] = merged.provider.apiKey
     }
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。
     // 这里只认还在售的 id，认不出就归位到默认，不抛错——设置文件是用户数据，不该因为改版而炸。
@@ -85,6 +95,8 @@ export function saveSettings(patch: Partial<AppSettings>): AppSettings {
     ...current,
     ...patch,
     provider: { ...current.provider, ...(patch.provider ?? {}) } as ProviderConfig,
+    // key 表按 id 深合并：别的调用方可能只改 provider 不碰 key 表，没提到的 id 保持原样。
+    providerKeys: { ...current.providerKeys, ...(patch.providerKeys ?? {}) },
     // 面板一次提交整张热键表，但别的调用方可能只 patch 一个动作：按动作合并，没提到的保持原样。
     hotkeys: normalizeHotkeyMap({ ...current.hotkeys, ...(patch.hotkeys ?? {}) })
   }

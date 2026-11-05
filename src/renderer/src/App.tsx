@@ -1373,7 +1373,15 @@ export default function App(): React.ReactElement {
   const applyPreset = (id: ProviderId): void => {
     const preset = PROVIDER_PRESETS.find((p) => p.id === id)
     if (!preset) return
-    patchProvider({ id, baseUrl: preset.baseUrl, model: preset.model })
+    // authStyle 必须跟着预设一起盖：换供应商会残留上一家的鉴权头（MiMo 的 api-key），GLM 就报 401 无 Authorization。
+    // key 也按 id 从各自存档取回：换家不丢 key，没记过的（第一次用）给空串让用户填。
+    patchProvider({
+      id,
+      baseUrl: preset.baseUrl,
+      model: preset.model,
+      authStyle: preset.authStyle,
+      apiKey: settings.providerKeys?.[id] ?? ''
+    })
   }
 
   // patch：开关类按钮「点了立即生效」用——setSettings 是异步的，直接在 onClick 里
@@ -1386,6 +1394,7 @@ export default function App(): React.ReactElement {
       const draft = { ...settings, ...patch }
       const next = await window.api.setSettings({
         provider: draft.provider,
+        providerKeys: draft.providerKeys,
         proxyUrl: draft.proxyUrl,
         targetLang: draft.targetLang,
         whisperBinPath: draft.whisperBinPath,
@@ -1628,7 +1637,15 @@ export default function App(): React.ReactElement {
                   id="apiKey"
                   type="password"
                   value={settings.provider.apiKey}
-                  onChange={(e) => patchProvider({ apiKey: e.target.value })}
+                  onChange={(e) => {
+                    // 一把钥匙两处记：provider.apiKey 是当前生效的，providerKeys 按 id 存档，切预设不丢。
+                    const apiKey = e.target.value
+                    setSettings((s) => ({
+                      ...s,
+                      provider: { ...s.provider, apiKey },
+                      providerKeys: { ...s.providerKeys, [s.provider.id]: apiKey }
+                    }))
+                  }}
                   placeholder="sk-…"
                 />
                 {preset && preset.needsKey && !settings.provider.apiKey && (

@@ -146,6 +146,11 @@ export function offlineVoicePreset(id: OfflineVoiceId): OfflineVoice {
 
 export interface AppSettings {
   provider: ProviderConfig
+  /**
+   * 每个供应商各记各的 API Key（含 custom）：provider.apiKey 只是「当前生效」的那把，
+   * 切预设时从这里按 id 取回，换家不用重新粘 key。写路径只有面板的 key 输入框。
+   */
+  providerKeys?: Partial<Record<ProviderId, string>>
   proxyUrl: string
   targetLang: string
   whisperBinPath: string
@@ -303,6 +308,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     model: 'deepseek-chat',
     reasoning: false
   },
+  providerKeys: {},
   proxyUrl: '',
   targetLang: 'zh-CN',
   whisperBinPath: '',
