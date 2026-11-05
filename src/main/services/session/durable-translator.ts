@@ -11,6 +11,7 @@ import type {
   SettledSubmissionRecord
 } from '@earendil-works/pi-durable'
 import type { ProviderConfig, ReplyTone, TranslateDirection } from '@shared/ipc'
+import { thinkingFormatFor, thinkingLevelFor } from '@shared/provider-reasoning'
 import { loadSettings } from '../settings'
 import {
   buildSystemPrompt,
@@ -73,6 +74,10 @@ const NUMBERED_CONTRACT_NOTE = [
 
 interface SessionRuntime {
   key: string
+  /** key + 推理开关：只决定运行时模型对象，不该像 key 那样拆开历史文件。 */
+  configKey: string
+  /** 会话的思考档位（面板「推理」开关的产物），复用旧会话时也要重新配置。 */
+  thinkingLevel: 'off' | 'medium'
   harness: Harness
   context: Context
   conversations: Map<string, Conversation>
@@ -155,6 +160,25 @@ function shortHash(text: string): string {
 
 export function providerKey(provider: ProviderConfig): string {
   return [provider.id, provider.baseUrl, provider.model, provider.authStyle ?? 'bearer', provider.apiKey.length].join('|')
+}
+
+/**
+ * 推理开关的运行时身份：换 provider 或换推理档位都要重建模型对象，
+ * 但两者共用同一份会话历史（providerKey 不含它），否则切一下开关就把 few-shot 历史丢了。
+ */
+function runtimeConfigKey(provider: ProviderConfig): string {
+  return providerKey(provider) + '|' + thinkingLevelFor(provider)
+}
+
+/**
+ * pi-ai 的推理方言：zai（MiMo/智谱）与 deepseek 都走 thinking.type，
+ * OpenAI 兼容端点只认 reasoning_effort。方言选错的表现是「开关点了没反应」。
+ */
+function compatFor(provider: ProviderConfig): { thinkingFormat?: 'zai' | 'deepseek'; supportsReasoningEffort?: boolean } {
+  const format = thinkingFormatFor(provider.id)
+  if (format === 'zai' || format === 'deepseek') return { thinkingFormat: format }
+  if (format === 'openai') return { supportsReasoningEffort: true }
+  return {}
 }
 
 /**
@@ -264,11 +288,10 @@ async function openRuntime(provider: ProviderConfig): Promise<SessionRuntime> {
     contextWindow: 128_000,
     // 推理模型会先花掉一大截预算，留 2048 才不会把译文截成半句。
     maxTokens: 2048,
-    // 官方文档（mimo.mi.com/docs/zh-CN/quick-start/usage-guide/text-generation/deep-thinking）规定
-    // thinking.type = 'enabled' | 'disabled'，mimo-v2.6-* 默认开启。实测关闭后 1.4s（开着 7.4s），译文不变；
-    // 关闭时 temperature 才有效（开启时服务端强制 1.0 / top_p 0.95）。
-    // thinkingLevel:'off' 时 pi-ai 才会把 reasoningEffort 置空，zai 分支据此下发 disabled。
-    compat: { thinkingFormat: 'zai' },
+    // 各家「先思考」的开关不是一个字段（zai/deepseek 的 thinking.type、OpenAI 的 reasoning_effort）：
+    // 方言由 thinkingFormatFor 按 provider 选，开关由会话的 thinkingLevel 决定（面板「推理」）。
+    // thinkingLevel:'off' 时 pi-ai 把 reasoningEffort 置空，各家分支据此下发 disabled / 什么都不发。
+    compat: compatFor(provider),
     headers
   }
 
@@ -294,6 +317,8 @@ async function openRuntime(provider: ProviderConfig): Promise<SessionRuntime> {
 
   const session: SessionRuntime = {
     key: providerKey(provider),
+    configKey: runtimeConfigKey(provider),
+    thinkingLevel: thinkingLevelFor(provider),
     harness,
     context: BACKGROUND_CONTEXT,
     conversations: new Map(),
@@ -331,11 +356,11 @@ export async function warmTranslator(provider: ProviderConfig): Promise<void> {
 }
 
 async function ensureRuntime(provider: ProviderConfig): Promise<SessionRuntime> {
-  const key = providerKey(provider)
-  if (runtime && runtime.key === key) return runtime
+  const configKey = runtimeConfigKey(provider)
+  if (runtime && runtime.configKey === configKey) return runtime
   if (opening) {
     const pending = await opening
-    if (pending.key === key) return pending
+    if (pending.configKey === configKey) return pending
   }
   if (runtime) {
     await runtime.harness.close(runtime.context).catch(() => undefined)
@@ -369,7 +394,7 @@ async function ensureConversation(
       const existing = await session.harness.conversation(storedId as ConversationId, session.context)
       if (!existing) throw new Error('conversation ' + storedId + ' is gone')
       await existing.configure(
-        { instructions: instructionsFor(direction, tone), thinkingLevel: 'off' },
+        { instructions: instructionsFor(direction, tone), thinkingLevel: session.thinkingLevel },
         session.context
       )
       session.conversations.set(slot, existing)
@@ -386,8 +411,8 @@ async function ensureConversation(
       agent: {
         model: { provider: 'app', modelId: session.modelId },
         instructions: instructionsFor(direction, tone),
-        // Translations are short: reasoning tokens only add latency here.
-        thinkingLevel: 'off'
+        // 翻译默认不思考（面板「推理」可打开）：短句任务，思考 token 只加延迟。
+        thinkingLevel: session.thinkingLevel
       }
     },
     session.context

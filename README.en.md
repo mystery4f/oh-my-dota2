@@ -20,7 +20,7 @@ Communicate with foreign teammates without touching the game process:
 ## Principles
 
 - Zero game injection (VAC-safe): GSI chat intake, keystroke/clipboard replies only; no game memory reads.
-- Provider-agnostic: any OpenAI-compatible endpoint (DeepSeek by default, OpenAI, Ollama, custom).
+- Provider-agnostic: any OpenAI-compatible endpoint (DeepSeek by default; presets for OpenAI, Ollama, MiMo, GLM/Zhipu; custom). Reasoning ("think first") is a per-provider toggle, off by default.
 
 ## Development
 

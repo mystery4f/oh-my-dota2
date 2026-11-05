@@ -40,6 +40,7 @@ import { runHotkeyProbe } from './probes/hotkeys'
 import { runVoiceOutProbe } from './probes/voice-out'
 import { runInPlaceGuardProbe } from './probes/inplace-guard'
 import { runAsrHotwordsProbe } from './probes/asr-hotwords'
+import { runProviderReasoningProbe } from './probes/provider-reasoning'
 import { runTrainProbe } from './probes/train'
 import { loadSettings } from './services/settings'
 import { hotkeysState, installHotkeys, releaseHotkeys } from './services/hotkeys'
@@ -181,6 +182,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--hotkey-probe')) void runHotkeyProbe()
   if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()
   if (process.argv.includes('--asr-hotwords-probe')) void runAsrHotwordsProbe()
+  if (process.argv.includes('--provider-reasoning-probe')) void runProviderReasoningProbe()
   if (process.argv.includes('--train-probe')) void runTrainProbe()
   if (process.argv.includes('--inplace-guard-probe')) void runInPlaceGuardProbe()
   if (process.argv.includes('--input-probe')) void runInputProbe()

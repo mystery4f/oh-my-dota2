@@ -43,7 +43,7 @@ export interface FtRecInfo {
   bytes: number
   durationMs: number
 }
-export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'custom'
+export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'zhipu' | 'custom'
 
 export interface ProviderConfig {
   id: ProviderId
@@ -52,6 +52,8 @@ export interface ProviderConfig {
   model: string
   /** Auth header style; omitted means the usual "Authorization: Bearer". */
   authStyle?: 'bearer' | 'api-key'
+  /** 让模型先思考（推理）再回答；默认关：翻译是短句任务，思考只加延迟。 */
+  reasoning?: boolean
 }
 
 export interface ProviderPreset {
@@ -92,6 +94,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     model: 'mimo-v2.6-flash',
     needsKey: true,
     authStyle: 'api-key'
+  },
+  {
+    id: 'zhipu',
+    label: 'GLM (智谱 BigModel)',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-4-flash-250414',
+    needsKey: true
   },
   {
     id: 'custom',
@@ -291,7 +300,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     id: 'deepseek',
     baseUrl: 'https://api.deepseek.com',
     apiKey: '',
-    model: 'deepseek-chat'
+    model: 'deepseek-chat',
+    reasoning: false
   },
   proxyUrl: '',
   targetLang: 'zh-CN',

@@ -1,5 +1,6 @@
 import { net } from 'electron'
 import type { ProviderConfig } from '@shared/ipc'
+import { directReasoningParams } from '@shared/provider-reasoning'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
@@ -39,8 +40,9 @@ export async function chatCompletion(opts: ChatOptions): Promise<string> {
       temperature,
       max_tokens: maxTokens,
       stream: false,
-      // mimo 默认会先思考：关掉后同一句翻译从 7.4s 降到 1.4s，译文不变。
-      ...(provider.id === 'mimo' ? { reasoning_effort: 'none' } : {})
+      // 各家「先思考」的开关不是一个字段（zai 的 thinking、OpenAI 的 reasoning_effort），
+      // 由共享纯函数按 provider 决定发什么；面板的「推理」开关就是它的输入。
+      ...directReasoningParams(provider)
     }),
     signal: AbortSignal.timeout(timeoutMs)
   })

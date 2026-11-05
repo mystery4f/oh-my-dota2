@@ -71,9 +71,16 @@ Single interface, OpenAI-compatible `/chat/completions`:
 | DeepSeek (default) | https://api.deepseek.com | deepseek-chat |
 | OpenAI | https://api.openai.com/v1 | gpt-4o-mini |
 | Ollama (local) | http://localhost:11434/v1 | qwen2.5:7b |
+| GLM (Zhipu BigModel) | https://open.bigmodel.cn/api/paas/v4 | glm-4-flash-250414 |
 | Custom | user-set | user-set |
 
 All requests go through the system proxy when set (Electron `session.setProxy`).
+
+Reasoning is off by default (short-line translation; thinking only adds latency). The panel toggle
+`provider.reasoning` turns it on per provider, and the dialect is picked per family by
+`src/shared/provider-reasoning.ts`: `thinking: { type }` for MiMo / 智谱 GLM / DeepSeek,
+`reasoning_effort` for OpenAI-compatible endpoints, nothing for Ollama. Switching the toggle rebuilds the
+runtime model object but keeps the same session history file (`providerKey` does not include it).
 
 ## Voice modules — skeleton only in MVP
 

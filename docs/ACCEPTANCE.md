@@ -15,13 +15,15 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 ```
 
 - 静态校验：`npm run typecheck`、`npm run build` 全绿
-- 首次启动后：Overview → provider 选 MiMo → 填 api-key（`sk-` 开头，官方端点用 `api-key` 头）→ 保存 → Test 显示 `OK · Nms`
+- 首次启动后：Overview → provider 选一个预设（DeepSeek / OpenAI / Ollama / MiMo / GLM 智谱 / Custom）→ 填 key（MiMo 官方端点用 `api-key` 头，其余走 `Authorization: Bearer`）→ 保存 → Test 显示 `OK · Nms`
 
 ## M1 面板与 provider
 
 - [ ] 总览卡显示 模型服务 / 代理 / OCR 引擎 / 捕获 / 浮层 / 开机自动捕获 摘要
 - [ ] 点「一键自检」，5 行全是「通过」徽章（模型服务连通、OCR 引擎、区域已选、捕获运行、截图 + OCR）
 - [ ] 面板「翻译试用」：英文 `push top now` → 中文「现在推上」；中文「别送了，稳住」→ 英文不夹中文
+- [ ] 面板「翻译模型」页有「推理：开/关」开关（默认关，改完点保存）：关着时 MiMo 一句译文 1–2 秒；打开后同一句明显变慢但译文仍通顺（`--provider-reasoning-probe` 只能验字段，开关的真实效果靠这一条）
+- [ ] 切「推理」开关后不需要换模型：会话历史文件不变（`data/sessions/translator-*.sqlite` 还是同一个），下一次翻译照常命中缓存
 
 ## M2 聊天捕获
 

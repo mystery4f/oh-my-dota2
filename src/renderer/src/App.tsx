@@ -1646,6 +1646,18 @@ export default function App(): React.ReactElement {
                   placeholder="deepseek-chat"
                 />
               </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  variant={settings.provider.reasoning ? 'secondary' : 'outline'}
+                  onClick={() => patchProvider({ reasoning: !settings.provider.reasoning })}
+                  title="让模型先思考再翻译。默认关：翻译是短句任务，思考只会把每句拖慢几秒（MiMo 实测 1.4s → 7.4s）。改完点保存生效"
+                >
+                  推理：{settings.provider.reasoning ? '开' : '关'}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  默认关。开着更准但每句多等几秒；模型本身不支持思考时请保持关闭
+                </span>
+              </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="proxy">代理</Label>

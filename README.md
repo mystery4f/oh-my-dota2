@@ -20,7 +20,7 @@
 ## 原则
 
 - 零游戏注入（VAC 安全）：聊天走 GSI，回复只靠按键/剪贴板，不读游戏内存。
-- 供应商无关：任何 OpenAI 兼容端点（默认 DeepSeek，也支持 OpenAI、Ollama、自定义）。
+- 供应商无关：任何 OpenAI 兼容端点（默认 DeepSeek，也自带 OpenAI / Ollama / MiMo / 智谱 GLM 预设，可自定义）；「要不要先思考」做成开关，默认关。
 
 ## 开发
 
