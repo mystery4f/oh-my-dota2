@@ -27,12 +27,11 @@ export function loadSettings(): AppSettings {
     // 面板从不单独编辑 authStyle，一律以预设声明的为准，存档里的野值在这里归位。
     const preset = PROVIDER_PRESETS.find((item) => item.id === merged.provider.id)
     if (preset && merged.provider.authStyle !== preset.authStyle) merged.provider.authStyle = preset.authStyle
-    // 旧存档只有 provider.apiKey 没有 providerKeys：把当前这把按 id 种进表里，
-    // 否则切走再切回来，这把 key 就找不回了。只种非空值——空串会顶掉已记住的 key。
+    // 漂移仲裁（#42）：活值非空时永远写回表里——用户手编了 settings.json 的 key，要以手编的为准，
+    // 否则切走再切回来，表里那把旧 key 会复活。空串/缺失则不碰表——空值不许顶掉已记住的 key。
+    // 旧的「仅缺项时播种」迁移（无条目 + 非空活值）是这条规则的特例，自然归入其中。
     if (!merged.providerKeys || typeof merged.providerKeys !== 'object') merged.providerKeys = {}
-    if (merged.provider.apiKey && !merged.providerKeys[merged.provider.id]) {
-      merged.providerKeys[merged.provider.id] = merged.provider.apiKey
-    }
+    if (merged.provider.apiKey) merged.providerKeys[merged.provider.id] = merged.provider.apiKey
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。
     // 这里只认还在售的 id，认不出就归位到默认，不抛错——设置文件是用户数据，不该因为改版而炸。
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。

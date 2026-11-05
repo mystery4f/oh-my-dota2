@@ -226,6 +226,45 @@ export async function runSettingsPersistProbe(): Promise<void> {
     writeFileSync(file, JSON.stringify({ sendMode: 'chat', retiredKey: { nested: 1 } }), 'utf-8')
     const withUnknown = loadSettings()
     push('未知字段被忽略', withUnknown.sendMode === 'chat', `sendMode=${withUnknown.sendMode}`)
+
+    // —— #42 漂移仲裁：key 表的三条裁决都走真实 loadSettings 路径（手写文件再读）。
+    // 写的文件不带 sendMode，'结束后原样还原' 那条在全新安装场景也能按默认值对上。
+    // ① 手编文件改了活 key、表里躺着旧 key：活值赢，表被更新（否则切走再切回会复活旧 key）。
+    writeFileSync(
+      file,
+      JSON.stringify({
+        provider: { ...DEFAULT_SETTINGS.provider, apiKey: 'hand-edited-live-key' },
+        providerKeys: { deepseek: 'stale-archived-key', zhipu: 'zhipu-kept' }
+      }),
+      'utf-8'
+    )
+    const adopted = loadSettings()
+    push(
+      '手编活 key 覆盖表里的旧 key',
+      adopted.providerKeys?.deepseek === 'hand-edited-live-key' &&
+        adopted.provider.apiKey === 'hand-edited-live-key',
+      JSON.stringify(adopted.providerKeys)
+    )
+    push('漂移仲裁不碰别家的表项', adopted.providerKeys?.zhipu === 'zhipu-kept', adopted.providerKeys?.zhipu ?? 'undefined')
+    // ② 活 key 空、表里有值：空值不许顶掉已记住的 key。
+    writeFileSync(
+      file,
+      JSON.stringify({
+        provider: { ...DEFAULT_SETTINGS.provider, apiKey: '' },
+        providerKeys: { deepseek: 'archived-kept-key' }
+      }),
+      'utf-8'
+    )
+    const kept = loadSettings()
+    push('空活 key 不顶掉表里的值', kept.providerKeys?.deepseek === 'archived-kept-key', kept.providerKeys?.deepseek ?? 'undefined')
+    // ③ 旧存档只有活 key、没有表：仍按 id 播种（迁移是仲裁规则的特例）。
+    writeFileSync(
+      file,
+      JSON.stringify({ provider: { ...DEFAULT_SETTINGS.provider, apiKey: 'legacy-live-key' } }),
+      'utf-8'
+    )
+    const seeded = loadSettings()
+    push('旧存档仍按 id 播种表', seeded.providerKeys?.deepseek === 'legacy-live-key', seeded.providerKeys?.deepseek ?? 'undefined')
   } finally {
     if (hadFile) copyFileSync(backup, file)
     rmSync(backupDir, { recursive: true, force: true })
