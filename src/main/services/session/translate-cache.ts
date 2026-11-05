@@ -23,6 +23,18 @@ const FILE_NAME = 'translate-cache.sqlite'
 /** 这一对最初是谁问出来的：抓屏、回复框、试用页、预热。 */
 export type TranslationOrigin = 'capture' | 'reply' | 'try' | 'warm' | 'probe'
 
+/**
+ * 读取按调用方来源过滤：生产的读永远不蹭 try/warm/probe 写下的行 ——
+ * glm 把 bkb 译成 bkg 那次，就是试用页的行（origin=try，键位 UNIQUE(provider,tone,a) 与生产同槽）
+ * 冒充了生产命中。try/warm 只排 probe（探针的假答案谁都不许用）；
+ * probe 调用方不设限制：探针要能验证自己写下的行。
+ */
+function excludedOriginsFor(caller: TranslationOrigin): TranslationOrigin[] {
+  if (caller === 'capture' || caller === 'reply') return ['try', 'warm', 'probe']
+  if (caller === 'try' || caller === 'warm') return ['probe']
+  return []
+}
+
 const REQUIRED_COLUMNS = [
   'a_raw',
   'direction',
@@ -202,11 +214,13 @@ export function lookupTranslation(
 ): LookupHit | null {
   const wantHan = wantsChinese(direction)
   const source = normalizeLine(text)
+  const excluded = excludedOriginsFor(origin)
+  const scopeSql = excluded.length === 0 ? '' : ` AND origin NOT IN (${excluded.map(() => '?').join(', ')})`
   const handle = open()
 
   if (handle === null) {
     const forward = memory.get(pairKey(provider, tone, text))
-    if (forward !== undefined && hasHan(forward.b) === wantHan) {
+    if (forward !== undefined && !excluded.includes(forward.origin) && hasHan(forward.b) === wantHan) {
       forward.hits += 1
       stats.hits += 1
       return { value: forward.b, tone }
@@ -214,6 +228,7 @@ export function lookupTranslation(
     if (crossTone) {
       for (const [key, pair] of memory) {
         if (!key.startsWith(`${provider}|`) || pair.a !== source) continue
+        if (excluded.includes(pair.origin)) continue
         if (hasHan(pair.b) !== wantHan) continue
         pair.hits += 1
         stats.hits += 1
@@ -222,6 +237,7 @@ export function lookupTranslation(
     }
     for (const [key, pair] of memory) {
       if (!key.startsWith(`${provider}|`)) continue
+      if (excluded.includes(pair.origin)) continue
       if (normalizeLine(pair.b) === source && hasHan(pair.a) === wantHan) {
         pair.hits += 1
         stats.hits += 1
@@ -234,8 +250,8 @@ export function lookupTranslation(
 
   try {
     const forward = handle
-      .prepare('SELECT b, a_han FROM pair WHERE provider = ? AND tone = ? AND a = ?')
-      .get(provider, tone, source) as { b: string; a_han: number } | undefined
+      .prepare('SELECT b, a_han FROM pair WHERE provider = ? AND tone = ? AND a = ?' + scopeSql)
+      .get(provider, tone, source, ...excluded) as { b: string; a_han: number } | undefined
     if (forward !== undefined && hasHan(forward.b) === wantHan) {
       handle
         .prepare(
@@ -249,9 +265,12 @@ export function lookupTranslation(
     if (crossTone) {
       const other = handle
         .prepare(
-          'SELECT id, b, a_han, tone FROM pair WHERE provider = ? AND a = ? ORDER BY hits DESC LIMIT 1'
+          // scopeSql 必须在 LIMIT 之前：接在 LIMIT 后面会被当成 LIMIT 表达式，报 no such column
+          'SELECT id, b, a_han, tone FROM pair WHERE provider = ? AND a = ?' +
+            scopeSql +
+            ' ORDER BY hits DESC LIMIT 1'
         )
-        .get(provider, source) as { id: number; b: string; a_han: number; tone: string } | undefined
+        .get(provider, source, ...excluded) as { id: number; b: string; a_han: number; tone: string } | undefined
       if (other !== undefined && hasHan(other.b) === wantHan) {
         handle
           .prepare('UPDATE pair SET hits = hits + 1, last_hit_at = ?, last_origin = ? WHERE id = ?')
@@ -262,8 +281,10 @@ export function lookupTranslation(
     }
     // 反向：这句话以前是译文，源文就在同一行；反向那半句与语气无关。
     const backward = handle
-      .prepare('SELECT id, a_raw, a_han, tone FROM pair WHERE provider = ? AND b = ? LIMIT 1')
-      .get(provider, text.trim()) as
+      .prepare(
+        'SELECT id, a_raw, a_han, tone FROM pair WHERE provider = ? AND b = ?' + scopeSql + ' LIMIT 1'
+      )
+      .get(provider, text.trim(), ...excluded) as
       | { id: number; a_raw: string; a_han: number; tone: string }
       | undefined
     if (backward !== undefined && (backward.a_han === 1) === wantHan) {

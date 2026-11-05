@@ -29,6 +29,7 @@ import { runSovitsRefsProbe } from './probes/sovits-refs'
 import { runSovitsVoicepackProbe } from './probes/sovits-voicepack'
 import { runMatchReportProbe } from './probes/match-report'
 import { runTranslateCacheProbe } from './probes/translate-cache'
+import { runTranslateAccuracyProbe } from './probes/translate-accuracy'
 import { startGsi, stopGsi } from './services/gsi'
 import { startUpdateCheck } from './services/updater'
 import { registerIpc } from './ipc'
@@ -179,6 +180,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--gsi-dump-report')) void runGsiFramesReportProbe()
   if (process.argv.includes('--match-report')) void runMatchReportProbe()
   if (process.argv.includes('--translate-cache-probe')) void runTranslateCacheProbe()
+  if (process.argv.includes('--translate-accuracy-probe')) void runTranslateAccuracyProbe()
   if (process.argv.includes('--overlay-geometry-probe')) void runOverlayGeometryProbe()
   if (process.argv.includes('--hotkey-probe')) void runHotkeyProbe()
   if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()

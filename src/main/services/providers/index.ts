@@ -1,8 +1,9 @@
 import type { ProviderConfig, ReplyTone, TestResult, TranslateDirection } from '@shared/ipc'
 import { chatCompletion, type ChatMessage } from './openai-compat'
 
+// 缩写类物品（bkb/mkb/od/linken）也在内：保真守卫的词表镜像在 @shared/dota-glossary 的 JARGON_KEEP_TOKENS。
 const JARGON_KEEP =
-  'gg, wp, ez, glhf, ss (missing), b (back), re, rosh, aegis, smoke, ward, deward, dust, tp, gank, feed, carry, support, push, def, farm, deny, stack, pull, rune, bounty, buyback, mid, top, bot, jungle'
+  'gg, wp, ez, glhf, ss (missing), b (back), re, rosh, aegis, smoke, ward, deward, dust, tp, bkb, mkb, od, linken, gank, feed, carry, support, push, def, farm, deny, stack, pull, rune, bounty, buyback, mid, top, bot, jungle'
 
 export const SYSTEM_PROMPTS: Record<TranslateDirection, string> = {
   'en-zh': [
@@ -11,7 +12,7 @@ export const SYSTEM_PROMPTS: Record<TranslateDirection, string> = {
     'Context:',
     '- Every line is Dota 2 match chat. Read words as game terms first: mid/top/bot are lanes, rosh is Roshan, and smoke/ward/dust/tp/gank/push/def/farm/deny/stack/pull/rune/bounty/aegis/buyback are in-game actions, never everyday words.',
     `- Keep these untranslated: ${JARGON_KEEP}.`,
-    '- Keep hero names, item names, player nicknames, and prefixes like [All] / [Team] exactly as written.',
+    '- Hero names translate to the CN slang from the glossary block when listed, otherwise stay as written; player nicknames and prefixes like [All] / [Team] stay as written.',
     '- Never drop a leading prefix or nickname; if the line starts with [All] PlayerName:, keep both.',
     '',
     'Style:',
@@ -28,7 +29,7 @@ export const SYSTEM_PROMPTS: Record<TranslateDirection, string> = {
     'Hard limits:',
     '- At most 8 words and at most 80 characters. Shorter is better.',
     '- One line only. No quotes, no trailing period, no explanation, no pinyin, no Chinese characters left behind.',
-    `- Keep untranslated: ${JARGON_KEEP}, hero names, item names, player nicknames, channel tags like [All] / [Team].`,
+    `- Keep untranslated: ${JARGON_KEEP}, player nicknames, channel tags like [All] / [Team]. CN hero slang maps to the EN hero name from the glossary block when listed; listed item acronyms stay verbatim.`,
     '',
     'Style:',
     '- Use the shorthand players actually type: ss (missing), b (back), re, care mid, rosh now, push top, need ward, def, group up, tp bot, gg, wp, hex, root, silence, slow, initiate, courier, tango, low, oom.',
@@ -41,7 +42,7 @@ export const SYSTEM_PROMPTS: Record<TranslateDirection, string> = {
     'Context:',
     '- Every line is Dota 2 match chat. Read words as game terms first: mid/top/bot are lanes, rosh is Roshan, and smoke/ward/dust/tp/gank/push/def/farm/deny/stack/pull/rune/bounty/aegis/buyback are in-game actions, never everyday words.',
     `- Keep these untranslated: ${JARGON_KEEP}.`,
-    '- Keep hero names, item names, player nicknames, and prefixes like [All] / [Team] exactly as written.',
+    '- Hero names translate to the CN slang from the glossary block when listed, otherwise stay as written; player nicknames and prefixes like [All] / [Team] stay as written.',
     '- Never drop a leading prefix or nickname; if the line starts with [All] PlayerName:, keep both.',
     '- If the line is already Chinese, return it unchanged.',
     '- Never echo a non-Chinese line back. English words, UI/menu text, hero names and player words must come out in Chinese (game jargon listed above stays as-is).',

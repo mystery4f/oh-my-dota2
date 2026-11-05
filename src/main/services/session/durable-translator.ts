@@ -11,7 +11,9 @@ import type {
   SettledSubmissionRecord
 } from '@earendil-works/pi-durable'
 import type { ProviderConfig, ReplyTone, TranslateDirection } from '@shared/ipc'
+import { glossaryPromptBlock } from '@shared/dota-glossary'
 import { thinkingFormatFor, thinkingLevelFor } from '@shared/provider-reasoning'
+import { latinTokenViolations } from '@shared/translate-fidelity'
 import { loadSettings } from '../settings'
 import {
   buildSystemPrompt,
@@ -217,8 +219,9 @@ function writeState(path: string, value: Record<string, number>): void {
   }
 }
 
-function instructionsFor(direction: TranslateDirection, tone: ReplyTone = 'terse'): string {
-  return buildSystemPrompt(direction, tone) + NUMBERED_CONTRACT_NOTE
+/** 会话系统指令 = 方向提示词 + 编号契约 + 术语速查块（静态：会话按会话配置指令，不按行）。 */
+export function instructionsFor(direction: TranslateDirection, tone: ReplyTone = 'terse'): string {
+  return buildSystemPrompt(direction, tone) + NUMBERED_CONTRACT_NOTE + glossaryPromptBlock(direction)
 }
 
 function withTimeout<T>(promise: Promise<T>, label: string, ms = SUBMIT_TIMEOUT_MS): Promise<T> {
@@ -475,46 +478,67 @@ async function translateWithSession(
     const conversation = await ensureConversation(session, direction, tone, scope)
     const cold = (turns.get(slot) ?? 0) === 0
     const tSubmit = Date.now()
-    const submission = await conversation.submit({ type: 'input', content: text }, session.context)
-    let settled: SettledSubmissionRecord
-    const abortTurn = (): void => {
-      void conversation.abort(session.context).catch(() => undefined)
+
+    // 一次完整回合：提交 → 等答案 → 校验 → 取出译文。保真守卫的重试用它跑第二遍。
+    const submitOnce = async (): Promise<string> => {
+      const submission = await conversation.submit({ type: 'input', content: text }, session.context)
+      let settled: SettledSubmissionRecord
+      const abortTurn = (): void => {
+        void conversation.abort(session.context).catch(() => undefined)
+      }
+      inFlight = { origin: gate.origin, abort: abortTurn }
+      try {
+        settled = await withTimeout(submission.wait(session.context), 'translation', cold ? budgets.cold : budgets.warm)
+      } catch (err) {
+        // 客户端超时不等于模型停了：不撤掉这一轮，它会在会话里继续跑，
+        // 下一句 submit 只能排在它后面，表现就是「点了热键一直没反应」。
+        abortTurn()
+        throw err
+      } finally {
+        if (inFlight?.abort === abortTurn) inFlight = null
+      }
+      if (process.env.DURABLE_DEBUG)
+        console.log('TURN_TIMING', JSON.stringify({ submitMs: Date.now() - tSubmit, settledMs: Date.now() - tSubmit, status: settled.status }))
+      if (settled.status !== 'done') {
+        const failure = settled as { reason?: string; detail?: unknown }
+        const detail = failure.detail === undefined ? '' : ' (' + String(failure.detail).slice(0, 200) + ')'
+        throw new Error('translation unanswered: ' + String(failure.reason ?? settled.status) + detail)
+      }
+      const turnsSoFar = (turns.get(slot) ?? 0) + 1
+      turns.set(slot, turnsSoFar)
+      if (turnsSoFar % TURNS_PER_CONVERSATION === 0) {
+        // 每 N 轮清一次上下文：译文历史只保留最近几行（见 payload），不让旧答案变成范例。
+        await conversation.reset(undefined, session.context)
+      }
+      const answerId = settled.answer as EntryId | undefined
+      const page = await conversation.entries(
+        answerId === undefined ? {} : { minEntryId: answerId, maxEntryId: answerId },
+        1,
+        undefined,
+        session.context
+      )
+      const latest = page.items[0] as { model?: { content?: unknown }[] } | undefined
+      const translated = sanitizeTranslation(messageText(latest))
+      if (direction === 'zh-en' && (translated.match(/[\u3400-\u9fff]/g)?.length ?? 0) > 2)
+        throw new Error('zh-en answer came back untranslated')
+      return translated
     }
-    inFlight = { origin: gate.origin, abort: abortTurn }
-    try {
-      settled = await withTimeout(submission.wait(session.context), 'translation', cold ? budgets.cold : budgets.warm)
-    } catch (err) {
-      // 客户端超时不等于模型停了：不撤掉这一轮，它会在会话里继续跑，
-      // 下一句 submit 只能排在它后面，表现就是「点了热键一直没反应」。
-      abortTurn()
-      throw err
-    } finally {
-      if (inFlight?.abort === abortTurn) inFlight = null
+
+    let translated = await submitOnce()
+    // 保真守卫：缩写被写坏（bkb → bkg）就清历史重试一次；再犯就放弃，原文原样返回，
+    // 译文和记账本都不进（调用方对「译文 === 原文」本来就不落账）。适用于所有 scope 包括 try。
+    const violations = latinTokenViolations(text, translated, direction)
+    if (violations.length > 0) {
+      console.log('TRANSLATE_GUARD_RETRY', JSON.stringify({ tokens: violations, via: 'session' }))
+      await resetHistory(direction, tone, scope)
+      translated = await submitOnce()
+      const again = latinTokenViolations(text, translated, direction)
+      if (again.length > 0) {
+        console.log('TRANSLATE_GUARD_GIVEUP', JSON.stringify({ tokens: again, translated: translated.slice(0, 200), via: 'session' }))
+        trackLatency(Date.now() - startedAt, 'session', 1)
+        return text
+      }
     }
-    if (process.env.DURABLE_DEBUG)
-      console.log('TURN_TIMING', JSON.stringify({ submitMs: Date.now() - tSubmit, settledMs: Date.now() - tSubmit, status: settled.status }))
-    if (settled.status !== 'done') {
-      const failure = settled as { reason?: string; detail?: unknown }
-      const detail = failure.detail === undefined ? '' : ' (' + String(failure.detail).slice(0, 200) + ')'
-      throw new Error('translation unanswered: ' + String(failure.reason ?? settled.status) + detail)
-    }
-    const turnsSoFar = (turns.get(slot) ?? 0) + 1
-    turns.set(slot, turnsSoFar)
-    if (turnsSoFar % TURNS_PER_CONVERSATION === 0) {
-      // 每 N 轮清一次上下文：译文历史只保留最近几行（见 payload），不让旧答案变成范例。
-      await conversation.reset(undefined, session.context)
-    }
-    const answerId = settled.answer as EntryId | undefined
-    const page = await conversation.entries(
-      answerId === undefined ? {} : { minEntryId: answerId, maxEntryId: answerId },
-      1,
-      undefined,
-      session.context
-    )
-    const latest = page.items[0] as { model?: { content?: unknown }[] } | undefined
-    const translated = sanitizeTranslation(messageText(latest))
-    if (direction === 'zh-en' && (translated.match(/[\u3400-\u9fff]/g)?.length ?? 0) > 2)
-      throw new Error('zh-en answer came back untranslated')
     trackLatency(Date.now() - startedAt, 'session', 1)
     return translated
   })
@@ -616,7 +640,19 @@ async function translateDirect(
 ): Promise<string> {
   const startedAt = Date.now()
   try {
-    const output = await translateText(provider, text, direction)
+    let output = await translateText(provider, text, direction)
+    // 直连同样过保真守卫（对冲赢家、冷却兜底都走这里），重试一次后放弃回原文。
+    const violations = latinTokenViolations(text, output, direction)
+    if (violations.length > 0) {
+      console.log('TRANSLATE_GUARD_RETRY', JSON.stringify({ tokens: violations, via: 'direct' }))
+      output = await translateText(provider, text, direction)
+      const again = latinTokenViolations(text, output, direction)
+      if (again.length > 0) {
+        console.log('TRANSLATE_GUARD_GIVEUP', JSON.stringify({ tokens: again, translated: output.slice(0, 200), via: 'direct' }))
+        trackLatency(Date.now() - startedAt, 'direct', 1)
+        return text
+      }
+    }
     trackLatency(Date.now() - startedAt, 'direct', 1)
     return output
   } catch (err) {
@@ -685,7 +721,8 @@ export async function translateLine(
       trackLatency(Date.now() - startedAt, outcome.via, 1)
       lastFallback = outcome.via === 'session' ? null : '直连对冲先返回（会话层较慢）'
       if (translated) {
-        writeTranslation(text, cacheKey, tone, translated, { direction, origin })
+        // 保真守卫放弃时译文 === 原文：原样行不进记账本（与 writeTranslation 的原样跳过同一条规则）。
+        if (translated !== text) writeTranslation(text, cacheKey, tone, translated, { direction, origin })
         return translated
       }
       noteFailure('empty session output')
@@ -702,7 +739,7 @@ export async function translateLine(
   lastFallback = failedReason
   const fallback = await translateDirect(provider, text, direction)
   ensureAlive()
-  writeTranslation(text, cacheKey, tone, fallback, { direction, origin })
+  if (fallback !== text) writeTranslation(text, cacheKey, tone, fallback, { direction, origin })
   return fallback
 }
 
