@@ -58,6 +58,8 @@ import { applyPortableUserData } from './services/data-dir'
 // 数据目录必须在任何 userData 读取之前定好：settings、会话库、日志、词库都挂在它下面。
 applyPortableUserData()
 
+// 诊断用：强制渲染进程暴露无障碍树，让 UI 自动化能看到网页层焦点（长期开着无副作用）。
+app.commandLine.appendSwitch('force-renderer-accessibility')
 suppressExperimentalSqliteWarning()
 
 let dashboard: BrowserWindow | null = null
