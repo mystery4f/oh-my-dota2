@@ -17,14 +17,27 @@ export function loadSettings(): AppSettings {
     const file = settingsFile()
     if (!existsSync(file)) return structuredClone(DEFAULT_SETTINGS)
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as Partial<AppSettings>
-    const merged: AppSettings = {
-      ...structuredClone(DEFAULT_SETTINGS),
-      ...parsed,
-      provider: { ...DEFAULT_SETTINGS.provider, ...(parsed.provider ?? {}) } as ProviderConfig,
-      // 热键表要按动作深合并：浅合并会让「只改一个键」的存档把另外四个动作抹成 undefined。
-      // 具体哪一项该回落默认交给 normalizeHotkeyMap 逐项兜底（未知 id 丢掉、非法值回默认）。
-      hotkeys: normalizeHotkeyMap({ ...DEFAULT_SETTINGS.hotkeys, ...(parsed.hotkeys ?? {}) })
-    }
+    return normalizeSettings(mergeSettings(parsed), parsed)
+  } catch (err) {
+    console.error('settings: load failed, using defaults', err)
+    return structuredClone(DEFAULT_SETTINGS)
+  }
+}
+
+/** 缺省值 + 存档的合并：读写两条路共用，避免「读时兜底、写时不兜底」的双份定义。 */
+function mergeSettings(parsed: Partial<AppSettings>): AppSettings {
+  return {
+    ...structuredClone(DEFAULT_SETTINGS),
+    ...parsed,
+    provider: { ...DEFAULT_SETTINGS.provider, ...(parsed.provider ?? {}) } as ProviderConfig,
+    // 热键表要按动作深合并：浅合并会让「只改一个键」的存档把另外四个动作抹成 undefined。
+    // 具体哪一项该回落默认交给 normalizeHotkeyMap 逐项兜底（未知 id 丢掉、非法值回默认）。
+    hotkeys: normalizeHotkeyMap({ ...DEFAULT_SETTINGS.hotkeys, ...(parsed.hotkeys ?? {}) })
+  }
+}
+
+/** 归一化的唯一入口：读盘（loadSettings）与写盘（saveSettings）都从这里走一遍。 */
+export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings> = {}): AppSettings {
     // 换预设会残留上一家的 authStyle（MiMo 的 api-key 头风格）：GLM 收不到 Authorization 报 401。
     // 面板从不单独编辑 authStyle，一律以预设声明的为准，存档里的野值在这里归位。
     const preset = PROVIDER_PRESETS.find((item) => item.id === merged.provider.id)
@@ -49,25 +62,23 @@ export function loadSettings(): AppSettings {
     merged.translationMaxWords = maxWordsFromSettings(merged.translationMaxWords)
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。
     // 这里只认还在售的 id，认不出就归位到默认，不抛错——设置文件是用户数据，不该因为改版而炸。
-    // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。
-    // 这里只认还在售的 id，认不出就归位到默认，不抛错——设置文件是用户数据，不该因为改版而炸。
     if (!OFFLINE_VOICES.some((voice) => voice.id === merged.ttsOfflineVoice)) {
       merged.ttsOfflineVoice = DEFAULT_SETTINGS.ttsOfflineVoice
     }
     // 「某某说」前缀换过类型（boolean → 'front'|'back'|'off'）：旧文件里躺着 true/false
     // 也要能读，归一化成新值，别让一次改版把朗读位置打回默认。
-    const rawPrefix = (parsed as Record<string, unknown>).ttsSpeakPrefix
+    const rawPrefix = (raw as Record<string, unknown>).ttsSpeakPrefix
     if (rawPrefix === true) merged.ttsSpeakPrefix = 'front'
     else if (rawPrefix === false) merged.ttsSpeakPrefix = 'off'
     else if (merged.ttsSpeakPrefix !== 'front' && merged.ttsSpeakPrefix !== 'back' && merged.ttsSpeakPrefix !== 'off') {
       merged.ttsSpeakPrefix = DEFAULT_SETTINGS.ttsSpeakPrefix
     }
     // 说话人模板：不是字符串、或没写 {body}（内容丢了等于没配），一律回缺省。
-    const tplFront = (parsed as Record<string, unknown>).ttsSpeakFrontTpl
+    const tplFront = (raw as Record<string, unknown>).ttsSpeakFrontTpl
     if (typeof tplFront !== 'string' || !tplFront.includes('{body}')) {
       merged.ttsSpeakFrontTpl = DEFAULT_SETTINGS.ttsSpeakFrontTpl
     }
-    const tplBack = (parsed as Record<string, unknown>).ttsSpeakBackTpl
+    const tplBack = (raw as Record<string, unknown>).ttsSpeakBackTpl
     if (typeof tplBack !== 'string' || !tplBack.includes('{body}')) {
       merged.ttsSpeakBackTpl = DEFAULT_SETTINGS.ttsSpeakBackTpl
     }
@@ -89,23 +100,18 @@ export function loadSettings(): AppSettings {
       merged.asrEngine = DEFAULT_SETTINGS.asrEngine
     }
     // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
-    // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
     if (typeof merged.asrHotwords !== 'string') merged.asrHotwords = DEFAULT_SETTINGS.asrHotwords
     // 训练窗口记忆：kind 乱值打回 demo，dataset 只认字符串。
     merged.trainKind = normalizeTrainKind(merged.trainKind)
     if (typeof merged.trainDataset !== 'string') merged.trainDataset = DEFAULT_SETTINGS.trainDataset
     // 微调环境根目录：只认字符串，空串 = 用应用数据目录的 asr-ft-env。
     if (typeof merged.asrFtEnvDir !== 'string') merged.asrFtEnvDir = DEFAULT_SETTINGS.asrFtEnvDir
-    return merged
-  } catch (err) {
-    console.error('settings: load failed, using defaults', err)
-    return structuredClone(DEFAULT_SETTINGS)
-  }
+  return merged
 }
 
 export function saveSettings(patch: Partial<AppSettings>): AppSettings {
   const current = loadSettings()
-  const next: AppSettings = {
+  const merged: AppSettings = {
     ...current,
     ...patch,
     provider: { ...current.provider, ...(patch.provider ?? {}) } as ProviderConfig,
@@ -116,6 +122,8 @@ export function saveSettings(patch: Partial<AppSettings>): AppSettings {
     // 面板一次提交整张热键表，但别的调用方可能只 patch 一个动作：按动作合并，没提到的保持原样。
     hotkeys: normalizeHotkeyMap({ ...current.hotkeys, ...(patch.hotkeys ?? {}) })
   }
+  // 落盘前走同一条归一化：面板提交的 999 不能原样进文件（重启才变回 60 就是这条缺失的症状）。
+  const next = normalizeSettings(merged, patch)
   const file = settingsFile()
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, JSON.stringify(next, null, 2), 'utf-8')

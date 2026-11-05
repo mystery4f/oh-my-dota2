@@ -4,6 +4,7 @@ import type { OfflineStatus } from '../../../shared/ipc'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { GITHUB_MIRRORS } from '../net/download'
 import { offlineVoicePreset, type OfflineVoiceId } from '../../../shared/ipc'
 
 /**
@@ -142,7 +143,7 @@ export function offlineStatus(voice: OfflineVoiceId = 'baker'): OfflineStatus {
  *   2. 依次尝试直连与几个已知的 GitHub 加速前缀；
  *   3. 每 2 MB 打一行日志，下载卡在哪一目了然。
  */
-const MIRRORS = ['', 'https://gh-proxy.com/', 'https://ghfast.top/']
+const MIRRORS = GITHUB_MIRRORS
 const STALL_MS = 15_000
 
 async function downloadOnce(url: string, target: string, onProgress: (ratio: number) => void): Promise<void> {

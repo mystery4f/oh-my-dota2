@@ -6,6 +6,7 @@ import {
   reasoningEnabled,
   reasoningForProvider,
   thinkingFormatFor,
+  thinkingCompatFor,
   thinkingLevelFor
 } from '@shared/provider-reasoning'
 
@@ -164,6 +165,26 @@ export function runProviderReasoningProbe(): void {
     '预设声明了就压过存档（声明即真理）',
     reasoningForProvider('mimo', declaring, { mimo: false }) === true,
     'declaring.reasoning=true, archive.mimo=false'
+  )
+
+  // compat 位（#30）：方言只翻一次，会话层不再自己判一遍——这里锁「哪家给什么字段名」。
+  push(
+    'zai 两家翻成 thinking.type',
+    JSON.stringify(thinkingCompatFor('mimo')) === '{"thinkingFormat":"zai"}' &&
+      JSON.stringify(thinkingCompatFor('zhipu')) === '{"thinkingFormat":"zai"}',
+    'mimo/zhipu'
+  )
+  push(
+    'deepseek 与 OpenAI 兼容端各走自己的字段',
+    thinkingCompatFor('deepseek').thinkingFormat === 'deepseek' &&
+      thinkingCompatFor('openai').supportsReasoningEffort === true &&
+      thinkingCompatFor('custom').supportsReasoningEffort === true,
+    'deepseek→thinking, openai/custom→reasoning_effort'
+  )
+  push(
+    '没有统一开关的家什么都不发',
+    Object.keys(thinkingCompatFor('ollama')).length === 0,
+    'ollama 空对象'
   )
 
   let failed = 0

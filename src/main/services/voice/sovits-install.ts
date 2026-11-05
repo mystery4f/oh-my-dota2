@@ -1,10 +1,9 @@
 import { spawn } from 'node:child_process'
 import { app } from 'electron'
-import { createWriteStream, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs'
 import { statfs } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
+import { downloadResumable } from '../net/download'
 
 /**
  * GPT-SoVITS 引擎包的应用内安装（一键下载 / 手动放置）。
@@ -102,62 +101,27 @@ async function checkDiskSpace(): Promise<string | null> {
   }
 }
 
-/** 解析 content-range「bytes 100-199/1000」；不合法返回 null。 */
-function parseContentRange(header: string | null): { start: number; total: number } | null {
-  const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(header ?? '')
-  if (!match) return null
-  return { start: Number(match[1]), total: Number(match[3]) }
-}
-
 async function downloadArchive(onProgress: (ratio: number) => void): Promise<void> {
   const archive = join(sovitsInstallRoot(), ARCHIVE_NAME)
-  const part = `${archive}.part`
-  // 断点续传：.part 在就带着 Range 接着下（魔搭直链支持，实测返回 206），
-  // 8GB 断在第 6GB 不用从零再来——用户重按一次安装按钮即可续上。
-  const partBytes = existsSync(part) ? statSync(part).size : 0
-  const response = await fetch(DOWNLOAD_URL, partBytes > 0 ? { headers: { Range: `bytes=${partBytes}-` } } : undefined)
-  if (response.status === 416 && partBytes >= MIN_ARCHIVE_BYTES) {
-    // 残片已经比完整包还大：服务端拒续传，但文件本身大概率是齐的，直接收尾。
-    renameSync(part, archive)
-    return
-  }
-  if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
-  let total = Number(response.headers.get('content-length') ?? 0)
-  let received = 0
-  const range = parseContentRange(response.headers.get('content-range'))
-  const appendable = response.status === 206 && range !== null && range.start === partBytes
-  if (response.status === 206 && range) total = range.total
-  if (appendable) {
-    received = partBytes
-    console.log('TTS_SOVITS_INSTALL_RESUME', JSON.stringify({ fromBytes: partBytes, total }))
-  } else if (partBytes > 0) {
-    // 服务端没认 Range（200 全量）或起点对不上：从零重下，别在残片上叠加脏数据。
-    console.log('TTS_SOVITS_INSTALL_RESTART', JSON.stringify({ partBytes, status: response.status }))
-  }
-  const source = Readable.fromWeb(response.body as never)
-  let reported = 0
-  let lastChunkAt = Date.now()
-  const stall = setInterval(() => {
-    // 大文件直链偶发断流：60 秒没有新字节就掐断流；已落盘的字节留在 .part 里等续传。
-    if (Date.now() - lastChunkAt > STALL_MS) source.destroy(new Error(`stall: no bytes for ${STALL_MS / 1000}s`))
-  }, 5_000)
-  source.on('data', (chunk: Buffer) => {
-    received += chunk.length
-    lastChunkAt = Date.now()
-    if (total > 0) onProgress(received / total)
-    if (received - reported >= 500 * 1024 * 1024) {
-      reported = received
-      console.log('TTS_SOVITS_INSTALL_PROGRESS', JSON.stringify({ gb: (received / 1073741824).toFixed(2), totalGb: (total / 1073741824).toFixed(2) }))
-    }
+  // 断点续传、停滞掐断、原子改名都在 @main/services/net/download：
+  // .part 在就带 Range 接着下（魔搭直链支持，实测 206），8GB 断在第 6GB 时重按一次安装即可续上。
+  await downloadResumable({
+    url: DOWNLOAD_URL,
+    dest: archive,
+    minBytes: MIN_ARCHIVE_BYTES,
+    stallMs: STALL_MS,
+    onProgress: (done, total) => {
+      if (total > 0) onProgress(done / total)
+    },
+    progressLogEvery: 500 * 1024 * 1024,
+    onProgressLog: (done, total) =>
+      console.log(
+        'TTS_SOVITS_INSTALL_PROGRESS',
+        JSON.stringify({ gb: (done / 1073741824).toFixed(2), totalGb: (total / 1073741824).toFixed(2) })
+      ),
+    onLog: (tag, detail) =>
+      console.log(tag === 'RESUME' ? 'TTS_SOVITS_INSTALL_RESUME' : 'TTS_SOVITS_INSTALL_RESTART', JSON.stringify(detail))
   })
-  try {
-    await pipeline(source, createWriteStream(part, { flags: appendable ? 'a' : 'w' }))
-    if (received < MIN_ARCHIVE_BYTES) throw new Error(`download too small: ${received}`)
-    if (total > 0 && received < total) throw new Error(`download incomplete: ${received}/${total}`)
-    renameSync(part, archive)
-  } finally {
-    clearInterval(stall)
-  }
 }
 
 function extractArchive(): Promise<void> {

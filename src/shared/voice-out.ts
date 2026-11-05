@@ -1,4 +1,4 @@
-import { OFFLINE_VOICES } from './ipc'
+import { SPEECH_MIME, resolveSpeechPlan } from './speech-plan'
 import type { VoiceOutEngine } from './ipc'
 import type { TtsVoiceOption } from './tts-voices'
 
@@ -92,19 +92,19 @@ export function resolveVoiceOutSynth(
   voiceRaw: unknown,
   text: string
 ): VoiceOutSynthPlan {
+  // 引擎、音色、语言、格式的选法只有一份（shared/speech-plan）；
+  // 这里只补上声出这条腿的清单与默认嗓——清单归调用方，选法归计划值。
   const engine = normalizeVoiceOutEngine(engineRaw)
-  const lang: 'zh' | 'en' = /[\u3400-\u9fff]/.test(text) ? 'zh' : 'en'
-  if (engine === 'sovits') return { engine, voice: '', audioMime: 'audio/wav', lang }
-  if (engine === 'offline') {
-    const voice = OFFLINE_VOICES.some((item) => item.id === voiceRaw)
-      ? (voiceRaw as string)
-      : OFFLINE_VOICES[0].id
-    return { engine, voice, audioMime: 'audio/wav', lang }
-  }
-  const voice = VOICE_OUT_VOICES.some((item) => item.id === voiceRaw)
-    ? (voiceRaw as string)
-    : DEFAULT_VOICE_OUT_VOICE
-  return { engine, voice, audioMime: 'audio/mpeg', lang }
+  const plan = resolveSpeechPlan({
+    engine,
+    voice: voiceRaw,
+    rate: 1,
+    pitch: 1,
+    text,
+    edgeVoices: VOICE_OUT_VOICES,
+    defaultEdgeVoice: DEFAULT_VOICE_OUT_VOICE
+  })
+  return { engine, voice: plan.voice, audioMime: SPEECH_MIME[engine], lang: plan.lang }
 }
 
 /**

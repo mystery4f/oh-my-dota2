@@ -12,7 +12,7 @@ import type {
 } from '@earendil-works/pi-durable'
 import type { ProviderConfig, ReplyTone, TranslateDirection } from '@shared/ipc'
 import { glossaryPromptBlock } from '@shared/dota-glossary'
-import { thinkingFormatFor, thinkingLevelFor } from '@shared/provider-reasoning'
+import { thinkingCompatFor, thinkingLevelFor } from '@shared/provider-reasoning'
 import { ensureTerminalPunct, latinTokenViolations } from '@shared/translate-fidelity'
 import { loadSettings } from '../settings'
 import {
@@ -178,16 +178,6 @@ function runtimeConfigKey(provider: ProviderConfig, maxWords: number): string {
   return providerKey(provider) + '|' + thinkingLevelFor(provider) + '|' + maxWords
 }
 
-/**
- * pi-ai 的推理方言：zai（MiMo/智谱）与 deepseek 都走 thinking.type，
- * OpenAI 兼容端点只认 reasoning_effort。方言选错的表现是「开关点了没反应」。
- */
-function compatFor(provider: ProviderConfig): { thinkingFormat?: 'zai' | 'deepseek'; supportsReasoningEffort?: boolean } {
-  const format = thinkingFormatFor(provider.id)
-  if (format === 'zai' || format === 'deepseek') return { thinkingFormat: format }
-  if (format === 'openai') return { supportsReasoningEffort: true }
-  return {}
-}
 
 /**
  * 会话库按 provider 分文件：换模型/换端点（包括探针里的假 provider）各自一份历史，
@@ -302,9 +292,10 @@ async function openRuntime(provider: ProviderConfig, maxWords: number): Promise<
     // 推理模型会先花掉一大截预算，留 2048 才不会把译文截成半句。
     maxTokens: 2048,
     // 各家「先思考」的开关不是一个字段（zai/deepseek 的 thinking.type、OpenAI 的 reasoning_effort）：
-    // 方言由 thinkingFormatFor 按 provider 选，开关由会话的 thinkingLevel 决定（面板「推理」）。
+    // 方言与开关分两处：方言由 @shared/provider-reasoning 的 thinkingCompatFor 翻译，
+    // 开关由会话的 thinkingLevel 决定（面板「推理」）。
     // thinkingLevel:'off' 时 pi-ai 把 reasoningEffort 置空，各家分支据此下发 disabled / 什么都不发。
-    compat: compatFor(provider),
+    compat: thinkingCompatFor(provider.id),
     headers
   }
 

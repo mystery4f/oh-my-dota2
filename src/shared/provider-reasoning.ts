@@ -62,6 +62,20 @@ export function directReasoningParams(provider: Pick<ProviderConfig, 'id' | 'rea
 }
 
 /**
+ * pi-ai 的 compat 位（#30）：方言只在这里翻译成字段名，会话层不再自己判一遍。
+ * zai/deepseek 走 thinking 对象，openai 兼容走 reasoning_effort，其余什么都不发。
+ */
+export function thinkingCompatFor(id: ProviderId): {
+  thinkingFormat?: 'zai' | 'deepseek'
+  supportsReasoningEffort?: boolean
+} {
+  const format = thinkingFormatFor(id)
+  if (format === 'zai' || format === 'deepseek') return { thinkingFormat: format }
+  if (format === 'openai') return { supportsReasoningEffort: true }
+  return {}
+}
+
+/**
  * 切供应商/载入时这一格该亮的开关（#43）：预设声明 > 该供应商自己的存档 > 默认关。
  * MiMo 要思考、智谱 flash 不要，切家时跟着换，不用重新点。
  */

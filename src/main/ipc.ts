@@ -14,7 +14,8 @@ import { getWhisperAdapter } from './services/voice/whisper'
 import { getVoiceOutService } from './services/voice/voice-out'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
-import { ensureQwen3Model, qwen3Status, qwen3Transcribe } from './services/voice/qwen3-asr'
+import { transcribeWav } from './services/voice/asr'
+import { ensureQwen3Model, qwen3Status } from './services/voice/qwen3-asr'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
@@ -122,22 +123,8 @@ const handlers: MainHandlers = {
     mkdirSync(dir, { recursive: true })
     const wavPath = join(dir, 'utterance.wav')
     writeFileSync(wavPath, Buffer.from(base64, 'base64'))
-    // 识别引擎路由：Qwen3 走 sherpa worker；模型没就绪时给一句人话提示，
-    // 让用户去面板下载/解压，而不是吞掉录音。
-    const asrEngine = loadSettings().asrEngine
-    if (asrEngine === 'qwen3') {
-      if (!qwen3Status().ready) {
-        return {
-          ok: false,
-          text: '',
-          error: 'Qwen3 模型未就绪：下载 tar.bz2 放进 data\\asr-models\\，到面板「识别引擎」点解压'
-        }
-      }
-      return qwen3Transcribe(wavPath).then((result) =>
-        result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'Qwen3 识别失败' }
-      )
-    }
-    return getWhisperAdapter().transcribe(wavPath, language ?? 'zh')
+    // 引擎路由在这里只有一行：识别引擎的选择与「模型没就绪」的提示都由 transcribeWav 负责。
+    return transcribeWav(wavPath, language ?? 'zh')
   },
   ttsPreview: (text) => getTtsAdapter().preview(String(text ?? '')),
   voiceOutTest: () => getVoiceOutService().test(),
@@ -209,15 +196,7 @@ const handlers: MainHandlers = {
   ftRecRead: (group, line) => ftRecRead(group, line),
   // 训练窗口「识别测试」：已存录音直接喂给当前识别引擎，和稿子原文对比。
   ftRecAsr: async (group, line) => {
-    const wavPath = ftRecPath(String(group ?? ''), String(line ?? ''))
-    if (loadSettings().asrEngine === 'qwen3') {
-      if (!qwen3Status().ready) {
-        return { ok: false, text: '', error: 'Qwen3 模型未就绪：到面板「识别引擎」里点解压' }
-      }
-      const result = await qwen3Transcribe(wavPath)
-      return result ? { ok: true, text: result.text } : { ok: false, text: '', error: 'Qwen3 识别失败' }
-    }
-    return getWhisperAdapter().transcribe(wavPath, 'zh')
+    return transcribeWav(ftRecPath(String(group ?? ''), String(line ?? '')), 'zh')
   },
   // 一键打包：录音 × 稿子 → 官方微调 JSONL（#14 的核心件，试点格式已验证）。
   ftDatasetPrepare: () => prepareFtDataset(),

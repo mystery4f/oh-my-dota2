@@ -29,98 +29,22 @@ const CHANNEL_RE = /^\s*(\[[^\]\n]{1,12}\])\s*/
  * 24 字符会把它判成「续行」，于是整屏消息被并成一条（实测 bug）。冒号后必须还有内容，避免把「wtf:」这类正文尾巴当前缀。
  */
 const SPEAKER_RE = /^([^:：\n]{1,48}?)\s*[:：]\s*(?=\S)/
-/**
- * 一行 OCR 文本是不是「一条新消息」的开头：有昵称前缀就算。
- * 合并与拆分共用同一条判据，避免两处规则漂移。
- */
-export function startsNewMessage(text: string): boolean {
-  return SPEAKER_RE.test(text.trim())
-}
 
-/** 一条消息内部的第二个 `[频道]` + 冒号标记：OCR 把相邻两行并成一行时，用它切开。 */
-const INLINE_START_RE = /(?:\[|【)[^\]】\n]{1,14}(?:\]|】|」|』)?\s*[^:：\n]{1,40}?\s*[:：]\s*(?=\S)/g
-
-/**
- * 把被 OCR 并成一行的多条消息拆开。只在「方括号开头 + 后面很快出现冒号」处切，
- * 正文里的普通冒号（如 `wtf: no`）不会被误切。
- */
-export function splitInlineMessages(text: string): string[] {
-  const trimmed = text.trim()
-  if (trimmed.length === 0) return []
-  const cuts: number[] = []
-  for (const match of trimmed.matchAll(INLINE_START_RE))
-    if (match.index !== undefined && match.index > 0) cuts.push(match.index)
-  if (cuts.length === 0) return [trimmed]
-  const parts: string[] = []
-  let start = 0
-  for (const cut of cuts) {
-    const piece = trimmed.slice(start, cut).trim()
-    if (piece.length > 0) parts.push(piece)
-    start = cut
-  }
-  const tail = trimmed.slice(start).trim()
-  if (tail.length > 0) parts.push(tail)
-  return parts
-}
-
-/** 汉字占比 ≥0.3 视为中文行：Dota 聊天里中英混排是「两条不同消息」的典型信号。 */
-export function isHanText(text: string): boolean {
-  const letters = text.replace(/[^\p{L}\p{N}]/gu, '')
-  if (letters.length === 0) return false
-  const han = letters.match(/[\u3400-\u9fff]/g)?.length ?? 0
-  return han / letters.length >= 0.3
-}
-/**
- * 把 OCR 行按「续行」规则合并成完整消息。
- * 判据（全部满足才合并）：空隙 ≤ 0.5 行高、左缩进差 ≤ 24px、下一行没有昵称前缀、
- * 上一行不以句末标点结束、合并后不超过 180 字符。
- */
 /** 去空白、去标点、去符号后的小写串，用作精确判重键（OCR 的标点/大小写噪声不该算新消息）。 */
 export function normalizeLine(text: string): string {
   return text.replace(/[\s\p{P}\p{S}]+/gu, '').toLowerCase()
 }
 
-/** 近似判重的两侧最短长度与长度差容忍度：滚动时被裁剩的同一条消息两侧会差几个字符。 */
-const NEAR_DUP_MIN_CHARS = 8
-const NEAR_DUP_LENGTH_RATIO = 0.25
-/** 近似判重要求的字符差异上限：至少 2 个字符，且不超过较长者的 10%。 */
-const NEAR_DUP_MIN_EDITS = 2
-const NEAR_DUP_EDIT_RATIO = 0.1
-
-/** 一条消息是另一条的前缀或后缀（长度相近）即算重复：聊天滚动会把同一条消息裁成两截重复出现。 */
-/** 编辑距离（只用于 ≤180 字符的聊天行，O(n*m) 足够）。 */
-function editDistance(a: string, b: string): number {
-  const prev: number[] = new Array(b.length + 1)
-  const cur: number[] = new Array(b.length + 1)
-  for (let j = 0; j <= b.length; j++) prev[j] = j
-  for (let i = 1; i <= a.length; i++) {
-    cur[0] = i
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
-    }
-    for (let j = 0; j <= b.length; j++) prev[j] = cur[j]
-  }
-  return prev[b.length]
+/**
+ * 游戏只认可打印 ASCII：CJK、换行、引号都会在按键注入里变成空白或残句。
+ *
+ * 两个写法通道（聊天框整句粘贴、控制台逐字打字）此前各写一遍同样的清洗，
+ * 规则一样却各自为政——改一处就漏另一处，所以只留这一份。
+ */
+export function toPrintableAscii(text: string): string {
+  return text.replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-export function isNearDuplicate(text: string, recent: string[]): boolean {
-  // 两侧都归一化（去空白/标点/大小写）：OCR 的标点噪声不该把同一条消息判成新消息。
-  const probe = normalizeLine(text)
-  if (probe.length < NEAR_DUP_MIN_CHARS) return false
-  for (const raw of recent) {
-    const other = normalizeLine(raw)
-    if (other.length < NEAR_DUP_MIN_CHARS) continue
-    const shorter = probe.length <= other.length ? probe : other
-    const longer = shorter === probe ? other : probe
-    if (longer.length - shorter.length > longer.length * NEAR_DUP_LENGTH_RATIO) continue
-    if (!longer.startsWith(shorter) && !longer.endsWith(shorter)) continue
-    // 只是前缀相同不等于同一条消息（'push top now A1' 与 'push top now B2'），要差得足够少。
-    const allowed = Math.max(NEAR_DUP_MIN_EDITS, Math.round(longer.length * NEAR_DUP_EDIT_RATIO))
-    if (editDistance(shorter, longer) <= allowed) return true
-  }
-  return false
-}
 /**
  * 拆出频道、昵称与正文。频道与昵称由调用方原样回填，模型只接触正文，
  * 因此翻译物理上无法弄丢玩家名。

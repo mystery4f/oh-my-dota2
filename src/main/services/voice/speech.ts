@@ -4,6 +4,8 @@ import { loadSettings } from '../settings'
 import { heroChinese } from '../hero-names'
 import { warmEdge } from './edge'
 import { speakPipeline, type SpeechSegment } from './speech-pipeline'
+import { resolveSpeechPlan } from '@shared/speech-plan'
+import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 
 /** 单句上限：再长就不念了——一整段口播会把后面的消息全挤到后面。 */
 export const SPEAK_MAX_CHARS = 60
@@ -33,6 +35,8 @@ export function speakText(raw: string): string {
 export interface SpeakOptions {
   /** 朗读引擎：edge 用神经语音，system 用系统嗓子，sovits 走本机 GPT-SoVITS 服务。默认 edge。 */
   engine?: 'system' | 'edge' | 'offline' | 'sovits'
+  /** 离线嗓 id：朗读两条音色槽里离线那一槽，计划值按引擎决定用哪个（声出不传）。 */
+  offlineVoice?: string
   readAloud: boolean
   /** 自己发的也念；缺省关闭（见 AppSettings.ttsReadOwn）。 */
   readOwn?: boolean
@@ -106,16 +110,27 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
       : options.frontTpl || '{who}说，{body}'
   const text = spoken ? tpl.replace('{who}', spoken).replace('{body}', body) : body
   const clipped = text.length > SPEAK_MAX_CHARS ? `${text.slice(0, SPEAK_MAX_CHARS)}…` : text
+  // 引擎、嗓音、语言、语速、音高全交给计划值：四条腿同一份判断，改一处四腿一起变。
+  const plan = resolveSpeechPlan({
+    engine: options.engine,
+    voice: options.voice,
+    offlineVoice: options.offlineVoice,
+    rate: options.rate,
+    pitch: options.pitch,
+    segmentChars: options.segmentChars,
+    text: clipped,
+    edgeVoices: EDGE_VOICES,
+    defaultEdgeVoice: DEFAULT_EDGE_VOICE
+  })
   return {
     // 捕获时间随包走：投递层/浮层拿它判过期（新消息已到就不再念旧的）。
     ts: entry.ts,
     text: clipped,
-    engine: options.engine ?? 'edge',
-    // 中文用中文嗓子，其余用英文嗓子；判据看译文本身，不看用户设置。
-    lang: /[\u3400-\u9fff]/.test(clipped) ? 'zh' : 'en',
-    rate: Math.min(2, Math.max(0.5, options.rate)),
-    pitch: Math.min(1.3, Math.max(0.7, options.pitch)),
-    voice: options.voice
+    engine: plan.engine,
+    lang: plan.lang,
+    rate: plan.rate,
+    pitch: plan.pitch,
+    voice: plan.voice
   }
 }
 
@@ -131,8 +146,8 @@ export function isAnnounceStale(entryTs: number, cutoff: number | undefined, dro
  * cutoff=最新一次捕获的时间戳（capture 层传入）：ttsDropBacklog 开着时，宣布此刻已过期
  * （捕获时间早于更新一拍）的条目直接跳过；宁可漏念旧的，也不让队列越念越落后。 */
 /**
- * 从设置组装 decideSpeak 的入参。engine 必须显式带进来：漏掉时 decideSpeak 会默认
- * edge，离线分支合成出的 WAV 在 deliver 里就被标成 audio/mpeg，浮层按 mp3 解不开。
+ * 从设置组装 decideSpeak 的入参。引擎与音色的选法在计划值里（shared/speech-plan），
+ * 这里只做「设置字段 → 入参字段」的搬运，不再承担引擎语义。
  */
 export function speakOptionsFromSettings(settings: {
   ttsReadAloud: boolean
@@ -140,6 +155,7 @@ export function speakOptionsFromSettings(settings: {
   ttsRate: number
   ttsPitch: number
   ttsVoice: string
+  ttsOfflineVoice?: string
   ttsEngine: 'system' | 'edge' | 'offline' | 'sovits'
   ttsSpeakPrefix: 'front' | 'back' | 'off'
   ttsSpeakSegmentChars?: number
@@ -156,7 +172,8 @@ export function speakOptionsFromSettings(settings: {
     backTpl: settings.ttsSpeakBackTpl,
     rate: settings.ttsRate,
     pitch: settings.ttsPitch,
-    voice: settings.ttsVoice
+    voice: settings.ttsVoice,
+    offlineVoice: settings.ttsOfflineVoice
   }
 }
 export function announceEntries(entries: CaptureEntry[], cutoff?: number): void {
@@ -208,7 +225,6 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
         split: true,
         segmentChars: options.segmentChars,
         voice: payload.voice,
-        offlineVoice: settings.ttsOfflineVoice,
         rate: payload.rate,
         pitch: payload.pitch,
         lang: payload.lang,

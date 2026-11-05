@@ -1,10 +1,8 @@
-import { app } from 'electron'
-import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { toPrintableAscii } from '@shared/chat-line'
 import scriptSource from './chat-send.ps1?raw'
+import { PsSerial, runPs, writePsArg } from './ps-runner'
 
-// Paste is a single keystroke, so the whole hand-off fits in a few hundred ms.
+// 粘贴是一次按键，整段交接几百毫秒就够；超时给宽一点是因为 PowerShell 启动本身要两百毫秒。
 const SEND_TIMEOUT_MS = 12_000
 
 export interface ChatSendResult {
@@ -19,86 +17,25 @@ const EXIT_REASONS: Record<string, string> = {
 }
 
 /**
- * Types a short English line into the Dota 2 chat box: Esc clears any draft,
- * Enter opens the chat box, Ctrl+V pastes the clipboard and Enter sends it.
- * The chat widget accepts a real paste, so nothing is typed character by character.
+ * 把一句英文送进 Dota 2 聊天框：Esc 清草稿、Enter 开框、Ctrl+V 粘贴、Enter 发送。
+ * 聊天控件接受真实粘贴，所以不用逐字敲。
  */
 class ChatSender {
-  private scriptPath: string | null = null
-  private chain: Promise<ChatSendResult> = Promise.resolve({ ok: true })
+  private serial = new PsSerial()
 
   send(text: string): Promise<ChatSendResult> {
-    const next = (): Promise<ChatSendResult> => this.run(text)
-    this.chain = this.chain.then(next, next)
-    return this.chain
-  }
-
-  private dir(): string {
-    const path = join(app.getPath('userData'), 'chat-send')
-    mkdirSync(path, { recursive: true })
-    return path
-  }
-
-  private deployScript(): string {
-    const path = join(this.dir(), 'chat-send.ps1')
-    if (this.scriptPath !== path) {
-      writeFileSync(path, scriptSource, 'utf8')
-      this.scriptPath = path
-    }
-    return path
-  }
-
-  private async run(text: string): Promise<ChatSendResult> {
-    const dir = this.dir()
-    const textPath = join(dir, 'line.txt')
-    writeFileSync(textPath, text, 'utf8')
-
-    const scriptPath = this.deployScript()
-    return await new Promise<ChatSendResult>((resolve) => {
-      let settled = false
-      const finish = (result: ChatSendResult): void => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolve(result)
-      }
-
-      const child = spawn(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-TextFile', textPath],
-        { windowsHide: true }
-      )
-
-      let stdout = ''
-      let stderr = ''
-      const timer = setTimeout(() => {
-        child.kill()
-        finish({ ok: false, error: '聊天框发送超时' })
-      }, SEND_TIMEOUT_MS)
-
-      child.stdout?.on('data', (chunk) => {
-        stdout += String(chunk)
+    return this.serial.run(() =>
+      runPs({
+        folder: 'chat-send',
+        scriptName: 'chat-send.ps1',
+        source: scriptSource,
+        args: ['-TextFile', writePsArg('chat-send', 'line.txt', text)],
+        timeoutMs: SEND_TIMEOUT_MS,
+        timeoutMessage: '聊天框发送超时',
+        reasons: EXIT_REASONS,
+        noHandshake: '聊天框没有确认收到消息'
       })
-      child.stderr?.on('data', (chunk) => {
-        stderr += String(chunk)
-      })
-      child.on('error', (error) => finish({ ok: false, error: error.message }))
-      child.on('close', (code) => {
-        if (code !== 0) {
-          const token = Object.keys(EXIT_REASONS).find((key) => stdout.includes(key))
-          finish({
-            ok: false,
-            error: token ? EXIT_REASONS[token] : (stderr.trim() || `PowerShell 退出码 ${code ?? -1}`).slice(0, 300)
-          })
-          return
-        }
-        if (!stdout.includes('OK')) {
-          finish({ ok: false, error: (stderr.trim() || '聊天框没有确认收到消息').slice(0, 300) })
-          return
-        }
-        finish({ ok: true })
-      })
-    })
+    )
   }
 }
 
@@ -109,10 +46,7 @@ export function getChatSender(): ChatSender {
   return sender
 }
 
-/** The chat box is typed as plain text, so only printable ASCII survives the trip. */
+/** 聊天框按纯文本对待，只有可打印 ASCII 能完整走完这一趟。 */
 export function normalizeChatLine(text: string): string {
-  return text
-    .replace(/[^\x20-\x7E]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return toPrintableAscii(text)
 }

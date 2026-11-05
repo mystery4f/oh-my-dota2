@@ -1,11 +1,7 @@
-import { app } from 'electron'
-import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import scriptSource from './ptt-key.ps1?raw'
+import { PsSerial, runPs } from './ps-runner'
 
-// Press/release must reach the game within the 200ms lead/tail margins,
-// and PowerShell startup itself eats a couple hundred ms.
+// 按下/松开必须落在 200ms 的头尾余量里，而 PowerShell 启动自己就要两百毫秒。
 const KEY_TIMEOUT_MS = 4000
 
 export interface PttKeyResult {
@@ -14,84 +10,36 @@ export interface PttKeyResult {
 }
 
 /**
- * Sends the game push-to-talk key as raw SendInput down/up events (one process
- * per event: the key must stay HELD for the whole playback, so a single
- * "tap" script will not do). Serialized — a down/up pair must never interleave
- * with the next test run's pair.
+ * 用原始 SendInput 按下/松开游戏的说话键（一次进程一个事件：键要一直按住整段播放，
+ * 单次「敲一下」的脚本做不到）。串行执行——一对按下/松开不能和下一对的按键交错。
  */
 class PttKeySender {
-  private scriptPath: string | null = null
-  private chain: Promise<PttKeyResult> = Promise.resolve({ ok: true })
+  private serial = new PsSerial()
 
-  /** Press and hold the key (VK code). */
+  /** 按下并按住（VK 码）。 */
   down(vk: number): Promise<PttKeyResult> {
     return this.enqueue('down', vk)
   }
 
-  /** Release the key (VK code). Must always run — even after a failed down. */
+  /** 松开（VK 码）。按下失败也必须跑。 */
   up(vk: number): Promise<PttKeyResult> {
     return this.enqueue('up', vk)
   }
 
   private enqueue(action: 'down' | 'up', vk: number): Promise<PttKeyResult> {
-    const next = (): Promise<PttKeyResult> => this.run(action, vk)
-    this.chain = this.chain.then(next, next)
-    return this.chain
-  }
-
-  private deployScript(): string {
-    const path = join(app.getPath('userData'), 'ptt-key', 'ptt-key.ps1')
-    if (this.scriptPath !== path) {
-      mkdirSync(join(app.getPath('userData'), 'ptt-key'), { recursive: true })
-      writeFileSync(path, scriptSource, 'utf8')
-      this.scriptPath = path
-    }
-    return path
-  }
-
-  private run(action: 'down' | 'up', vk: number): Promise<PttKeyResult> {
-    const scriptPath = this.deployScript()
-    return new Promise<PttKeyResult>((resolve) => {
-      let settled = false
-      const finish = (result: PttKeyResult): void => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolve(result)
-      }
-
-      const child = spawn(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Vk', String(vk), '-Action', action],
-        { windowsHide: true }
-      )
-
-      let stdout = ''
-      let stderr = ''
-      const timer = setTimeout(() => {
-        child.kill()
-        finish({ ok: false, error: `说话键${action === 'down' ? '按下' : '松开'}超时` })
-      }, KEY_TIMEOUT_MS)
-
-      child.stdout?.on('data', (chunk) => {
-        stdout += String(chunk)
+    return this.serial.run(() =>
+      runPs({
+        folder: 'ptt-key',
+        scriptName: 'ptt-key.ps1',
+        source: scriptSource,
+        args: ['-Vk', String(vk), '-Action', action],
+        timeoutMs: KEY_TIMEOUT_MS,
+        timeoutMessage: `说话键${action === 'down' ? '按下' : '松开'}超时`,
+        noHandshake: '说话键注入未确认',
+        // 脚本没有原因表：退出码兜底也要说是哪件事失败了，别让用户只看到「PowerShell 退出码 1」。
+        errorPrefix: '说话键注入失败'
       })
-      child.stderr?.on('data', (chunk) => {
-        stderr += String(chunk)
-      })
-      child.on('error', (error) => finish({ ok: false, error: error.message }))
-      child.on('close', (code) => {
-        if (code !== 0) {
-          finish({ ok: false, error: (stderr.trim() || `PowerShell 退出码 ${code ?? -1}`).slice(0, 300) })
-          return
-        }
-        if (!stdout.includes('OK')) {
-          finish({ ok: false, error: (stderr.trim() || '说话键注入未确认').slice(0, 300) })
-          return
-        }
-        finish({ ok: true })
-      })
-    })
+    )
   }
 }
 

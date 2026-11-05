@@ -8,6 +8,9 @@ import {
   type SpeechSegment,
   type SpeechSynthAdapters
 } from '../services/voice/speech-pipeline'
+import { OFFLINE_VOICES } from '@shared/ipc'
+import { resolveSpeechPlan, speechFailHint } from '@shared/speech-plan'
+import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 
 /**
  * `--tts-pipeline-probe`：合成→按序投递管线的全量行为锁（假引擎注入，零网络零显卡零窗口）。
@@ -215,6 +218,41 @@ export async function runTtsPipelineProbe(): Promise<void> {
     )
     push('GV：合成失败产出空段不回退', seen.length === 1 && seen[0].audio === null, 'audio null')
     push('GV：合成失败记 synthFailed', outcome.synthFailed === true && outcome.dropped === 0, JSON.stringify(outcome))
+  }
+
+  // —— 计划值：引擎/嗓音/语言/格式一处算出，四条腿共用（试听把 offline 折成 edge 的那次 bug）——
+  {
+    const leg = { voice: 'zh-CN-XiaoxiaoNeural', offlineVoice: 'xiao_ya', rate: 1, pitch: 1, text: '别送了' }
+    const edge = resolveSpeechPlan({ ...leg, engine: 'edge', edgeVoices: EDGE_VOICES, defaultEdgeVoice: DEFAULT_EDGE_VOICE })
+    const offline = resolveSpeechPlan({ ...leg, engine: 'offline' })
+    const sovits = resolveSpeechPlan({ ...leg, engine: 'sovits' })
+    const system = resolveSpeechPlan({ ...leg, engine: 'system' })
+    const all = [edge, offline, sovits, system]
+    push('计划：同一句中文四条腿都判 zh', all.every((p) => p.lang === 'zh'), JSON.stringify(all.map((p) => p.lang)))
+    push(
+      '计划：一个引擎一格格式（离线/GV 是 wav，系统不出音频）',
+      edge.mime === 'audio/mpeg' && offline.mime === 'audio/wav' && sovits.mime === 'audio/wav' && system.mime === null,
+      JSON.stringify(all.map((p) => p.mime))
+    )
+    push(
+      '计划：离线嗓取离线槽、GV 不选嗓、系统不出音频',
+      offline.voice === 'xiao_ya' && sovits.voice === '' && system.voice === '' && edge.voice === leg.voice,
+      JSON.stringify(all.map((p) => p.voice))
+    )
+    push('计划：垃圾引擎打回 edge', resolveSpeechPlan({ ...leg, engine: 'garbage' }).engine === 'edge', 'garbage')
+    push(
+      '计划：离线嗓不在清单里回落到第一个',
+      resolveSpeechPlan({ ...leg, engine: 'offline', offlineVoice: 'nope' }).voice === OFFLINE_VOICES[0].id,
+      OFFLINE_VOICES[0].id
+    )
+    const wild = resolveSpeechPlan({ ...leg, engine: 'edge', rate: 9, pitch: 0.1, edgeVoices: EDGE_VOICES })
+    push('计划：语速/音高夹在引擎认的区间', wild.rate === 2 && wild.pitch === 0.7, JSON.stringify({ rate: wild.rate, pitch: wild.pitch }))
+    push('计划：英文句判 en', resolveSpeechPlan({ ...leg, engine: 'sovits', text: 'gg wp' }).lang === 'en', 'en')
+    push(
+      '计划：失败原因按引擎分域（断网不报给离线）',
+      speechFailHint('offline').includes('模型') && speechFailHint('edge').includes('断网') && speechFailHint('sovits').includes('api_v2'),
+      speechFailHint('offline')
+    )
   }
 
   const failed = cases.filter((row) => !row.ok)

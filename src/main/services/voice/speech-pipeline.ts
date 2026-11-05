@@ -3,6 +3,8 @@ import type { TtsVoiceOption } from '@shared/tts-voices'
 import { synthesizeEdge } from './edge'
 import { synthesizeOffline } from './offline'
 import { synthesizeSovits } from './sovits'
+import { SPEECH_MIME, speechLang, type SpeechMime } from '@shared/speech-plan'
+import type { SpeechEngine } from '@shared/speech-plan'
 
 /**
  * 合成管线：把一句文本变成按序音频段的公共机器——切段、按引擎并发策略合成、
@@ -12,7 +14,6 @@ import { synthesizeSovits } from './sovits'
  * @author dongcheng.xie
  */
 
-export type SpeechEngine = 'system' | 'edge' | 'offline' | 'sovits'
 
 /** 引擎适配器缝：探针注入假引擎；生产实现就是三个真实合成器（全部失败返回 null，不抛错）。 */
 export interface SpeechSynthAdapters {
@@ -78,19 +79,61 @@ export interface SpeechRequest {
   voice?: string
   /** edge 允许的嗓音白名单：朗读走默认中文嗓清单，声出传 VOICE_OUT_VOICES 放英文嗓进来。 */
   edgeVoices?: readonly TtsVoiceOption[]
-  /** 离线嗓 id。 */
-  offlineVoice?: string
   rate: number
   /** 音高倍率，仅 edge 认。 */
   pitch?: number
   /** 合成语言，仅 sovits 认；缺省按段文本判（含 CJK 即中文）。 */
   lang?: 'zh' | 'en'
   /** 每段精调：声出按段解析嗓/语言（英文占位）；返回字段缺省回落到请求级。 */
-  resolveSegment?: (segment: string) => { voice?: string; offlineVoice?: string; lang?: 'zh' | 'en' }
+  resolveSegment?: (segment: string) => { voice?: string; lang?: 'zh' | 'en' }
   /** 探针注入假引擎；生产不传。 */
   adapters?: Partial<SpeechSynthAdapters>
   /** 投递通道：同通道的单子按序投递（朗读每拍一批，靠它保证跨批有序；声出/试听单发不传）。 */
   lane?: string
+}
+
+/** 一次合成调用：引擎差异只在参数怎么给，调用处不看引擎名。 */
+type SynthCall = (
+  adapters: SpeechSynthAdapters,
+  text: string,
+  voice: string,
+  request: SpeechRequest
+) => Promise<Buffer | null>
+
+export interface EngineDriver {
+  /** 切段：长句按标点切段（edge 分散跨境往返、sovits 分散等待）；整句够快的引擎不切。 */
+  split: boolean
+  /** 出什么格式：system 不出音频（null），其余二选一。 */
+  mime: SpeechMime | null
+  /** 合成时机：入队就发车 / 轮到才合成 / 本机排队懒启动 / 不出音频。 */
+  scheduling: 'eager' | 'lazy' | 'sovits' | 'none'
+  /** 入队即发车的引擎（eager）：往返时间藏进投递顺位里。 */
+  atEnqueue?: SynthCall
+  /** 轮到才合成的引擎（lazy）：过期单子根本不浪费推理。 */
+  atDelivery?: SynthCall
+}
+
+/**
+ * 引擎表：一个引擎一行，差异只有这几项。加引擎＝表里加一行——
+ * 若发现按引擎名写的 if 出现在两处以上，说明这个差异没进表。
+ * sovits 的合成在 pumpSovits（预取 + 换代作废在同一处），表里只声明切段与排队方式。
+ */
+const ENGINE_DRIVERS: Record<SpeechEngine, EngineDriver> = {
+  system: { split: false, mime: null, scheduling: 'none' },
+  edge: {
+    split: true,
+    mime: SPEECH_MIME.edge,
+    scheduling: 'eager',
+    atEnqueue: (adapters, text, voice, request) =>
+      adapters.edge(text, voice, request.rate, request.pitch ?? 1, request.edgeVoices)
+  },
+  offline: {
+    split: false,
+    mime: SPEECH_MIME.offline,
+    scheduling: 'lazy',
+    atDelivery: (adapters, text, voice, request) => adapters.offline(text, voice, request.rate)
+  },
+  sovits: { split: true, mime: SPEECH_MIME.sovits, scheduling: 'sovits' }
 }
 
 /** 管线产出的一段：audio 为 null 时——system 是交给渲染层系统嗓子，其余引擎是合成失败（调用方跳过这句，绝不换系统嗓子）。 */
@@ -131,29 +174,22 @@ export const isSpeakStale = (drop: boolean, jobGen: number, currentGen: number):
 export const isDeliverStale = (drop: boolean, ts: number | undefined, base: number): boolean =>
   drop && ts !== undefined && ts < base
 
-/** 中文用中文嗓子，其余用英文嗓子；判据看文本本身，不看用户设置。 */
-function judgeLang(text: string): 'zh' | 'en' {
-  return /[\u3400-\u9fff]/.test(text) ? 'zh' : 'en'
-}
 
 function resolveFor(
   request: SpeechRequest,
   segment: string
-): { voice: string; offlineVoice: string; lang: 'zh' | 'en' } {
+): { voice: string; lang: 'zh' | 'en' } {
   const refined = request.resolveSegment?.(segment)
   return {
     voice: refined?.voice ?? request.voice ?? '',
-    offlineVoice: refined?.offlineVoice ?? request.offlineVoice ?? '',
-    lang: refined?.lang ?? request.lang ?? judgeLang(segment)
+    lang: refined?.lang ?? request.lang ?? speechLang(segment)
   }
 }
 
 /** 切段计划：split 只对 edge/sovits 生效；offline/system 永远整句一段。 */
 function planSegments(request: SpeechRequest): string[] {
-  if (request.engine === 'edge' || request.engine === 'sovits') {
-    return request.split === true ? splitForSpeech(request.text, request.segmentChars ?? 30) : [request.text]
-  }
-  return [request.text]
+  if (!ENGINE_DRIVERS[request.engine].split) return [request.text]
+  return request.split === true ? splitForSpeech(request.text, request.segmentChars ?? 30) : [request.text]
 }
 
 function logDrop(stage: string, text: string, extra: Record<string, unknown> = {}): void {
@@ -164,15 +200,14 @@ function logDrop(stage: string, text: string, extra: Record<string, unknown> = {
 let latestCaptureAt = 0
 
 /** edge 的切段合成在入队时立刻全部发车——网络往返时间藏进投递顺位里；offline 到点现合成；system 无合成。 */
-function startEdgeSynths(
+/** 入队即发车：所有段的合成请求在排队时就全部发出去，往返时间藏进投递顺位里。 */
+function startEagerSynths(
+  call: SynthCall,
   request: SpeechRequest,
   adapters: SpeechSynthAdapters,
   segments: string[]
 ): Promise<Buffer | null>[] {
-  return segments.map((segment) => {
-    const resolved = resolveFor(request, segment)
-    return adapters.edge(segment, resolved.voice, request.rate, request.pitch ?? 1, request.edgeVoices)
-  })
+  return segments.map((segment) => call(adapters, segment, resolveFor(request, segment).voice, request))
 }
 
 /** 投递一段产出：按序 await、投递闸拦截、失败留 null——调用方整句跳过，绝不换系统嗓子。 */
@@ -196,17 +231,17 @@ async function deliverSegments(
     }
     let audio: Buffer | null = null
     let audioMime: 'audio/mpeg' | 'audio/wav' | null = null
-    if (request.engine === 'edge') {
+    const driver = ENGINE_DRIVERS[request.engine]
+    if (driver.scheduling === 'eager') {
       const pending = eager?.[index]
       if (pending) {
         audio = await pending
-        audioMime = audio ? 'audio/mpeg' : null
+        audioMime = audio ? driver.mime : null
       }
-    } else if (request.engine === 'offline') {
+    } else if (driver.atDelivery) {
       // 到点现合成：本地推理在投递顺位上跑，过期单子根本不浪费推理。
-      const resolved = resolveFor(request, text)
-      audio = await adapters.offline(text, resolved.offlineVoice, request.rate)
-      audioMime = audio ? 'audio/wav' : null
+      audio = await driver.atDelivery(adapters, text, resolveFor(request, text).voice, request)
+      audioMime = audio ? driver.mime : null
     }
     if (audio) synthOkAny = true
     delivered += 1
@@ -241,7 +276,8 @@ function enqueueLane(
 ): Promise<SpeechOutcome> {
   return new Promise((resolve) => {
     const segments = planSegments(request)
-    const eager = request.engine === 'edge' ? startEdgeSynths(request, adapters, segments) : null
+    const drive = ENGINE_DRIVERS[request.engine]
+    const eager = drive.atEnqueue ? startEagerSynths(drive.atEnqueue, request, adapters, segments) : null
     const lane = lanes.get(key) ?? []
     lanes.set(key, [...lane, { request, adapters, segments, eager, onSegment, resolve }])
     void pumpLane(key)
@@ -268,14 +304,15 @@ export async function speakPipeline(
   const adapters = { ...realSpeechSynthAdapters, ...request.adapters }
   // 截止线只前进不后退：新的一拍把更旧的候选全部作废。
   if (request.cutoff !== undefined && request.cutoff > latestCaptureAt) latestCaptureAt = request.cutoff
-  if (request.engine === 'sovits') return enqueueSovits(request, adapters, onSegment)
+  const driver = ENGINE_DRIVERS[request.engine]
+  if (driver.scheduling === 'sovits') return enqueueSovits(request, adapters, onSegment)
   if (request.lane) return enqueueLane(request.lane, request, adapters, onSegment)
   const segments = planSegments(request)
   return deliverSegments(
     request,
     adapters,
     segments,
-    request.engine === 'edge' ? startEdgeSynths(request, adapters, segments) : null,
+    driver.atEnqueue ? startEagerSynths(driver.atEnqueue, request, adapters, segments) : null,
     onSegment
   )
 }

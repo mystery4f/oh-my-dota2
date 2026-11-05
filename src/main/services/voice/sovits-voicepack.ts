@@ -1,8 +1,7 @@
 import { app } from 'electron'
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
+import { downloadResumable } from '../net/download'
 import { SOVITS_SEED_REF_DIR, type SovitsVoicePack } from '@shared/ipc'
 import { loadSettings } from '../settings'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './sovits-refs'
@@ -403,26 +402,16 @@ export async function downloadPackFile(
   expectedBytes: number,
   onProgress: (done: number) => void
 ): Promise<void> {
-  mkdirSync(join(dest, '..'), { recursive: true })
-  const part = `${dest}.part`
-  const partBytes = existsSync(part) ? statSync(part).size : 0
-  if (existsSync(dest) && statSync(dest).size === expectedBytes) return
-  const response = await fetch(url, partBytes > 0 ? { headers: { Range: `bytes=${partBytes}-` } } : undefined)
-  if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
-  const rangeTotal = response.status === 206 ? Number((response.headers.get('content-range') ?? '').split('/')[1]) : 0
-  const appendable = response.status === 206 && rangeTotal === expectedBytes
-  if (!appendable && partBytes > 0) {
-    recordSovitsLog('TTS_SOVITS_PACK_RESTART', { url, partBytes, status: response.status })
-  }
-  let done = appendable ? partBytes : 0
-  const source = Readable.fromWeb(response.body as never)
-  source.on('data', (chunk: Buffer) => {
-    done += chunk.length
-    onProgress(done)
+  // 续传、原子改名、尺寸校验都在 downloadResumable 里；这里只留这个口子的日志标签。
+  await downloadResumable({
+    url,
+    dest,
+    expectedBytes,
+    onProgress: (done) => onProgress(done),
+    onLog: (tag, detail) => {
+      if (tag === 'RESTART') recordSovitsLog('TTS_SOVITS_PACK_RESTART', detail)
+    }
   })
-  await pipeline(source, createWriteStream(part, { flags: appendable ? 'a' : 'w' }))
-  if (done !== expectedBytes) throw new Error(`size mismatch: ${done}/${expectedBytes}`)
-  renameSync(part, dest)
 }
 
 /**

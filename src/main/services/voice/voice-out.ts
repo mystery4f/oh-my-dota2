@@ -1,5 +1,4 @@
 import {
-  type OfflineVoiceId,
   type VoiceOutEndedReport,
   type VoiceOutReadyReport,
   type VoiceOutTestResult
@@ -15,12 +14,9 @@ import {
   pttWindow,
   resolveVoiceOutSynth,
   speakKeyVk,
-  type VoiceOutEngine,
 } from '@shared/voice-out'
-import { synthesizeEdge } from './edge'
-import { synthesizeOffline } from './offline'
-import { synthesizeSovits } from './sovits'
 import { speakPipeline } from './speech-pipeline'
+import { speechFailHint } from '@shared/speech-plan'
 import { loadSettings } from '../settings'
 import { getPttKeySender } from '../input/ptt-key'
 import { getVoiceOutWindow } from '../../windows/voice-out'
@@ -32,15 +28,6 @@ const READY_TIMEOUT_MS = 17_000
 /** 顺序递增的请求号：窗口只认当前这一单，旧单的 READY/ENDED 一律忽略。 */
 let nextRequestId = 1
 
-/**
- * 合成失败时浮层上的提示：引擎不同，失败的原因域也不同，别把「断网」误报给离线/GV 用户。
- * 失败一律静默跳过这句（不念、不按键），绝不回退系统嗓子。
- */
-const SYNTH_FAIL_HINT: Record<VoiceOutEngine, string> = {
-  edge: 'Edge 合成失败（断网或接口不可用），这句不出声',
-  offline: '离线引擎合成失败（模型没装好或推理失败），这句不出声',
-  sovits: 'GV 合成失败（api_v2 不在或参考没配），这句不出声'
-}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -135,28 +122,27 @@ class VoiceOutService {
       settings.ttsOutVoice,
       VOICE_OUT_TEST_LINE
     )
-    let audioOrNull: Buffer | null
-    if (synth.engine === 'offline') {
-      audioOrNull = await synthesizeOffline(
-        VOICE_OUT_TEST_LINE,
-        synth.voice as OfflineVoiceId,
-        settings.ttsRate
-      )
-    } else if (synth.engine === 'sovits') {
-      // GV：音色由参考音频/音色包权重决定（切换复用现有 sovits 管线），语言看文本本身。
-      audioOrNull = await synthesizeSovits(VOICE_OUT_TEST_LINE, settings.ttsRate, synth.lang)
-    } else {
-      audioOrNull = await synthesizeEdge(
-        VOICE_OUT_TEST_LINE,
-        synth.voice,
-        settings.ttsRate,
-        settings.ttsPitch,
-        VOICE_OUT_VOICES
-      )
-    }
+    // 合成收进管线：引擎、音色、语言、格式全由计划值决定，本腿只管「一段怎么播」。
+    const got: Buffer[] = []
+    await speakPipeline(
+      {
+        text: VOICE_OUT_TEST_LINE,
+        engine: synth.engine,
+        split: false,
+        voice: synth.voice,
+        rate: settings.ttsRate,
+        pitch: settings.ttsPitch,
+        lang: synth.lang,
+        edgeVoices: VOICE_OUT_VOICES
+      },
+      (segment) => {
+        if (segment.audio !== null) got.push(segment.audio)
+      }
+    )
+    const audioOrNull: Buffer | null = got[0] ?? null
     const plan = decideVoiceOutTest(audioOrNull !== null, VOICE_OUT_TEST_LINE, synth)
     if (!plan.speak || audioOrNull === null) {
-      const error = plan.skip === 'synth-failed' ? SYNTH_FAIL_HINT[synth.engine] : '测试句为空'
+      const error = plan.skip === 'synth-failed' ? `${speechFailHint(synth.engine)}，这句不出声` : '测试句为空'
       console.log('VOICE_OUT_SKIP', JSON.stringify({ skip: plan.skip, engine: synth.engine }))
       showHint(error)
       return { ok: false, durationMs: null, hint: null, error }
@@ -302,7 +288,7 @@ class VoiceOutService {
           pitch: settings.ttsPitch,
           resolveSegment: (segment) => {
             const synth = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, segment)
-            return { voice: synth.voice, offlineVoice: synth.voice, lang: synth.lang }
+            return { voice: synth.voice, lang: synth.lang }
           }
         },
         async (segment) => {
@@ -368,7 +354,7 @@ class VoiceOutService {
     if (!synthOkAny) {
       // 全部段合成失败：不播、不按键，引擎跟设置走——别把「断网」误报给离线/GV 用户（与测试腿同一份提示表）。
       const engine = normalizeVoiceOutEngine(settings.ttsOutEngine)
-      const error = SYNTH_FAIL_HINT[engine]
+      const error = `${speechFailHint(engine)}，这句不出声`
       console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', engine, segments: segmentCount }))
       showHint(error)
       return { spoken: false, error }
