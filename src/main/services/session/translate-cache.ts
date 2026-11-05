@@ -394,6 +394,44 @@ export function translationCacheSize(): number {
   }
 }
 
+/** 这个 provider 名下有几对：面板「清空缓存」确认框用的数字。 */
+export function translationCachePairsFor(provider: string): number {
+  const handle = open()
+  if (handle === null) {
+    let count = 0
+    for (const key of memory.keys()) if (key.startsWith(`${provider}|`)) count += 1
+    return count
+  }
+  try {
+    return (handle.prepare('SELECT COUNT(*) AS n FROM pair WHERE provider = ?').get(provider) as { n: number }).n
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * 清掉这个 provider 的全部记账对，返回删掉的行数；其它 provider 的行原样保留。
+ * 「清空」是面板上的明确指令：数不出总数也照删，只有删不动才报 0。
+ */
+export function clearTranslationPairs(provider: string): number {
+  const handle = open()
+  if (handle === null) {
+    let removed = 0
+    for (const key of Array.from(memory.keys())) {
+      if (!key.startsWith(`${provider}|`)) continue
+      memory.delete(key)
+      removed += 1
+    }
+    return removed
+  }
+  try {
+    return Number(handle.prepare('DELETE FROM pair WHERE provider = ?').run(provider).changes)
+  } catch (err) {
+    console.log('TRANSLATE_CACHE_CLEAR_FAILED', err instanceof Error ? err.message : String(err))
+    return 0
+  }
+}
+
 /**
  * 给词频统计留的出口：按命中次数倒序列出记账行。
  * 现在只有探针用，但统计功能要读的就是这些字段。

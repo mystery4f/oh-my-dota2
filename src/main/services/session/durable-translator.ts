@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { Context } from '@earendil-works/chord'
@@ -23,8 +23,10 @@ import {
   translateText
 } from '../providers'
 import {
+  clearTranslationPairs,
   lookupTranslation,
   readTranslation,
+  translationCachePairsFor,
   writeTranslation,
   type TranslationOrigin
 } from './translate-cache'
@@ -185,7 +187,7 @@ function compatFor(provider: ProviderConfig): { thinkingFormat?: 'zai' | 'deepse
  * 会话库按 provider 分文件：换模型/换端点（包括探针里的假 provider）各自一份历史，
  * 否则别人的 few-shot 会混进你的译文，反过来也一样。
  */
-function sessionPaths(provider: ProviderConfig): { dir: string; db: string; state: string } {
+export function sessionPaths(provider: ProviderConfig): { dir: string; db: string; state: string } {
   const dir = join(app.getPath('userData'), 'sessions')
   const suffix = providerKey(provider).length === 0 ? '' : '-' + shortHash(providerKey(provider))
   return {
@@ -883,4 +885,68 @@ export function sessionStatus(): SessionStatus {
     lastRaw,
     latency: latencySummary()
   }
+}
+
+/** 面板「清空缓存」的数字口径：记账对 + 会话槽；inspect 与 clear 共用，model 供确认框点名。 */
+export interface TranslationCacheCounts {
+  pairs: number
+  conversations: number
+  model: string
+}
+
+function countStateSlots(path: string): number {
+  try {
+    return Object.keys(JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>).length
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * 只数数不动文件：这个 provider 名下的记账对与会话槽。面板确认框的第一步。
+ * 参数可显式传入（探针用假 provider），不传就是当前设置里的 provider。
+ */
+export function inspectTranslationCache(provider: ProviderConfig = loadSettings().provider): TranslationCacheCounts {
+  return {
+    pairs: translationCachePairsFor(providerKey(provider)),
+    conversations: countStateSlots(sessionPaths(provider).state),
+    model: provider.model
+  }
+}
+
+/**
+ * 清空这个 provider 的全部翻译缓存：记账本对 + 会话库（sqlite 连同 wal/shm）+ 会话槽 sidecar。
+ * 其它 provider 的文件按 hash 分名，一个字节都不碰。会话库整个删掉重建：缓存与历史都可再生，
+ * 大小才拿得回来；下一句翻译会自然重建全新会话。
+ */
+export async function clearTranslationCache(
+  provider: ProviderConfig = loadSettings().provider
+): Promise<TranslationCacheCounts> {
+  const key = providerKey(provider)
+  const paths = sessionPaths(provider)
+  const conversations = countStateSlots(paths.state)
+
+  // 正在跑的回合先揪掉（translateWithSession 的 abort 约定）：不清这一步，半截回合会把
+  // stale 状态写回刚删掉的文件，下一句还排在死会话后面。
+  if (runtime && runtime.key === key) inFlight?.abort()
+
+  return withTurnLock(async () => {
+    // 锁内重看一眼：排队回合可能刚换过会话。先关句柄再删文件——Windows 上开着句柄删不动。
+    if (runtime && runtime.key === key) {
+      await runtime.harness.close(runtime.context).catch(() => undefined)
+      runtime = null
+    }
+    turns.clear()
+    failedAt = 0
+    failedReason = null
+    for (const path of [paths.state, paths.db, `${paths.db}-wal`, `${paths.db}-shm`]) {
+      try {
+        rmSync(path, { force: true })
+      } catch (err) {
+        console.log('TRANSLATE_SESSION_CLEAR_FAILED', path, err instanceof Error ? err.message : String(err))
+      }
+    }
+    const pairs = clearTranslationPairs(key)
+    return { pairs, conversations, model: provider.model }
+  })
 }

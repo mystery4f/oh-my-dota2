@@ -487,6 +487,13 @@ export interface CacheStats {
   origins: Record<string, number>
 }
 
+/** 清空缓存的数字口径：当前 provider 的记账对 + 会话槽；model 供确认框点名。 */
+export interface TranslationCacheCounts {
+  pairs: number
+  conversations: number
+  model: string
+}
+
 export interface CaptureEntry {
   id: string
   ts: number
@@ -697,6 +704,9 @@ export const IPC = {
   REPLY_INPLACE: 'reply:inplace',
   CAPTURE_ENTRIES: 'capture:entries',
   CACHE_STATS: 'cache:stats',
+  /** 清空缓存两步走：inspect 只数数（确认框用），clear 才真删——都只对当前 provider。 */
+  TRANSLATION_CACHE_INSPECT: 'cache:inspect',
+  TRANSLATION_CACHE_CLEAR: 'cache:clear',
   UPDATE_CHECK: 'update:check',
   APP_VERSION: 'app:version',
   UPDATE_INSTALL: 'update:install',
@@ -923,6 +933,8 @@ export const ipcContract = {
   translateInPlace: invoke<[], InPlaceResult>(IPC.REPLY_INPLACE),
   translatorStatus: invoke<[], TranslatorStatus>(IPC.SESSION_STATUS),
   cacheStats: invoke<[], CacheStats>(IPC.CACHE_STATS),
+  translationCacheInspect: invoke<[], TranslationCacheCounts>(IPC.TRANSLATION_CACHE_INSPECT),
+  translationCacheClear: invoke<[], TranslationCacheCounts>(IPC.TRANSLATION_CACHE_CLEAR),
   // 捕获账本与更新
   captureStart: invoke<[], CaptureStatus>(IPC.CAPTURE_START),
   captureStop: invoke<[], CaptureStatus>(IPC.CAPTURE_STOP),

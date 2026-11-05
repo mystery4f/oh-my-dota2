@@ -1,10 +1,20 @@
 import { app } from 'electron'
-import { providerKey, sameText, translateLines } from '../services/session/durable-translator'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  clearTranslationCache,
+  inspectTranslationCache,
+  providerKey,
+  sameText,
+  sessionPaths,
+  translateLines
+} from '../services/session/durable-translator'
 import {
   closeTranslationCache,
+  clearTranslationPairs,
   lookupTranslation,
   readTranslation,
   translationCachePath,
+  translationCachePairsFor,
   translationCacheSize,
   translationCacheStats,
   translationCacheRows,
@@ -130,6 +140,64 @@ export async function runTranslateCacheProbe(): Promise<void> {
     insights.averageA >= 0 && insights.averageB >= 0,
     `avgA=${insights.averageA} avgB=${insights.averageB}`
   )
+
+  // ---- 清空缓存（面板两步走的缝）：inspect 数数 → clear 真删，其它 provider 一字节不动 ----
+  // 用全新的 provider 当夹具：数字只由这里种下的行决定，不被前面段落与历史残留干扰。
+  const clearA = { id: 'ollama' as const, baseUrl: 'http://127.0.0.1:2', model: 'clear-a', authStyle: 'bearer' as const, apiKey: 'a' }
+  const clearB = { id: 'ollama' as const, baseUrl: 'http://127.0.0.1:2', model: 'clear-b', authStyle: 'bearer' as const, apiKey: 'b' }
+  const keyA = providerKey(clearA)
+  const keyB = providerKey(clearB)
+  // 先把可能的旧痕迹扫掉（上次探针残留），保证下面的计数是准的
+  await clearTranslationCache(clearA)
+  await clearTranslationCache(clearB)
+
+  writeTranslation('你好呀', keyA, 'terse', 'hello there', { direction: 'zh-en', origin: 'probe' })
+  writeTranslation('撤退', keyA, 'terse', 'fall back', { direction: 'zh-en', origin: 'probe' })
+  writeTranslation('打钱', keyA, 'polite', 'push', { direction: 'zh-en', origin: 'probe' })
+  writeTranslation('小心', keyB, 'terse', 'be careful', { direction: 'zh-en', origin: 'probe' })
+  writeTranslation('撤退', keyB, 'terse', 'fall back', { direction: 'zh-en', origin: 'probe' })
+
+  const pathsA = sessionPaths(clearA)
+  const pathsB = sessionPaths(clearB)
+  mkdirSync(pathsA.dir, { recursive: true })
+  writeFileSync(pathsA.state, JSON.stringify({ 'auto-zh': 1, 'zh-en#terse': 2 }), 'utf8')
+  writeFileSync(pathsB.state, JSON.stringify({ 'auto-zh': 7, 'zh-en#terse': 8, 'try#en-zh': 9 }), 'utf8')
+  // 会话库塞占位文件：clear 不打开会话库，B 的那份必须原样留着
+  writeFileSync(pathsA.db, 'seed-a', 'utf8')
+  writeFileSync(pathsB.db, 'seed-b', 'utf8')
+  const bytesB = { state: readFileSync(pathsB.state), db: readFileSync(pathsB.db) }
+
+  const counts = inspectTranslationCache(clearA)
+  add('inspect 数出记账对', counts.pairs === 3, `pairs=${counts.pairs}`)
+  add('inspect 数出会话槽', counts.conversations === 2, `conversations=${counts.conversations}`)
+
+  const cleared = await clearTranslationCache(clearA)
+  add('clear 报告删除数', cleared.pairs === 3 && cleared.conversations === 2, JSON.stringify(cleared))
+  add('A 的记账对清零', translationCachePairsFor(keyA) === 0, `pairs=${translationCachePairsFor(keyA)}`)
+  add('B 的记账对保留', translationCachePairsFor(keyB) === 2, `pairs=${translationCachePairsFor(keyB)}`)
+  add('B 的查询仍命中', readTranslation('撤退', 'zh-en', keyB, 'terse') === 'fall back')
+  add(
+    'A 的会话文件已删',
+    !existsSync(pathsA.state) && !existsSync(pathsA.db) && !existsSync(`${pathsA.db}-wal`)
+  )
+  add(
+    'B 的文件一字节不动',
+    existsSync(pathsB.state) &&
+      existsSync(pathsB.db) &&
+      bytesB.state.equals(readFileSync(pathsB.state)) &&
+      bytesB.db.equals(readFileSync(pathsB.db))
+  )
+  add('A 无 stale 命中', readTranslation('你好呀', 'zh-en', keyA, 'terse') === null)
+  // 清空后照常可用：关掉重开，另一家的行还在，清空过的那家能重新写入
+  closeTranslationCache()
+  add('重开后 B 仍在', readTranslation('撤退', 'zh-en', keyB, 'terse') === 'fall back')
+  writeTranslation('补一刀', keyA, 'terse', 'last hit', { direction: 'zh-en', origin: 'probe' })
+  add('重开后 A 能写入', readTranslation('补一刀', 'zh-en', keyA, 'terse') === 'last hit')
+  // 收尾：探针夹具不留垃圾在真实数据目录
+  const pairsAfter = clearTranslationPairs(keyA)
+  await clearTranslationCache(clearA)
+  await clearTranslationCache(clearB)
+  add('收尾清掉夹具', pairsAfter === 1 && translationCachePairsFor(keyA) === 0, `pairsAfter=${pairsAfter}`)
 
   const failed = checks.filter((item) => !item.ok)
   console.log(

@@ -17,6 +17,7 @@ import {
   type VoiceOutTestResult,
   type VoiceChainSummary,
   type TranslatorStatus,
+  type TranslationCacheCounts,
   type VoiceProbeResult,
   OFFLINE_VOICES,
   type OfflineVoiceId,
@@ -1431,6 +1432,39 @@ export default function App(): React.ReactElement {
     }
   }
 
+  // 清空缓存两步走：先 inspect 拿到真实数字（确认框点名 provider），确认后才 clear。
+  // 主进程按已保存的 settings 定位 provider，确认框里的 model 也用 inspect 回传的那一个，
+  // 免得面板上没保存的草稿和真删的对象对不上。
+  const [cacheBusy, setCacheBusy] = useState(false)
+  const [cacheFlash, setCacheFlash] = useState('')
+  const clearCache = async (): Promise<void> => {
+    let counts: TranslationCacheCounts | null = null
+    try {
+      counts = await window.api.translationCacheInspect()
+    } catch {
+      counts = null
+    }
+    if (counts === null) {
+      setCacheFlash('读取缓存失败')
+      setTimeout(() => setCacheFlash(''), 2500)
+      return
+    }
+    const confirmed = window.confirm(
+      `将清空「${counts.model}」的翻译缓存：${counts.pairs} 对翻译记忆、${counts.conversations} 条会话历史。` +
+        '其它模型的缓存不受影响，此操作不能撤销。确定清空吗？'
+    )
+    if (!confirmed) return
+    setCacheBusy(true)
+    try {
+      const done = await window.api.translationCacheClear()
+      setCacheFlash(`已清空（${done.pairs} 对记忆、${done.conversations} 条会话）`)
+    } catch (e) {
+      setCacheFlash(`清空失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+    setCacheBusy(false)
+    setTimeout(() => setCacheFlash(''), 4000)
+  }
+
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [voiceProbe, setVoiceProbe] = useState<VoiceProbeResult | null>(null)
   const [voiceAssets, setVoiceAssets] = useState<VoiceAssetsResult | null>(null)
@@ -1716,7 +1750,16 @@ export default function App(): React.ReactElement {
                 <Button variant="secondary" onClick={() => void runTest()} disabled={test.status === 'running'}>
                   {test.status === 'running' ? '测试中…' : '测试连接'}
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => void clearCache()}
+                  disabled={cacheBusy}
+                  title="清空当前模型的翻译记忆与对话历史；其它模型的缓存不受影响"
+                >
+                  {cacheBusy ? '清空中…' : '清空缓存'}
+                </Button>
                 {saveFlash ? <span className="text-sm text-muted-foreground">{saveFlash}</span> : null}
+                {cacheFlash ? <span className="text-sm text-muted-foreground">{cacheFlash}</span> : null}
                 {test.status === 'done' ? (
                   <Badge variant={test.result.ok ? 'success' : 'destructive'}>
                     {test.result.ok

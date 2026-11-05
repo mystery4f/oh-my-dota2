@@ -8,7 +8,7 @@ import { hotkeysState, saveHotkeysState } from './services/hotkeys'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
 import { testProvider, translateText } from './services/providers'
-import { sessionStatus, translateTry } from './services/session/durable-translator'
+import { clearTranslationCache, inspectTranslationCache, sessionStatus, translateTry } from './services/session/durable-translator'
 import { getCaptureService } from './services/capture/capturer'
 import { getWhisperAdapter } from './services/voice/whisper'
 import { getVoiceOutService } from './services/voice/voice-out'
@@ -70,6 +70,9 @@ const handlers: MainHandlers = {
   translateInPlace: () => translateInPlace(),
   translatorStatus: () => sessionStatus(),
   cacheStats: () => translationInsights(),
+  // 清空缓存两步走：inspect 数数给确认框，clear 才真删（都只对当前 provider）。
+  translationCacheInspect: () => inspectTranslationCache(),
+  translationCacheClear: () => clearTranslationCache(),
   // 捕获账本与更新
   captureStart: () => getCaptureService().start(),
   captureStop: () => getCaptureService().stop(),
