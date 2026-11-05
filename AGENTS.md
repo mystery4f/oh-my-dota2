@@ -234,6 +234,10 @@ it and nothing happened". The overlay and the pause hint print key names from th
 - `docs/BENCH.md` — measured baselines and how to reproduce them
 - `docs/NOTES.md` — detailed engineering notes: symptom → cause → fix (Chinese)
 - `docs/VOICES.md` — the offline voice catalogue: where every model archive comes from, how the three layout families are loaded, measured sample rate/latency per model, and the traps (LFS-pointer .int8.onnx, 8 kHz models, non-linear speed)
+- `docs/STANDARDS.md` — the anti-duplication standard: ask "how many places hold this knowledge" before writing, the
+  three worked examples to copy (`shared/speech-plan.ts` plan value + engine table, `input/ps-runner.ts` one PowerShell
+  run, `net/download.ts` mirror + resume), table-vs-branch rules, pure-seam/probe contract, "comments say why", and the
+  panel-vs-main ownership rule. Read it before adding a branch that mirrors an existing one.
 
 ## Commits
 
