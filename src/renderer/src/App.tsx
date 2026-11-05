@@ -1436,8 +1436,11 @@ export default function App(): React.ReactElement {
   // 清空缓存两步走：先 inspect 拿到真实数字（确认框点名 provider），确认后才 clear。
   // 主进程按已保存的 settings 定位 provider，确认框里的 model 也用 inspect 回传的那一个，
   // 免得面板上没保存的草稿和真删的对象对不上。
+  // 确认框必须页面内自绘：原生 window.confirm 一旦弹过，页面键盘/IME 上下文会被毁掉
+  // （Electron 已知坑），之后所有输入框都打不进字。
   const [cacheBusy, setCacheBusy] = useState(false)
   const [cacheFlash, setCacheFlash] = useState('')
+  const [cacheConfirm, setCacheConfirm] = useState<TranslationCacheCounts | null>(null)
   const clearCache = async (): Promise<void> => {
     let counts: TranslationCacheCounts | null = null
     try {
@@ -1450,11 +1453,10 @@ export default function App(): React.ReactElement {
       setTimeout(() => setCacheFlash(''), 2500)
       return
     }
-    const confirmed = window.confirm(
-      `将清空「${counts.model}」的翻译缓存：${counts.pairs} 对翻译记忆、${counts.conversations} 条会话历史。` +
-        '其它模型的缓存不受影响，此操作不能撤销。确定清空吗？'
-    )
-    if (!confirmed) return
+    setCacheConfirm(counts)
+  }
+  const confirmClearCache = async (): Promise<void> => {
+    setCacheConfirm(null)
     setCacheBusy(true)
     try {
       const done = await window.api.translationCacheClear()
@@ -1777,6 +1779,31 @@ export default function App(): React.ReactElement {
                 </Button>
                 {saveFlash ? <span className="text-sm text-muted-foreground">{saveFlash}</span> : null}
                 {cacheFlash ? <span className="text-sm text-muted-foreground">{cacheFlash}</span> : null}
+                {cacheConfirm ? (
+                  <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+                    onClick={() => setCacheConfirm(null)}
+                  >
+                    <div
+                      className="w-full max-w-md rounded-xl border bg-background p-6 shadow-lg"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <p className="text-sm font-medium">清空翻译缓存</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        将清空「{cacheConfirm.model}」的翻译缓存：{cacheConfirm.pairs} 对翻译记忆、
+                        {cacheConfirm.conversations} 条会话历史。其它模型的缓存不受影响，此操作不能撤销。
+                      </p>
+                      <div className="mt-4 flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setCacheConfirm(null)}>
+                          取消
+                        </Button>
+                        <Button variant="destructive" onClick={() => void confirmClearCache()}>
+                          确定清空
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {test.status === 'done' ? (
                   <Badge variant={test.result.ok ? 'success' : 'destructive'}>
                     {test.result.ok
