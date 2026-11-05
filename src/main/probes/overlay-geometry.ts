@@ -157,8 +157,21 @@ export function runOverlayGeometryProbe(): void {
   )
   push(
     '捕获暂停要提示',
-    captureHint({ running: false, gsiLive: true, lastError: null })?.includes('暂停') === true,
+    captureHint({ running: false, gsiLive: true, lastError: null, toggleKey: 'Alt+Shift+O' })?.includes('暂停') ===
+      true,
     'stopped'
+  )
+  // 「按什么恢复」必须来自当前配置：写死键名的话用户改了键，提示还在教旧键。
+  push(
+    '暂停提示点名当前配置的键',
+    captureHint({ running: false, gsiLive: true, lastError: null, toggleKey: 'Ctrl+F9' })?.includes('Ctrl+F9') ===
+      true,
+    String(captureHint({ running: false, gsiLive: true, lastError: null, toggleKey: 'Ctrl+F9' }))
+  )
+  push(
+    '动作没绑键时不假装有键',
+    captureHint({ running: false, gsiLive: true, lastError: null, toggleKey: '' })?.includes('没绑键') === true,
+    String(captureHint({ running: false, gsiLive: true, lastError: null, toggleKey: '' }))
   )
   push(
     '错误优先于其他提示',

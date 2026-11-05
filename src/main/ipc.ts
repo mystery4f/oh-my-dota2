@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { IPC, ipcContract, type MainHandlers } from '@shared/ipc'
 import { sendReply, translateInPlace, translateReplyToClipboard, voiceReply } from './services/reply/reply-service'
 import { loadSettings, saveSettings } from './services/settings'
+import { hotkeysState, saveHotkeysState } from './services/hotkeys'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
 import { testProvider, translateText } from './services/providers'
@@ -50,6 +51,14 @@ const handlers: MainHandlers = {
   // 设置 / 提供商 / 翻译
   getSettings: () => loadSettings(),
   setSettings: (patch) => saveSettings(patch),
+  getHotkeys: () => hotkeysState(),
+  // 存完热键要重发一次浮层状态：浮层和自己那行提示上的键名都来自 status()，
+  // 不重发就会出现「键改了、浮层还在教旧键」，直到下一次状态变化。
+  setHotkeys: (map) => {
+    const result = saveHotkeysState(map)
+    if (!result.error) getOverlayManager().refreshStatus()
+    return result
+  },
   testProvider: (provider) => testProvider(provider),
   translate: (text, direction) =>
     translateTry(loadSettings().provider, text, direction ?? 'en-zh').catch(() =>
@@ -71,7 +80,7 @@ const handlers: MainHandlers = {
   // 浮层：面板与热键共用同一条链
   overlayToggle: () => getOverlayManager().toggle(),
   overlayVoiceToggle: () => {
-    // 面板按钮与 Alt+Shift+V 共用同一条录制链：起录/停录都由 overlay 窗口自己报状态。
+    // 面板按钮与「语音对讲」共用同一条录制链：起录/停录都由 overlay 窗口自己报状态。
     getOverlayManager().toggleVoiceCapture()
     return { ok: true }
   },

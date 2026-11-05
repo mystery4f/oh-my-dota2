@@ -25,7 +25,7 @@ import {
   type SovitsVoicePack,
   SOVITS_SEED_REF_DIR
 } from '@shared/ipc'
-import type { OfflineStatus, UpdateState } from '@shared/ipc'
+import type { HotkeysResult, OfflineStatus, UpdateState } from '@shared/ipc'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { QWEN3_ASR_RELEASE_URL } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
@@ -38,6 +38,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { HotkeyCard } from '@/components/hotkey-card'
 
 type TestState = { status: 'idle' } | { status: 'running' } | { status: 'done'; result: TestResult }
 
@@ -67,7 +68,8 @@ const EMPTY_OVERLAY: OverlayStatus = {
   readAloud: false,
   opacity: 0.34,
   geometry: { x: 0, y: 0, width: 0, height: 0 },
-  hint: null
+  hint: null,
+  hotkeys: {}
 }
 
 /** 抖动统计一行：分位数比单次数字更能说明「为什么刚才那么慢」。 */
@@ -82,23 +84,27 @@ function formatLatency(status: TranslatorStatus | null): string {
   return parts.join(' · ')
 }
 
+
 function OverviewCard(): React.ReactElement {
   const [settings, setSettings] = useState<AppSettings | null>(null)
-const [capture, setCapture] = useState<CaptureStatus | null>(null)
+  const [capture, setCapture] = useState<CaptureStatus | null>(null)
   const [translator, setTranslator] = useState<TranslatorStatus | null>(null)
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
+  const [hotkeys, setHotkeys] = useState<HotkeysResult | null>(null)
   const [rows, setRows] = useState<CheckRow[] | null>(null)
   const [busy, setBusy] = useState(false)
 
   const refresh = async (): Promise<void> => {
-    const [nextSettings, nextCapture, nextTranslator] = await Promise.all([
+    const [nextSettings, nextCapture, nextTranslator, nextHotkeys] = await Promise.all([
       window.api.getSettings(),
       window.api.captureStatus(),
-      window.api.translatorStatus()
+      window.api.translatorStatus(),
+      window.api.getHotkeys()
     ])
     setSettings(nextSettings)
     setCapture(nextCapture)
     setTranslator(nextTranslator)
+    setHotkeys(nextHotkeys)
   }
 
   useEffect(() => {
@@ -181,13 +187,30 @@ const [capture, setCapture] = useState<CaptureStatus | null>(null)
           ) : null}
         </div>
 
+        {/* 五个热键单独一块：一行网格里塞不下，截断掉就等于没写。 */}
+        <div className="space-y-1 rounded-md border border-stone-700 px-3 py-2 text-sm">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-muted-foreground">热键</span>
+            <span className="text-xs text-muted-foreground">「浮层与对局 → 热键」里改</span>
+          </div>
+          <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
+            {(hotkeys?.actions ?? []).map((action) => (
+              <div key={action.id} className="flex items-baseline justify-between gap-3">
+                <span className="text-muted-foreground">{action.label}</span>
+                <span className={action.verdict === 'rejected' ? 'font-mono text-destructive' : 'font-mono'}>
+                  {action.verdict === 'rejected' ? `${action.display} · 被占用` : action.display}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void selfCheck()} disabled={busy}>
             {busy ? '检查中…' : '一键自检'}
           </Button>
           <span className="text-xs text-muted-foreground">
-            Alt+Shift+R 框选区域 · Alt+Shift+O 浮层 · Alt+Shift+P 点击穿透 · Alt+Shift+T 输入直发 · Alt+Shift+Y 回复 ·
-            Alt+Shift+V 语音
+            五个热键在下面单独列出；改键在「浮层与对局 → 热键」。
           </span>
         </div>
 
@@ -327,14 +350,14 @@ function SendCard(): React.ReactElement {
         <CardTitle>游戏内直发</CardTitle>
         <CardDescription>
           {sendMode === 'inplace'
-            ? '在游戏聊天框里打中文（先别按回车）→ 按 Alt+Shift+T → 后台翻译 → 自动粘贴英文并回车发送。全程不切换窗口。'
+            ? '在游戏聊天框里打中文（先别按回车）→ 按「发送消息」热键 → 后台翻译 → 自动粘贴英文并回车发送。全程不切换窗口。'
             : '打中文 → 回车 → 翻成英文 → 自动切回游戏、粘贴进聊天框并回车发送。'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {sendMode === 'inplace' ? (
           <div className="text-xs text-muted-foreground">
-            游戏里按 Enter 打开聊天框 → 打中文 → 按 Alt+Shift+T。读到的草稿会被清空，翻译完成后自动粘回并回车发出；
+            游戏里按 Enter 打开聊天框 → 打中文 → 按「发送消息」热键。读到的草稿会被清空，翻译完成后自动粘回并回车发出；
             失败时原文还在剪贴板里，可 Ctrl+V 恢复。
           </div>
         ) : (
@@ -517,7 +540,7 @@ function OverlayCard(): React.ReactElement {
             variant={overlay.locked ? 'secondary' : 'outline'}
             disabled={!overlay.visible}
             onClick={() => void window.api.overlaySetLocked(!overlay.locked).then(setOverlay)}
-            title="锁定 = 几何冻住且不吃鼠标；解锁后可拖动、拉两侧改宽度（Alt+Shift+P）"
+            title={`锁定 = 几何冻住且不吃鼠标；解锁后可拖动、拉两侧改宽度（${overlay.hotkeys.overlayLock ?? '未绑定'}）`}
           >
             {overlay.locked ? '已锁定' : '可编辑'}
           </Button>
@@ -525,7 +548,7 @@ function OverlayCard(): React.ReactElement {
             variant="outline"
             disabled={!overlay.visible}
             onClick={() => void window.api.overlayToggleCollapse().then(setOverlay)}
-            title="收成角落里的小图标，再点一下展开（Alt+Shift+B）"
+            title={`收成角落里的小图标，再点一下展开（${overlay.hotkeys.overlayCollapse ?? '未绑定'}）`}
           >
             {overlay.collapsed ? '展开' : '收起'}
           </Button>
@@ -1088,15 +1111,6 @@ function OverlayCard(): React.ReactElement {
           <span className="text-xs text-muted-foreground">自己的昵称（只做归属标注，不因它跳过翻译或朗读）</span>
         </div>
 
-        <GroupLabel text="热键" />
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <span>Alt+Shift+O 显示/隐藏</span>
-          <span>Alt+Shift+P 锁定/解锁</span>
-          <span>Alt+Shift+B 收起/展开</span>
-          <span>Alt+Shift+T 输入直发</span>
-          <span>Alt+Shift+Y 回复</span>
-          <span>Alt+Shift+V 语音</span>
-        </div>
       </CardContent>
     </Card>
   )
@@ -1691,7 +1705,10 @@ export default function App(): React.ReactElement {
         </TabsContent>
 
         <TabsContent value="capture">
-          <OverlayCard />
+          <HotkeyCard />
+          <div className="mt-4">
+            <OverlayCard />
+          </div>
           <div className="mt-4">
             <SendCard />
           </div>
@@ -1705,7 +1722,7 @@ export default function App(): React.ReactElement {
             <CardHeader>
               <CardTitle>语音链路</CardTitle>
               <CardDescription>
-                whisper.cpp 在本机运行（资源自动下载）；声出引擎可选 Edge / 离线 / GV。「测试声出」念一句固定英文送进频道（冒烟用）；想试自己的声音点「说一句试试」或按 Alt+Shift+V：说中文 → 识别 → 翻译 → 声出，测试模式开着时只放所选输出设备、不按说话键。
+                whisper.cpp 在本机运行（资源自动下载）；声出引擎可选 Edge / 离线 / GV。「测试声出」念一句固定英文送进频道（冒烟用）；想试自己的声音点「说一句试试」或按「语音对讲」热键：说中文 → 识别 → 翻译 → 声出，测试模式开着时只放所选输出设备、不按说话键。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
@@ -1891,7 +1908,7 @@ export default function App(): React.ReactElement {
                 <Button
                   variant={settings.voiceTranscribeOnly ? 'secondary' : 'outline'}
                   onClick={() => void save({ voiceTranscribeOnly: !settings.voiceTranscribeOnly })}
-                  title="开了之后「说一句试试」/Alt+Shift+V 只做识别、把原文写进识别记录，翻译和声出全跳过——测口音、调模型用，测完记得关掉"
+                  title="开了之后「说一句试试」/「语音对讲」热键只做识别、把原文写进识别记录，翻译和声出全跳过——测口音、调模型用，测完记得关掉"
                 >
                   只看识别：{settings.voiceTranscribeOnly ? '开（不翻译不声出）' : '关'}
                 </Button>
@@ -1915,7 +1932,7 @@ export default function App(): React.ReactElement {
                 </Button>
                 <Button
                   variant={voiceRecording ? 'secondary' : 'outline'}
-                  title="与 Alt+Shift+V 同一条链：点一下开始说话，再点一下结束；识别→翻译→声出全程照跑，测试模式开着时只放耳机不按说话键"
+                  title="与「语音对讲」热键同一条链：点一下开始说话，再点一下结束；识别→翻译→声出全程照跑，测试模式开着时只放耳机不按说话键"
                   onClick={() => {
                     if (typeof window.api.overlayVoiceToggle !== 'function') {
                       setVoiceChainLog((log) => [
@@ -1934,7 +1951,7 @@ export default function App(): React.ReactElement {
                 </Button>
               </div>
               {voiceRecording && (
-                <p className="text-xs text-amber-400">● 正在录音——对着麦克风说话，说完再点一次按钮（或按 Alt+Shift+V）结束。</p>
+                <p className="text-xs text-amber-400">● 正在录音——对着麦克风说话，说完再点一次按钮（或按「语音对讲」热键）结束。</p>
               )}
               {voiceChainLog.length > 0 && (
                 <div className="space-y-1.5 rounded-md bg-stone-900/60 p-3">

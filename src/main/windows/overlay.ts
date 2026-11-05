@@ -9,6 +9,7 @@ import {
 import { loadSettings, saveSettings } from '../services/settings'
 import { clampGeometry, miniGeometry, shouldIgnoreMouse, snapToEdges } from '@shared/overlay-geometry'
 import { overlayStateFromSettings, reduceOverlay, type OverlayEvent, type OverlayState } from '@shared/overlay-state'
+import { formatAccelerator } from '@shared/hotkeys'
 
 /** 配置态（可拖可点）闲置多久后自动锁回穿透。 */
 const CONFIG_IDLE_MS = 5000
@@ -49,16 +50,25 @@ class OverlayManager {
   }
 
   status(): OverlayStatus {
+    // 一次读出整份设置：朗读开关和四个键名都来自它，别每行各读一遍文件。
+    const settings = loadSettings()
     return {
       visible: this.win !== null && this.win.isVisible(),
       textMode: this.s.textMode,
       replyOpen: this.s.replyOpen,
       locked: this.s.locked,
       collapsed: this.s.collapsed,
-      readAloud: loadSettings().ttsReadAloud,
+      readAloud: settings.ttsReadAloud,
       opacity: this.s.opacity,
       geometry: this.currentGeometry(),
-      hint: this.s.hint
+      hint: this.s.hint,
+      // 浮层要写的两个键随状态一起下发：它拿不到设置，键名只能从主进程带过去。
+      hotkeys: {
+        overlayToggle: formatAccelerator(settings.hotkeys.overlayToggle),
+        overlayLock: formatAccelerator(settings.hotkeys.overlayLock),
+        overlayCollapse: formatAccelerator(settings.hotkeys.overlayCollapse),
+        voiceCapture: formatAccelerator(settings.hotkeys.voiceCapture)
+      }
     }
   }
 
@@ -76,7 +86,7 @@ class OverlayManager {
   private applyClickThrough(): void {
     if (!this.win) return
     // 锁定 / 解锁对收起的小图标同样生效：锁定就穿透，防误点；
-    // 要展开就按 Alt+Shift+B（全局热键，不依赖点得到）或先按 Alt+Shift+P 解锁。
+    // 要展开就按「收起/展开」热键（全局热键，不依赖点得到）或先解锁。
     const ignore = shouldIgnoreMouse(this.s.locked, this.s.replyOpen)
     this.win.setIgnoreMouseEvents(ignore, { forward: true })
     // 防截屏默认开着（否则手动截图会把浮层自己的行 OCR 回来再翻一遍），
@@ -121,6 +131,11 @@ class OverlayManager {
   /** 主进程每拍算一次「为什么没字」，只有变化时才广播，避免刷 IPC。 */
   setHint(hint: string | null): void {
     this.commit({ type: 'set-hint', hint })
+  }
+
+  /** 设置变了但窗口自身状态没变（例如刚改完热键）：重发一次，让浮层上的键名跟上。 */
+  refreshStatus(): void {
+    this.broadcast()
   }
 
   /**
@@ -240,7 +255,7 @@ class OverlayManager {
   toggle(): OverlayStatus {
     if (this.status().visible) {
       this.win?.hide()
-      // 藏起来要跨启动记住：用户明确按了 Alt+Shift+O，下次启动就别自己蹦出来。
+      // 藏起来要跨启动记住：用户明确按了「显示/隐藏浮层」，下次启动就别自己蹦出来。
       return this.commit({ type: 'set-visible', visible: false })
     }
     this.show()
