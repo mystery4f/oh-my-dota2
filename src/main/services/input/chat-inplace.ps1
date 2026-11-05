@@ -171,6 +171,10 @@ while ($true) {
   if ($op -eq 'send') {
     $content = [string]$req.text
     if ([string]::IsNullOrEmpty($content)) { Write-Resp @{ id = $id; ok = $false; code = 'EMPTY' }; continue }
+    # enter = false pastes without sending: used to put the user's Chinese back after a failed
+    # translation, so a failure never sends something the player did not approve.
+    $pressEnter = $true
+    if ($null -ne $req.enter) { $pressEnter = [bool]$req.enter }
     $tClip = [Environment]::TickCount
     $wrote = [SaiClip]::SetText($content)
     $clipSetMs = [Environment]::TickCount - $tClip
@@ -181,9 +185,9 @@ while ($true) {
     [SaiInput]::Combo(0x11, 0x56, $HOLD_MS, $GAP_MS)
     # Pasting lands asynchronously, so give the text a moment before pressing Enter.
     Start-Sleep -Milliseconds 40
-    [SaiInput]::Tap(0x0D, 20, 0)
+    if ($pressEnter) { [SaiInput]::Tap(0x0D, 20, 0) }
     $keysMs = [Environment]::TickCount - $tKeys
-    Write-Resp @{ id = $id; ok = $true; lookupMs = $lookupMs; clipSetMs = $clipSetMs; keysMs = $keysMs; retried = $false }
+    Write-Resp @{ id = $id; ok = $true; lookupMs = $lookupMs; clipSetMs = $clipSetMs; keysMs = $keysMs; retried = $false; entered = $pressEnter }
     Start-Sleep -Milliseconds 100
     continue
   }

@@ -501,6 +501,11 @@ export interface InPlaceResult {
   translateMs?: number
   sendMs?: number
   error?: string
+  /**
+   * 失败时有没有把用户那句中文放回聊天框（只贴不回车）。
+   * 原文在读取那一刻就从聊天框清空了，false = 那句中文没救回来，面板要提醒重打。
+   */
+  restored?: boolean
 }
 
 /**

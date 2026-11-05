@@ -7,8 +7,9 @@ import {
   type VoiceReplyResult
 } from '@shared/ipc'
 import { decideVoiceOutReply } from '@shared/voice-out'
+import { decideInPlaceDelivery, inplaceFailureLine, pickInPlaceDraft } from '@shared/inplace'
 import { loadSettings } from '../settings'
-import { translateReply } from '../session/durable-translator'
+import { abortTranslation, translateReply } from '../session/durable-translator'
 import { buildSayTeamCommand, getConsoleSender } from '../input/console-send'
 import { getChatSender, normalizeChatLine } from '../input/chat-send'
 import { getInPlaceSender } from '../input/chat-inplace'
@@ -106,47 +107,107 @@ export async function sendReply(text: string): Promise<ReplySendResult> {
 }
 
 /**
+ * 正在跑的那条原地直发。
+ * 再按一次热键就是「打断它，重读聊天框」：用户按第二次是嫌上一句慢了，
+ * 不会想让上一句的译文过几秒再落进聊天框 —— 那正是「翻的是上一条」的来源。
+ */
+interface InPlaceFlight {
+  token: number
+  /** 已经从聊天框读走、还没写回的中文：被打断时它是唯一还记得这一句的地方。 */
+  draft: string | null
+  /** 已经写回聊天框：发出去的句子收不回来，不能再交给下一次当草稿。 */
+  sent: boolean
+}
+let inPlaceFlight: InPlaceFlight | null = null
+let inPlaceToken = 0
+/**
+ * 结束当前这条直发，返回还没写回的那句中文。
+ * 同时掐掉还在跑的模型回合：不掐它就一直占着回合锁，重按的那一次照样要排在它后面。
+ */
+function breakInPlace(): string | null {
+  const flight = inPlaceFlight
+  if (!flight) return null
+  inPlaceFlight = null
+  abortTranslation('reply')
+  return flight.sent ? null : flight.draft
+}
+
+/**
  * 读取游戏聊天框里已经打好但未发送的中文，翻译成英文后粘贴回同一个输入框并回车发送。
  * 全程不切换前台窗口，也不经过控制台。
  */
 export async function translateInPlace(): Promise<InPlaceResult> {
   const settings = loadSettings()
   const sender = getInPlaceSender()
+  // 单飞行：再按一次热键 = 打断上一次。上一句的中文在 grab 时就被读走、聊天框已经空了，
+  // 所以必须把它从被打断的那一次手里接过来 —— 新的 grab 只会拿到 NOCONTENT。
+  const orphan = breakInPlace()
+  const token = ++inPlaceToken
+  const flight: InPlaceFlight = { token, draft: null, sent: false }
+  inPlaceFlight = flight
+  /** 这一条还是当前那一条吗：被别人取代之后聊天框归新的那一次，这边一概不碰。 */
+  const alive = (): boolean => inPlaceFlight?.token === token
   const grabbed = await sender.grab()
-  if (!grabbed.ok || !grabbed.text) {
+  // 过期从「读到这一句」算起：慢在桥启动不该算到翻译头上。
+  const grabbedAt = Date.now()
+  const pick = pickInPlaceDraft({
+    ok: grabbed.ok,
+    text: grabbed.text ?? null,
+    code: grabbed.code,
+    error: grabbed.error,
+    orphan
+  })
+  if (pick.kind === 'fail' || pick.kind === 'empty') {
     return {
       ok: false,
       draft: null,
       translated: null,
       grabMs: grabbed.ms,
-      error: grabbed.error ?? '没有读到聊天框内容'
+      error: pick.kind === 'fail' ? pick.reason : '聊天框里没有可翻译的内容'
     }
   }
-  const draft = grabbed.text
+  if (!alive()) {
+    return { ok: false, draft: pick.draft, translated: null, grabMs: grabbed.ms, error: '已被新的直发打断' }
+  }
+  const draft = pick.draft
+  flight.draft = draft
+  /** 失败收场：把中文原样贴回聊天框（不按回车），否则那句中文随 grab 一起消失了。 */
+  const restore = async (): Promise<boolean> => {
+    if (!alive()) return false
+    const back = await sender.replace(draft, { enter: false })
+    return back.ok
+  }
   const translateStartedAt = Date.now()
   let translated: string | null = null
+  let failure: string | null = null
   try {
-    translated = await translateReply(settings.provider, draft, settings.replyTone)
+    translated = await translateReply(settings.provider, draft, settings.replyTone, { alive })
   } catch (err) {
-    return {
-      ok: false,
-      draft,
-      translated: null,
-      grabMs: grabbed.ms,
-      translateMs: Date.now() - translateStartedAt,
-      error: err instanceof Error ? err.message : String(err)
-    }
+    failure = err instanceof Error ? err.message : String(err)
   }
   const translateMs = Date.now() - translateStartedAt
-  if (!translated) {
-    return { ok: false, draft, translated: null, grabMs: grabbed.ms, translateMs, error: '翻译结果为空' }
+  const delivery = decideInPlaceDelivery({
+    cancelled: !alive(),
+    line: translated === null ? null : normalizeChatLine(translated),
+    elapsedMs: Date.now() - grabbedAt
+  })
+  // 被新的直发取代：不写回、不回贴、也不报错，新的那一次会给用户答案。
+  if (delivery.action === 'abandon') {
+    return { ok: false, draft, translated: null, grabMs: grabbed.ms, translateMs, error: delivery.reason }
   }
-  const line = normalizeChatLine(translated)
-  if (!line) {
-    return { ok: false, draft, translated, grabMs: grabbed.ms, translateMs, error: '译文没有可发送的英文字符' }
+  if (delivery.action === 'restore') {
+    const restored = await restore()
+    const reason = failure !== null && translated === null ? failure : delivery.reason
+    getOverlayManager().flashHint(inplaceFailureLine({ reason, restored }))
+    return { ok: false, draft, translated, grabMs: grabbed.ms, translateMs, restored, error: reason }
   }
-  const sent = await sender.replace(line)
+  // 从这里起这句英文可能已经粘上并回车：之后被打断也不能再回贴中文，否则聊天框里多一句。
+  flight.sent = true
+  const sent = await sender.replace(delivery.line)
   if (!sent.ok) {
+    const restored = await restore()
+    const reason = sent.error ?? '写回聊天框并发送失败'
+    getOverlayManager().flashHint(inplaceFailureLine({ reason, restored }))
     return {
       ok: false,
       draft,
@@ -154,10 +215,11 @@ export async function translateInPlace(): Promise<InPlaceResult> {
       grabMs: grabbed.ms,
       translateMs,
       sendMs: sent.ms,
-      error: sent.error ?? '写回聊天框并发送失败'
+      restored,
+      error: reason
     }
   }
-  return { ok: true, draft, translated: line, grabMs: grabbed.ms, translateMs, sendMs: sent.ms }
+  return { ok: true, draft, translated: delivery.line, grabMs: grabbed.ms, translateMs, sendMs: sent.ms, restored: false }
 }
 
 /** 只翻不发：译文进剪贴板，渲染层直接粘贴（Alt+Shift+T 回复框的「翻译」按钮）。 */

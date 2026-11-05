@@ -167,6 +167,29 @@
 - 可行做法：轻敲一次裸 `Alt`（VK_MENU down/up）→ `BringWindowToTop` → `SetForegroundWindow` → 等 ~320ms →
   校验 `GetForegroundWindow()` 是否等于目标窗口，不等就重试一次；仍失败返回 `NOFOCUS` 并回传 `fg`/`win` 句柄便于排查。
 
+### 直发翻出「上一条」
+- 症状：`Shift+Alt+T` 明明聊天框里打的是新的一句，发出去的却是上一条的译文；或者按了完全没反应，
+  几秒后忽然冒出一句旧消息并回车发出；最糟的是那句中文彻底没了。
+- 根因三条叠在一起：
+  - `grab` 读完就把聊天框 `Ctrl+A` + `Delete` 清空了（`chat-inplace.ps1` 的 grab 尾部），
+    那句中文此刻只活在内存里，任何失败都是永久丢失。
+  - `grab` / `replace` 各自只串行「单步请求」，整条流水线（读 → 翻 → 写）没有闸门。
+    两次热键可以交错成 读A → 读B（空）→ 翻A → 翻B → 写A → 写B，后写的那次把先写的那次盖掉。
+  - 单句翻译最坏几十秒（回合排队 + 对冲 + 重译），而热键路径 `void translateInPlace()` 把返回值丢了：
+    用户以为没成功，重打重按，于是又开了一条流水线。
+- 修法（`src/shared/inplace.ts` 是纯决策缝，主进程与探针共用）：
+  - 再按一次热键 = **打断上一次**：`breakInPlace()` 清掉当前这趟并 `abortTranslation('reply')` 掐掉模型回合
+    （不掐它就一直占着回合锁，重按的那次照样排队）。还没写回的中文作为 orphan 交给下一次；
+    新的 `grab` 拿到 `NOCONTENT` 且手里有 orphan 时继续翻那一句，而不是报「没有读到内容」。
+  - 写回前的三道闸门 `decideInPlaceDelivery`：被打断 → 什么都不做；没翻出英文 → 回贴原文；
+    超过 20 秒（`INPLACE_STALE_MS`）才回来 → 也算过期，回贴原文。只有「没被打断 + 有英文 + 没迟到」才写回。
+  - 失败一律把原文粘回聊天框（`send` 分支新增 `enter:false`，只贴不回车），并把
+    「原文已放回聊天框 / 没救回来」写进结果（`InPlaceResult.restored`）；面板据此提示，浮层用 `flashHint` 显示 6 秒。
+  - 打断不是失败：`durable-translator` 里改成按来源打断（`abortTranslation('reply')`），
+    被打断的回合抛 `TURN_CANCELLED` 且不记冷却、不写记账本、不触发直连兜底 ——
+    否则下一次直发要白等 30 秒，看起来就是「按了没反应」。
+- 复查命令：`--inplace-guard-probe`（纯决策，不碰游戏与输入桥）。
+
 ## 语音
 
 ### whisper 模型下载只有 43KB/s

@@ -316,7 +316,10 @@ function SendCard(): React.ReactElement {
           draft: res.draft ?? '',
           translated: res.translated,
           command: res.translated,
-          error: res.error
+          error:
+            res.restored === false && res.error
+              ? `${res.error}（原文没放回聊天框，需要自己再打一遍）`
+              : res.error
         })
       } finally {
         setBusy(false)

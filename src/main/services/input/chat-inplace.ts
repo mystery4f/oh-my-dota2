@@ -38,6 +38,11 @@ interface BridgeResponse {
   ok: boolean
   text?: string
   error?: string
+  /**
+   * 桥的原始错误码（NOCONTENT / NOGAME / NOFOCUS…）。
+   * 直发靠它区分「聊天框真的空着」和「游戏没在前台」：前者能继续翻被打断的那一句，后者不能。
+   */
+  code?: string
   /** 分段计时：Get-Process 找窗口、写剪贴板、发组合键。 */
   lookupMs?: number
   clipSetMs?: number
@@ -172,6 +177,7 @@ class InPlaceBridge {
       entry.resolve({
         ok: false,
         error: EXIT_REASONS[payload.code ?? ''] ?? `输入桥失败：${payload.code ?? 'unknown'}`,
+        code: payload.code,
         lookupMs: payload.lookupMs,
         fg: payload.fg,
         win: payload.win
@@ -259,7 +265,12 @@ class InPlaceBridge {
     return this.starting
   }
 
-  private request(op: 'grab' | 'send' | 'ping' | 'focus', text?: string): Promise<BridgeResponse> {
+  /** enter=false 只贴不回车（失败回贴原文用）；不传就是老行为：粘上并回车。 */
+  private request(
+    op: 'grab' | 'send' | 'ping' | 'focus',
+    text?: string,
+    enter?: boolean
+  ): Promise<BridgeResponse> {
     return new Promise((resolve) => {
       const child = this.child
       if (!child || !this.ready) {
@@ -272,7 +283,7 @@ class InPlaceBridge {
         resolve({ ok: false, error: '游戏输入超时' })
       }, REQUEST_TIMEOUT_MS)
       this.pending.set(id, { resolve, timer })
-      child.stdin.write(JSON.stringify({ id, op, text }) + '\n')
+      child.stdin.write(JSON.stringify({ id, op, text, enter }) + '\n')
     })
   }
 
@@ -331,7 +342,11 @@ class InPlaceBridge {
     return next
   }
 
-  replace(text: string): Promise<ReplaceResult> {
+  /**
+   * 把文本粘回聊天框。`enter: false` 只贴不回车：翻译失败时把用户那句中文原样放回去，
+   * 失败绝不替用户发一句。
+   */
+  replace(text: string, options: { enter?: boolean } = {}): Promise<ReplaceResult> {
     const next = this.chain.then(async (): Promise<ReplaceResult> => {
       const startedAt = Date.now()
       try {
@@ -339,9 +354,12 @@ class InPlaceBridge {
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err), ms: Date.now() - startedAt }
       }
-      const res = await this.request('send', text)
+      const res = await this.request('send', text, options.enter)
       const ms = Date.now() - startedAt
-      appendLog('send ' + (res.ok ? 'ok' : 'fail') + ' ' + ms + 'ms ' + timingOf(res) + (res.ok ? '' : ' ' + (res.error ?? '')))
+      const op = options.enter === false ? 'send(fill)' : 'send'
+      appendLog(
+        op + ' ' + (res.ok ? 'ok' : 'fail') + ' ' + ms + 'ms ' + timingOf(res) + (res.ok ? '' : ' ' + (res.error ?? ''))
+      )
       return { ...res, ms }
     })
     this.chain = next.then(

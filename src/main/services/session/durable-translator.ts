@@ -36,6 +36,11 @@ const SUBMIT_TIMEOUT_MS = 45_000
 const COLD_SUBMIT_TIMEOUT_MS = 120_000
 /** After a session failure, direct translation stays in charge for this long. */
 const RETRY_AFTER_MS = 30_000
+/**
+ * 被打断（用户又按了一次热键）不是失败：不进 30 秒失败冷却、不写记账本、不触发直连兜底。
+ * 用一句话当标记，调用方据此决定「原文还要不要放回去」。
+ */
+const TURN_CANCELLED = 'translation cancelled'
 /** 捕获轮询的熔断线：一轮批量超过这个时间，聊天已经刷过去了，留在会话里等没意义。 */
 const CAPTURE_WARM_TIMEOUT_MS = 12_000
 /** 冷启动首轮模型要建缓存，允许更久；但超过一轮聊天的时间就没有意义了，直连兜底反而更快。 */
@@ -429,9 +434,14 @@ async function translateWithSession(
   direction: TranslateDirection,
   tone: ReplyTone = 'terse',
   scope: TranslateScope = 'prod',
-  budgets: { warm: number; cold: number } = { warm: SUBMIT_TIMEOUT_MS, cold: COLD_SUBMIT_TIMEOUT_MS }
+  budgets: { warm: number; cold: number } = { warm: SUBMIT_TIMEOUT_MS, cold: COLD_SUBMIT_TIMEOUT_MS },
+  gate: TurnGate = { origin: 'capture' }
 ): Promise<string> {
   return withTurnLock(async () => {
+    // 排队期间用户可能已经又按了一次热键：拿到锁先看一眼，没人要的立刻放弃 ——
+    // 提交一条没人读的回答不但白烧 token，还会把下一句堵在回合锁后面。
+    const { guard } = gate
+    if (guard && !guard()) throw new Error(TURN_CANCELLED)
     const startedAt = Date.now()
     const session = await ensureRuntime(provider)
     const slot = sessionSlot(direction, tone, scope)
@@ -443,7 +453,7 @@ async function translateWithSession(
     const abortTurn = (): void => {
       void conversation.abort(session.context).catch(() => undefined)
     }
-    inFlightAbort = abortTurn
+    inFlight = { origin: gate.origin, abort: abortTurn }
     try {
       settled = await withTimeout(submission.wait(session.context), 'translation', cold ? budgets.cold : budgets.warm)
     } catch (err) {
@@ -452,7 +462,7 @@ async function translateWithSession(
       abortTurn()
       throw err
     } finally {
-      if (inFlightAbort === abortTurn) inFlightAbort = null
+      if (inFlight?.abort === abortTurn) inFlight = null
     }
     if (process.env.DURABLE_DEBUG)
       console.log('TURN_TIMING', JSON.stringify({ submitMs: Date.now() - tSubmit, settledMs: Date.now() - tSubmit, status: settled.status }))
@@ -520,8 +530,26 @@ interface HedgeOutcome<T> {
   via: 'session' | 'direct'
 }
 
-/** 对冲里直连先回来时，把还在跑的会话回合掐掉：否则它继续生成、烧 token、把下一句堵在后面。 */
-let inFlightAbort: (() => void) | null = null
+/**
+ * 这一轮翻译还归不归调用方：guard 返回 false 就说明它被新的请求取代了，立刻放弃。
+ * 直连对冲先回来时也用同一套机制掐掉没人读的会话回合（否则它继续烧 token、把下一句堵在后面）。
+ */
+interface TurnGate {
+  /** 谁发起的：打断按来源认领，抓屏批次不该被热键掐掉。 */
+  origin: TranslationOrigin
+  guard?: () => boolean
+}
+/** 正在跑的会话回合：带上来源，打断时才认得出这是不是「自己要掐的那一个」。 */
+let inFlight: { origin: TranslationOrigin; abort: () => void } | null = null
+/**
+ * 掐掉指定来源正在跑的翻译。返回 false 表示那一刻没有它的回合。
+ * 热键直发第二次按下时要的就是这个：上一句别再往聊天框里写。
+ */
+export function abortTranslation(origin: TranslationOrigin): boolean {
+  if (inFlight === null || inFlight.origin !== origin) return false
+  inFlight.abort()
+  return true
+}
 
 /**
  * 会话回合超过 afterMs 就并行打一条直连请求，谁先回用谁。
@@ -544,7 +572,7 @@ async function raceHedge<T>(
       hedged
     ])
     if (first) {
-      if (first.via === 'direct') inFlightAbort?.()
+      if (first.via === 'direct') inFlight?.abort()
       return first
     }
     return { settled: await session, via: 'session' }
@@ -577,9 +605,17 @@ export async function translateLine(
   direction: TranslateDirection,
   tone: ReplyTone = 'terse',
   scope: TranslateScope = 'prod',
-  origin: TranslationOrigin = 'capture'
+  origin: TranslationOrigin = 'capture',
+  /** 调用方是否还要这一句：返回 false 就立刻放弃（热键直发再按一次会作废上一句）。 */
+  alive?: () => boolean
 ): Promise<string> {
   const startedAt = Date.now()
+  // 这一句还有没有人要（按了第二次热键就没人要了）：每一处 await 之后都要再问一次，
+  // 否则一次没人读的翻译会进记账本、占着回合锁、还可能冒充「翻译失败」触发 30 秒冷却。
+  const ensureAlive = (): void => {
+    if (alive && !alive()) throw new Error(TURN_CANCELLED)
+  }
+  ensureAlive()
   const cacheKey = providerKey(provider)
   // 记账本先查：这句（或它换个方向的那半句）翻过就直接出，不碰模型。
   const hit = lookupTranslation(
@@ -600,10 +636,10 @@ export async function translateLine(
   // 只对非中文方向判定：中文行本来就该原样返回。
   const sessionAttempt = async (): Promise<string> => {
     const budgets = scope === 'prod' && direction === 'zh-en' ? REPLY_BUDGETS : undefined
-    let translated = await translateWithSession(provider, text, direction, tone, scope, budgets)
+    let translated = await translateWithSession(provider, text, direction, tone, scope, budgets, { origin, guard: alive })
     if (direction !== 'zh-en' && isEcho(text, translated)) {
       await resetHistory(direction, tone, scope)
-      translated = await translateWithSession(provider, text, direction, tone, scope, budgets)
+      translated = await translateWithSession(provider, text, direction, tone, scope, budgets, { origin, guard: alive })
       if (isEcho(text, translated)) throw new Error('session echoed the source line')
     }
     return translated
@@ -617,6 +653,8 @@ export async function translateLine(
       )
       if (!outcome.settled.ok) throw outcome.settled.error
       const translated = outcome.settled.value
+      // 对冲/等待期间被作废的句子：成绩、记账本、失败冷却一律不记，就当没翻过。
+      ensureAlive()
       trackLatency(Date.now() - startedAt, outcome.via, 1)
       lastFallback = outcome.via === 'session' ? null : '直连对冲先返回（会话层较慢）'
       if (translated) {
@@ -625,13 +663,18 @@ export async function translateLine(
       }
       noteFailure('empty session output')
     } catch (err) {
+      // 被打断（abort）也会让会话回合报失败：先问一句「还要不要」，要才算真失败。
+      // 记成失败会让下一句白等 30 秒冷却，表现出来就是「按了没反应」。
+      ensureAlive()
       const message = err instanceof Error ? err.message : String(err)
       trackLatency(Date.now() - startedAt, message.includes('timed out') ? 'timeout' : 'error', 1)
       noteFailure(message)
     }
   }
+  ensureAlive()
   lastFallback = failedReason
   const fallback = await translateDirect(provider, text, direction)
+  ensureAlive()
   writeTranslation(text, cacheKey, tone, fallback, { direction, origin })
   return fallback
 }
@@ -649,23 +692,30 @@ export async function translateTry(
   return translateLine(provider, text, direction, 'terse', 'try', 'try')
 }
 
+/** 回复翻译的调用方闸门：热键直发再按一次会把它作废，作废后既不提交也不写记账本。 */
+export interface TranslateReplyOptions {
+  alive?: () => boolean
+}
 export async function translateReply(
   provider: ProviderConfig,
   text: string,
-  tone: ReplyTone = 'terse'
+  tone: ReplyTone = 'terse',
+  options: TranslateReplyOptions = {}
 ): Promise<string> {
-  let raw = await translateLine(provider, text, 'zh-en', tone, 'prod', 'reply')
+  let raw = await translateLine(provider, text, 'zh-en', tone, 'prod', 'reply', options.alive)
   // 一条聊天行只能对应一句话：模型偶尔回两行，取第一行，别把两句拼进游戏聊天框。
   raw = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] ?? raw
   if (looksLikeCommentary(raw)) {
     await resetHistory('zh-en', tone)
-    raw = await translateLine(provider, text, 'zh-en', tone, 'prod', 'reply')
+    raw = await translateLine(provider, text, 'zh-en', tone, 'prod', 'reply', options.alive)
   }
   if (looksLikeCommentary(raw)) throw new Error('reply translation came back as commentary')
   const clamped = clampReply(raw)
   let answer = clamped
   if (!replyWithinLimits(clamped)) {
     try {
+      // 二次压缩又要一次模型往返：已经没人要这一句就别花这个时间。
+      if (options.alive && !options.alive()) throw new Error(TURN_CANCELLED)
       const shortened = clampReply(await shortenReply(provider, clamped))
       if (shortened.length > 0) answer = shortened
     } catch {

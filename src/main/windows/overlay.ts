@@ -31,6 +31,9 @@ class OverlayManager {
   private lastVoiceToggleAt = 0
   /** 配置态闲置计时器：解锁后放着不管，自动回到穿透，避免忘了锁定后在游戏里误点。 */
   private idleTimer: NodeJS.Timeout | null = null
+  /** 一次性提示的到期时刻：在这之前，每拍 2 秒的「为什么没字」不许把它盖掉。 */
+  private flashUntil = 0
+  private flashTimer: NodeJS.Timeout | null = null
 
   /**
    * 状态策略走纯缝（reduceOverlay），这里只执行效果：落盘、闲置表、穿透、广播。
@@ -130,7 +133,24 @@ class OverlayManager {
 
   /** 主进程每拍算一次「为什么没字」，只有变化时才广播，避免刷 IPC。 */
   setHint(hint: string | null): void {
+    // 一次性提示还没到期：周期提示先让路，否则「翻译失败」这条活不过 2 秒就被覆盖。
+    if (this.flashUntil > Date.now()) return
     this.commit({ type: 'set-hint', hint })
+  }
+  /**
+   * 一次性提示（直发失败的原因）：到期前压住周期提示，到点自己清空。
+   * 浮层没开就直接丢 —— 报个错不值得为它把浮层弹出来。
+   */
+  flashHint(text: string, ms = 6_000): void {
+    if (!this.win) return
+    this.flashUntil = Date.now() + ms
+    this.commit({ type: 'set-hint', hint: text })
+    if (this.flashTimer) clearTimeout(this.flashTimer)
+    this.flashTimer = setTimeout(() => {
+      this.flashTimer = null
+      this.flashUntil = 0
+      this.commit({ type: 'set-hint', hint: null })
+    }, ms)
   }
 
   /** 设置变了但窗口自身状态没变（例如刚改完热键）：重发一次，让浮层上的键名跟上。 */

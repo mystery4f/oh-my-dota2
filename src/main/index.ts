@@ -38,6 +38,7 @@ import { runInPlaceProbe, runReplyLatencyProbe } from './probes/latency'
 import { runOverlayGeometryProbe } from './probes/overlay-geometry'
 import { runHotkeyProbe } from './probes/hotkeys'
 import { runVoiceOutProbe } from './probes/voice-out'
+import { runInPlaceGuardProbe } from './probes/inplace-guard'
 import { runAsrHotwordsProbe } from './probes/asr-hotwords'
 import { runTrainProbe } from './probes/train'
 import { loadSettings } from './services/settings'
@@ -181,6 +182,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()
   if (process.argv.includes('--asr-hotwords-probe')) void runAsrHotwordsProbe()
   if (process.argv.includes('--train-probe')) void runTrainProbe()
+  if (process.argv.includes('--inplace-guard-probe')) void runInPlaceGuardProbe()
   if (process.argv.includes('--input-probe')) void runInputProbe()
 
   const startup = loadSettings()
@@ -225,8 +227,14 @@ app.whenReady().then(() => {
     },
     // 直发：inplace = 读游戏聊天框草稿 → 翻译 → 粘回并回车；其他通道 = 弹浮层输入框。
     inplaceSend: () => {
-      if (loadSettings().sendMode === 'inplace') void translateInPlace()
-      else getOverlayManager().openReply()
+      if (loadSettings().sendMode !== 'inplace') {
+        getOverlayManager().openReply()
+        return
+      }
+      // 热键这条路径没人接返回值：真出了没处理过的错也要说一句，不能静默地「按了没反应」。
+      void translateInPlace().catch((err: unknown) => {
+        getOverlayManager().flashHint('直发失败：' + (err instanceof Error ? err.message : String(err)))
+      })
     },
     voiceCapture: () => {
       getOverlayManager().toggleVoiceCapture()
