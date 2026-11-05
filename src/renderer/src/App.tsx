@@ -84,17 +84,6 @@ function formatLatency(status: TranslatorStatus | null): string {
   return parts.join(' · ')
 }
 
-/**
- * 总览里那一行热键：五个动作各点一次名，全部读动作表里的显示写法。
- * 有动作被系统拒了就直接写出来——「按了没反应」只有在这里能提前看见。
- */
-function hotkeySummary(state: HotkeysResult | null): string {
-  if (!state) return '读取中…'
-  const parts = state.actions.map((action) => `${action.label} ${action.display}`)
-  const rejected = state.actions.filter((action) => action.verdict === 'rejected')
-  if (rejected.length > 0) parts.push(`被占用 ${rejected.map((action) => action.label).join('、')}`)
-  return parts.join(' · ')
-}
 
 function OverviewCard(): React.ReactElement {
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -168,9 +157,7 @@ function OverviewCard(): React.ReactElement {
         ['对局正文', capture?.running ? `监听中 · ${capture.totalEntries} 条` : '已停止'],
         ['浮层', overlay.visible ? `显示中 · ${overlay.locked ? '已锁定' : '可编辑'}` : '已隐藏'],
         ['翻译延迟', formatLatency(translator)],
-        ['开机自动捕获', settings.autoStartCapture ? '开' : '关'],
-        // 热键行的键名来自动作表，不写字面量：改过键之后这里也必须跟着变。
-        ['热键', hotkeySummary(hotkeys)]
+        ['开机自动捕获', settings.autoStartCapture ? '开' : '关']
       ]
     : []
 
@@ -198,6 +185,24 @@ function OverviewCard(): React.ReactElement {
               {capture.lastError}
             </div>
           ) : null}
+        </div>
+
+        {/* 五个热键单独一块：一行网格里塞不下，截断掉就等于没写。 */}
+        <div className="space-y-1 rounded-md border border-stone-700 px-3 py-2 text-sm">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-muted-foreground">热键</span>
+            <span className="text-xs text-muted-foreground">「浮层与对局 → 热键」里改</span>
+          </div>
+          <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
+            {(hotkeys?.actions ?? []).map((action) => (
+              <div key={action.id} className="flex items-baseline justify-between gap-3">
+                <span className="text-muted-foreground">{action.label}</span>
+                <span className={action.verdict === 'rejected' ? 'font-mono text-destructive' : 'font-mono'}>
+                  {action.verdict === 'rejected' ? `${action.display} · 被占用` : action.display}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
