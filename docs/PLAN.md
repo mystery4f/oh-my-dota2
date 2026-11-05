@@ -301,6 +301,7 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 - 2026-10-21 MiMo 改官方端点 api.xiaomimimo.com/v1（api-key 头而非 Bearer）；testProvider 预算 8→256 适配推理模型
 - 2026-11-05 新增 GLM (智谱 BigModel) provider 预设（OpenAI 兼容端点 open.bigmodel.cn/api/paas/v4，模型 glm-4-flash-250414 免费档，Bearer 头）
 - 2026-11-05 新增「推理」开关（`provider.reasoning`，面板「翻译模型」页，默认关）：方言按供应商选（MiMo/智谱/DeepSeek 走 thinking.type，OpenAI/custom 走 reasoning_effort，Ollama 不发），直连对冲路径同一套规则由 `src/shared/provider-reasoning.ts` 提供；切开关只重建运行时模型对象，会话历史文件不变；`--provider-reasoning-probe` 23/23 PASS
+- 2026-11-05 新增 `--zhipu-live-probe`：走真实封装链路（预热 → 会话 + 记账本 → `translateLine`/`translateReply`）真打智谱端点，key 只从 `ZHIPU_API_KEY` 环境变量读、日志只打形状；GLM-4-Flash-250414 实测 7/7 PASS（聊天 p50 596ms、回复 871–1021ms、`lastFallback:null` 全走会话链路），推理开关在该模型上「接受但忽略」，耗时与译文不变；预设标签标注免费档
 - 2026-10-22 M2d 完成：OverlayManager 透明置顶双语流窗口（点击穿透 Alt+Shift+P、显隐 Alt+Shift+O）、捕获区高亮可视化（region:show）、Alt+Shift+R 实时透明框选（弃用截图冻结方案）；--region-probe 全链路实测通过
 - 2026-10-23 抓屏提速：隐藏渲染进程常驻视频流取帧（抓屏 950 ms → 12-21 ms），帧指纹跳过未变化画面，OCR 线程数取 min(8, 核数/2)，译文异步补推（原文先上屏），轮询默认 1500 → 800 ms，慢回合 5 秒对冲直连；--latency-probe 原文上屏 2.1 s → 1.2-1.6 s
 - 2026-10-23 指纹改判据：从「平均灰度」换成「每格亮点（文字）占比 + 每格 4x4 采样」，半透明聊天面板背后镜头在动不再触发 OCR（--fingerprint-probe：灰度判据 17.6% 格子翻红，亮点判据 0%），真新增一行仍占 0.2-0.9%；连续空转时阈值与 OCR 间隔逐步退避，总览卡显示「OCR N 次 / 文字区变化 X% / 空转 N 次」；新增 --motion-probe 采样真实聊天区

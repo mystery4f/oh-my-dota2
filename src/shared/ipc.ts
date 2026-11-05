@@ -97,7 +97,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
   {
     id: 'zhipu',
-    label: 'GLM (智谱 BigModel)',
+    label: 'GLM (智谱 BigModel · 免费)',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     model: 'glm-4-flash-250414',
     needsKey: true

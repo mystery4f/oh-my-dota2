@@ -71,7 +71,7 @@ Single interface, OpenAI-compatible `/chat/completions`:
 | DeepSeek (default) | https://api.deepseek.com | deepseek-chat |
 | OpenAI | https://api.openai.com/v1 | gpt-4o-mini |
 | Ollama (local) | http://localhost:11434/v1 | qwen2.5:7b |
-| GLM (Zhipu BigModel) | https://open.bigmodel.cn/api/paas/v4 | glm-4-flash-250414 |
+| GLM (Zhipu BigModel, free tier) | https://open.bigmodel.cn/api/paas/v4 | glm-4-flash-250414 |
 | Custom | user-set | user-set |
 
 All requests go through the system proxy when set (Electron `session.setProxy`).
