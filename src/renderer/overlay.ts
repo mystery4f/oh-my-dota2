@@ -151,8 +151,7 @@ window.api.onCaptureReplace((batch) => {
   for (const entry of batch) {
     appendRow(entry.original, entry.translated, false, entry.id, entry.pending === true, entry.hero, entry.cached === true, entry.error)
   }
-  if (batch.length === 0) pill.textContent = '没有识别到聊天内容'
-  else pill.textContent = '已刷新 ' + batch.length + ' 条'
+  transientLabel(batch.length === 0 ? '没有识别到聊天内容' : `已刷新 ${batch.length} 条`, 1500)
 })
 
 window.api.onOverlayState((state: OverlayStatus) => applyState(state))
@@ -193,10 +192,36 @@ function hotkeyLabel(id: 'overlayToggle' | 'voiceCapture'): string {
   return overlayState?.hotkeys?.[id] ?? ''
 }
 
-/** 平时那行状态：点名当前配置的展开键；那个动作没绑键就只写「运行中」。 */
-function runningLabel(): string {
-  const key = hotkeyLabel('overlayToggle')
-  return key ? `运行中 · ${key}` : '运行中'
+/**
+ * 临时的阶段行（录音中 / 识别中 / 声出中 / 已刷新 N 条）。
+ * 平时锁定且无异常时那行整块是隐藏的，所以这里必须自己把它显出来，
+ * 否则「按了录音键却看不到任何反馈」——那正是这行字存在的理由。
+ */
+let stageLabel: string | null = null
+let stageTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 临时的阶段行（录音中 / 识别中 / 声出中 / 已刷新 N 条）。
+ * 平时锁定且无异常时那行整块是隐藏的，所以这里必须自己把它显出来，
+ * 否则「按了录音键却看不到任何反馈」——那正是这行字存在的理由。
+ * holdMs > 0 表示说完就收：到时把显示权还给正常规则。
+ */
+function transientLabel(text: string, holdMs = 0): void {
+  stageLabel = text
+  pill.textContent = text
+  pill.hidden = false
+  pill.classList.remove('warn', 'through')
+  if (stageTimer) clearTimeout(stageTimer)
+  stageTimer = holdMs > 0 ? setTimeout(restorePill, holdMs) : null
+}
+
+/** 临时阶段结束：把这一行的显示权还给正常规则（锁定且无异常就该重新藏起来）。 */
+function restorePill(): void {
+  if (stageTimer) clearTimeout(stageTimer)
+  stageTimer = null
+  stageLabel = null
+  if (overlayState) applyState(overlayState)
+  else pill.hidden = true
 }
 
 /**
@@ -226,6 +251,14 @@ function applyState(state: OverlayStatus): void {
   // 行底色由设置控制：一边是游戏画面太亮看不清字，一边是底色太实挡住视野。
   document.body.style.setProperty('--row-alpha', String(state.opacity ?? 0.34))
   barLabel.textContent = geometryLabel(state)
+  // 阶段行优先：录音/识别/声出/刷新这些反馈是用户按键之后唯一能看见的回应，
+  // 状态广播（改键、锁定、提示）不该把它冲掉。
+  if (stageLabel !== null) {
+    pill.textContent = stageLabel
+    pill.hidden = false
+    pill.classList.remove('warn', 'through')
+    return
+  }
   if (state.replyOpen) {
     pill.textContent = '回复 · Esc 关闭'
     pill.hidden = false
@@ -509,8 +542,8 @@ async function startRecording(): Promise<void> {
   recordNode.connect(recordCtx.destination)
   recording = true
   window.api.reportVoiceState(true)
-  pill.textContent = `● 录音中${hotkeyLabel('voiceCapture') ? ` · ${hotkeyLabel('voiceCapture')} 结束` : ''}`
-  pill.classList.remove('through')
+  const stopKey = hotkeyLabel('voiceCapture')
+  transientLabel(`● 录音中${stopKey ? ` · ${stopKey} 结束` : ''}`)
   recordTimer = setTimeout(() => void stopRecording(), RECORD_MAX_MS)
 }
 
@@ -535,7 +568,7 @@ async function stopRecording(): Promise<void> {
   if (frames < rate * 0.3) {
     appendRow('🎤 录音太短，已忽略', null)
     window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: '录音太短（不足 0.3 秒）' })
-    pill.textContent = runningLabel()
+    transientLabel('录音太短，已忽略', 1800)
     return
   }
   // whisper hallucinates text on silence, so skip the request when the mic is quiet.
@@ -548,24 +581,24 @@ async function stopRecording(): Promise<void> {
     const quietError = `没有检测到语音（音量 RMS ${rms.toFixed(4)}）`
     appendRow('🎤 ' + quietError, null)
     window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: quietError })
-    pill.textContent = runningLabel()
+    transientLabel('没有检测到语音', 1800)
     return
   }
-  pill.textContent = '识别中…'
+  transientLabel('识别中…')
   const result = await window.api.transcribeAudio(encodeWav16k(chunks, rate))
   const transcript = result.text.trim()
   if (!result.ok || !transcript) {
     const transcriptError = result.error ?? '未识别到语音'
     appendRow('🎤 ' + transcriptError, null)
     window.api.reportVoiceChain({ transcript: '', translated: null, spoken: false, stage: null, error: transcriptError })
-    pill.textContent = runningLabel()
+    transientLabel(transcriptError, 2200)
     return
   }
   // 一键到底（票 05）：识别文本先落一行（pending 态压暗 + 「翻译中…」），译文与
   // 已播状态就地补进同一行——原文/译文/已播三行，不再另起一行。
   const rowId = `voice-${Date.now()}`
   appendRow('🎤 ' + transcript, null, false, rowId, true)
-  pill.textContent = '翻译声出中…'
+  transientLabel('翻译声出中…')
   const reply = await window.api.voiceReply(transcript)
   const row = rows.get(rowId)
   if (row) {
@@ -587,7 +620,10 @@ async function stopRecording(): Promise<void> {
     stage: reply.stage,
     error: reply.error
   })
-  pill.textContent = runningLabel()
+  // 结果已经写进那一行里了；只有「播没播」还需要一句，说完就收。
+  const spoken = reply.spoken ? '已播' : reply.error ? '未播' : ''
+  if (spoken) transientLabel(spoken, 2000)
+  else restorePill()
 }
 
 

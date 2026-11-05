@@ -25,7 +25,7 @@ import {
   type SovitsVoicePack,
   SOVITS_SEED_REF_DIR
 } from '@shared/ipc'
-import type { OfflineStatus, UpdateState } from '@shared/ipc'
+import type { HotkeysResult, OfflineStatus, UpdateState } from '@shared/ipc'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { QWEN3_ASR_RELEASE_URL } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
@@ -84,23 +84,38 @@ function formatLatency(status: TranslatorStatus | null): string {
   return parts.join(' · ')
 }
 
+/**
+ * 总览里那一行热键：五个动作各点一次名，全部读动作表里的显示写法。
+ * 有动作被系统拒了就直接写出来——「按了没反应」只有在这里能提前看见。
+ */
+function hotkeySummary(state: HotkeysResult | null): string {
+  if (!state) return '读取中…'
+  const parts = state.actions.map((action) => `${action.label} ${action.display}`)
+  const rejected = state.actions.filter((action) => action.verdict === 'rejected')
+  if (rejected.length > 0) parts.push(`被占用 ${rejected.map((action) => action.label).join('、')}`)
+  return parts.join(' · ')
+}
+
 function OverviewCard(): React.ReactElement {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [capture, setCapture] = useState<CaptureStatus | null>(null)
   const [translator, setTranslator] = useState<TranslatorStatus | null>(null)
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
+  const [hotkeys, setHotkeys] = useState<HotkeysResult | null>(null)
   const [rows, setRows] = useState<CheckRow[] | null>(null)
   const [busy, setBusy] = useState(false)
 
   const refresh = async (): Promise<void> => {
-    const [nextSettings, nextCapture, nextTranslator] = await Promise.all([
+    const [nextSettings, nextCapture, nextTranslator, nextHotkeys] = await Promise.all([
       window.api.getSettings(),
       window.api.captureStatus(),
-      window.api.translatorStatus()
+      window.api.translatorStatus(),
+      window.api.getHotkeys()
     ])
     setSettings(nextSettings)
     setCapture(nextCapture)
     setTranslator(nextTranslator)
+    setHotkeys(nextHotkeys)
   }
 
   useEffect(() => {
@@ -153,7 +168,9 @@ function OverviewCard(): React.ReactElement {
         ['对局正文', capture?.running ? `监听中 · ${capture.totalEntries} 条` : '已停止'],
         ['浮层', overlay.visible ? `显示中 · ${overlay.locked ? '已锁定' : '可编辑'}` : '已隐藏'],
         ['翻译延迟', formatLatency(translator)],
-        ['开机自动捕获', settings.autoStartCapture ? '开' : '关']
+        ['开机自动捕获', settings.autoStartCapture ? '开' : '关'],
+        // 热键行的键名来自动作表，不写字面量：改过键之后这里也必须跟着变。
+        ['热键', hotkeySummary(hotkeys)]
       ]
     : []
 
@@ -1089,10 +1106,6 @@ function OverlayCard(): React.ReactElement {
           <span className="text-xs text-muted-foreground">自己的昵称（只做归属标注，不因它跳过翻译或朗读）</span>
         </div>
 
-        <GroupLabel text="热键" />
-        <p className="text-xs text-muted-foreground">
-          热键已可以自己改，「浮层与对局」页顶部的「热键」卡片里改键、看生效状态。
-        </p>
       </CardContent>
     </Card>
   )

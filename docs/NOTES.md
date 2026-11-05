@@ -44,7 +44,7 @@
 - 根因：WGC（Windows Graphics Capture）在 Dota 2 全屏独占模式下拿不到新帧，Electron 会复用旧帧而不是报错。
 - 修法：`app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer')`，让 Chromium 回落到
   DXGI/GDI 桌面复制；同时把 `maxFrameRate` 从 30 降到 10，减少失败噪声。
-- 判据：日志干净不等于修好，必须是「画面在变」。切手动模式连按两次 `Alt+Shift+C`，两次内容相同就是冻结帧。
+- 判据：日志干净不等于修好，必须是「画面在变」。这条只适用于已经退役的 OCR 抓屏路径：那时切手动模式连按两次「立即捕获」，两次内容相同就是冻结帧。现在正文来自 GSI，没有抓屏帧可看。
 
 ### 抓一帧要 0.9 秒
 - 实测：`desktopCapturer.getSources` 无论缩略图给 2560、480、192 还是 96 宽，都在 800–1800ms；

@@ -181,14 +181,6 @@ export function HotkeyCard(): React.ReactElement {
           <Button onClick={() => void save()} disabled={busy || conflictKeys.length > 0 || !dirty}>
             {busy ? '保存中…' : '保存热键'}
           </Button>
-          <Button
-            variant="ghost"
-            className="text-xs"
-            onClick={() => setDraft(normalizeHotkeyMap({}))}
-            disabled={busy}
-          >
-            全部恢复默认
-          </Button>
           {dirty ? <span className="text-xs text-muted-foreground">有未保存的改动</span> : null}
         </div>
         <p className="text-xs text-muted-foreground">
