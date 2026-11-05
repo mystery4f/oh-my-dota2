@@ -265,6 +265,73 @@ export async function runSettingsPersistProbe(): Promise<void> {
     )
     const seeded = loadSettings()
     push('旧存档仍按 id 播种表', seeded.providerKeys?.deepseek === 'legacy-live-key', seeded.providerKeys?.deepseek ?? 'undefined')
+
+    // —— #43 推理存档：形状与 key 表同款，走真实 loadSettings/saveSettings 路径。
+    // ① 轮换两家各自的开关：MiMo 开、智谱关，落盘读回各自都在（切家不丢各自的档）。
+    saveSettings({
+      provider: {
+        ...DEFAULT_SETTINGS.provider,
+        id: 'mimo',
+        baseUrl: 'https://api.xiaomimimo.com/v1',
+        model: 'mimo-v2.6-flash',
+        reasoning: true
+      },
+      providerReasoning: { mimo: true, zhipu: false }
+    })
+    const roundtrip = loadSettings()
+    push(
+      '推理存档落盘可读回（含别家的档）',
+      roundtrip.providerReasoning?.mimo === true &&
+        roundtrip.providerReasoning?.zhipu === false &&
+        roundtrip.provider.reasoning === true,
+      JSON.stringify(roundtrip.providerReasoning)
+    )
+    // ② 深合并不冲掉：只 patch 一家的开关，别家保持原样。
+    saveSettings({ providerReasoning: { custom: true } })
+    const mergedReasoning = loadSettings()
+    push(
+      '只写一家的推理开关不冲掉别家',
+      mergedReasoning.providerReasoning?.mimo === true &&
+        mergedReasoning.providerReasoning?.zhipu === false &&
+        mergedReasoning.providerReasoning?.custom === true,
+      JSON.stringify(mergedReasoning.providerReasoning)
+    )
+    // ③ 同一份手编文件：key 走漂移仲裁、推理走归位（deepseek 预设未声明 → 用户值保留），两条规则互不干扰。
+    writeFileSync(
+      file,
+      JSON.stringify({
+        provider: { ...DEFAULT_SETTINGS.provider, apiKey: 'hand-live-key', reasoning: true },
+        providerKeys: { deepseek: 'stale-key' },
+        providerReasoning: { deepseek: true, zhipu: false }
+      }),
+      'utf-8'
+    )
+    const both = loadSettings()
+    push(
+      '同一份文件：key 仲裁与推理归位互不干扰',
+      both.providerKeys?.deepseek === 'hand-live-key' &&
+        both.provider.reasoning === true &&
+        both.providerReasoning?.deepseek === true &&
+        both.providerReasoning?.zhipu === false,
+      JSON.stringify({ keys: both.providerKeys, reasoning: both.providerReasoning, live: both.provider.reasoning })
+    )
+    // ④ 存档表坏掉（非对象）：静默兜底成空表，不炸，key 仲裁照常工作。
+    writeFileSync(
+      file,
+      JSON.stringify({
+        provider: { ...DEFAULT_SETTINGS.provider, apiKey: 'keep-key' },
+        providerReasoning: 'garbage'
+      }),
+      'utf-8'
+    )
+    const salvagedReasoning = loadSettings()
+    push(
+      '坏掉的推理存档兜底成空表且不影响 key 仲裁',
+      salvagedReasoning.providerReasoning !== undefined &&
+        Object.keys(salvagedReasoning.providerReasoning).length === 0 &&
+        salvagedReasoning.providerKeys?.deepseek === 'keep-key',
+      JSON.stringify(salvagedReasoning.providerReasoning)
+    )
   } finally {
     if (hadFile) copyFileSync(backup, file)
     rmSync(backupDir, { recursive: true, force: true })

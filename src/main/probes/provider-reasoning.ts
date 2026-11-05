@@ -1,6 +1,13 @@
 import { app } from 'electron'
-import { PROVIDER_PRESETS, type ProviderConfig, type ProviderId } from '@shared/ipc'
-import { directReasoningParams, reasoningEnabled, thinkingFormatFor, thinkingLevelFor } from '@shared/provider-reasoning'
+import { PROVIDER_PRESETS, type ProviderConfig, type ProviderId, type ProviderPreset } from '@shared/ipc'
+import {
+  directReasoningParams,
+  healProviderReasoning,
+  reasoningEnabled,
+  reasoningForProvider,
+  thinkingFormatFor,
+  thinkingLevelFor
+} from '@shared/provider-reasoning'
 
 /**
  * `--provider-reasoning-probe`：面板「推理」开关纯函数缝的行为锁。
@@ -77,6 +84,86 @@ export function runProviderReasoningProbe(): void {
       (preset) => preset.id === 'zhipu' && preset.baseUrl === 'https://open.bigmodel.cn/api/paas/v4' && preset.model === 'glm-4-flash-250414'
     ),
     PROVIDER_PRESETS.map((p) => p.id).join(',')
+  )
+
+  // —— #43 预设归位：预设表声明了 reasoning 时，存档里的野值以声明为准（authStyle 同款）。 ——
+  // 现表里没有预设声明 reasoning，这里用合成预设锁住「声明即真理」的缝，未来哪家要默认开思考时归位已在。
+  const declaring: ProviderPreset = {
+    id: 'mimo',
+    label: 'MiMo',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    model: 'mimo-v2.6-flash',
+    needsKey: true,
+    reasoning: true
+  }
+  const healed = healProviderReasoning('mimo', false, declaring, { mimo: false, zhipu: true })
+  push(
+    '预设声明 reasoning:true → 存档野值归位为开（活值+存档一起归位）',
+    healed.reasoning === true && healed.providerReasoning.mimo === true,
+    JSON.stringify(healed)
+  )
+  push('归位不碰别家的表项', healed.providerReasoning.zhipu === true, healed.providerReasoning.zhipu ? 'zhipu kept' : 'zhipu lost')
+  const healedOff = healProviderReasoning('mimo', true, { ...declaring, reasoning: false }, { mimo: true })
+  push(
+    '预设声明 reasoning:false → 存档里的开也归位为关',
+    healedOff.reasoning === false && healedOff.providerReasoning.mimo === false,
+    JSON.stringify(healedOff)
+  )
+
+  // —— #43 用户值保留：没声明 reasoning 的预设与 custom，存档值原样保留，开关仍可各家各编辑。 ——
+  const deepseekPreset = PROVIDER_PRESETS.find((preset) => preset.id === 'deepseek')
+  const untouched = healProviderReasoning('deepseek', true, deepseekPreset, { deepseek: true })
+  push(
+    '没声明的预设保留用户存档值（deepseek 开）',
+    untouched.reasoning === true && untouched.providerReasoning.deepseek === true,
+    JSON.stringify(untouched)
+  )
+  const customKept = healProviderReasoning('custom', true, undefined, { custom: true })
+  push(
+    'custom 没有预设可依，存档值原样保留',
+    customKept.reasoning === true && customKept.providerReasoning.custom === true,
+    JSON.stringify(customKept)
+  )
+  const customOff = healProviderReasoning('custom', false, undefined, { custom: false })
+  push(
+    'custom 关着的开关也不被翻成开',
+    customOff.reasoning === false && customOff.providerReasoning.custom === false,
+    JSON.stringify(customOff)
+  )
+  const salvage = healProviderReasoning('mimo', true, undefined, undefined)
+  push(
+    '存档表缺失/坏掉静默兜底成空表，不炸',
+    salvage.reasoning === true && Object.keys(salvage.providerReasoning).length === 0,
+    JSON.stringify(salvage)
+  )
+
+  // —— #43 切家记忆：MiMo(开) → 智谱(关) → MiMo，每家回到自己的那格，不用重新点。 ——
+  const archive = { mimo: true, zhipu: false }
+  const presetFor = (id: ProviderId): ProviderPreset | undefined => PROVIDER_PRESETS.find((preset) => preset.id === id)
+  push(
+    'MiMo 自己的档是开',
+    reasoningForProvider('mimo', presetFor('mimo'), archive) === true,
+    JSON.stringify(archive)
+  )
+  push(
+    '切到智谱：回到智谱自己的档（关，不是 MiMo 的开）',
+    reasoningForProvider('zhipu', presetFor('zhipu'), archive) === false,
+    JSON.stringify(archive)
+  )
+  push(
+    '切回 MiMo：还是开（每家各记各的）',
+    reasoningForProvider('mimo', presetFor('mimo'), archive) === true,
+    JSON.stringify(archive)
+  )
+  push(
+    '没记过也没声明的家默认关',
+    reasoningForProvider('ollama', presetFor('ollama'), archive) === false,
+    'ollama 无存档'
+  )
+  push(
+    '预设声明了就压过存档（声明即真理）',
+    reasoningForProvider('mimo', declaring, { mimo: false }) === true,
+    'declaring.reasoning=true, archive.mimo=false'
   )
 
   let failed = 0

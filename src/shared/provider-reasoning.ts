@@ -1,4 +1,4 @@
-import type { ProviderConfig, ProviderId } from './ipc'
+import type { ProviderConfig, ProviderId, ProviderPreset } from './ipc'
 
 /**
  * 每家供应商关/开「先思考」用的不是同一个字段，猜错就是 400 或者白等 7 秒：
@@ -59,4 +59,36 @@ export function directReasoningParams(provider: Pick<ProviderConfig, 'id' | 'rea
     default:
       return {}
   }
+}
+
+/**
+ * 切供应商/载入时这一格该亮的开关（#43）：预设声明 > 该供应商自己的存档 > 默认关。
+ * MiMo 要思考、智谱 flash 不要，切家时跟着换，不用重新点。
+ */
+export function reasoningForProvider(
+  id: ProviderId,
+  preset: ProviderPreset | undefined,
+  providerReasoning: Partial<Record<ProviderId, boolean>> | undefined
+): boolean {
+  if (preset && 'reasoning' in preset) return preset.reasoning === true
+  return providerReasoning?.[id] === true
+}
+
+/**
+ * 载入归位（#43）：预设表声明了 reasoning 就以声明为真理，活值与存档一起归位——和 authStyle
+ * 同一个治病模式；没声明的预设（现表里全部）与 custom 保留用户存档值，开关仍可各家各编辑。
+ * 存档不是对象（手编坏了）时静默兜底成空表，不让读取炸掉。
+ */
+export function healProviderReasoning(
+  id: ProviderId,
+  reasoning: boolean | undefined,
+  preset: ProviderPreset | undefined,
+  providerReasoning: Partial<Record<ProviderId, boolean>> | undefined
+): { reasoning: boolean | undefined; providerReasoning: Partial<Record<ProviderId, boolean>> } {
+  const archive = providerReasoning && typeof providerReasoning === 'object' ? { ...providerReasoning } : {}
+  if (preset && 'reasoning' in preset) {
+    const declared = preset.reasoning === true
+    return { reasoning: declared, providerReasoning: { ...archive, [id]: declared } }
+  }
+  return { reasoning, providerReasoning: archive }
 }

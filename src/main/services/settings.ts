@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, OFFLINE_VOICES, PROVIDER_PRESETS, type AppSettings, t
 import { normalizeTrainKind } from '@shared/train'
 import { normalizeSpeakKey, normalizeVoiceOutEngine } from '@shared/voice-out'
 import { normalizeHotkeyMap } from '@shared/hotkeys'
+import { healProviderReasoning } from '@shared/provider-reasoning'
 
 function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -32,6 +33,17 @@ export function loadSettings(): AppSettings {
     // 旧的「仅缺项时播种」迁移（无条目 + 非空活值）是这条规则的特例，自然归入其中。
     if (!merged.providerKeys || typeof merged.providerKeys !== 'object') merged.providerKeys = {}
     if (merged.provider.apiKey) merged.providerKeys[merged.provider.id] = merged.provider.apiKey
+    // 推理存档（#43）：形状与 key 表相同，同样先兜底。预设表声明了 reasoning 的家以声明为准
+    // （authStyle 同款归位，活值与存档一起归位）；没声明的预设与 custom 保留用户值，开关仍可各家各编辑。
+    if (!merged.providerReasoning || typeof merged.providerReasoning !== 'object') merged.providerReasoning = {}
+    const healedReasoning = healProviderReasoning(
+      merged.provider.id,
+      merged.provider.reasoning,
+      preset,
+      merged.providerReasoning
+    )
+    merged.provider.reasoning = healedReasoning.reasoning
+    merged.providerReasoning = healedReasoning.providerReasoning
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。
     // 这里只认还在售的 id，认不出就归位到默认，不抛错——设置文件是用户数据，不该因为改版而炸。
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。
@@ -96,6 +108,8 @@ export function saveSettings(patch: Partial<AppSettings>): AppSettings {
     provider: { ...current.provider, ...(patch.provider ?? {}) } as ProviderConfig,
     // key 表按 id 深合并：别的调用方可能只改 provider 不碰 key 表，没提到的 id 保持原样。
     providerKeys: { ...current.providerKeys, ...(patch.providerKeys ?? {}) },
+    // 推理开关表同样按 id 深合并（#43）：别的调用方可能只 patch 别的字段，没提到的家保持原样。
+    providerReasoning: { ...current.providerReasoning, ...(patch.providerReasoning ?? {}) },
     // 面板一次提交整张热键表，但别的调用方可能只 patch 一个动作：按动作合并，没提到的保持原样。
     hotkeys: normalizeHotkeyMap({ ...current.hotkeys, ...(patch.hotkeys ?? {}) })
   }

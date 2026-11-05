@@ -30,6 +30,7 @@ import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { QWEN3_ASR_RELEASE_URL } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
+import { reasoningForProvider } from '@shared/provider-reasoning'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -1380,7 +1381,9 @@ export default function App(): React.ReactElement {
       baseUrl: preset.baseUrl,
       model: preset.model,
       authStyle: preset.authStyle,
-      apiKey: settings.providerKeys?.[id] ?? ''
+      apiKey: settings.providerKeys?.[id] ?? '',
+      // 推理开关跟 key 一个待遇（#43）：按 id 取回这家自己的选择；预设声明了就以声明为准。
+      reasoning: reasoningForProvider(id, preset, settings.providerReasoning)
     })
   }
 
@@ -1395,6 +1398,7 @@ export default function App(): React.ReactElement {
       const next = await window.api.setSettings({
         provider: draft.provider,
         providerKeys: draft.providerKeys,
+        providerReasoning: draft.providerReasoning,
         proxyUrl: draft.proxyUrl,
         targetLang: draft.targetLang,
         whisperBinPath: draft.whisperBinPath,
@@ -1666,7 +1670,16 @@ export default function App(): React.ReactElement {
               <div className="flex flex-wrap items-center gap-3">
                 <Button
                   variant={settings.provider.reasoning ? 'secondary' : 'outline'}
-                  onClick={() => patchProvider({ reasoning: !settings.provider.reasoning })}
+                  onClick={() => {
+                    // 推理开关也两处记（#43）：provider.reasoning 是当前生效的那格，
+                    // providerReasoning 按 id 存档，切预设换家不用重新点。
+                    const reasoning = !settings.provider.reasoning
+                    setSettings((s) => ({
+                      ...s,
+                      provider: { ...s.provider, reasoning },
+                      providerReasoning: { ...s.providerReasoning, [s.provider.id]: reasoning }
+                    }))
+                  }}
                   title="让模型先思考再翻译。默认关：翻译是短句任务，思考只会把每句拖慢几秒（MiMo 实测 1.4s → 7.4s）。改完点保存生效"
                 >
                   推理：{settings.provider.reasoning ? '开' : '关'}

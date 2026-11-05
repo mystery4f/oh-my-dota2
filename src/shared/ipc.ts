@@ -63,6 +63,8 @@ export interface ProviderPreset {
   model: string
   needsKey: boolean
   authStyle?: 'bearer' | 'api-key'
+  /** 预设里声明了推理开关：载入/切家以声明为准（authStyle 同款归位）。不声明 = 用户自己管。 */
+  reasoning?: boolean
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -151,6 +153,11 @@ export interface AppSettings {
    * 切预设时从这里按 id 取回，换家不用重新粘 key。写路径只有面板的 key 输入框。
    */
   providerKeys?: Partial<Record<ProviderId, string>>
+  /**
+   * 推理开关按供应商各记各的（含 custom）：provider.reasoning 只是「当前生效」的那格，
+   * 切预设时从这里按 id 取回，换家不用重新点开关。预设表声明了 reasoning 的家以声明为准。
+   */
+  providerReasoning?: Partial<Record<ProviderId, boolean>>
   proxyUrl: string
   targetLang: string
   whisperBinPath: string
@@ -309,6 +316,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     reasoning: false
   },
   providerKeys: {},
+  providerReasoning: {},
   proxyUrl: '',
   targetLang: 'zh-CN',
   whisperBinPath: '',
