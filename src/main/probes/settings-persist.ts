@@ -332,6 +332,19 @@ export async function runSettingsPersistProbe(): Promise<void> {
         salvagedReasoning.providerKeys?.deepseek === 'keep-key',
       JSON.stringify(salvagedReasoning.providerReasoning)
     )
+    // ⑤ 词数上限：哨兵往返、坏值钳回、越界钳边。
+    saveSettings({ translationMaxWords: 24 })
+    const maxRoundtrip = loadSettings()
+    push('词数上限落盘可读回', maxRoundtrip.translationMaxWords === 24, String(maxRoundtrip.translationMaxWords))
+    saveSettings({ translationMaxWords: 'garbage' as unknown as number })
+    const maxGarbage = loadSettings()
+    push('词数上限坏值回默认 16', maxGarbage.translationMaxWords === 16, String(maxGarbage.translationMaxWords))
+    saveSettings({ translationMaxWords: 99 })
+    const maxHigh = loadSettings()
+    push('词数上限越界钳到 32', maxHigh.translationMaxWords === 32, String(maxHigh.translationMaxWords))
+    saveSettings({ translationMaxWords: 0 })
+    const maxLow = loadSettings()
+    push('词数上限下界钳到 4', maxLow.translationMaxWords === 4, String(maxLow.translationMaxWords))
   } finally {
     if (hadFile) copyFileSync(backup, file)
     rmSync(backupDir, { recursive: true, force: true })

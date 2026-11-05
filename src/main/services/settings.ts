@@ -6,6 +6,7 @@ import { normalizeTrainKind } from '@shared/train'
 import { normalizeSpeakKey, normalizeVoiceOutEngine } from '@shared/voice-out'
 import { normalizeHotkeyMap } from '@shared/hotkeys'
 import { healProviderReasoning } from '@shared/provider-reasoning'
+import { maxWordsFromSettings } from './providers'
 
 function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -44,6 +45,8 @@ export function loadSettings(): AppSettings {
     )
     merged.provider.reasoning = healedReasoning.reasoning
     merged.providerReasoning = healedReasoning.providerReasoning
+    // 词数上限：坏值（字符串/NaN/越界）钳回 4-32，和提示词、回复截断共用同一条归一化路径。
+    merged.translationMaxWords = maxWordsFromSettings(merged.translationMaxWords)
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。
     // 这里只认还在售的 id，认不出就归位到默认，不抛错——设置文件是用户数据，不该因为改版而炸。
     // 本地音色换过几轮（keqing → melo → baker）：旧值留在文件里会把面板下拉打空。

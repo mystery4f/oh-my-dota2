@@ -1400,6 +1400,7 @@ export default function App(): React.ReactElement {
         provider: draft.provider,
         providerKeys: draft.providerKeys,
         providerReasoning: draft.providerReasoning,
+        translationMaxWords: draft.translationMaxWords,
         proxyUrl: draft.proxyUrl,
         targetLang: draft.targetLang,
         whisperBinPath: draft.whisperBinPath,
@@ -1744,6 +1745,21 @@ export default function App(): React.ReactElement {
                     <option value="zh-TW">繁體中文</option>
                     <option value="en">English</option>
                   </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="maxWords">译文词数上限</Label>
+                  <Input
+                    id="maxWords"
+                    type="number"
+                    min={4}
+                    max={32}
+                    value={settings.translationMaxWords ?? 16}
+                    onChange={(e) => setSettings((s) => ({ ...s, translationMaxWords: Number(e.target.value) }))}
+                    placeholder="16"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    中文→英文译文最多写几个词（4-32，默认 16）。超长回复会被按词截断；改完点保存生效，翻译会话按新上限重建。
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">

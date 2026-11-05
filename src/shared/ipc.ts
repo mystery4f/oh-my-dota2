@@ -158,6 +158,11 @@ export interface AppSettings {
    * 切预设时从这里按 id 取回，换家不用重新点开关。预设表声明了 reasoning 的家以声明为准。
    */
   providerReasoning?: Partial<Record<ProviderId, boolean>>
+  /**
+   * zh-en 译文的词数上限（4-32，默认 16）：提示词上限行与回复截断共用一个值。
+   * 改动会让翻译会话按新上限重建（进 runtimeConfigKey）。
+   */
+  translationMaxWords?: number
   proxyUrl: string
   targetLang: string
   whisperBinPath: string
@@ -317,6 +322,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   providerKeys: {},
   providerReasoning: {},
+  translationMaxWords: 16,
   proxyUrl: '',
   targetLang: 'zh-CN',
   whisperBinPath: '',

@@ -12,8 +12,8 @@ import {
   JARGON_KEEP_TOKENS,
   KEEP_VERBATIM_TOKENS
 } from '@shared/dota-glossary'
-import { latinTokenViolations } from '@shared/translate-fidelity'
-import { SYSTEM_PROMPTS } from '../services/providers'
+import { ensureTerminalPunct, latinTokenViolations } from '@shared/translate-fidelity'
+import { DEFAULT_MAX_WORDS, SYSTEM_PROMPTS, buildSystemPrompt, clampReply, maxWordsFromSettings, replyWithinLimits } from '../services/providers'
 import { instructionsFor } from '../services/session/durable-translator'
 
 const deepEqualJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
@@ -133,6 +133,55 @@ export async function runTranslateAccuracyProbe(): Promise<void> {
     deepEqualJson(latinTokenViolations('bkb还差200块钱', '', 'zh-en'), ['bkb', '200'])
   )
 
+
+  // ---- ensureTerminalPunct：句末语气守卫（问号叹号必保，句号不强制）----
+  add(
+    '问句丢问号 → 补 ?（动机案例：如何获取用户信息？）',
+    ensureTerminalPunct('如何获取用户信息？', 'user info get how') === 'user info get how?'
+  )
+  add(
+    '句号挡路 → 摘句号再补 ?',
+    ensureTerminalPunct('如何获取用户信息？', 'user info get how.') === 'user info get how?'
+  )
+  add('译文已带 ? 不再动', ensureTerminalPunct('买活了吗？', 'bb cd?') === 'bb cd?')
+  add('译文带 ?! 组合算已带语气', ensureTerminalPunct('危！', 'care?!') === 'care?!')
+  add('感叹句补 !', ensureTerminalPunct('快撤！', 'fall back') === 'fall back!')
+  add('双语气 → ?!', ensureTerminalPunct('打得好！？', 'nice play') === 'nice play?!')
+  add('源句无问叹号 → 原样', ensureTerminalPunct('他们打肉山了', 'theyre doing rosh') === 'theyre doing rosh')
+  add('源句句号不强制', ensureTerminalPunct('他们打肉山了。', 'theyre doing rosh') === 'theyre doing rosh')
+  add('空译文原样', ensureTerminalPunct('你好？', '') === '')
+  add('en→zh 同规则补 ？', ensureTerminalPunct('any ward?', '有眼吗') === '有眼吗？')
+
+  // ---- 词数上限：默认 16、坏值钳位、提示词占位符替换、回复截断跟随 ----
+  add('默认词数上限是 16', DEFAULT_MAX_WORDS === 16)
+  add(
+    'maxWordsFromSettings 坏值与越界钳位',
+    maxWordsFromSettings(undefined) === 16 &&
+      maxWordsFromSettings('garbage') === 16 &&
+      maxWordsFromSettings(NaN) === 16 &&
+      maxWordsFromSettings(99) === 32 &&
+      maxWordsFromSettings(0) === 4 &&
+      maxWordsFromSettings(16.6) === 17
+  )
+  add(
+    'zh-en 提示词上限行按设置替换',
+    buildSystemPrompt('zh-en', 'terse', 16).includes('At most 16 words and at most 160 characters') &&
+      buildSystemPrompt('zh-en', 'terse', 8).includes('At most 8 words and at most 80 characters')
+  )
+  add(
+    'instructionsFor 带词数上限',
+    instructionsFor('zh-en', 'terse', 24).includes('At most 24 words') &&
+      instructionsFor('zh-en', 'terse').includes('At most 16 words')
+  )
+  add(
+    'en-zh 无上限占位符残留',
+    !buildSystemPrompt('en-zh').includes('{{MAX_WORDS}}') && !SYSTEM_PROMPTS['en-zh'].includes('{{MAX_WORDS}}')
+  )
+  add(
+    'clampReply 按词数上限截断',
+    clampReply('a b c d e f g h i j k', 4) === 'a b c d' && clampReply('a b c d e f g h i j k', 16) === 'a b c d e f g h i j k'
+  )
+  add('replyWithinLimits 跟随上限', replyWithinLimits('a b c d', 4) && !replyWithinLimits('a b c d e', 4))
   // ---- instructionsFor：词表块进了两个方向的会话指令 ----
   const zhEnInstructions = instructionsFor('zh-en', 'terse')
   add(

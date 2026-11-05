@@ -13,10 +13,12 @@ import type {
 import type { ProviderConfig, ReplyTone, TranslateDirection } from '@shared/ipc'
 import { glossaryPromptBlock } from '@shared/dota-glossary'
 import { thinkingFormatFor, thinkingLevelFor } from '@shared/provider-reasoning'
-import { latinTokenViolations } from '@shared/translate-fidelity'
+import { ensureTerminalPunct, latinTokenViolations } from '@shared/translate-fidelity'
 import { loadSettings } from '../settings'
 import {
+  DEFAULT_MAX_WORDS,
   buildSystemPrompt,
+  maxWordsFromSettings,
   clampReply,
   looksLikeCommentary,
   replyWithinLimits,
@@ -78,7 +80,7 @@ const NUMBERED_CONTRACT_NOTE = [
 
 interface SessionRuntime {
   key: string
-  /** key + 推理开关：只决定运行时模型对象，不该像 key 那样拆开历史文件。 */
+  /** key + 推理开关 + 词数上限：只决定运行时模型对象，不该像 key 那样拆开历史文件。 */
   configKey: string
   /** 会话的思考档位（面板「推理」开关的产物），复用旧会话时也要重新配置。 */
   thinkingLevel: 'off' | 'medium'
@@ -87,6 +89,8 @@ interface SessionRuntime {
   conversations: Map<string, Conversation>
   statePath: string
   modelId: string
+  /** 会话指令里的 zh-en 词数上限（设置快照），建会话与重建运行时都要带上。 */
+  maxWords: number
 }
 
 export type LatencySource = 'session' | 'direct' | 'timeout' | 'error'
@@ -167,11 +171,11 @@ export function providerKey(provider: ProviderConfig): string {
 }
 
 /**
- * 推理开关的运行时身份：换 provider 或换推理档位都要重建模型对象，
- * 但两者共用同一份会话历史（providerKey 不含它），否则切一下开关就把 few-shot 历史丢了。
+ * 运行时身份：换 provider、换推理档位或换词数上限都要重建模型对象（指令变了），
+ * 但共用同一份会话历史（providerKey 不含档位），否则切一下开关就把 few-shot 历史丢了。
  */
-function runtimeConfigKey(provider: ProviderConfig): string {
-  return providerKey(provider) + '|' + thinkingLevelFor(provider)
+function runtimeConfigKey(provider: ProviderConfig, maxWords: number): string {
+  return providerKey(provider) + '|' + thinkingLevelFor(provider) + '|' + maxWords
 }
 
 /**
@@ -220,8 +224,12 @@ function writeState(path: string, value: Record<string, number>): void {
 }
 
 /** 会话系统指令 = 方向提示词 + 编号契约 + 术语速查块（静态：会话按会话配置指令，不按行）。 */
-export function instructionsFor(direction: TranslateDirection, tone: ReplyTone = 'terse'): string {
-  return buildSystemPrompt(direction, tone) + NUMBERED_CONTRACT_NOTE + glossaryPromptBlock(direction)
+export function instructionsFor(
+  direction: TranslateDirection,
+  tone: ReplyTone = 'terse',
+  maxWords = DEFAULT_MAX_WORDS
+): string {
+  return buildSystemPrompt(direction, tone, maxWords) + NUMBERED_CONTRACT_NOTE + glossaryPromptBlock(direction)
 }
 
 function withTimeout<T>(promise: Promise<T>, label: string, ms = SUBMIT_TIMEOUT_MS): Promise<T> {
@@ -268,7 +276,7 @@ function numberedTranslations(output: string, count: number): string[] {
   return Array.from({ length: count }, (_, i) => found.get(i + 1) ?? '')
 }
 
-async function openRuntime(provider: ProviderConfig): Promise<SessionRuntime> {
+async function openRuntime(provider: ProviderConfig, maxWords: number): Promise<SessionRuntime> {
   const durable = await import('@earendil-works/pi-durable')
   const { createModels, createProvider } = await import('@earendil-works/pi-ai/models')
   const { openAICompletionsApi } = await import('@earendil-works/pi-ai/api/openai-completions.lazy')
@@ -322,13 +330,14 @@ async function openRuntime(provider: ProviderConfig): Promise<SessionRuntime> {
 
   const session: SessionRuntime = {
     key: providerKey(provider),
-    configKey: runtimeConfigKey(provider),
+    configKey: runtimeConfigKey(provider, maxWords),
     thinkingLevel: thinkingLevelFor(provider),
     harness,
     context: BACKGROUND_CONTEXT,
     conversations: new Map(),
     statePath: paths.state,
-    modelId: provider.model
+    modelId: provider.model,
+    maxWords
   }
   // 先把两个方向的会话建好：提交过程中再建会话会让存储层撞上"对话忙"。
   // 试用的 try# 槽位一并预建，面板里点「翻译」时就不会撞上冷启动。
@@ -361,7 +370,8 @@ export async function warmTranslator(provider: ProviderConfig): Promise<void> {
 }
 
 async function ensureRuntime(provider: ProviderConfig): Promise<SessionRuntime> {
-  const configKey = runtimeConfigKey(provider)
+  const maxWords = maxWordsFromSettings(loadSettings().translationMaxWords)
+  const configKey = runtimeConfigKey(provider, maxWords)
   if (runtime && runtime.configKey === configKey) return runtime
   if (opening) {
     const pending = await opening
@@ -371,7 +381,7 @@ async function ensureRuntime(provider: ProviderConfig): Promise<SessionRuntime> 
     await runtime.harness.close(runtime.context).catch(() => undefined)
     runtime = null
   }
-  opening = openRuntime(provider)
+  opening = openRuntime(provider, maxWords)
   try {
     runtime = await opening
     failedAt = 0
@@ -399,7 +409,7 @@ async function ensureConversation(
       const existing = await session.harness.conversation(storedId as ConversationId, session.context)
       if (!existing) throw new Error('conversation ' + storedId + ' is gone')
       await existing.configure(
-        { instructions: instructionsFor(direction, tone), thinkingLevel: session.thinkingLevel },
+        { instructions: instructionsFor(direction, tone, session.maxWords), thinkingLevel: session.thinkingLevel },
         session.context
       )
       session.conversations.set(slot, existing)
@@ -415,7 +425,7 @@ async function ensureConversation(
       ownership: { kind: 'ownerless' },
       agent: {
         model: { provider: 'app', modelId: session.modelId },
-        instructions: instructionsFor(direction, tone),
+        instructions: instructionsFor(direction, tone, session.maxWords),
         // 翻译默认不思考（面板「推理」可打开）：短句任务，思考 token 只加延迟。
         thinkingLevel: session.thinkingLevel
       }
@@ -525,6 +535,7 @@ async function translateWithSession(
     }
 
     let translated = await submitOnce()
+    translated = ensureTerminalPunct(text, translated)
     // 保真守卫：缩写被写坏（bkb → bkg）就清历史重试一次；再犯就放弃，原文原样返回，
     // 译文和记账本都不进（调用方对「译文 === 原文」本来就不落账）。适用于所有 scope 包括 try。
     const violations = latinTokenViolations(text, translated, direction)
@@ -532,6 +543,7 @@ async function translateWithSession(
       console.log('TRANSLATE_GUARD_RETRY', JSON.stringify({ tokens: violations, via: 'session' }))
       await resetHistory(direction, tone, scope)
       translated = await submitOnce()
+      translated = ensureTerminalPunct(text, translated)
       const again = latinTokenViolations(text, translated, direction)
       if (again.length > 0) {
         console.log('TRANSLATE_GUARD_GIVEUP', JSON.stringify({ tokens: again, translated: translated.slice(0, 200), via: 'session' }))
@@ -636,16 +648,19 @@ async function raceHedge<T>(
 async function translateDirect(
   provider: ProviderConfig,
   text: string,
-  direction: TranslateDirection
+  direction: TranslateDirection,
+  maxWords = DEFAULT_MAX_WORDS
 ): Promise<string> {
   const startedAt = Date.now()
   try {
-    let output = await translateText(provider, text, direction)
+    let output = await translateText(provider, text, direction, maxWords)
+    output = ensureTerminalPunct(text, output)
     // 直连同样过保真守卫（对冲赢家、冷却兜底都走这里），重试一次后放弃回原文。
     const violations = latinTokenViolations(text, output, direction)
     if (violations.length > 0) {
       console.log('TRANSLATE_GUARD_RETRY', JSON.stringify({ tokens: violations, via: 'direct' }))
-      output = await translateText(provider, text, direction)
+      output = await translateText(provider, text, direction, maxWords)
+      output = ensureTerminalPunct(text, output)
       const again = latinTokenViolations(text, output, direction)
       if (again.length > 0) {
         console.log('TRANSLATE_GUARD_GIVEUP', JSON.stringify({ tokens: again, translated: output.slice(0, 200), via: 'direct' }))
@@ -744,7 +759,7 @@ export async function translateLine(
 }
 
 /**
- * 回复专用：先走 zh-en 会话，再压到 8 词 / 80 字符以内；
+ * 回复专用：先走 zh-en 会话，再压到词数上限（设置，默认 16）以内；
  * 仍然超长才让模型自己再压一版，最后无论如何都按词截断（聊天框放不下）。
  */
 /** 面板「翻译试用」专用：和生产同一条流式链路，但历史隔离在 try# 会话里。 */
@@ -766,6 +781,8 @@ export async function translateReply(
   tone: ReplyTone = 'terse',
   options: TranslateReplyOptions = {}
 ): Promise<string> {
+  // 回复腿的词数上限走设置（默认 16）：clamp、二次压缩判定与 shorten 提示词共用。
+  const maxWords = maxWordsFromSettings(loadSettings().translationMaxWords)
   let raw = await translateLine(provider, text, 'zh-en', tone, 'prod', 'reply', options.alive)
   // 一条聊天行只能对应一句话：模型偶尔回两行，取第一行，别把两句拼进游戏聊天框。
   raw = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] ?? raw
@@ -774,13 +791,13 @@ export async function translateReply(
     raw = await translateLine(provider, text, 'zh-en', tone, 'prod', 'reply', options.alive)
   }
   if (looksLikeCommentary(raw)) throw new Error('reply translation came back as commentary')
-  const clamped = clampReply(raw)
+  const clamped = clampReply(raw, maxWords)
   let answer = clamped
-  if (!replyWithinLimits(clamped)) {
+  if (!replyWithinLimits(clamped, maxWords)) {
     try {
       // 二次压缩又要一次模型往返：已经没人要这一句就别花这个时间。
       if (options.alive && !options.alive()) throw new Error(TURN_CANCELLED)
-      const shortened = clampReply(await shortenReply(provider, clamped))
+      const shortened = clampReply(await shortenReply(provider, clamped, maxWords), maxWords)
       if (shortened.length > 0) answer = shortened
     } catch {
       // 二次压缩失败不影响主流程，下面直接返回截断结果。
