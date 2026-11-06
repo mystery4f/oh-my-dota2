@@ -66,7 +66,6 @@ export function ReadPage({
   }
 
   const engine = settings.ttsEngine
-  const packs = voicePacks.packs
   const currentPack = voicePacks.current
 
   return (
@@ -108,7 +107,7 @@ export function ReadPage({
             htmlFor="v2-tts-voice"
             hint={
               engine === 'sovits'
-                ? '音色由参考音频决定：一个音色包＝参考音频＋它自己的微调权重'
+                ? '音色由参考音频决定：一个音色包＝参考音频＋它自己的微调权重；换嗓在「音色包…」里，朗读和声出共用一个'
                 : engine === 'system'
                   ? '系统嗓子由操作系统决定，没有选项'
                   : '挑一个喜欢的嗓子，点右边的试听当场验证'
@@ -116,31 +115,7 @@ export function ReadPage({
           >
             {engine === 'sovits' ? (
               <>
-                <select
-                  id="v2-tts-voice"
-                  value={currentPack?.id ?? ''}
-                  disabled={packs === null || voicePacks.busy}
-                  onChange={(e) => voicePacks.select(e.target.value)}
-                  className="h-8 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
-                >
-                  {packs === null ? (
-                    <option value="">读取音色包…</option>
-                  ) : currentPack ? null : (
-                    <option value="">还没选音色包</option>
-                  )}
-                  {packs?.map((pack) => (
-                    <option key={pack.id} value={pack.id}>
-                      {pack.name} ·{' '}
-                      {pack.downloading
-                        ? `下载中 ${Math.round(pack.progress * 100)}%`
-                        : pack.upgradable
-                          ? '可升级'
-                          : pack.installed
-                            ? '已就绪'
-                            : '未下载'}
-                    </option>
-                  ))}
-                </select>
+                <span className="text-sm">{currentPack ? currentPack.name : '还没选音色包'}</span>
                 {currentPack?.downloading ? (
                   <StatusPill tone="warn">↓ {Math.round(currentPack.progress * 100)}%</StatusPill>
                 ) : null}
