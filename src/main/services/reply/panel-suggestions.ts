@@ -1,4 +1,5 @@
 import type { PanelSuggestionsResult } from '@shared/ipc'
+import { errorMessage } from '@shared/errors'
 import { chatCompletion } from '../providers/openai-compat'
 import { loadSettings } from '../settings'
 import { getCaptureService } from '../capture/capturer'
@@ -48,6 +49,6 @@ export async function generatePanelSuggestions(): Promise<PanelSuggestionsResult
     if (items.length === 0) return { ok: false, items: [], error: '模型没有给出可用建议' }
     return { ok: true, items }
   } catch (err) {
-    return { ok: false, items: [], error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, items: [], error: errorMessage(err) }
   }
 }

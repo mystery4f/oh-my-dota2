@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { errorMessage } from '@shared/errors'
 import {
   PROVIDER_PRESETS,
   type ProviderId,
@@ -230,7 +231,7 @@ function useTestState(): {
     } catch (e) {
       setState({
         status: 'done',
-        result: { ok: false, message: e instanceof Error ? e.message : String(e) }
+        result: { ok: false, message: errorMessage(e) }
       })
     }
   }
@@ -274,7 +275,7 @@ function useCacheClear(): {
       const done = await window.api.translationCacheClear()
       setFlash(`已清空（${done.pairs} 对记忆、${done.conversations} 条会话）`)
     } catch (e) {
-      setFlash(`清空失败：${e instanceof Error ? e.message : String(e)}`)
+      setFlash(`清空失败：${errorMessage(e)}`)
     }
     setBusy(false)
   }
@@ -356,7 +357,7 @@ function TrialRow({
     try {
       setOut(await window.api.translate(text, direction))
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }

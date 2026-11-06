@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { downloadResumable } from '../net/download'
@@ -470,7 +471,7 @@ export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
       }
     }
   } catch (err) {
-    run.error = err instanceof Error ? err.message : String(err)
+    run.error = errorMessage(err)
     recordSovitsLog('TTS_SOVITS_PACK_FAIL', { id: pack.id, err: run.error })
   } finally {
     run.downloading = false

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { errorMessage as asMessage } from '@shared/errors'
 import type { SovitsVoicePack } from '@shared/ipc'
 
-const asMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 export interface VoicePacksApi {
   /** null = 还没拿到清单（首次请求在路上） */

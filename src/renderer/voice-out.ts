@@ -1,5 +1,6 @@
 // 声出隐藏窗口页：主进程要播一段 → 这里选好输出设备（setSinkId）→ 等播放指令。
 // 决策都在 @shared/voice-out 和主进程编排器里，这一页只是「扬声器 + 汇报员」。
+import { errorMessage } from '@shared/errors'
 import {
   DEFAULT_SINK_ID,
   resolveOutputSink,
@@ -127,7 +128,7 @@ async function handlePlay(payload: {
       sinkLabel: '',
       fallback: false,
       hint: null,
-      error: err instanceof Error ? err.message : String(err)
+      error: errorMessage(err)
     })
   }
 }

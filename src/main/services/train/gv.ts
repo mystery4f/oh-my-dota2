@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { load as loadYaml, dump as dumpYaml } from 'js-yaml'
@@ -155,7 +156,7 @@ function writeS2Config(
     writeFileSync(path, JSON.stringify(data, null, 2), 'utf-8')
     return { ok: true, path }
   } catch (err) {
-    return { ok: false, error: `写 SoVITS 训练配置失败：${err instanceof Error ? err.message : String(err)}` }
+    return { ok: false, error: `写 SoVITS 训练配置失败：${errorMessage(err)}` }
   }
 }
 
@@ -178,7 +179,7 @@ function writeS1Config(
     writeFileSync(path, dumpYaml(data), 'utf-8')
     return { ok: true, path }
   } catch (err) {
-    return { ok: false, error: `写 GPT 训练配置失败：${err instanceof Error ? err.message : String(err)}` }
+    return { ok: false, error: `写 GPT 训练配置失败：${errorMessage(err)}` }
   }
 }
 
@@ -300,7 +301,7 @@ export function registerGvWeights(payload: GvRegisterPayload): GvRegisterResult 
     const next = [...list.filter((item) => (item as Record<string, unknown>)?.name !== name), entry]
     writeFileSync(refsFile, `${JSON.stringify(next, null, 2)}\n`, 'utf-8')
   } catch (err) {
-    return { ok: false, error: `refs.json 写盘失败：${err instanceof Error ? err.message : String(err)}` }
+    return { ok: false, error: `refs.json 写盘失败：${errorMessage(err)}` }
   }
   return { ok: true, entry }
 }

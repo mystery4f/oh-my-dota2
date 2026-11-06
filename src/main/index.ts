@@ -1,4 +1,5 @@
 import { app, BrowserWindow, session } from 'electron'
+import { errorMessage } from '@shared/errors'
 
 // 隐藏抓屏窗口必须持续出帧：Chromium 默认会节流被遮挡/后台的渲染进程，视频流会冻住。
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
@@ -244,7 +245,7 @@ app.whenReady().then(() => {
     inplaceSend: () => {
       // 热键这条路径没人接返回值：真出了没处理过的错也要说一句，不能静默地「按了没反应」。
       void translateInPlace().catch((err: unknown) => {
-        getOverlayManager().flashHint('直发失败：' + (err instanceof Error ? err.message : String(err)))
+        getOverlayManager().flashHint('直发失败：' + (errorMessage(err)))
       })
     },
     voiceCapture: () => {

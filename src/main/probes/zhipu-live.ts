@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { PROVIDER_PRESETS, type ProviderConfig, type TranslateDirection } from '@shared/ipc'
 import { looksLikeCommentary, replyWithinLimits } from '../services/providers'
 import { sessionStatus, translateLine, translateReply, warmTranslator } from '../services/session/durable-translator'
@@ -79,7 +80,7 @@ export async function runZhipuLiveProbe(): Promise<void> {
         detail: `${out} (${timings[timings.length - 1]}ms)`
       })
     } catch (err) {
-      failure = err instanceof Error ? err.message : String(err)
+      failure = errorMessage(err)
       rows.push({ name: `聊天 ${direction}：${line}`, ok: false, detail: failure })
     }
   }
@@ -94,7 +95,7 @@ export async function runZhipuLiveProbe(): Promise<void> {
         detail: `${out} (${Date.now() - startedAt}ms)`
       })
     } catch (err) {
-      failure = err instanceof Error ? err.message : String(err)
+      failure = errorMessage(err)
       rows.push({ name: `回复 ${draft}`, ok: false, detail: failure })
     }
   }
@@ -109,7 +110,7 @@ export async function runZhipuLiveProbe(): Promise<void> {
     reasoningOut = await translateLine(thinkingProvider, CHAT_LINES[0][0], 'zh-en', 'terse', 'prod', 'probe')
     reasoningMs = Date.now() - reasoningStartedAt
   } catch (err) {
-    rows.push({ name: '推理开：同一句', ok: false, detail: err instanceof Error ? err.message : String(err) })
+    rows.push({ name: '推理开：同一句', ok: false, detail: errorMessage(err) })
   }
 
   let failed = 0

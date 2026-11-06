@@ -1,4 +1,5 @@
 import type { SpeakPayload } from '@shared/ipc'
+import { errorMessage } from '@shared/errors'
 
 /**
  * 朗读队列（渲染进程侧）：speechSynthesis 只在这边有，system 引擎的出声归这里；
@@ -55,7 +56,7 @@ function pumpSpeech(): void {
       .then(() => console.log('VOICE_PLAY_OK', next.text))
       .catch((err: unknown) => {
         // 播不出来绝不能静默：Chromium 的 autoplay 策略拒绝时会走到这里。
-        console.log('VOICE_PLAY_FAILED', err instanceof Error ? err.message : String(err))
+        console.log('VOICE_PLAY_FAILED', errorMessage(err))
         done()
       })
     return

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import net from 'node:net'
@@ -142,7 +143,7 @@ async function warmupSovits(port: number): Promise<void> {
     const bytes = response.ok ? (await response.arrayBuffer()).byteLength : 0
     recordSovitsLog('TTS_SOVITS_SERVER_WARMUP', { ms: Date.now() - started, bytes })
   } catch (err) {
-    recordSovitsLog('TTS_SOVITS_SERVER_WARMUP_FAIL', { err: err instanceof Error ? err.message : String(err) })
+    recordSovitsLog('TTS_SOVITS_SERVER_WARMUP_FAIL', { err: errorMessage(err) })
   }
 }
 
@@ -186,7 +187,7 @@ export async function applySovitsVoice(
     recordSovitsLog('TTS_SOVITS_SET_WEIGHTS', { ms: Date.now() - started })
     return true
   } catch (err) {
-    recordSovitsLog('TTS_SOVITS_SET_WEIGHTS_FAIL', { err: err instanceof Error ? err.message : String(err) })
+    recordSovitsLog('TTS_SOVITS_SET_WEIGHTS_FAIL', { err: errorMessage(err) })
     return false
   }
 }
@@ -203,7 +204,7 @@ async function restoreSovitsVoice(port: number): Promise<void> {
     const entry = refs.find((ref) => ref.audioPath === settings.ttsSovitsRefAudio)
     if (entry) await applySovitsVoice(port, entry)
   } catch (err) {
-    recordSovitsLog('TTS_SOVITS_RESTORE_FAIL', { err: err instanceof Error ? err.message : String(err) })
+    recordSovitsLog('TTS_SOVITS_RESTORE_FAIL', { err: errorMessage(err) })
   }
   await warmupSovits(port)
 }

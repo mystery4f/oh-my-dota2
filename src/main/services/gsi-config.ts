@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -135,6 +136,6 @@ export async function ensureGsiConfig(port: number): Promise<GsiConfigResult> {
     await writeFile(target, body, 'utf8')
     return { path: target, error: null, written: true }
   } catch (error) {
-    return { path: target, error: error instanceof Error ? error.message : String(error), written: false }
+    return { path: target, error: errorMessage(error), written: false }
   }
 }

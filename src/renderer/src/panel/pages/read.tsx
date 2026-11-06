@@ -9,8 +9,11 @@ import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
+import { errorMessage } from '@shared/errors'
+import { selectClass } from '../components/select-class'
 import { useSaveFlash, useSettings } from '../use-settings'
 import { useVoicePacks } from '../use-voice-packs'
+import { VoicePackDisplay } from '../components/voice-pack-display'
 
 type TtsEngine = 'system' | 'edge' | 'offline' | 'sovits'
 type SpeakPrefix = 'front' | 'back' | 'off'
@@ -51,7 +54,7 @@ export function ReadPage({
         }
       })
       .catch((e: unknown) => {
-        setPreview({ busy: false, result: { ok: false, error: e instanceof Error ? e.message : String(e) } })
+        setPreview({ busy: false, result: { ok: false, error: errorMessage(e) } })
       })
   }
 
@@ -93,7 +96,7 @@ export function ReadPage({
               id="v2-tts-engine"
               value={engine}
               onChange={(e) => void save.wrap(update({ ttsEngine: e.target.value as TtsEngine }))}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              className={selectClass}
             >
               <option value="edge">联网 · 神经语音</option>
               <option value="offline">本地 · 离线模型</option>
@@ -114,18 +117,11 @@ export function ReadPage({
             }
           >
             {engine === 'sovits' ? (
-              <>
-                <span className="text-sm">{currentPack ? currentPack.name : '还没选音色包'}</span>
-                {currentPack?.downloading ? (
-                  <StatusPill tone="warn">↓ {Math.round(currentPack.progress * 100)}%</StatusPill>
-                ) : null}
-                {voicePacks.error ? <StatusPill tone="bad">{voicePacks.error}</StatusPill> : null}
-                {onOpenVoicePacks ? (
-                  <Button size="sm" variant="outline" onClick={onOpenVoicePacks}>
-                    音色包…
-                  </Button>
-                ) : null}
-              </>
+              <VoicePackDisplay
+                current={currentPack}
+                error={voicePacks.error}
+                onOpenVoicePacks={onOpenVoicePacks}
+              />
             ) : (
               <select
                 id="v2-tts-voice"
@@ -136,7 +132,7 @@ export function ReadPage({
                     void save.wrap(update({ ttsOfflineVoice: e.target.value as OfflineVoiceId }))
                   else void save.wrap(update({ ttsVoice: e.target.value }))
                 }}
-                className="h-8 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
+                className={`${selectClass} disabled:opacity-50`}
               >
                 {engine === 'offline'
                   ? OFFLINE_VOICES.map((v) => (

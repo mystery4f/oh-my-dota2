@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -64,7 +65,7 @@ export function writeCachedAudio(key: string, audio: Buffer): void {
     writeFileSync(join(dir, `${key}.mp3`), audio)
     pruneIfNeeded(dir)
   } catch (err) {
-    console.log('TTS_CACHE_WRITE_FAILED', err instanceof Error ? err.message : String(err))
+    console.log('TTS_CACHE_WRITE_FAILED', errorMessage(err))
   }
 }
 

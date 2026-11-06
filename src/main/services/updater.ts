@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { autoUpdater } from 'electron-updater'
@@ -74,8 +75,8 @@ function wire(): void {
     broadcast({ channel: CHANNEL, status: 'ready', version: info.version, percent: 100, message: '下载完成，重启后生效' })
   )
   autoUpdater.on('error', (err) => {
-    logUpdate('error', err instanceof Error ? err.message : String(err))
-    broadcast({ channel: CHANNEL, status: 'error', version: app.getVersion(), message: err instanceof Error ? err.message : String(err) })
+    logUpdate('error', errorMessage(err))
+    broadcast({ channel: CHANNEL, status: 'error', version: app.getVersion(), message: errorMessage(err) })
   })
 }
 
@@ -93,7 +94,7 @@ export async function checkForUpdates(): Promise<UpdateState> {
       channel: CHANNEL,
       status: 'error',
       version: app.getVersion(),
-      message: err instanceof Error ? err.message : String(err)
+      message: errorMessage(err)
     })
   }
   return state

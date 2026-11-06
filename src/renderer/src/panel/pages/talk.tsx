@@ -15,12 +15,14 @@ import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
+import { selectClass } from '../components/select-class'
+import { errorMessage } from '@shared/errors'
 import { useSaveFlash, useSettings } from '../use-settings'
 import { useVoicePacks } from '../use-voice-packs'
+import { VoicePackDisplay } from '../components/voice-pack-display'
 
 type LogEntry = VoiceChainSummary & { at: number; corrected?: boolean }
 
-const selectClass = 'h-8 rounded-md border border-input bg-background px-2 text-sm'
 
 /**
  * 对讲页：我说给别人听。麦克风 → 识别 → 翻译 → 声出，一条链一屏看完。
@@ -91,7 +93,7 @@ export function TalkPage({
       setAsrStatus(await window.api.asrStatus())
     } catch (err) {
       setLog((l) => [
-        { transcript: '', translated: null, spoken: false, stage: null, error: `Qwen3 解压失败：${err instanceof Error ? err.message : String(err)}`, at: Date.now() },
+        { transcript: '', translated: null, spoken: false, stage: null, error: `Qwen3 解压失败：${errorMessage(err)}`, at: Date.now() },
         ...l
       ])
     }
@@ -102,7 +104,7 @@ export function TalkPage({
     try {
       setVoiceProbe(await window.api.whisperProbe(settings?.whisperBinPath ?? ''))
     } catch (e) {
-      setVoiceProbe({ ok: false, configured: false, error: e instanceof Error ? e.message : String(e) })
+      setVoiceProbe({ ok: false, configured: false, error: errorMessage(e) })
     } finally {
       setBusy(false)
     }
@@ -114,7 +116,7 @@ export function TalkPage({
     try {
       setVoiceAssets(await window.api.whisperSetup())
     } catch (e) {
-      setVoiceAssets({ ok: false, binaryPath: null, modelPath: null, error: e instanceof Error ? e.message : String(e) })
+      setVoiceAssets({ ok: false, binaryPath: null, modelPath: null, error: errorMessage(e) })
     } finally {
       setBusy(false)
     }
@@ -126,7 +128,7 @@ export function TalkPage({
     try {
       setOutResult(await window.api.voiceOutTest())
     } catch (e) {
-      setOutResult({ ok: false, durationMs: null, hint: null, error: e instanceof Error ? e.message : String(e) })
+      setOutResult({ ok: false, durationMs: null, hint: null, error: errorMessage(e) })
     } finally {
       setOutBusy(false)
     }
@@ -286,14 +288,11 @@ export function TalkPage({
           </Row>
           <Row label="声出音色" htmlFor="v2-outVoice">
             {engine === 'sovits' ? (
-              <>
-                <span className="text-sm">{voicePacks.current ? voicePacks.current.name : '还没选音色包'}</span>
-                {onOpenVoicePacks ? (
-                  <Button size="sm" variant="outline" onClick={onOpenVoicePacks}>
-                    音色包…
-                  </Button>
-                ) : null}
-              </>
+              <VoicePackDisplay
+                current={voicePacks.current}
+                error={voicePacks.error}
+                onOpenVoicePacks={onOpenVoicePacks}
+              />
             ) : (
               <select
                 id="v2-outVoice"

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
@@ -236,7 +237,7 @@ export async function installAsrFtEnv(): Promise<AsrFtInstallState> {
     }
     run = { running: false, stage: '安装完成', progress: 100, error: null }
   } catch (err) {
-    run = { running: false, stage: '', progress: 0, error: err instanceof Error ? err.message : String(err) }
+    run = { running: false, stage: '', progress: 0, error: errorMessage(err) }
   }
   return { ...run }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { errorMessage } from '@shared/errors'
 import type {
   AppSettings,
   CaptureStatus,
@@ -91,7 +92,7 @@ export function OverviewPage(): React.ReactElement {
           detail: `${result.ok ? `${result.latencyMs ?? 0} ms` : result.message} · ${current.provider.model}`
         })
       } catch (err) {
-        next.push({ label: '模型服务', ok: false, detail: err instanceof Error ? err.message : String(err) })
+        next.push({ label: '模型服务', ok: false, detail: errorMessage(err) })
       }
       const captureStatus = await window.api.captureStatus()
       next.push({

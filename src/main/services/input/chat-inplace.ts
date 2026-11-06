@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
@@ -325,7 +326,7 @@ class InPlaceBridge {
       try {
         await this.ensureStarted()
       } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err), ms: Date.now() - startedAt }
+        return { ok: false, error: errorMessage(err), ms: Date.now() - startedAt }
       }
       const res = await this.request('grab')
       const ms = Date.now() - startedAt
@@ -352,7 +353,7 @@ class InPlaceBridge {
       try {
         await this.ensureStarted()
       } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err), ms: Date.now() - startedAt }
+        return { ok: false, error: errorMessage(err), ms: Date.now() - startedAt }
       }
       const res = await this.request('send', text, options.enter)
       const ms = Date.now() - startedAt

@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
@@ -65,7 +66,7 @@ function migrateLegacy(previous: string, target: string): void {
       if (existsSync(from) && !existsSync(to)) copyFileSync(from, to)
     }
   } catch (err) {
-    console.log('DATA_DIR_MIGRATE_FAILED', err instanceof Error ? err.message : String(err))
+    console.log('DATA_DIR_MIGRATE_FAILED', errorMessage(err))
   }
 }
 

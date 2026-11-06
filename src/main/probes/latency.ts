@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { getInPlaceSender } from '../services/input/chat-inplace'
 import { sessionStatus, translateReply, translateTry, warmTranslator } from '../services/session/durable-translator'
 import { loadSettings } from '../services/settings'
@@ -39,7 +40,7 @@ export async function runReplyLatencyProbe(): Promise<void> {
     try {
       outputs.push(await translateReply(provider, draft, 'terse'))
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
+      error = errorMessage(err)
       outputs.push('')
     }
     timings.push(Date.now() - startedAt)

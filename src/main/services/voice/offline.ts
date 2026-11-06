@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { app } from 'electron'
 import type { OfflineStatus } from '../../../shared/ipc'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -193,7 +194,7 @@ async function download(url: string, target: string, onProgress: (ratio: number)
       if (prefix !== '') console.log('TTS_OFFLINE_DOWNLOAD_MIRROR', JSON.stringify({ prefix }))
       return
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err)
+      lastError = errorMessage(err)
       console.log('TTS_OFFLINE_DOWNLOAD_RETRY', JSON.stringify({ url: candidate, err: lastError }))
     }
   }
@@ -255,7 +256,7 @@ export async function ensureOfflineModel(voice: OfflineVoiceId = 'baker'): Promi
     console.log('TTS_OFFLINE_READY', JSON.stringify({ dir, bytes: state.bytes }))
     return state
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorMessage(err)
     state = { ...state, downloading: false, error: message }
     console.log('TTS_OFFLINE_DOWNLOAD_FAILED', JSON.stringify({ err: message }))
     return state
@@ -406,7 +407,7 @@ export async function synthesizeOffline(
     console.log('TTS_OFFLINE_OK', JSON.stringify({ ms: Date.now() - started, bytes: wav.length }))
     return wav
   } catch (err) {
-    console.log('TTS_OFFLINE_FAILED', JSON.stringify({ ms: Date.now() - started, err: err instanceof Error ? err.message : String(err) }))
+    console.log('TTS_OFFLINE_FAILED', JSON.stringify({ ms: Date.now() - started, err: errorMessage(err) }))
     return null
   } finally {
     try {

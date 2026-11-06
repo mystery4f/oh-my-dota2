@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { errorMessage } from '@shared/errors'
 import type { AppSettings } from '@shared/ipc'
 
 /**
@@ -24,7 +25,7 @@ export function useSettings(): {
     window.api
       .getSettings()
       .then(setSettings)
-      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setLoadError(errorMessage(e)))
   }, [])
 
   const update = useCallback(async (patch: Partial<AppSettings>): Promise<void> => {
@@ -69,7 +70,7 @@ export function useSaveFlash(): {
       timer.current = window.setTimeout(() => setFlash(''), 1200)
     } catch (e) {
       setFlash('')
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     }
   }, [])
 

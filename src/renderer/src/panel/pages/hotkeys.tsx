@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { errorMessage } from '@shared/errors'
 import {
   HOTKEY_ACTIONS,
   chordFromKeyEvent,
@@ -97,7 +98,7 @@ export function HotkeysPage(): React.ReactElement {
       if (next.error) setError(next.error)
       else setDraft(mapFromState(next))
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }

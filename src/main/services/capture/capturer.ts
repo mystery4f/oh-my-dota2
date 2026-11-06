@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { IPC, type CaptureEntry, type CaptureStatus } from '@shared/ipc'
 import { chatBody, hasHan, normalizeLine, splitChatLine, takeHero, worthTranslating } from '@shared/chat-line'
 import { translateLines } from '../session/durable-translator'
@@ -132,7 +133,7 @@ export class ChatCaptureService {
       .then(() => this.translatePending(needs.map((entry) => entry.original), needs))
       .catch((err: unknown) => {
         // 队列是一条 Promise 链，一节坏掉会把后面所有翻译冻住且毫无声响。
-        this.lastError = `translate chain: ${err instanceof Error ? err.message : String(err)}`
+        this.lastError = `translate chain: ${errorMessage(err)}`
         console.log('TRANSLATE_CHAIN_FAILED', this.lastError)
       })
   }
@@ -177,7 +178,7 @@ export class ChatCaptureService {
       // 译文落地就交给朗读：pending 的行会被 decideSpeak 拒掉，这里不必再判。
       this.effects.onTranslated(filled, this.lastPushAt)
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err)
+      this.lastError = errorMessage(err)
     }
   }
 
@@ -261,7 +262,7 @@ export class ChatCaptureService {
           if (marks[i] === true) cachedRows.set(item.index, true)
         })
       } catch (err) {
-        firstError ??= `translate: ${err instanceof Error ? err.message : String(err)}`
+        firstError ??= `translate: ${errorMessage(err)}`
       }
     }
 

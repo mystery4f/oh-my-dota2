@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { createServer, type Server } from 'node:http'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -219,7 +220,7 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
       try {
         await downloadPackFile(`http://127.0.0.1:${fileServer.port}/bad.bin`, join(base, 'bad.bin'), payload.length + 5, () => {})
       } catch (err) {
-        mismatch = err instanceof Error ? err.message : String(err)
+        mismatch = errorMessage(err)
       }
       push('字节数对不上要抛错', mismatch.includes('size mismatch'), mismatch)
     } finally {

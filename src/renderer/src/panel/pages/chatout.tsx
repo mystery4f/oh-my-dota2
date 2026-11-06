@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { InPlaceResult, ReplyTone } from '@shared/ipc'
 import { Button } from '@/components/ui/button'
-import { Group, Row, StatusPill, CollapsibleGroup, Panel } from '../components/primitives'
-import { useSettings } from '../use-settings'
+import { Group, Row, StatusPill, CollapsibleGroup, Panel, SaveFlash } from '../components/primitives'
+import { selectClass } from '../components/select-class'
+import { useSaveFlash, useSettings } from '../use-settings'
 
 const REPLY_TONES: { value: ReplyTone; label: string }[] = [
   { value: 'terse', label: '简短（默认）' },
@@ -11,7 +12,6 @@ const REPLY_TONES: { value: ReplyTone; label: string }[] = [
   { value: 'firm', label: '强硬' }
 ]
 
-const selectClass = 'h-8 rounded-md border border-input bg-background px-2 text-sm'
 
 /** 最近几次原地直发的记录：只留在本页，不落设置。 */
 interface DirectItem {
@@ -116,7 +116,7 @@ export function ChatoutPage(): React.ReactElement {
 
       <Group label="快捷短语">
         <Row label="浮层呼出面板用" stacked hint="方向键选择、回车复制；一行一条，存进设置立即生效">
-          <PhrasesEditor phrases={phrases} onChange={(next) => void update({ quickPhrases: next })} />
+          <PhrasesEditor phrases={phrases} onChange={(next) => update({ quickPhrases: next })} />
         </Row>
       </Group>
 
@@ -139,10 +139,9 @@ export function ChatoutPage(): React.ReactElement {
 }
 
 /** 快捷短语编辑：textarea 一行一条，失焦时规范化（去空行、去重、上限 20）。 */
-function PhrasesEditor(props: { phrases: string[]; onChange: (next: string[]) => void }): React.ReactElement {
+function PhrasesEditor(props: { phrases: string[]; onChange: (next: string[]) => Promise<void> }): React.ReactElement {
   const [text, setText] = useState(props.phrases.join('\n'))
-  const [saved, setSaved] = useState(false)
-
+  const save = useSaveFlash()
   useEffect(() => {
     setText(props.phrases.join('\n'))
     // 设置从别处更新时同步显示。
@@ -160,8 +159,7 @@ function PhrasesEditor(props: { phrases: string[]; onChange: (next: string[]) =>
     }
     props.onChange(next)
     setText(next.join('\n'))
-    setSaved(true)
-    setTimeout(() => setSaved(false), 1200)
+    void save.wrap(props.onChange(next))
   }
 
   return (
@@ -173,7 +171,9 @@ function PhrasesEditor(props: { phrases: string[]; onChange: (next: string[]) =>
         rows={6}
         className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
       />
-      <p className="mt-1 text-[11px] text-muted-foreground">{saved ? '已保存' : '失焦保存 · 最多 20 条'}</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {save.flash || save.error ? <SaveFlash flash={save.flash} error={save.error} /> : '失焦保存 · 最多 20 条'}
+      </p>
     </div>
   )
 }

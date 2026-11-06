@@ -1,4 +1,5 @@
 import { EdgeTTS } from '@andresaya/edge-tts'
+import { errorMessage } from '@shared/errors'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES, pitchSpec, rateSpec, type TtsVoiceOption } from '@shared/tts-voices'
 import { readCachedAudio, ttsCacheKey, writeCachedAudio } from './tts-cache'
 
@@ -115,7 +116,7 @@ export async function synthesizeEdge(
       // 这条路是「锦上添花」：失败只留一行日志，绝不打断朗读。
       console.log(
         'EDGE_TTS_FAILED',
-        JSON.stringify({ ms: Date.now() - started, slot: index, err: err instanceof Error ? err.message : String(err) })
+        JSON.stringify({ ms: Date.now() - started, slot: index, err: errorMessage(err) })
       )
     }
     // 这次连接已经不可信，丢掉；下一句重新握手（账面上只亏这一句）。

@@ -1,4 +1,5 @@
 import { app, net } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
@@ -199,7 +200,7 @@ async function downloadModel(dest: string, onPct?: (pct: number) => void): Promi
       await downloadParallel(url, dest, onPct)
       return
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err)
+      lastError = errorMessage(err)
     }
   }
   throw new Error(lastError || '模型下载失败')
@@ -268,7 +269,7 @@ class WhisperAdapter {
           ok: false,
           binaryPath: binary,
           modelPath: null,
-          error: `model download failed: ${err instanceof Error ? err.message : String(err)}`
+          error: `model download failed: ${errorMessage(err)}`
         }
       }
       downloadedModel = true

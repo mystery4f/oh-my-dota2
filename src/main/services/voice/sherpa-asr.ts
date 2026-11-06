@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { app } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -113,7 +114,7 @@ export async function sherpaTranscribe(request: SherpaAsrRequest): Promise<{ tex
     console.log('ASR_SHERPA_OK', JSON.stringify({ ms: Date.now() - started, chars: reply.text.length }))
     return { text: reply.text }
   } catch (err) {
-    console.log('ASR_SHERPA_FAILED', JSON.stringify({ ms: Date.now() - started, err: err instanceof Error ? err.message : String(err) }))
+    console.log('ASR_SHERPA_FAILED', JSON.stringify({ ms: Date.now() - started, err: errorMessage(err) }))
     return null
   }
 }

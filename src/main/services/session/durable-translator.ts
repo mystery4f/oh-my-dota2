@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
@@ -339,7 +340,7 @@ async function openRuntime(provider: ProviderConfig, maxWords: number): Promise<
   ]
   for (const [direction, scope] of warmSlots) {
     await ensureConversation(session, direction, 'terse', scope).catch((err: unknown) => {
-      noteFailure(err instanceof Error ? err.message : String(err))
+      noteFailure(errorMessage(err))
     })
   }
   return session
@@ -736,7 +737,7 @@ export async function translateLine(
       // 被打断（abort）也会让会话回合报失败：先问一句「还要不要」，要才算真失败。
       // 记成失败会让下一句白等 30 秒冷却，表现出来就是「按了没反应」。
       ensureAlive()
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       trackLatency(Date.now() - startedAt, message.includes('timed out') ? 'timeout' : 'error', 1)
       noteFailure(message)
     }
@@ -888,7 +889,7 @@ async function translateBlockwise(
       lastFallback = null
       return output
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       trackLatency(Date.now() - startedAt, message.includes('timed out') ? 'timeout' : 'error', texts.length)
       noteFailure(message)
     }
@@ -988,7 +989,7 @@ export async function clearTranslationCache(
       try {
         rmSync(path, { force: true })
       } catch (err) {
-        console.log('TRANSLATE_SESSION_CLEAR_FAILED', path, err instanceof Error ? err.message : String(err))
+        console.log('TRANSLATE_SESSION_CLEAR_FAILED', path, errorMessage(err))
       }
     }
     const pairs = clearTranslationPairs(key)

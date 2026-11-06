@@ -16,6 +16,7 @@ import {
   speakKeyVk,
 } from '@shared/voice-out'
 import { speakPipeline } from './speech-pipeline'
+import { errorMessage } from '@shared/errors'
 import { speechFailHint } from '@shared/speech-plan'
 import { loadSettings } from '../settings'
 import { getPttKeySender } from '../input/ptt-key'
@@ -244,7 +245,7 @@ class VoiceOutService {
     try {
       return await this.runReplyInner(text)
     } catch (err) {
-      const error = err instanceof Error ? err.message : String(err)
+      const error = errorMessage(err)
       console.log('VOICE_REPLY_ERROR', JSON.stringify({ error }))
       return { spoken: false, error }
     }

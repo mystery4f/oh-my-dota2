@@ -3,6 +3,7 @@ import type { OverlayStatus } from '@shared/ipc'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, StatusPill } from '../components/primitives'
+import { selectClass } from '../components/select-class'
 import { useSaveFlash, useSettings } from '../use-settings'
 
 const EMPTY_OVERLAY: OverlayStatus = {
@@ -117,7 +118,7 @@ export function OverlayPage(): React.ReactElement {
               id="v2-textMode"
               value={overlay.textMode}
               onChange={(e) => act(window.api.overlaySetText(e.target.value as 'translated' | 'both' | 'original'))}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              className={selectClass}
             >
               <option value="translated">只显示译文</option>
               <option value="both">原文 + 译文</option>

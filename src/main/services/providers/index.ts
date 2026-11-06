@@ -1,4 +1,5 @@
 import type { ProviderConfig, ReplyTone, TestResult, TranslateDirection } from '@shared/ipc'
+import { errorMessage } from '@shared/errors'
 import { chatCompletion, type ChatMessage } from './openai-compat'
 
 // 缩写类物品（bkb/mkb/od/linken）也在内：保真守卫的词表镜像在 @shared/dota-glossary 的 JARGON_KEEP_TOKENS。
@@ -222,6 +223,6 @@ export async function testProvider(provider: ProviderConfig): Promise<TestResult
       latencyMs: Date.now() - started
     }
   } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    return { ok: false, message: errorMessage(err) }
   }
 }

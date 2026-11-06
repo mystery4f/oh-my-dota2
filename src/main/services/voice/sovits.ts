@@ -1,4 +1,5 @@
 import { loadSettings } from '../settings'
+import { errorMessage } from '@shared/errors'
 import { ensureSovitsServer, recordSovitsLog } from './sovits-server'
 import { lookupSovitsCache, sovitsCacheKey, storeSovitsCache } from './sovits-cache'
 
@@ -76,7 +77,7 @@ export async function synthesizeSovits(text: string, rate = 1, lang: 'zh' | 'en'
   try {
     return await attempt()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorMessage(err)
     recordSovitsLog('TTS_SOVITS_FAIL', { ms: Date.now() - started, err: message })
     // 连不上通常是「应用刚起、模型还在加载」——重启应用那一局的第一句话不该白丢。
     // 等它起来（ensure 会等到端口就绪或超时）再重试一次；还是不行就静默跳过这一句。
@@ -89,7 +90,7 @@ export async function synthesizeSovits(text: string, rate = 1, lang: 'zh' | 'en'
       recordSovitsLog('TTS_SOVITS_FAIL', {
         ms: Date.now() - started,
         retry: true,
-        err: retryErr instanceof Error ? retryErr.message : String(retryErr)
+        err: errorMessage(retryErr)
       })
       return null
     }

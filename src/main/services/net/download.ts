@@ -1,4 +1,5 @@
 import { createWriteStream, existsSync, mkdirSync, renameSync, statSync } from 'node:fs'
+import { errorMessage } from '@shared/errors'
 import { dirname } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -38,7 +39,7 @@ export async function tryMirrors<T>(
     try {
       return await attempt(candidate, prefix)
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err)
+      lastError = errorMessage(err)
       options.onError?.(candidate, lastError)
     }
   }

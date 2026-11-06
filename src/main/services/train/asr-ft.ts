@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
@@ -153,7 +154,7 @@ export function applyAsrFtModel(): AsrFtSwapResult {
       }
     }
   } catch (err) {
-    return { ok: false, error: `换模失败：${err instanceof Error ? err.message : String(err)}（模型目录可能停在中间态，按「回滚上一版」恢复）` }
+    return { ok: false, error: `换模失败：${errorMessage(err)}（模型目录可能停在中间态，按「回滚上一版」恢复）` }
   }
   resetSherpaWorker()
   return { ok: true, error: null }
@@ -172,7 +173,7 @@ export function rollbackAsrFtModel(): AsrFtSwapResult {
       if (op === 'restore-bak') renameSync(bak, active)
     }
   } catch (err) {
-    return { ok: false, error: `回滚失败：${err instanceof Error ? err.message : String(err)}` }
+    return { ok: false, error: `回滚失败：${errorMessage(err)}` }
   }
   resetSherpaWorker()
   return { ok: true, error: null }

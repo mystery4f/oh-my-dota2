@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { app } from 'electron'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -134,7 +135,7 @@ export async function ensureQwen3Model(): Promise<OfflineStatus> {
     console.log('ASR_QW_READY', JSON.stringify({ dir: qwen3AsrDir(), bytes: qwen3Status().bytes }))
     return qwen3Status()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorMessage(err)
     extractState.busy = false
     extractState.error = message
     console.log('ASR_QW_EXTRACT_FAILED', JSON.stringify({ err: message }))

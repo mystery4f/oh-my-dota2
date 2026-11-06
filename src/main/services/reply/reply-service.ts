@@ -1,4 +1,5 @@
 import { clipboard } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { type InPlaceResult, type VoiceReplyResult } from '@shared/ipc'
 import { decideVoiceOutReply } from '@shared/voice-out'
 import { decideInPlaceDelivery, inplaceFailureLine, pickInPlaceDraft } from '@shared/inplace'
@@ -38,7 +39,7 @@ export async function voiceReply(transcript: string): Promise<VoiceReplyResult> 
       translated: null,
       spoken: false,
       stage: 'translate',
-      error: err instanceof Error ? err.message : String(err)
+      error: errorMessage(err)
     }
   }
   const plan = decideVoiceOutReply({ recognized, translated })
@@ -138,7 +139,7 @@ export async function translateInPlace(): Promise<InPlaceResult> {
   try {
     translated = await translateReply(settings.provider, draft, settings.replyTone, { alive })
   } catch (err) {
-    failure = err instanceof Error ? err.message : String(err)
+    failure = errorMessage(err)
   }
   const translateMs = Date.now() - translateStartedAt
   const delivery = decideInPlaceDelivery({

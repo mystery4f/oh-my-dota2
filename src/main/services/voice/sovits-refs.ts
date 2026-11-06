@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { errorMessage } from '@shared/errors'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import type { SovitsRefEntry } from '@shared/ipc'
 
@@ -75,7 +76,7 @@ export function listSovitsRefs(root: string, weightsRoot?: string): SovitsRefEnt
   try {
     raw = JSON.parse(readFileSync(file, 'utf-8'))
   } catch (err) {
-    console.warn(`[sovits-refs] refs.json 解析失败，参考库按空处理：${err instanceof Error ? err.message : String(err)}`)
+    console.warn(`[sovits-refs] refs.json 解析失败，参考库按空处理：${errorMessage(err)}`)
     return []
   }
   if (!Array.isArray(raw)) {

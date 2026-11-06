@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { errorMessage } from '@shared/errors'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { startGsi, stopGsi, type GsiPayload } from '../services/gsi'
@@ -64,7 +65,7 @@ export async function runGsiDumpProbe(): Promise<void> {
       JSON.stringify({
         ok: false,
         error: '端口占用或启动失败：先关掉 dev 应用再跑',
-        detail: error instanceof Error ? error.message : String(error)
+        detail: errorMessage(error)
       })
     )
     app.exit(1)
@@ -116,7 +117,7 @@ export async function runGsiDumpProbe(): Promise<void> {
     )
     result.file = file
   } catch (error) {
-    result.file = '写入失败: ' + (error instanceof Error ? error.message : String(error))
+    result.file = '写入失败: ' + (errorMessage(error))
   }
 
   console.log('GSI_DUMP_RESULT', JSON.stringify(result))

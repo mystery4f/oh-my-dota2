@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import { errorMessage } from '@shared/errors'
 import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
@@ -109,7 +110,7 @@ function healCorruptDatabase(reason: string): void {
 }
 
 function looksCorrupt(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err)
+  const message = errorMessage(err)
   return /malformed|not a database|disk image is malformed|database corruption/i.test(message)
 }
 
@@ -174,7 +175,7 @@ function open(): DatabaseSync | null {
   } catch (err) {
     // 缓存坏了不能拖垮翻译：退回进程内 Map，功能降级但结果照出。
     dbFailed = true
-    console.log('TRANSLATE_CACHE_OPEN_FAILED', err instanceof Error ? err.message : String(err))
+    console.log('TRANSLATE_CACHE_OPEN_FAILED', errorMessage(err))
     return null
   }
 }
@@ -298,7 +299,7 @@ export function lookupTranslation(
     return null
   } catch (err) {
     stats.misses += 1
-    console.log('TRANSLATE_CACHE_READ_FAILED', err instanceof Error ? err.message : String(err))
+    console.log('TRANSLATE_CACHE_READ_FAILED', errorMessage(err))
     return null
   }
 }
@@ -391,10 +392,10 @@ export function writeTranslation(
     }
     stats.writes += 1
   } catch (err) {
-    console.log('TRANSLATE_CACHE_WRITE_FAILED', err instanceof Error ? err.message : String(err))
+    console.log('TRANSLATE_CACHE_WRITE_FAILED', errorMessage(err))
     // 坏库就挪走重建，再试一次；只重试一次，避免在真错误上打转。
     if (looksCorrupt(err)) {
-      healCorruptDatabase(err instanceof Error ? err.message : String(err))
+      healCorruptDatabase(errorMessage(err))
       try {
         const retry = open()
         if (retry !== null) retry.prepare('SELECT 1').get()
@@ -448,7 +449,7 @@ export function clearTranslationPairs(provider: string): number {
   try {
     return Number(handle.prepare('DELETE FROM pair WHERE provider = ?').run(provider).changes)
   } catch (err) {
-    console.log('TRANSLATE_CACHE_CLEAR_FAILED', err instanceof Error ? err.message : String(err))
+    console.log('TRANSLATE_CACHE_CLEAR_FAILED', errorMessage(err))
     return 0
   }
 }

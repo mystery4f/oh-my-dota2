@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Modal } from './modal'
 import { Group, Row, StatusPill } from './primitives'
+import { errorMessage as asMessage } from '@shared/errors'
+import { selectClass } from './select-class'
 import { useSettings } from '../use-settings'
 import { useVoicePacks } from '../use-voice-packs'
 
-const selectClass = 'h-8 rounded-md border border-input bg-background px-2 text-sm'
 const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(0)} MB`
-const asMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 type Tab = 'packs' | 'refs' | 'server'
 
@@ -244,7 +244,7 @@ export function VoicePackDialog({
             >
               <input
                 id="v2-pack-prompt"
-                className="h-8 w-80 rounded-md border border-input bg-background px-2 text-sm"
+                className={`${selectClass} w-80`}
                 value={settings?.ttsSovitsPromptText ?? ''}
                 onChange={(e) => void update({ ttsSovitsPromptText: e.target.value })}
                 placeholder="参考音频的逐字转写"

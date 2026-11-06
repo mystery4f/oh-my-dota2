@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { errorMessage } from '@shared/errors'
 import { app } from 'electron'
 import { existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs'
 import { statfs } from 'node:fs/promises'
@@ -167,7 +168,7 @@ export async function ensureSovitsInstall(): Promise<SovitsInstallState> {
     state = { phase: 'ready', progress: 1, error: null }
     console.log('TTS_SOVITS_INSTALL_READY', JSON.stringify({ home: sovitsInstallHome() }))
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorMessage(err)
     state = { phase: 'error', progress: 0, error: message }
     console.log('TTS_SOVITS_INSTALL_FAILED', JSON.stringify({ err: message }))
   } finally {
