@@ -2,18 +2,10 @@ import type { VoiceReplyStage } from './voice-out'
 import type { HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import { DEFAULT_HOTKEYS } from './hotkeys'
 
-import type {
-  AsrFtInstallState,
-  AsrFtStatusResult,
-  AsrFtSwapResult,
-  FtDatasetPrepareResult,
-  GvDatasetJudgement,
-  GvRegisterPayload,
-  GvRegisterResult,
-  TrainSnapshot,
-  TrainStartRequest,
-  TrainStartResult
-} from '@shared/train'
+import type { AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
+import type { FtDatasetPrepareResult } from '@shared/train/dataset'
+import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@shared/train/gv'
+import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
 
 
 /** ASR 微调读稿：一句原文。 */

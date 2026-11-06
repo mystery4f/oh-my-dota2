@@ -14,9 +14,9 @@ import {
   type GvRegisterPayload,
   type GvRegisterResult,
   type GvTrainOptions,
-  type GvVersionInfo,
-  type TrainStartRequest
-} from '@shared/train'
+  type GvVersionInfo
+} from '@shared/train/gv'
+import type { TrainStartRequest } from '@shared/train/task'
 import { discoverSovitsHome } from '../voice/sovits-server'
 import { sovitsRefsRoot, sovitsWeightsRoot } from '../voice/sovits-refs'
 

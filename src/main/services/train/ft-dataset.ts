@@ -6,8 +6,8 @@ import {
   buildFtDatasetEntries,
   buildFtJsonlText,
   splitTrainEval,
-  type FtDatasetPrepareResult,
-} from '@shared/train'
+  type FtDatasetPrepareResult
+} from '@shared/train/dataset'
 import { ftRecList, ftRecPath, readFtScript } from './ft-record'
 
 /**

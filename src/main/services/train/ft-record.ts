@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { FtRecInfo, FtScriptGroup, FtScriptState } from '@shared/ipc'
-import { parseRecordingKeyParts, RECORDING_GROUP_SHAPE } from '@shared/train'
+import { parseRecordingKeyParts, RECORDING_GROUP_SHAPE } from '@shared/train/recording'
 
 /**
  * ASR 微调录音（T4a）：内置读稿解析 + 录音存取。

@@ -3,36 +3,44 @@ import {
   advanceRecording,
   initialRecordingState,
   RECORDING_LIMITS,
-  recordingKey,
   parseRecordingKeyParts,
+  recordingKey,
   shouldKeepTake,
-  takeLineId,
+  takeLineId
+} from '@shared/train/recording'
+import {
   buildFtDatasetEntries,
   buildFtGroupProgress,
   buildFtJsonlLine,
+  splitTrainEval,
+  type FtDatasetGroupView
+} from '@shared/train/dataset'
+import {
   canStartTrain,
   deriveTrainPlan,
   inferenceHoldLabel,
-  deriveAsrFtEnvGaps,
-  asrFtRollbackSteps,
-  asrFtSwapSteps,
   normalizeTrainKind,
-  parseTrainProgress,
-  pickLastCheckpointName,
-  planAsrFtExportArgv,
   shouldPauseInference,
   shouldResumeInference,
-  splitTrainEval,
-  type AsrFtPaths,
-  type FtDatasetGroupView,
-  type TrainTaskStatus,
-  GV_VERSION_INFO,
-  GV_VERSION_DEFAULT,
-  normalizeGvVersion,
-  buildS2TrainConfigData,
+  type TrainTaskStatus
+} from '@shared/train/task'
+import { parseTrainProgress } from '@shared/train/progress'
+import {
+  asrFtRollbackSteps,
+  asrFtSwapSteps,
+  deriveAsrFtEnvGaps,
+  pickLastCheckpointName,
+  planAsrFtExportArgv,
+  type AsrFtPaths
+} from '@shared/train/asr-ft'
+import {
   buildS1TrainConfigData,
-  judgeGvDataset
-} from '@shared/train'
+  buildS2TrainConfigData,
+  GV_VERSION_DEFAULT,
+  GV_VERSION_INFO,
+  judgeGvDataset,
+  normalizeGvVersion
+} from '@shared/train/gv'
 import { pickLatestUvAsset, planAsrFtInstallSteps } from '../services/train/asr-ft-install'
 
 /**

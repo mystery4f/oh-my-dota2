@@ -4,7 +4,6 @@ import {
   deriveTrainPlan,
   inferenceHoldLabel,
   normalizeTrainKind,
-  parseTrainProgress,
   shouldPauseInference,
   shouldResumeInference,
   type TrainLogLine,
@@ -15,7 +14,8 @@ import {
   type TrainTaskInfo,
   type TrainTaskKind,
   type TrainTaskStatus
-} from '@shared/train'
+} from '@shared/train/task'
+import { parseTrainProgress } from '@shared/train/progress'
 import { ensureSovitsServer, pauseSovitsForTraining } from '../voice/sovits-server'
 
 /**

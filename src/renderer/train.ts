@@ -1,17 +1,18 @@
 // 训练窗口页：上半是任务开/停与日志，下半是 ASR 微调录音（T4a）。
 // 决策（互斥、计划推导、进度解析、读稿解析）都在 shared/主进程，这里只是显示器 + 采样器。
-import { advanceRecording, canStartTrain, inferenceHoldLabel, initialRecordingState, recordingKey, shouldKeepTake, takeLineId, type RecordingStepState, type TrainSnapshot } from '@shared/train'
+import { advanceRecording, initialRecordingState, recordingKey, shouldKeepTake, takeLineId, type RecordingStepState } from '@shared/train/recording'
+import { canStartTrain, inferenceHoldLabel, type TrainSnapshot } from '@shared/train/task'
 import { encodeWav16k } from '@shared/wav'
 import type { FtRecInfo, FtScriptGroup } from '@shared/ipc'
+import { buildFtGroupProgress } from '@shared/train/dataset'
 import {
   GV_DEFAULTS,
   GV_VERSION_DEFAULT,
   GV_VERSION_INFO,
   type GvDatasetJudgement,
-  type GvVersion,
-  type TrainStartRequest,
-  buildFtGroupProgress
-} from '@shared/train'
+  type GvVersion
+} from '@shared/train/gv'
+import type { TrainStartRequest } from '@shared/train/task'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 const kindSel = $<HTMLSelectElement>('kind')

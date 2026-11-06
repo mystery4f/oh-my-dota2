@@ -9,10 +9,9 @@ import {
   pickLastCheckpointName,
   type AsrFtPaths,
   type AsrFtStatusResult,
-  type AsrFtSwapResult,
-  type TrainPlan,
-  type TrainStartRequest
-} from '@shared/train'
+  type AsrFtSwapResult
+} from '@shared/train/asr-ft'
+import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
 import { loadSettings } from '../settings'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { prepareFtDataset } from './ft-dataset'

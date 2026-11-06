@@ -35,7 +35,7 @@ import {
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
 import { closeGvWebui, openGvWebui, registerGvWeights, resolveGvTrainRequest, scanGvDatasets } from './services/train/gv'
 import { discoverSovitsHome } from './services/voice/sovits-server'
-import { normalizeTrainKind } from '@shared/train'
+import { normalizeTrainKind } from '@shared/train/task'
 import { gsiStatus } from './services/gsi'
 
 

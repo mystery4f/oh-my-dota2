@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import { asrFtEnvRoot } from './asr-ft'
 import { downloadPackFile } from '../voice/sovits-voicepack'
-import type { AsrFtInstallState } from '@shared/train'
+import type { AsrFtInstallState } from '@shared/train/asr-ft'
 
 /**
  * ASR 微调环境安装器（M-B）：uv + venv + 冻结依赖 + 底模，全程国内镜像，
