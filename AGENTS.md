@@ -30,6 +30,16 @@ constant into a compile error too.
 - `npm run build` — electron-vite build into `out/`
 - `npx tsc --noEmit -p tsconfig.node.json --composite false` and the same with `tsconfig.web.json`
 - `npx eslint .` — 0 errors expected; exactly 1 permanent `react-refresh` warning (button.tsx:41)
+- `npm run panel:preview` — the dashboard in a plain browser at `localhost:5199`, no Electron and no
+  game: `scripts/panel-preview.mts` serves `src/renderer/src/preview/api-stub.ts` as a fake `window.api`
+  before the app boots. That stub is typed against `WindowApi`, so a renamed channel or a changed result
+  shape breaks `npm run typecheck:web` instead of a click that does nothing; a channel with no stub logs
+  its own name. `?s=<section>`, `?engine=sovits`, `?outEngine=sovits` put a page in the state you want to
+  look at. Nothing imports the stub, so it never reaches `out/`. Playwright element screenshots time out
+  here more often than page screenshots do, and a repeated identical URL may not reload — bump a `&n=`
+  parameter.
+- `.githooks/pre-commit` runs `npm run typecheck` then `npm run lint` (the same two commands as CI).
+  Enable once per clone: `git config core.hooksPath .githooks`; skip once with `git commit --no-verify`.
 - Probes (run `taskkill /F /IM electron.exe` first — a leftover process holds the single-instance lock
   and the probe exits silently):
   `npx electron out/main/index.js --<probe>`
@@ -87,6 +97,9 @@ The whole dashboard is `src/renderer/src/panel/`, and it is the only dashboard: 
   progress, switching and GV server settings are all rare, and inlining them pushed the
   common rows down. `useVoicePacks(active)` is the only reader of that state, and `active`
   is false while the engine is not sovits, so a closed dialog makes no IPC calls.
+  The dialog is the only place a pack is chosen: both engine rows (朗读 / 声出) show the active
+  pack name plus the 音色包… button, so adding a loader means touching one component instead of
+  two pages that would drift.
 
 Rules the layout encodes, not preferences: every setting has exactly one home; saving is
 immediate, so there is no 保存 button anywhere (the flash says 已保存); a `StatusPill` is
