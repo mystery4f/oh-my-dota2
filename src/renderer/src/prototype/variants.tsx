@@ -163,7 +163,7 @@ function VariantA() {
                 <button
                   key={it.id}
                   onClick={() => setActive(it.id)}
-                  className={`flex w-full items-center gap-2 px-4 py-1.5 text-left ${active === it.id ? 'bg-zinc-800/60 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/30 hover:text-zinc-200'}`}
+                  className={`flex w-full items-center gap-2 px-4 py-1.5 text-left ${active === it.id ? 'bg-orange-600/10 text-orange-200' : 'text-zinc-400 hover:bg-zinc-800/30 hover:text-zinc-200'}`}
                 >
                   <span className="flex-1">{it.label}</span>
                   {it.dot && <AToneDot tone={it.dot} />}
@@ -189,7 +189,7 @@ function VariantA() {
           </div>
         </header>
         <div className="flex-1 overflow-auto p-6">
-          <div className="max-w-2xl overflow-hidden rounded-xl border border-[#1b1b1f] bg-[#0d0d10]">
+          <div className="mx-auto max-w-2xl overflow-hidden rounded-xl border border-[#1b1b1f] bg-[#0d0d10]">
             {section.chips.length > 0 && (
               <div className="flex gap-1.5 border-b border-[#1b1b1f] px-4 py-2.5">
                 {section.chips.map((c) => (
@@ -220,7 +220,7 @@ function VariantA() {
 /* B 对局台 — top game HUD, status orb, angular glowing panels.      */
 /* --------------------------------------------------------------- */
 
-const B_CUT = '[clip-path:polygon(10px_0,100%_0,100%_calc(100%-10px),calc(100%-10px)_100%,0_100%,0_10px)]'
+const B_CUT = '[clip-path:polygon(10px_0,100%_0,100%_calc(100%_-_10px),calc(100%_-_10px)_100%,0_100%,0_10px)]'
 
 function BTone(tone?: Tone): string {
   if (tone === 'warn') return 'text-amber-300'
@@ -236,7 +236,7 @@ function BChip({ chip }: { chip: Chip }) {
         ? 'border-amber-400/40 text-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.2)]'
         : 'border-zinc-600/40 text-zinc-400'
   return (
-    <span className={`border px-2 py-0.5 text-[10px] tracking-wider ${tone} ${B_CUT} bg-black/40`}>{chip.label}</span>
+    <span className={`border px-2 py-0.5 text-[10px] tracking-wider whitespace-nowrap ${tone} ${B_CUT} bg-black/40`}>{chip.label}</span>
   )
 }
 
@@ -289,14 +289,14 @@ function VariantB() {
             <button
               key={s.id}
               onClick={() => setActive(s.id)}
-              className={`${B_CUT} px-3 py-1.5 tracking-wide ${active === s.id ? 'border border-red-800/60 bg-red-950/40 text-red-200 shadow-[0_0_16px_rgba(220,38,38,0.25)]' : 'border border-transparent text-zinc-500 hover:text-zinc-200'}`}
+              className={`${B_CUT} whitespace-nowrap px-3 py-1.5 tracking-wide ${active === s.id ? 'border border-red-800/60 bg-red-950/40 text-red-200 shadow-[0_0_16px_rgba(220,38,38,0.25)]' : 'border border-transparent text-zinc-500 hover:text-zinc-200'}`}
             >
               {s.title}
             </button>
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-4">
-          {statusChips.map((c) => (
+          {statusChips.slice(0, 2).map((c) => (
             <BChip key={c.label} chip={c} />
           ))}
           <div className="flex items-center gap-2">
@@ -305,14 +305,14 @@ function VariantB() {
               <span className="h-4 w-4 rounded-full bg-emerald-400/90 shadow-[0_0_10px_rgba(52,211,153,0.8)]" />
             </span>
             <div className="leading-tight">
-              <div className="text-[11px] text-emerald-300">引擎就绪</div>
-              <div className="font-mono text-[10px] text-zinc-500">{status.rows[1].value}</div>
+              <div className="whitespace-nowrap text-[11px] text-emerald-300">引擎就绪</div>
+              <div className="font-mono text-[10px] whitespace-nowrap text-zinc-500">{status.rows[1].value}</div>
             </div>
           </div>
         </div>
       </div>
       {/* content: main panel + status rail */}
-      <div className="flex gap-4 p-5">
+      <div className="flex gap-4 p-5 pb-16">
         <section className={`${B_CUT} min-w-0 flex-1 border border-[#2a2f3a] bg-[#0d1017]/90 shadow-[0_0_30px_rgba(0,0,0,0.5)]`}>
           <div className="flex items-center justify-between border-b border-[#2a2f3a] bg-gradient-to-r from-[#161a23] to-transparent px-4 py-3">
             <div>
@@ -348,8 +348,8 @@ function VariantB() {
                 className={`${B_CUT} block w-full border border-[#2a2f3a] bg-[#0d1017]/70 px-4 py-3 text-left hover:border-[#3a4152] hover:bg-[#12161f]`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="tracking-widest text-zinc-300">{s.title}</span>
-                  <span className="font-mono text-[10px] text-zinc-500">{s.rows[0].value}</span>
+                  <span className="tracking-widest whitespace-nowrap text-zinc-300">{s.title}</span>
+                  <span className="ml-2 shrink-0 font-mono text-[10px] text-zinc-600">›</span>
                 </div>
                 <div className="mt-1.5 flex gap-1.5">
                   {s.chips.slice(0, 2).map((c) => (
