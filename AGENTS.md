@@ -16,6 +16,12 @@ The IPC seam is one typed contract: `src/shared/ipc.ts` declares every channel o
 from it — adding a feature is contract line + handler line + call site, and a missed step
 is a compile error, not a dead button. `deadChannelAudit` turns any orphan channel
 constant into a compile error too.
+
+The AI provider seam lives in `src/main/services/providers/`: `openai-compat.ts` declares
+`ChatOptions`/`ChatMessage` (a `messages[]` array — there is no `system` field; system prompts
+live in `SYSTEM_PROMPTS`) plus `chatCompletion` / `translateText`; the voice-chain summary type
+is `VoiceChainSummary` in `src/shared/ipc.ts`. Read these shapes before calling the provider —
+guessing the fields costs a rework round.
 ## Commands
 
 - `npm run dev` — dashboard with hot reload (app name `oh-my-dota2`)
@@ -52,7 +58,7 @@ constant into a compile error too.
     and prints a verdict: real match or training ground, whether `allplayers` arrives, which
     `event_type`s showed up. Read-only, so it works with the dev app running and right after a match.
   - `--match-report [logDir] [--since-min N]` folds one match out of the GSI log: unique lines vs raw frames (repeat median/max), channel mix, game-time window, plus a ledger coverage check naming the lines that never reached the pair table. Read-only, safe while playing; without `--since-min` it reports everything the logs still hold.
-  - `--settings-persist-probe` panel choices survive a restart: sentinel round-trip per field, no cross-field clobber, partial/unknown-key files fall back per field, original file restored, plus the per-provider archives (`providerKeys`/`providerReasoning`): live-key drift adoption, legacy seeding, cross-provider deep-merge non-clobber
+  - `--settings-persist-probe` panel choices survive a restart: sentinel round-trip per field, no cross-field clobber, partial/unknown-key files fall back per field, original file restored, plus the per-provider archives (`providerKeys`/`providerReasoning`): live-key drift adoption, legacy seeding, cross-provider deep-merge non-clobber. Array/object fields compare by JSON sentinel, never === — loadSettings rebuilds references on every read
   - `--sovits-refs-probe` the sovits reference library reader (`listSovitsRefs`) against temp fixtures: missing/non-array/malformed `refs.json` degrade to an empty list, missing audio and out-of-root paths are filtered, relative paths resolve under the library root, valid entries come back complete. Entries may declare fine-tuned `gptWeights`/`sovitsWeights` (relative to the weights root): a declared-but-missing/traversing/half-specified weight file drops the whole entry, and without a weights root to verify against, weighted entries are excluded rather than trusted
   - `--sovits-voicepack-probe` the voice pack pipeline with zero network and zero engine: download plan (three files landing in refs/weights roots), install verdict is exact-byte (one byte short = not installed), refs.json merge (upsert by audio key, bad index restarts as empty), resumable download against a local HTTP source (200 full fetch, `bytes=N-` Range resume with content-range verified, size mismatch throws), and the weight-switch sequence against a fake api_v2: `/set_gpt_weights` then `/set_sovits_weights` with absolute `weights_path`, repeated same-voice calls are idempotently skipped, switching voices re-fires both, zero-shot entries send nothing. Remote-manifest layer: `voicepacks.json` parsing (strict schemaVersion, per-pack drop on bad path/bytes/fields, empty list = fallback to builtin), remote-over-builtin merge by id with the builtin default preserved when the remote has none, pack refs merge (same name OR same audio replaces, stale audio reported), stale-file cleanup after a version bump (old weights + `.part` die, current files and other voices' refs survive), and `resolveVoicePacks` against a local manifest server (remote wins, 404 falls back to builtin)
   - `--overlay-geometry-probe` pure arithmetic of the overlay's own geometry (18 geometry cases + 6 hint cases + 11 state-reduction cases): min width/height lifted, a window dragged off either edge keeps 80 px reachable, moving translates as a whole, handles pin the right/left edge correctly, the width floor wins over the screen edge, snapping only when already within 24 px, and the collapsed icon (`miniGeometry`) staying on an unchanged display. It also pins the two rules that were broken twice: `shouldIgnoreMouse(locked, panelOpen)` (locked with no summon panel open passes clicks, collapsing included) and `shouldAutoLock`. The state cases enumerate every `reduceOverlay` event from `@shared/overlay-state` (collapse auto-locks, unlock arms idle re-lock, opacity clamp, same-hint no-broadcast, summon panel overrides click-through via `set-panel`, collapsed drag moves only the remembered origin). The hint cases pin `captureHint`'s paused branch naming the currently configured toggle key (and admitting 「没绑键」 instead of inventing one). Re-run it before touching any of those functions or the reducer.
@@ -132,7 +138,9 @@ it and nothing happened". The overlay and the pause hint print key names from th
 
 - npm: `--registry=https://registry.npmmirror.com`; Electron postinstall needs
   `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`
-- Foreign sites only through proxy `http://mcr:4444`. `registry.npmmirror.com`, `hf-mirror.com`,
+- Foreign sites only through proxy `http://mcr:4444`.
+- `taskkill /F` under Git Bash eats `/F` as a path — run it as `cmd /c "taskkill /F /IM electron.exe"`.
+- `registry.npmmirror.com`, `hf-mirror.com`,
   `api.xiaomimimo.com`, `api.deepseek.com`, `open.bigmodel.cn` are domestic — go direct.
 - If `node_modules/electron/dist/electron.exe` is missing (silent postinstall failure), download
   `electron-v37.*-win32-x64.zip` from npmmirror and extract with `C:\Windows\System32\tar.exe`
