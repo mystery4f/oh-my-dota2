@@ -1,0 +1,402 @@
+/* ── 浮层 v2：干净字幕风 ───────────────────────────────────────────────
+   游戏画面上的字幕，不是仪表盘：没有外框卡片，每行消息自成胶囊；
+   颜色只花在三个地方——选中、主操作反馈、警告。全部尺寸手动给出，
+   不引面板主题（透明窗口挂不得 body 底色）。 */
+
+#root-inner {
+  box-sizing: border-box;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  background: transparent;
+}
+
+/* 解锁 = 配置态：一圈虚线轮廓标出「这是窗口」，锁定后什么都不画。 */
+#root-inner[data-locked='false']:not([data-panel='true']) {
+  outline: 1px dashed rgba(148, 163, 184, 0.55);
+  outline-offset: -1px;
+}
+
+/* 收起后整窗只剩小图标 */
+#root-inner[data-collapsed='true'] {
+  padding: 0;
+  outline: none;
+}
+
+/* ── 阶段行 ─────────────────────────────────────────────────────────── */
+#stage {
+  margin: 6px 0 0;
+  align-self: flex-end;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(10, 8, 6, 0.72);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: right;
+  animation: rise-in 200ms ease-out;
+}
+#stage.warn {
+  color: rgba(253, 230, 138, 0.95);
+}
+
+/* ── 消息行 ─────────────────────────────────────────────────────────── */
+#list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.row {
+  position: relative;
+  background: rgba(12, 10, 9, var(--row-alpha, 0.34));
+  border-radius: 8px;
+  padding: 6px 10px;
+  animation: rise-in 200ms ease-out;
+}
+/* 英雄色条：行左缘 3px，浮层唯一的装饰色。 */
+.row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 8px 0 0 8px;
+  background: hsl(var(--hue, 0) 60% 45%);
+  display: none;
+}
+.row[style*='--hue']::before {
+  display: block;
+}
+
+.row.has-hero,
+.row:has(.hero-img) {
+  padding-left: 42px;
+}
+.hero-img {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+}
+
+.orig {
+  color: rgba(231, 229, 228, 0.92);
+  font-size: 12px;
+  line-height: 1.4;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+.trans {
+  color: #f5f0e0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+.trans + .orig,
+.orig + .trans {
+  margin-top: 2px;
+}
+/* 词库直接给的结果标一个「词」：和现翻的亮色区分开。 */
+.trans.cached {
+  color: #e8dfb8;
+}
+.trans.cached::before {
+  content: '词';
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(251, 191, 36, 0.18);
+  color: #fcd34d;
+  font-size: 10px;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
+/* 翻失败的行：红字 + ✕。 */
+.trans.err {
+  color: #f87171;
+}
+/* 译文未到：原文先出现，压暗一点表示仍在翻译。 */
+.row.pending .orig {
+  color: rgba(255, 255, 255, 0.7);
+}
+.row.pending .orig::after {
+  content: ' · 翻译中…';
+  font-size: 11px;
+  color: rgba(253, 230, 138, 0.75);
+}
+/* 语音对讲的第三行：已播绿 / 未播红。 */
+.spoken {
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.spoken.ok {
+  color: #86efac;
+}
+.spoken.err {
+  color: #f87171;
+}
+/* 空态提示行 */
+.row.hint {
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  color: rgba(214, 211, 209, 0.7);
+  font-size: 11px;
+  background: rgba(12, 10, 9, 0.5);
+}
+/* 超过 12 秒的旧行渐隐：保留上下文但不占视野。 */
+.row.dim {
+  opacity: 0.25;
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── 工具条（仅解锁时） ──────────────────────────────────────────────── */
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  cursor: grab;
+  font-size: 11px;
+  color: rgba(226, 232, 240, 0.95);
+}
+#bar:active {
+  cursor: grabbing;
+}
+#bar-label {
+  flex: 1;
+  user-select: none;
+}
+#bar button {
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.55);
+  color: rgba(226, 232, 240, 0.95);
+  font: inherit;
+  cursor: pointer;
+}
+#bar button:hover {
+  background: rgba(51, 65, 85, 0.8);
+}
+#bar button.dim-btn {
+  opacity: 0.6;
+}
+
+/* ── 缩放把手 ───────────────────────────────────────────────────────── */
+.rz,
+#resize-left,
+#resize-right {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+}
+#resize-left {
+  left: 0;
+}
+#resize-right {
+  right: 0;
+}
+
+/* ── 收起小图标 ─────────────────────────────────────────────────────── */
+#mini {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(226, 232, 240, 0.95);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+#root-inner[data-locked='false'] #mini {
+  cursor: move;
+}
+#mini:hover {
+  background: rgba(51, 65, 85, 0.8);
+}
+/* 未读数：呼吸的小点，2s 一个周期。 */
+.unread {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.9);
+  color: #1c1917;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  animation: breathe 2s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ── 呼出面板（整窗 sheet） ──────────────────────────────────────────── */
+#root-inner[data-panel='true'] {
+  background: rgba(10, 10, 12, 0.96);
+  border-radius: 10px;
+  outline: none;
+}
+#panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+#panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+.tab {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgba(148, 163, 184, 0.9);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tab:hover {
+  color: rgba(226, 232, 240, 0.95);
+}
+.tab.on {
+  background: rgba(51, 65, 85, 0.7);
+  color: rgba(255, 255, 255, 0.95);
+}
+.panel-close {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: transparent;
+  color: rgba(148, 163, 184, 0.9);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.panel-close:hover {
+  color: rgba(226, 232, 240, 0.95);
+}
+#panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.copy-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.copy-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.copy-row.selected {
+  background: rgba(255, 255, 255, 0.1);
+}
+.copy-primary {
+  color: rgba(240, 235, 224, 0.95);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.copy-secondary {
+  color: rgba(148, 163, 184, 0.7);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.copied {
+  margin-left: auto;
+  font-size: 10px;
+  color: transparent;
+}
+.copied.ok {
+  color: #86efac;
+}
+.panel-note {
+  padding: 10px;
+  color: rgba(148, 163, 184, 0.85);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.panel-note.kbd-note {
+  padding-top: 6px;
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.55);
+}
+.retry {
+  margin-left: 8px;
+  padding: 2px 10px;
+  border-radius: 5px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: transparent;
+  color: rgba(226, 232, 240, 0.9);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.retry:hover {
+  background: rgba(51, 65, 85, 0.7);
+}
+
+/* 滚动条：细一条，不抢眼 */
+.scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 3px;
+}

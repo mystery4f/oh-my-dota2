@@ -1,17 +1,10 @@
 import { clipboard } from 'electron'
-import {
-  type InPlaceResult,
-  type ReplyResult,
-  type ReplySendResult,
-  type ReplyTone,
-  type VoiceReplyResult
-} from '@shared/ipc'
+import { type InPlaceResult, type VoiceReplyResult } from '@shared/ipc'
 import { decideVoiceOutReply } from '@shared/voice-out'
 import { decideInPlaceDelivery, inplaceFailureLine, pickInPlaceDraft } from '@shared/inplace'
 import { loadSettings } from '../settings'
 import { abortTranslation, translateReply } from '../session/durable-translator'
-import { buildSayTeamCommand, getConsoleSender } from '../input/console-send'
-import { getChatSender, normalizeChatLine } from '../input/chat-send'
+import { toPrintableAscii } from '@shared/chat-line'
 import { getInPlaceSender } from '../input/chat-inplace'
 import { getVoiceOutService } from '../voice/voice-out'
 import { getOverlayManager } from '../../windows/overlay'
@@ -67,44 +60,6 @@ export async function voiceReply(transcript: string): Promise<VoiceReplyResult> 
   }
 }
 
-export async function sendReply(text: string): Promise<ReplySendResult> {
-  const settings = loadSettings()
-  const draft = text.trim()
-  if (!draft) return { ok: false, draft: '', translated: null, command: null, error: '内容为空' }
-
-  const overlay = getOverlayManager()
-  let translated: string | null = null
-  try {
-    translated = await translateReply(settings.provider, draft, settings.replyTone)
-  } catch (err) {
-    return {
-      ok: false,
-      draft,
-      translated: null,
-      command: null,
-      error: err instanceof Error ? err.message : String(err)
-    }
-  }
-  if (!translated) {
-    return { ok: false, draft, translated: null, command: null, error: '翻译结果为空' }
-  }
-
-  const line = normalizeChatLine(translated)
-  if (!line) {
-    return { ok: false, draft, translated, command: null, error: '译文没有可发送的英文字符' }
-  }
-  const command = settings.sendMode === 'console' ? buildSayTeamCommand(translated) : line
-  overlay.closeReply(false)
-  const sent =
-    settings.sendMode === 'console'
-      ? await getConsoleSender().send(command, settings.consoleKey)
-      : await getChatSender().send(line)
-  if (!sent.ok) {
-    overlay.openReply()
-    return { ok: false, draft, translated, command, error: sent.error ?? '发送失败' }
-  }
-  return { ok: true, draft, translated, command }
-}
 
 /**
  * 正在跑的那条原地直发。
@@ -188,7 +143,7 @@ export async function translateInPlace(): Promise<InPlaceResult> {
   const translateMs = Date.now() - translateStartedAt
   const delivery = decideInPlaceDelivery({
     cancelled: !alive(),
-    line: translated === null ? null : normalizeChatLine(translated),
+    line: translated === null ? null : toPrintableAscii(translated),
     elapsedMs: Date.now() - grabbedAt
   })
   // 被新的直发取代：不写回、不回贴、也不报错，新的那一次会给用户答案。
@@ -222,21 +177,3 @@ export async function translateInPlace(): Promise<InPlaceResult> {
   return { ok: true, draft, translated: delivery.line, grabMs: grabbed.ms, translateMs, sendMs: sent.ms, restored: false }
 }
 
-/** 只翻不发：译文进剪贴板，渲染层直接粘贴（Alt+Shift+T 回复框的「翻译」按钮）。 */
-export async function translateReplyToClipboard(text: string, tone?: ReplyTone): Promise<ReplyResult> {
-  const trimmed = String(text ?? '').trim()
-  if (!trimmed) return { ok: false, translated: null, copied: false, error: '内容为空' }
-  const settings = loadSettings()
-  try {
-    const translated = await translateReply(settings.provider, trimmed, tone ?? settings.replyTone)
-    clipboard.writeText(translated)
-    return { ok: true, translated, copied: true }
-  } catch (err) {
-    return {
-      ok: false,
-      translated: null,
-      copied: false,
-      error: err instanceof Error ? err.message : String(err)
-    }
-  }
-}

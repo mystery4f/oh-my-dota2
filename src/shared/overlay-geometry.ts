@@ -81,11 +81,11 @@ export function resizeFromLeft(
 }
 
 /**
- * 穿透规则：回复框打开时必须可点（否则粘不回去）；其余时候只听锁定的。
+ * 穿透规则：呼出面板打开时必须可点（历史/短语/建议都要点）；其余时候只听锁定的。
  * 收起成小图标不改变这条规则——收起只是变小，不是「放开鼠标」。锁定后被误点才是真麻烦。
  */
-export function shouldIgnoreMouse(locked: boolean, replyOpen: boolean): boolean {
-  return !replyOpen && locked
+export function shouldIgnoreMouse(locked: boolean, panelOpen: boolean): boolean {
+  return !panelOpen && locked
 }
 
 /** 离屏幕边多近就吸附：够近是「想贴边」，太远是「想放开」。 */

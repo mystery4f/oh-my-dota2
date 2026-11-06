@@ -13,6 +13,7 @@ export type HotkeyActionId =
   | 'overlayLock'
   | 'overlayCollapse'
   | 'inplaceSend'
+  | 'overlayPanel'
   | 'voiceCapture'
 
 export interface HotkeyAction {
@@ -47,9 +48,15 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   },
   {
     id: 'inplaceSend',
-    label: '发送消息',
-    hint: '原地替换模式读游戏聊天框草稿；其它模式弹回复框',
+    label: '原地直发',
+    hint: '读游戏聊天框里打好未发送的中文，翻译贴回并回车',
     defaultAccelerator: 'Alt+Shift+T'
+  },
+  {
+    id: 'overlayPanel',
+    label: '呼出面板',
+    hint: '把浮层临时变成可交互面板：历史、快捷短语、AI 建议回复；再按或 Esc 关闭',
+    defaultAccelerator: 'Alt+Shift+H'
   },
   {
     id: 'voiceCapture',
@@ -259,7 +266,7 @@ export function findHotkeyConflicts(map: Partial<HotkeyMap>): HotkeyConflict[] {
 
 /**
  * 逐项兜底：未知动作 id 丢掉，非字符串/非法值回落到该动作的默认键。
- * 整份缺表 = 全部默认——绝不因为一个键写坏把其它四个一起废掉。
+ * 整份缺表 = 全部默认——绝不因为一个键写坏把其它几个一起废掉。
  */
 export function normalizeHotkeyMap(raw: unknown): HotkeyMap {
   const source = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}

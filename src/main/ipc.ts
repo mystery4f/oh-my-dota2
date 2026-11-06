@@ -1,8 +1,9 @@
-import { BrowserWindow, app, ipcMain } from 'electron'
+import { BrowserWindow, app, clipboard, ipcMain } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { IPC, ipcContract, type MainHandlers } from '@shared/ipc'
-import { sendReply, translateInPlace, translateReplyToClipboard, voiceReply } from './services/reply/reply-service'
+import { translateInPlace, voiceReply } from './services/reply/reply-service'
+import { generatePanelSuggestions } from './services/reply/panel-suggestions'
 import { loadSettings, saveSettings } from './services/settings'
 import { hotkeysState, saveHotkeysState } from './services/hotkeys'
 import { translationInsights } from './services/session/translate-cache'
@@ -73,9 +74,8 @@ const handlers: MainHandlers = {
       // 会话层失败时退回直连，保证「翻译试用」永远能给出结果或明确报错。
       translateText(loadSettings().provider, text, direction ?? 'en-zh')
     ),
-  translateReply: (text, tone) => translateReplyToClipboard(text, tone),
-  sendReply: (text) => sendReply(text),
   translateInPlace: () => translateInPlace(),
+  panelSuggestions: () => generatePanelSuggestions(),
   translatorStatus: () => sessionStatus(),
   cacheStats: () => translationInsights(),
   // 清空缓存两步走：inspect 数数给确认框，clear 才真删（都只对当前 provider）。
@@ -96,9 +96,9 @@ const handlers: MainHandlers = {
     return { ok: true }
   },
   overlaySetText: (mode) => getOverlayManager().setText(mode),
-  overlayOpenReply: () => getOverlayManager().openReply(),
-  overlayCloseReply: (submitted) => getOverlayManager().closeReply(Boolean(submitted)),
-  overlayReplyState: () => getOverlayManager().status(),
+  overlayPanelToggle: () => getOverlayManager().togglePanel(),
+  overlayStatus: () => getOverlayManager().status(),
+  chatHistory: () => getCaptureService().history(),
   overlaySetGeometry: (patch) => getOverlayManager().applyGeometry(patch ?? {}),
   overlayResetGeometry: () => getOverlayManager().resetGeometry(),
   overlaySetVoice: (read) => getOverlayManager().setVoice(Boolean(read)),
@@ -108,6 +108,10 @@ const handlers: MainHandlers = {
   overlaySnap: () => getOverlayManager().snap(),
   overlaySetLocked: (locked) => getOverlayManager().setLocked(locked),
   overlaySetOpacity: (value) => getOverlayManager().setOpacity(value),
+  copyText: (text) => {
+    clipboard.writeText(String(text ?? ''))
+    return true
+  },
   voiceReply: (transcript) => voiceReply(String(transcript ?? '')),
   // overlay 起录/停录/出结果时上抛，广播给所有窗口（面板按钮与回显行靠它活着）。
   reportVoiceState: (recording) => {

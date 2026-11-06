@@ -193,10 +193,8 @@ export interface AppSettings {
   asrFtEnvDir: string
   /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
   autoStartCapture: boolean
-  /** 直发通道：inplace = 原地替换游戏聊天框（默认），chat = 粘贴并回车发送，console = 控制台 say_team。 */
-  sendMode: 'inplace' | 'chat' | 'console'
-  /** Dota 控制台开关键（单字符，默认反斜杠）。仅在 sendMode='console' 时使用。 */
-  consoleKey: string
+  /** 快捷短语表：呼出面板「短语」标签的内容，方向键选、Enter 复制进剪贴板。 */
+  quickPhrases: string[]
   /** In-game nicknames that should never be translated (your own messages). */
   myNicknames: string[]
   replyTone: ReplyTone
@@ -304,6 +302,18 @@ export interface HotkeysResult extends HotkeyState {
   error: string | null
 }
 
+/** 快捷短语默认表：对局里高频、通用、不需要现场组织的英文短句；面板「文出」页可改。 */
+export const DEFAULT_QUICK_PHRASES: string[] = [
+  'Push mid',
+  'Group up',
+  'Fall back',
+  'Careful, they are missing',
+  'Nice play',
+  'Well played',
+  'My bad',
+  'Give me a sec'
+]
+
 export const DEFAULT_SETTINGS: AppSettings = {
   provider: {
     id: 'deepseek',
@@ -330,8 +340,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
   autoStartCapture: true,
-  sendMode: 'inplace',
-  consoleKey: '\\',
+  quickPhrases: DEFAULT_QUICK_PHRASES,
   myNicknames: [],
   replyTone: 'terse',
   overlayText: 'translated',
@@ -510,16 +519,6 @@ export interface CaptureEntry {
   /** 这行进了翻译队列却没翻成（服务不可达、鉴权失败…）：渲染层要显示出来，不能假装还在翻。 */
   error?: string
 }
-
-/** 回复直发结果：draft = 输入的中文，translated = 英文，command = 实际下发的控制台命令。 */
-export interface ReplySendResult {
-  ok: boolean
-  draft: string
-  translated: string | null
-  command: string | null
-  error?: string
-}
-
 /** 原地替换结果：draft = 从游戏聊天框读到的中文，translated = 写回聊天框的英文。 */
 export interface InPlaceResult {
   ok: boolean
@@ -535,6 +534,12 @@ export interface InPlaceResult {
    * 原文在读取那一刻就从聊天框清空了，false = 那句中文没救回来，面板要提醒重打。
    */
   restored?: boolean
+}
+
+export interface PanelSuggestionsResult {
+  ok: boolean
+  items: string[]
+  error?: string
 }
 
 /**
@@ -646,7 +651,8 @@ export interface OverlayStatus {
   visible: boolean
   /** 浮层显示什么：只译文（默认）／原文+译文／只原文。 */
   textMode: OverlayTextMode
-  replyOpen: boolean
+  /** 呼出面板开着吗：开着 = 浮层临时可交互（历史/短语/AI 建议），关了恢复原状态。 */
+  panelOpen: boolean
   /** 锁定后位置与尺寸都冻住，并且强制点击穿透——想调整时先解锁。 */
   locked: boolean
   /** 收起成小图标：此时窗口很小，但仍然可点（否则展不开）。 */
@@ -659,10 +665,13 @@ export interface OverlayStatus {
   /** 为什么取不到字（null = 一切正常）——只在异常时显示，正常时整块保持干净。 */
   hint: string | null
   /**
-   * 当前配置的键名（给人看的写法），只带浮层自己要写的那两个动作。
+  /**
+   * 当前配置的键名（给人看的写法），只带浮层自己要写的那几个动作。
    * 浮层没有设置访问权，键名不随状态下来就只能写死在渲染端里。
    */
   hotkeys: Partial<Record<HotkeyActionId, string>>
+  /** 快捷短语表（呼出面板第二页直接渲染）：随状态下来，浮层不读设置文件。 */
+  quickPhrases: string[]
 }
 
 /** 浮层的位置与尺寸，全部是 DIP（和 `screen` 报的是同一套坐标）。 */
@@ -673,13 +682,6 @@ export interface OverlayGeometry {
   height: number
 }
 
-/** Result of the reply flow: translate zh→en and copy to clipboard. */
-export interface ReplyResult {
-  ok: boolean
-  translated: string | null
-  copied: boolean
-  error?: string
-}
 
 export const IPC = {
   SETTINGS_GET: 'settings:get',
@@ -696,8 +698,6 @@ export const IPC = {
   /** 手动触发一次「拍屏 → OCR → 翻译 → 重建译文框」。 */
   /** 手动模式整屏重建（渲染层先清空再填充）。 */
   CAPTURE_REPLACE: 'capture:replace',
-  /** 中文草稿 → 翻译 → 控制台 say_team 直发。 */
-  REPLY_SEND: 'reply:send',
   /** 读取游戏聊天框草稿 → 翻译 → 原地替换成英文（不发送）。 */
   REPLY_INPLACE: 'reply:inplace',
   CAPTURE_ENTRIES: 'capture:entries',
@@ -711,7 +711,6 @@ export const IPC = {
   UPDATE_STATUS: 'update:status',
   CAPTURE_UPDATE: 'capture:update',
   SESSION_STATUS: 'session:status',
-  REPLY_TRANSLATE: 'reply:translate',
   VOICE_WHISPER_PROBE: 'voice:whisper-probe',
   VOICE_WHISPER_SETUP: 'voice:whisper-setup',
   VOICE_WHISPER_PROGRESS: 'voice:whisper-progress',
@@ -731,10 +730,12 @@ export const IPC = {
   VOICE_OUT_ENDED: 'voice-out:ended',
   OVERLAY_TOGGLE: 'overlay:toggle',
   OVERLAY_VOICE_TOGGLE: 'overlay:voice-record-toggle',
-  OVERLAY_REPLY: 'overlay:reply',
-  OVERLAY_REPLY_OPEN: 'overlay:reply-open',
-  OVERLAY_REPLY_CLOSE: 'overlay:reply-close',
-  OVERLAY_REPLY_STATE: 'overlay:reply-state',
+  OVERLAY_PANEL_TOGGLE: 'overlay:panel-toggle',
+  OVERLAY_STATUS: 'overlay:status',
+  /** 呼出面板数据：账本历史、AI 建议、点行复制。 */
+  CHAT_HISTORY: 'chat:history',
+  PANEL_SUGGESTIONS: 'panel:suggestions',
+  COPY_TEXT: 'clipboard:copy',
   OVERLAY_TEXT: 'overlay:text',
   VOICE_SPEAK: 'voice:speak',
   TTS_OFFLINE_STATE: 'tts:offline-state',
@@ -927,8 +928,6 @@ export const ipcContract = {
   setHotkeys: invoke<[Record<HotkeyActionId, string>], HotkeysResult>(IPC.HOTKEYS_SET),
   testProvider: invoke<[ProviderConfig], TestResult>(IPC.PROVIDER_TEST),
   translate: invoke<[string, TranslateDirection?], string>(IPC.PROVIDER_TRANSLATE),
-  translateReply: invoke<[string, ReplyTone?], ReplyResult>(IPC.REPLY_TRANSLATE),
-  sendReply: invoke<[string], ReplySendResult>(IPC.REPLY_SEND),
   translateInPlace: invoke<[], InPlaceResult>(IPC.REPLY_INPLACE),
   translatorStatus: invoke<[], TranslatorStatus>(IPC.SESSION_STATUS),
   cacheStats: invoke<[], CacheStats>(IPC.CACHE_STATS),
@@ -949,10 +948,11 @@ export const ipcContract = {
   overlayToggle: invoke<[], OverlayStatus>(IPC.OVERLAY_TOGGLE),
   overlayVoiceToggle: invoke<[], { ok: boolean }>(IPC.OVERLAY_VOICE_TOGGLE),
   overlaySetText: invoke<[OverlayTextMode], OverlayStatus>(IPC.OVERLAY_TEXT),
-  overlayOpenReply: invoke<[], OverlayStatus>(IPC.OVERLAY_REPLY_OPEN),
-  overlayCloseReply: invoke<[boolean?], OverlayStatus>(IPC.OVERLAY_REPLY_CLOSE),
-  overlayReplyState: invoke<[], OverlayStatus>(IPC.OVERLAY_REPLY_STATE),
-  onOverlayReply: listen<boolean>(IPC.OVERLAY_REPLY),
+  overlayPanelToggle: invoke<[], OverlayStatus>(IPC.OVERLAY_PANEL_TOGGLE),
+  overlayStatus: invoke<[], OverlayStatus>(IPC.OVERLAY_STATUS),
+  chatHistory: invoke<[], CaptureEntry[]>(IPC.CHAT_HISTORY),
+  panelSuggestions: invoke<[], PanelSuggestionsResult>(IPC.PANEL_SUGGESTIONS),
+  copyText: invoke<[string], boolean>(IPC.COPY_TEXT),
   onOverlayState: listen<OverlayStatus>(IPC.OVERLAY_STATE),
   onVoiceSpeak: listen<SpeakPayload>(IPC.VOICE_SPEAK),
   overlaySetGeometry: invoke<[Partial<OverlayGeometry>], OverlayStatus>(IPC.OVERLAY_GEOMETRY),

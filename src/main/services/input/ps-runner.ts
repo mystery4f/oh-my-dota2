@@ -6,14 +6,14 @@ import { join } from 'node:path'
 /**
  * 跑一次 PowerShell 桥：部署脚本、落参数文件、掐超时、认 OK 握手、把退出码翻成人话。
  *
- * 这套骨架此前在 chat-send / console-send / ptt-key 各抄了一遍，差别只在超时数字和提示文案——
+ * 这套骨架此前在 chat-inplace / ptt-key 的前身（chat-send / console-send，已删除）各抄了一遍，差别只在超时数字和提示文案——
  * 连「子进程结束前必须先判断 this.child === child」这种坑都要在三个地方各记一次。
  * 现在只有这一份：参数由调用方写进 `args`，语义差异（原因表、超时说什么）由选项表达。
  */
 export interface PsRunOptions {
   /** 数据目录下的子目录名，脚本与参数文件都落在这里 */
   folder: string
-  /** 脚本文件名，例如 chat-send.ps1 */
+  /** 脚本文件名，例如 chat-inplace.ps1 */
   scriptName: string
   /** `?raw` 导入的脚本正文（部署目录里的 .ps1 必须是纯 ASCII） */
   source: string

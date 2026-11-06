@@ -5,6 +5,7 @@ import { translateLines } from '../session/durable-translator'
 import { announceEntries } from '../voice/speech'
 import { loadSettings } from '../settings'
 
+import { HISTORY_MAX_ROWS } from '@shared/overlay-ledger'
 /**
  * 存续窗口：同一句话在 60 条内重复出现就不再上屏。
  * Dota 的 GSI 会连推 26 帧左右，这里也顺手兜住重复投递。
@@ -181,12 +182,33 @@ export class ChatCaptureService {
   }
 
   private broadcast(channel: string, entries: CaptureEntry[]): void {
+    this.rememberLedger(channel, entries)
     for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, entries)
     if (channel === IPC.CAPTURE_ENTRIES) {
       for (const callback of this.listeners) callback(entries)
     } else {
       for (const callback of this.updateListeners) callback(entries)
     }
+  }
+
+  /** 呼出面板的 200 条历史：广播即落账本，按 id 原位更新，替换事件整表清空。 */
+  private ledger: CaptureEntry[] = []
+  private rememberLedger(channel: string, entries: CaptureEntry[]): void {
+    if (channel === IPC.CAPTURE_REPLACE) {
+      this.ledger = []
+      return
+    }
+    for (const entry of entries) {
+      const index = this.ledger.findIndex((row) => row.id === entry.id)
+      if (index >= 0) this.ledger[index] = entry
+      else this.ledger.push(entry)
+    }
+    if (this.ledger.length > HISTORY_MAX_ROWS) this.ledger = this.ledger.slice(-HISTORY_MAX_ROWS)
+  }
+
+  /** 呼出面板读历史：只给最近 n 条，最新在尾部。 */
+  history(n = HISTORY_MAX_ROWS): CaptureEntry[] {
+    return this.ledger.slice(-n)
   }
 
   private remember(key: string, text: string): void {

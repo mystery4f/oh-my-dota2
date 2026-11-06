@@ -53,25 +53,27 @@ class OverlayManager {
   }
 
   status(): OverlayStatus {
-    // 一次读出整份设置：朗读开关和四个键名都来自它，别每行各读一遍文件。
+    // 一次读出整份设置：朗读开关和五个键名都来自它，别每行各读一遍文件。
     const settings = loadSettings()
     return {
       visible: this.win !== null && this.win.isVisible(),
       textMode: this.s.textMode,
-      replyOpen: this.s.replyOpen,
+      panelOpen: this.s.panelOpen,
       locked: this.s.locked,
       collapsed: this.s.collapsed,
       readAloud: settings.ttsReadAloud,
       opacity: this.s.opacity,
       geometry: this.currentGeometry(),
       hint: this.s.hint,
-      // 浮层要写的两个键随状态一起下发：它拿不到设置，键名只能从主进程带过去。
+      // 浮层要写的键随状态一起下发：它拿不到设置，键名只能从主进程带过去。
       hotkeys: {
         overlayToggle: formatAccelerator(settings.hotkeys.overlayToggle),
         overlayLock: formatAccelerator(settings.hotkeys.overlayLock),
         overlayCollapse: formatAccelerator(settings.hotkeys.overlayCollapse),
+        overlayPanel: formatAccelerator(settings.hotkeys.overlayPanel),
         voiceCapture: formatAccelerator(settings.hotkeys.voiceCapture)
-      }
+      },
+      quickPhrases: settings.quickPhrases
     }
   }
 
@@ -90,7 +92,7 @@ class OverlayManager {
     if (!this.win) return
     // 锁定 / 解锁对收起的小图标同样生效：锁定就穿透，防误点；
     // 要展开就按「收起/展开」热键（全局热键，不依赖点得到）或先解锁。
-    const ignore = shouldIgnoreMouse(this.s.locked, this.s.replyOpen)
+    const ignore = shouldIgnoreMouse(this.s.locked, this.s.panelOpen)
     this.win.setIgnoreMouseEvents(ignore, { forward: true })
     // 防截屏默认开着（否则手动截图会把浮层自己的行 OCR 回来再翻一遍），
     // 但 WDA_EXCLUDEFROMCAPTURE 在 Windows 上会让窗口收不到部分鼠标事件——
@@ -164,10 +166,10 @@ class OverlayManager {
    */
   private armIdle(): void {
     this.clearIdle()
-    if (this.s.locked || this.s.replyOpen) return
+    if (this.s.locked || this.s.panelOpen) return
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
-      if (this.s.locked || this.s.replyOpen) return
+      if (this.s.locked || this.s.panelOpen) return
       this.setLocked(true)
     }, CONFIG_IDLE_MS)
   }
@@ -229,31 +231,25 @@ class OverlayManager {
   }
 
   /**
-   * Show the reply bar and take focus. Windows grants foreground rights to the
-   * thread that handled the registered hotkey, so the game yields the keyboard.
+   * 呼出面板热键：浮层临时变成可交互面板（历史/快捷短语/AI 建议）。
+   * panelOpen 期间接鼠标、不回锁；再按一次或 Esc 关闭，恢复原状态（锁定→穿透）。
    */
-  openReply(): OverlayStatus {
-    if (!this.win) this.win = this.createWindow()
+  togglePanel(): OverlayStatus {
+    const open = !this.s.panelOpen
+    if (open && !this.win) this.win = this.createWindow()
     const win = this.win
-    return this.commit({ type: 'set-reply', open: true }, () => {
+    return this.commit({ type: 'set-panel', open }, () => {
+      if (!open) {
+        // 关闭即还键盘给游戏；穿透恢复由 applyClickThrough 完成。
+        win?.blur()
+        return
+      }
       this.reposition()
-      win.show()
-      win.moveTop()
-      win.focus()
-      win.webContents.send(IPC.OVERLAY_REPLY, true)
+      win?.show()
+      win?.moveTop()
+      win?.focus()
     })
   }
-
-  /** Close the reply bar; `submitted` hands focus back to the game for Ctrl+V. */
-  closeReply(submitted = false): OverlayStatus {
-    const win = this.win
-    return this.commit({ type: 'set-reply', open: false }, () => {
-      if (!win) return
-      win.webContents.send(IPC.OVERLAY_REPLY, false)
-      if (submitted) win.blur()
-    })
-  }
-
   /** Ask the overlay window to start or stop microphone capture (hotkey driven). */
   toggleVoiceCapture(): void {
     // 按住不松会触发键盘自动重复（WM_HOTKEY 连发），一次长按 = 起录/停录疯狂翻面，

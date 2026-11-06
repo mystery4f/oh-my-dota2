@@ -1,5 +1,5 @@
 /**
- * 浮层状态的纯缝（beside overlay-geometry）：锁定、收起、可见性、回复框这些开关怎么联动、
+ * 浮层状态的纯缝（beside overlay-geometry）：锁定、收起、可见性、呼出面板这些开关怎么联动、
  * 哪些要落盘、要不要广播，全部在这里枚举成事件；OverlayManager 只剩效果执行器
  * （开窗、setBounds、聚焦），与 gsi.ts 的 GsiEffects 同一形状。
  * 曾两次翻车的鼠标规则（shouldIgnoreMouse）与「收起顺手锁上」都冻结在事件里，探针钉死。
@@ -10,7 +10,7 @@ import type { AppSettings, OverlayGeometry, OverlayTextMode } from './ipc'
 export interface OverlayState {
   locked: boolean
   collapsed: boolean
-  replyOpen: boolean
+  panelOpen: boolean
   /** 收起前的几何；收起那一刻由 manager 把窗口几何递进来。 */
   expandedBounds: OverlayGeometry | null
   /** 用户亲手拖过的几何；null = 跟着屏幕默认摆放。 */
@@ -33,7 +33,7 @@ export type OverlayEvent =
   | { type: 'set-visible'; visible: boolean }
   /** 工具条上的朗读开关：只写设置，浮层自有状态不动。 */
   | { type: 'set-voice'; read: boolean }
-  | { type: 'set-reply'; open: boolean }
+  | { type: 'set-panel'; open: boolean }
   | { type: 'set-custom-geometry'; geometry: OverlayGeometry }
   | { type: 'reset-custom-geometry' }
   /** 收起状态下拖小图标：只挪展开记忆的原点，尺寸绝不过 clamp。 */
@@ -49,7 +49,7 @@ export interface OverlayReduction {
   persist: OverlayPersistPatch
   /** status() 的内容变了吗 —— 变了才值得广播一次 IPC。 */
   changed: boolean
-  /** locked / replyOpen 变了才需要重算穿透与防截屏。 */
+  /** locked / panelOpen 变了才需要重算穿透与防截屏。 */
   clickThrough: boolean
   /** 解锁 = 开始闲置回锁倒计时；锁定/收起 = 拆表。 */
   idle: 'arm' | 'clear' | 'keep'
@@ -69,7 +69,7 @@ export function overlayStateFromSettings(settings: AppSettings): OverlayState {
   return {
     locked: settings.overlayLocked,
     collapsed: settings.overlayCollapsed,
-    replyOpen: false,
+    panelOpen: false,
     expandedBounds: null,
     custom: settings.overlayBounds,
     textMode: settings.overlayText,
@@ -151,10 +151,10 @@ export function reduceOverlay(event: OverlayEvent, state: OverlayState): Overlay
         clickThrough: false,
         idle: 'keep'
       }
-    case 'set-reply': {
-      const changed = event.open !== state.replyOpen
+    case 'set-panel': {
+      const changed = event.open !== state.panelOpen
       return {
-        state: { ...state, replyOpen: event.open },
+        state: { ...state, panelOpen: event.open },
         persist: {},
         changed,
         clickThrough: changed,

@@ -62,7 +62,8 @@ const cacheCounts = (): Awaited<ReturnType<WindowApi['translationCacheInspect']>
 const overlay = {
   visible: true,
   textMode: 'translated' as OverlayTextMode,
-  replyOpen: false,
+  panelOpen: false,
+  quickPhrases: ['Push mid', 'Fall back', 'Nice play'],
   locked: true,
   collapsed: false,
   readAloud: false,
@@ -72,10 +73,11 @@ const overlay = {
   hotkeys: {
     overlayToggle: 'Alt+Shift+O',
     overlayLock: 'Alt+Shift+P',
-    overlayCollapse: 'Alt+Shift+B'
+    overlayCollapse: 'Alt+Shift+B',
+    overlayPanel: 'Alt+Shift+H'
   }
 }
-const overlaySnap = (): Awaited<ReturnType<WindowApi['overlayReplyState']>> => ({
+const overlaySnap = (): Awaited<ReturnType<WindowApi['overlayStatus']>> => ({
   ...overlay,
   geometry: { ...overlay.geometry }
 })
@@ -179,13 +181,20 @@ const implemented = {
     sendMs: 95,
     restored: true
   }),
-  sendReply: async (draft) => ({
+  panelSuggestions: async () => ({
     ok: true,
-    draft,
-    translated: 'hold mid',
-    command: 'hold mid'
+    items: ['Heading back to lane', 'Careful, mid is missing', 'Nice play']
   }),
-  translateReply: async () => ({ ok: true, translated: 'hold mid, we can win', copied: true }),
+  copyText: async () => true,
+  chatHistory: async () => [
+    {
+      id: 'c1',
+      ts: Date.now() - 60000,
+      original: '中路不见了',
+      translated: 'mid is missing',
+      hero: 'muerta'
+    }
+  ],
   captureStatus: async () => ({
     running: true,
     source: 'gsi',
@@ -239,7 +248,11 @@ const implemented = {
   },
   sovitsSelectRef: async () => true,
   sovitsSeed: async () => true,
-  overlayReplyState: async () => overlaySnap(),
+  overlayStatus: async () => overlaySnap(),
+  overlayPanelToggle: async () => {
+    overlay.panelOpen = !overlay.panelOpen
+    return overlaySnap()
+  },
   onOverlayState: (callback) => {
     callback(overlaySnap())
     return () => {}

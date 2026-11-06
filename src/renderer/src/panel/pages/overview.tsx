@@ -16,7 +16,8 @@ import { CollapsibleGroup, Group, Row, StatusPill, Panel } from '../components/p
 const EMPTY_OVERLAY: OverlayStatus = {
   visible: false,
   textMode: 'translated',
-  replyOpen: false,
+  panelOpen: false,
+  quickPhrases: [],
   locked: true,
   collapsed: false,
   readAloud: false,

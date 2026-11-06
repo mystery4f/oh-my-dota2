@@ -8,9 +8,8 @@ import { loadSettings, saveSettings } from '../services/settings'
 /** 面板上这些「选过的值」必须活过一次重启；逐个写哨兵值再读回来。 */
 const PERSISTED_FIELDS = [
   'autoStartCapture',
-  'sendMode',
+  'quickPhrases',
   'replyTone',
-  'consoleKey',
   'overlayText',
   'overlayLocked',
   'overlayOpacity',
@@ -32,6 +31,16 @@ const PERSISTED_FIELDS = [
   'trainDataset',
 ] as const
 
+/** 数组字段不能比引用（loadSettings 每次深合并出新数组）：按 JSON 内容比。 */
+function jsonSame(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/** 写入值/读回值/磁盘值三方一致；数组键走 jsonSame，其余键严格相等就够。 */
+function sameValue(key: string, a: unknown, b: unknown): boolean {
+  return key === 'quickPhrases' ? jsonSame(a, b) : a === b
+}
+
 /** 每一项都换成一个和当前值不同的哨兵，避免「读回来的是原值」这种假通过。 */
 function sentinelFor(
   key: (typeof PERSISTED_FIELDS)[number],
@@ -40,12 +49,13 @@ function sentinelFor(
   switch (key) {
     case 'autoStartCapture':
       return !current.autoStartCapture as AppSettings[typeof key]
-    case 'sendMode':
-      return (current.sendMode === 'chat' ? 'inplace' : 'chat') as AppSettings[typeof key]
+    case 'quickPhrases':
+      // 数组也走哨兵：换成一块和当前不同的短语表，验证「数组真的落盘」。
+      return (current.quickPhrases.includes('Push mid')
+        ? ['Fall back', 'Nice play']
+        : ['Push mid', 'Push mid now']) as AppSettings[typeof key]
     case 'replyTone':
       return (current.replyTone === 'firm' ? 'polite' : 'firm') as AppSettings[typeof key]
-    case 'consoleKey':
-      return (current.consoleKey === '\\' ? '`' : '\\') as AppSettings[typeof key]
     case 'overlayText':
       return (current.overlayText === 'translated' ? 'both' : 'translated') as AppSettings[typeof key]
     case 'overlayOpacity':
@@ -139,7 +149,7 @@ export async function runSettingsPersistProbe(): Promise<void> {
     push(
       '全新安装读到默认值',
       fresh.autoStartCapture === DEFAULT_SETTINGS.autoStartCapture &&
-        fresh.sendMode === DEFAULT_SETTINGS.sendMode,
+        jsonSame(fresh.quickPhrases, DEFAULT_SETTINGS.quickPhrases),
       `autoStart=${fresh.autoStartCapture}`
     )
 
@@ -150,7 +160,9 @@ export async function runSettingsPersistProbe(): Promise<void> {
       const onDisk = readFileSettings()
       push(
         `${key} 写盘后可读回`,
-        written[key] === sentinel && reread[key] === sentinel && onDisk?.[key] === sentinel,
+        sameValue(key, written[key], sentinel) &&
+        sameValue(key, reread[key], sentinel) &&
+        sameValue(key, onDisk?.[key], sentinel),
         `${String(before[key])} → ${String(sentinel)} / disk=${String(onDisk?.[key])}`
       )
     }
@@ -207,10 +219,10 @@ export async function runSettingsPersistProbe(): Promise<void> {
     )
 
     // 用户的核心诉求：选过的值活过一次重启，而不是每次都回落到默认值。
-    saveSettings({ sendMode: 'chat' })
-    push('选过 chat 后默认值不再生效', loadSettings().sendMode === 'chat', loadSettings().sendMode)
-    saveSettings({ sendMode: 'inplace' })
-    push('选回 inplace 后同样保留', loadSettings().sendMode === 'inplace', loadSettings().sendMode)
+    // 快捷短语是数组字段：整块替换再读回，确认数组的「选过」也能活过重启。
+    saveSettings({ quickPhrases: ['Hello there', 'Ward bottom'] })
+    const keptPhrases = loadSettings().quickPhrases
+    push('选过的短语表不再回落默认值', keptPhrases[0] === 'Hello there', keptPhrases.join(' | '))
 
     // 残缺文件不能把整份配置读成 undefined：写一份空 JSON，缺的字段必须回落到默认值。
     writeFileSync(file, '{}', 'utf-8')
@@ -218,17 +230,17 @@ export async function runSettingsPersistProbe(): Promise<void> {
     push(
       '残缺文件按字段回落到默认值',
       fromEmpty.autoStartCapture === DEFAULT_SETTINGS.autoStartCapture &&
-        fromEmpty.sendMode === DEFAULT_SETTINGS.sendMode,
-      `sendMode=${fromEmpty.sendMode}`
+        jsonSame(fromEmpty.quickPhrases, DEFAULT_SETTINGS.quickPhrases),
+      `autoStart=${fromEmpty.autoStartCapture}`
     )
 
     // 未登记的键不该让读取炸掉（老版本文件多出来的字段）。
-    writeFileSync(file, JSON.stringify({ sendMode: 'chat', retiredKey: { nested: 1 } }), 'utf-8')
+    writeFileSync(file, JSON.stringify({ quickPhrases: ['sentinel-phrase'], retiredKey: { nested: 1 } }), 'utf-8')
     const withUnknown = loadSettings()
-    push('未知字段被忽略', withUnknown.sendMode === 'chat', `sendMode=${withUnknown.sendMode}`)
+    push('未知字段被忽略', withUnknown.quickPhrases[0] === 'sentinel-phrase', withUnknown.quickPhrases.join(' | '))
 
     // —— #42 漂移仲裁：key 表的三条裁决都走真实 loadSettings 路径（手写文件再读）。
-    // 写的文件不带 sendMode，'结束后原样还原' 那条在全新安装场景也能按默认值对上。
+    // 写的文件不带这些字段，'结束后原样还原' 那条在全新安装场景也能按默认值对上。
     // ① 手编文件改了活 key、表里躺着旧 key：活值赢，表被更新（否则切走再切回会复活旧 key）。
     writeFileSync(
       file,
@@ -352,8 +364,10 @@ export async function runSettingsPersistProbe(): Promise<void> {
     const expected = hadFile ? readFileSettings() : null
     checks.push({
       name: '结束后原样还原',
-      ok: hadFile ? restored.sendMode === expected?.sendMode : restored.sendMode === DEFAULT_SETTINGS.sendMode,
-      detail: `sendMode=${restored.sendMode}`
+      ok: hadFile
+        ? restored.autoStartCapture === expected?.autoStartCapture
+        : restored.autoStartCapture === DEFAULT_SETTINGS.autoStartCapture,
+      detail: `autoStart=${restored.autoStartCapture}`
     })
   }
 

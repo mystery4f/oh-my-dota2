@@ -183,7 +183,7 @@ export function runOverlayGeometryProbe(): void {
   const st = (overrides: Partial<OverlayState> = {}): OverlayState => ({
     locked: true,
     collapsed: false,
-    replyOpen: false,
+    panelOpen: false,
     expandedBounds: null,
     custom: null,
     textMode: 'translated',
@@ -209,8 +209,8 @@ export function runOverlayGeometryProbe(): void {
   push('不透明度夹回区间', loudest.state.opacity === 0.9 && loudest.persist.overlayOpacity === 0.9, String(loudest.state.opacity))
   const hintSame = reduceOverlay({ type: 'set-hint', hint: null }, st({ hint: null }))
   push('提示没变就不广播', !hintSame.changed, 'same hint')
-  const reply = reduceOverlay({ type: 'set-reply', open: true }, st({ locked: true }))
-  push('回复框压过穿透', reply.state.replyOpen && reply.clickThrough, 'reply open')
+  const panel = reduceOverlay({ type: 'set-panel', open: true }, st({ locked: true }))
+  push('呼出面板压过穿透', panel.state.panelOpen && panel.clickThrough, 'panel open')
   const origin = reduceOverlay(
     {
       type: 'move-collapsed-origin',

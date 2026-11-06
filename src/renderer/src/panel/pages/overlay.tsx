@@ -8,7 +8,8 @@ import { useSaveFlash, useSettings } from '../use-settings'
 const EMPTY_OVERLAY: OverlayStatus = {
   visible: false,
   textMode: 'translated',
-  replyOpen: false,
+  panelOpen: false,
+  quickPhrases: [],
   locked: true,
   collapsed: false,
   readAloud: false,
@@ -25,7 +26,7 @@ export function OverlayPage(): React.ReactElement {
   const save = useSaveFlash()
 
   useEffect(() => {
-    void window.api.overlayReplyState().then(setOverlay)
+    void window.api.overlayStatus().then(setOverlay)
     return window.api.onOverlayState(setOverlay)
   }, [])
 

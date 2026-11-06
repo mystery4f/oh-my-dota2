@@ -11,7 +11,6 @@ app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer')
 // 表现为「朗读开了但一点声音都没有」，日志里只有一条被吞掉的 NotAllowedError。
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 import { join } from 'node:path'
-import { runInputProbe } from './probes/input'
 import { captureHint } from '@shared/overlay-hint'
 import { warmEdge } from './services/voice/edge'
 import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-server'
@@ -195,7 +194,6 @@ app.whenReady().then(() => {
   if (process.argv.includes('--zhipu-live-probe')) void runZhipuLiveProbe()
   if (process.argv.includes('--train-probe')) void runTrainProbe()
   if (process.argv.includes('--inplace-guard-probe')) void runInPlaceGuardProbe()
-  if (process.argv.includes('--input-probe')) void runInputProbe()
 
   const startup = loadSettings()
   // 进对局自动开始处理聊天：GSI 报 GAME_IN_PROGRESS 时会再拉一次，这里覆盖「启动时已在局内」。
@@ -237,12 +235,13 @@ app.whenReady().then(() => {
       const overlay = getOverlayManager()
       if (overlay.status().visible) overlay.toggleCollapse()
     },
-    // 直发：inplace = 读游戏聊天框草稿 → 翻译 → 粘回并回车；其他通道 = 弹浮层输入框。
+    // 呼出面板：浮层临时变成可交互面板（历史/快捷短语/AI 建议），再按一次关闭。
+    overlayPanel: () => {
+      const overlay = getOverlayManager()
+      if (overlay.status().visible) overlay.togglePanel()
+    },
+    // 原地直发：读游戏聊天框草稿 → 翻译 → 粘回并回车。
     inplaceSend: () => {
-      if (loadSettings().sendMode !== 'inplace') {
-        getOverlayManager().openReply()
-        return
-      }
       // 热键这条路径没人接返回值：真出了没处理过的错也要说一句，不能静默地「按了没反应」。
       void translateInPlace().catch((err: unknown) => {
         getOverlayManager().flashHint('直发失败：' + (err instanceof Error ? err.message : String(err)))
