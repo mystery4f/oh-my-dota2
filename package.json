@@ -18,7 +18,8 @@
     "pack:win": "npm run guard && npm run build && electron-builder --win --x64 --publish never",
     "dev:stop": "powershell -NoProfile -Command \"Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force\"",
     "dev:restart": "npm run dev:stop && npm run dev",
-    "guard": "node scripts/guard-secrets.mjs"
+    "guard": "node scripts/guard-secrets.mjs",
+    "panel:preview": "vite -c scripts/panel-preview.mts"
   },
   "dependencies": {
     "@andresaya/edge-tts": "^1.9.1",

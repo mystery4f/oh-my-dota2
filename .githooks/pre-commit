@@ -1,0 +1,14 @@
+#!/bin/sh
+# Runs the repo's own checks before a commit lands. CI does exactly the same two commands,
+# so this is the same guarantee a step earlier — cheap, and it catches the mistake that a
+# wrong-file edit or a half-finished refactor leaves behind (typecheck red, lint red).
+#
+# Enable once per clone: git config core.hooksPath .githooks
+# Skip once: git commit --no-verify
+set -e
+
+echo "[pre-commit] npm run typecheck"
+npm run --silent typecheck
+
+echo "[pre-commit] npm run lint"
+npm run --silent lint
