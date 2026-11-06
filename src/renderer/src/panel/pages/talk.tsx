@@ -1,0 +1,444 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  OFFLINE_VOICES,
+  QWEN3_ASR_RELEASE_URL,
+  type OfflineStatus,
+  type VoiceAssetProgress,
+  type VoiceAssetsResult,
+  type VoiceChainSummary,
+  type VoiceOutEngine,
+  type VoiceOutTestResult,
+  type VoiceProbeResult
+} from '@shared/ipc'
+import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
+import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
+import { useSaveFlash, useSettings } from '../use-settings'
+import { SovitsPanel } from './voice-pack'
+
+type LogEntry = VoiceChainSummary & { at: number; corrected?: boolean }
+
+const selectClass = 'h-8 rounded-md border border-input bg-background px-2 text-sm'
+
+/**
+ * 对讲页：我说给别人听。麦克风 → 识别 → 翻译 → 声出，一条链一屏看完。
+ * 声出的嗓子与音色包也在这里：说话的声音只有一个来源，分两页放必然对不上。
+ */
+export function TalkPage(): React.ReactElement {
+  const { settings, update, loadError } = useSettings()
+  const save = useSaveFlash()
+
+  const [asrStatus, setAsrStatus] = useState<OfflineStatus | null>(null)
+  const [voiceProbe, setVoiceProbe] = useState<VoiceProbeResult | null>(null)
+  const [voiceAssets, setVoiceAssets] = useState<VoiceAssetsResult | null>(null)
+  const [voiceProgress, setVoiceProgress] = useState<VoiceAssetProgress | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [outBusy, setOutBusy] = useState(false)
+  const [outResult, setOutResult] = useState<VoiceOutTestResult | null>(null)
+  const [recording, setRecording] = useState(false)
+  const [log, setLog] = useState<LogEntry[]>([])
+  const [editingAt, setEditingAt] = useState<number | null>(null)
+  const [draft, setDraft] = useState('')
+  const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([])
+
+  // Qwen3 模型状态：进面板问一次，解压期间每秒刷——别让人对着假进度等。
+  useEffect(() => {
+    void window.api.asrStatus().then(setAsrStatus)
+  }, [])
+  useEffect(() => {
+    if (!asrStatus?.downloading) return
+    const timer = setInterval(() => void window.api.asrStatus().then(setAsrStatus), 1000)
+    return () => clearInterval(timer)
+  }, [asrStatus?.downloading])
+
+  useEffect(() => window.api.onVoiceChainResult((r) => setLog((l) => [{ ...r, at: Date.now() }, ...l].slice(0, 6))), [])
+  useEffect(() => window.api.onVoiceRecordState((s) => setRecording(s.recording)), [])
+  useEffect(() => window.api.onWhisperProgress(setVoiceProgress), [])
+  useEffect(() => {
+    // 输出设备只在面板里枚举：插拔后重新打开页面就能看到。
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((all) => setOutputs(all.filter((d) => d.kind === 'audiooutput')))
+      .catch(() => setOutputs([]))
+  }, [])
+
+  // 纠错回路：改对了就把差异词并进热词表，下一句录音就少错一次。
+  const hotwordsRef = useRef(settings?.asrHotwords ?? '')
+  hotwordsRef.current = settings?.asrHotwords ?? ''
+  const saveCorrection = useCallback(
+    (entry: LogEntry): void => {
+      const additions = extractHotwordDiff(entry.transcript, draft)
+      if (additions.length > 0) void update({ asrHotwords: mergeHotwords(hotwordsRef.current, additions) })
+      setLog((l) => l.map((item) => (item.at === entry.at ? { ...item, transcript: draft.trim(), corrected: true } : item)))
+      setEditingAt(null)
+      setDraft('')
+    },
+    [draft, update]
+  )
+
+  const downloadAsr = async (): Promise<void> => {
+    try {
+      await window.api.asrDownload()
+      setAsrStatus(await window.api.asrStatus())
+    } catch (err) {
+      setLog((l) => [
+        { transcript: '', translated: null, spoken: false, stage: null, error: `Qwen3 解压失败：${err instanceof Error ? err.message : String(err)}`, at: Date.now() },
+        ...l
+      ])
+    }
+  }
+
+  const probeWhisper = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      setVoiceProbe(await window.api.whisperProbe(settings?.whisperBinPath ?? ''))
+    } catch (e) {
+      setVoiceProbe({ ok: false, configured: false, error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const setupWhisper = async (): Promise<void> => {
+    setBusy(true)
+    setVoiceProgress(null)
+    try {
+      setVoiceAssets(await window.api.whisperSetup())
+    } catch (e) {
+      setVoiceAssets({ ok: false, binaryPath: null, modelPath: null, error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runVoiceOutTest = async (): Promise<void> => {
+    setOutBusy(true)
+    setOutResult(null)
+    try {
+      setOutResult(await window.api.voiceOutTest())
+    } catch (e) {
+      setOutResult({ ok: false, durationMs: null, hint: null, error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setOutBusy(false)
+    }
+  }
+
+  if (settings === null) {
+    return (
+      <Panel>
+        <div className="px-4 py-6 text-sm text-muted-foreground">
+          {loadError ? `读取配置失败：${loadError}` : '读取设置中…'}
+        </div>
+      </Panel>
+    )
+  }
+
+  const engine = settings.ttsOutEngine
+  const voiceValue =
+    engine === 'offline'
+      ? OFFLINE_VOICES.some((v) => v.id === settings.ttsOutVoice)
+        ? settings.ttsOutVoice
+        : OFFLINE_VOICES[0].id
+      : VOICE_OUT_VOICES.some((v) => v.id === settings.ttsOutVoice)
+        ? settings.ttsOutVoice
+        : DEFAULT_VOICE_OUT_VOICE
+
+  return (
+    <>
+      <Panel>
+        <Group label="怎么听">
+          <Row label="识别引擎" htmlFor="v2-asrEngine" hint="whisper 轻；Qwen3 抗噪、自带标点，也是唯一支持热词的">
+            <select
+              id="v2-asrEngine"
+              value={settings.asrEngine}
+              onChange={(e) => void save.wrap(update({ asrEngine: e.target.value as 'whisper' | 'qwen3' }))}
+              className={selectClass}
+            >
+              <option value="whisper">whisper（ggml-small）</option>
+              <option value="qwen3">Qwen3（模型 ~838 MB）</option>
+            </select>
+            <SaveFlash flash={save.flash} error={save.error} />
+          </Row>
+          <Row label="说话键" htmlFor="v2-speakKey" hint="游戏里按住才能发言的那个键：声出时由程序按住它把话送进频道">
+            <Input
+              id="v2-speakKey"
+              className="w-24 font-mono"
+              value={settings.ttsSpeakKey}
+              onChange={(e) => update({ ttsSpeakKey: e.target.value.toUpperCase() })}
+              placeholder="F5"
+            />
+          </Row>
+          {settings.asrEngine === 'qwen3' ? (
+            <>
+              <Row
+                label="热词"
+                htmlFor="v2-hotwords"
+                stacked
+                hint="填容易认错的词，下一句录音就生效；识别记录里点「纠错」，差异词会自动并进这里。whisper 不支持"
+              >
+                <Input
+                  id="v2-hotwords"
+                  value={settings.asrHotwords}
+                  onChange={(e) => update({ asrHotwords: e.target.value })}
+                  placeholder="肉山, 买活, 风暴之灵"
+                />
+              </Row>
+              <Row label="Qwen3 模型">
+                {!asrStatus ? (
+                  <StatusPill tone="idle">检查中…</StatusPill>
+                ) : asrStatus.ready ? (
+                  <StatusPill tone="ready">已就绪 {Math.round(asrStatus.bytes / 1024 / 1024)} MB</StatusPill>
+                ) : asrStatus.downloading ? (
+                  <StatusPill tone="warn">解压中 {Math.round(asrStatus.progress * 100)}%</StatusPill>
+                ) : (
+                  <>
+                    <StatusPill tone={asrStatus.error ? 'bad' : 'idle'}>
+                      {asrStatus.error ? '解压失败' : '模型未下载'}
+                    </StatusPill>
+                    <a
+                      className="text-xs text-muted-foreground underline hover:text-foreground"
+                      href={QWEN3_ASR_RELEASE_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      打开下载页
+                    </a>
+                    <Button size="sm" variant="outline" disabled={!asrStatus.available} onClick={() => void downloadAsr()}>
+                      解压模型
+                    </Button>
+                  </>
+                )}
+              </Row>
+              {!asrStatus?.available && asrStatus && !asrStatus.ready ? (
+                <Row label="运行环境" hint="装 Node 后重启应用；sherpa 的原生插件在 Electron 里跑不了，只能借外部 node 进程">
+                  <StatusPill tone="bad">本机没找到 node.exe</StatusPill>
+                </Row>
+              ) : null}
+            </>
+          ) : (
+            <Row label="whisper.cpp" stacked hint="本机可执行文件；资源（二进制 + 模型）由下面两个按钮准备">
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  className="w-80"
+                  value={settings.whisperBinPath}
+                  onChange={(e) => update({ whisperBinPath: e.target.value })}
+                  placeholder="C:\\tools\\whisper.cpp\\whisper-cli.exe"
+                />
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => void probeWhisper()}>
+                  探测
+                </Button>
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => void setupWhisper()}>
+                  下载资源
+                </Button>
+                {voiceProbe ? (
+                  <StatusPill tone={voiceProbe.ok ? 'ready' : 'bad'}>
+                    {voiceProbe.ok ? '正常' : voiceProbe.error ?? '异常'}
+                    {voiceProbe.detail ? ` · ${voiceProbe.detail}` : ''}
+                  </StatusPill>
+                ) : null}
+                {voiceAssets ? (
+                  <StatusPill tone={voiceAssets.ok ? 'ready' : 'bad'}>
+                    {voiceAssets.ok ? '资源就绪' : voiceAssets.error ?? '资源准备失败'}
+                  </StatusPill>
+                ) : null}
+                {voiceProgress ? (
+                  <StatusPill tone="warn">
+                    {voiceProgress.phase} {voiceProgress.pct}%
+                  </StatusPill>
+                ) : null}
+              </div>
+            </Row>
+          )}
+        </Group>
+
+        <Group label="说给谁听">
+          <Row
+            label="声出引擎"
+            htmlFor="v2-outEngine"
+            hint={
+              engine === 'sovits'
+                ? '音色由参考音频决定：权重随音色包自动切换'
+                : engine === 'offline'
+                  ? '离线模型是中文嗓，念英文会吞字——只用来验证链路'
+                  : '免费端点的英文神经嗓；合成失败这句静默跳过，绝不回退系统嗓子'
+            }
+          >
+            <select
+              id="v2-outEngine"
+              value={engine}
+              onChange={(e) => void save.wrap(update({ ttsOutEngine: e.target.value as VoiceOutEngine }))}
+              className={selectClass}
+            >
+              <option value="edge">Edge · 英文神经嗓</option>
+              <option value="offline">离线 · 本地模型</option>
+              <option value="sovits">GV · GPT-SoVITS 音色包</option>
+            </select>
+            <SaveFlash flash={save.flash} error={save.error} />
+          </Row>
+          <Row label="声出音色" htmlFor="v2-outVoice">
+            {engine === 'sovits' ? (
+              <StatusPill tone="idle">音色由参考音频决定</StatusPill>
+            ) : (
+              <select
+                id="v2-outVoice"
+                value={voiceValue}
+                onChange={(e) => void save.wrap(update({ ttsOutVoice: e.target.value }))}
+                className={selectClass}
+              >
+                {(engine === 'offline' ? OFFLINE_VOICES : VOICE_OUT_VOICES).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                    {'note' in v && v.note ? ` · ${v.note}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Row>
+          <Row label="输出设备" htmlFor="v2-outDevice" hint="选 VB-Cable 的「CABLE Input」；找不到已选设备时回退系统默认并提示">
+            <select
+              id="v2-outDevice"
+              value={settings.ttsOutputDevice}
+              onChange={(e) => void save.wrap(update({ ttsOutputDevice: e.target.value }))}
+              className={`${selectClass} max-w-72`}
+            >
+              <option value="">系统默认输出</option>
+              {outputs.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `输出设备 ${d.deviceId.slice(0, 8)}…`}
+                </option>
+              ))}
+              {settings.ttsOutputDevice && !outputs.some((d) => d.deviceId === settings.ttsOutputDevice) ? (
+                <option value={settings.ttsOutputDevice}>（已保存，当前未接入）</option>
+              ) : null}
+            </select>
+          </Row>
+        </Group>
+
+        <Group label="试一下">
+          <Row label="整条链" hint="点一下开始说话，再点一下结束：识别 → 翻译 → 声出全程照跑">
+            <Button
+              size="sm"
+              variant={recording ? 'secondary' : 'outline'}
+              onClick={() => void window.api.overlayVoiceToggle()}
+            >
+              {recording ? '● 录音中 · 再点结束' : '说一句试试'}
+            </Button>
+            <Button size="sm" variant="outline" disabled={outBusy} onClick={() => void runVoiceOutTest()}>
+              测试声出
+            </Button>
+            {outResult ? (
+              <StatusPill tone={outResult.ok ? 'ready' : 'bad'}>
+                {outResult.ok
+                  ? `通过${outResult.durationMs ? ` · ${(outResult.durationMs / 1000).toFixed(1)} 秒` : ''}`
+                  : outResult.error ?? '声出失败'}
+              </StatusPill>
+            ) : null}
+            {recording ? <span className="text-xs text-amber-400">● 正在录音，说完再点一次</span> : null}
+          </Row>
+          <Row label="测试模式" hint="只放音频、不按说话键：游戏没开也能试听">
+            <Button
+              size="sm"
+              variant={settings.voiceOutTestMode ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ voiceOutTestMode: !settings.voiceOutTestMode }))}
+            >
+              {settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
+            </Button>
+          </Row>
+          <Row label="只看识别" hint="转写完就停：不翻译、不声出——测口音、调模型用，测完记得关">
+            <Button
+              size="sm"
+              variant={settings.voiceTranscribeOnly ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ voiceTranscribeOnly: !settings.voiceTranscribeOnly }))}
+            >
+              {settings.voiceTranscribeOnly ? '开（不翻译不声出）' : '关'}
+            </Button>
+          </Row>
+        </Group>
+
+        {log.length > 0 ? (
+          <Group label="识别记录">
+            <ul className="space-y-1.5 px-4 py-3">
+              {log.map((entry) => (
+                <li key={entry.at} className="text-xs leading-5">
+                  <span className="mr-2 tabular-nums text-muted-foreground">
+                    {new Date(entry.at).toLocaleTimeString('zh-CN', { hour12: false })}
+                  </span>
+                  {entry.error ? (
+                    <span className="text-rose-400">🎤 {entry.error}</span>
+                  ) : editingAt === entry.at ? (
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                      <Input
+                        className="h-6 w-64 text-xs"
+                        value={draft}
+                        autoFocus
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveCorrection(entry)
+                          if (e.key === 'Escape') {
+                            setEditingAt(null)
+                            setDraft('')
+                          }
+                        }}
+                      />
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => saveCorrection(entry)}>
+                        存（差异并入热词）
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-xs"
+                        onClick={() => {
+                          setEditingAt(null)
+                          setDraft('')
+                        }}
+                      >
+                        取消
+                      </Button>
+                    </span>
+                  ) : (
+                    <span>
+                      {entry.corrected ? '✏️ ' : ''}🎤 原文「{entry.transcript || '（空）'}」→ 译文「
+                      {entry.translated ?? (entry.stage === 'skipped' ? '（只看识别）' : '（翻译失败）')}」
+                      {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}{' '}
+                      {entry.transcript ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-5 px-1.5 text-xs text-muted-foreground"
+                          title="改成对的，差异词自动并入热词表（仅 Qwen3）"
+                          onClick={() => {
+                            setEditingAt(entry.at)
+                            setDraft(entry.transcript)
+                          }}
+                        >
+                          纠错
+                        </Button>
+                      ) : null}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Group>
+        ) : null}
+      </Panel>
+
+      <CollapsibleGroup id="talk.packs" label="音色包与 GV 服务">
+        <SovitsPanel />
+      </CollapsibleGroup>
+
+      <CollapsibleGroup id="talk.train" label="训练">
+        <Row
+          label="训练窗口"
+          hint="GV 音色微调与 ASR 口音微调：录制、打包数据集、训练、换模都在里面"
+        >
+          <Button size="sm" variant="outline" onClick={() => window.api.trainOpen()}>
+            打开训练管理
+          </Button>
+        </Row>
+      </CollapsibleGroup>
+    </>
+  )
+}

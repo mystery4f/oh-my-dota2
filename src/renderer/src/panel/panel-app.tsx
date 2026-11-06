@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Sidebar } from './components/sidebar'
-import { Panel, Section } from './components/primitives'
+import { Section } from './components/primitives'
 import { openCollapseGroup } from './collapse'
 import { SearchPalette } from './components/search'
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections'
@@ -9,6 +9,9 @@ import { HotkeysPage } from './pages/hotkeys'
 import { AboutPage } from './pages/about'
 import { ReadPage } from './pages/read'
 import { OverlayPage } from './pages/overlay'
+import { TalkPage } from './pages/talk'
+import { ChatoutPage } from './pages/chatout'
+import { OverviewPage } from './pages/overview'
 
 
 /**
@@ -18,13 +21,6 @@ import { OverlayPage } from './pages/overlay'
  */
 
 /** 还没迁的页显示这句，免得看的人以为坏了。 */
-const MIGRATES_IN: Partial<Record<SectionId, string>> = {
-  overview: 'M4',
-  talk: 'M4',
-  chatout: 'M4',
-  read: 'M3',
-  overlay: 'M3'
-}
 
 export function PanelApp(): React.ReactElement {
   const [active, setActive] = React.useState<SectionId>(() => {
@@ -65,17 +61,17 @@ export function PanelApp(): React.ReactElement {
         return <ReadPage />
       case 'overlay':
         return <OverlayPage />
-      default:
-        return (
-          <Panel>
-            <div className="px-4 py-6 text-center">
-              <p className="text-sm text-muted-foreground">这一页在 {MIGRATES_IN[active]} 迁入</p>
-              <p className="mt-1 text-xs text-muted-foreground/70">
-                当前只是壳，设置项还没接过来，旧面板不受影响
-              </p>
-            </div>
-          </Panel>
-        )
+      case 'overview':
+        return <OverviewPage />
+      case 'talk':
+        return <TalkPage />
+      case 'chatout':
+        return <ChatoutPage />
+      default: {
+        // 加了分区却忘了接线：编译期就报，别让人对着空白页猜。
+        const unhandled: never = active
+        throw new Error(`未接线的分区：${String(unhandled)}`)
+      }
     }
   }
 
