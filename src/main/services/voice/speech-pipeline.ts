@@ -105,25 +105,34 @@ export interface EngineDriver {
   split: boolean
   /** 出什么格式：system 不出音频（null），其余二选一。 */
   mime: SpeechMime | null
-  /** 合成时机：入队就发车 / 轮到才合成 / 本机排队懒启动 / 不出音频。 */
-  scheduling: 'eager' | 'lazy' | 'sovits' | 'none'
-  /** 入队即发车的引擎（eager）：往返时间藏进投递顺位里。 */
+  /** 合成时机：入队就发车（edge，往返藏进投递顺位）/ 轮到才合成（本机推理）/ 不出音频。 */
+  scheduling: 'eager' | 'lazy' | 'none'
+  /** 入队即发车的引擎（eager）：所有段的合成请求在排队时就全部发出去。 */
   atEnqueue?: SynthCall
   /** 轮到才合成的引擎（lazy）：过期单子根本不浪费推理。 */
   atDelivery?: SynthCall
+  /** 段间预取：当前段合成一完成就发下一段的合成请求（长句听完不出空窗）；0 = 不预取。 */
+  synthAhead: number
+  /** 换代作废：新单一来，旧单未合成的段当场作废——本机推理按住显卡，过时的话不值得再推理。 */
+  genDropout?: boolean
+  /** 排队积压丢弃：新单入队时顶掉队里可丢的旧单（被顶掉的永不合成、当场结账）。 */
+  dropQueued?: boolean
+  /** 独占队列：本机推理引擎的全部单子（朗读/声出/试听混排）进同一条 FIFO 全局串行——
+   * 游戏吃着显卡时一句要 2–7 s，服务端堆一串排不完的活会把显卡按住几十秒，游戏掉帧。 */
+  exclusiveLane?: string
 }
-
 /**
  * 引擎表：一个引擎一行，差异只有这几项。加引擎＝表里加一行——
  * 若发现按引擎名写的 if 出现在两处以上，说明这个差异没进表。
- * sovits 的合成在 pumpSovits（预取 + 换代作废在同一处），表里只声明切段与排队方式。
+ * 投递循环只有一条（deliverSegments）：所有引擎的段都从它出，时序差异全在这张表里。
  */
 const ENGINE_DRIVERS: Record<SpeechEngine, EngineDriver> = {
-  system: { split: false, mime: null, scheduling: 'none' },
+  system: { split: false, mime: null, scheduling: 'none', synthAhead: 0 },
   edge: {
     split: true,
     mime: SPEECH_MIME.edge,
     scheduling: 'eager',
+    synthAhead: 0,
     atEnqueue: (adapters, text, voice, request) =>
       adapters.edge(text, voice, request.rate, request.pitch ?? 1, request.edgeVoices)
   },
@@ -131,9 +140,19 @@ const ENGINE_DRIVERS: Record<SpeechEngine, EngineDriver> = {
     split: false,
     mime: SPEECH_MIME.offline,
     scheduling: 'lazy',
+    synthAhead: 0,
     atDelivery: (adapters, text, voice, request) => adapters.offline(text, voice, request.rate)
   },
-  sovits: { split: true, mime: SPEECH_MIME.sovits, scheduling: 'sovits' }
+  sovits: {
+    split: true,
+    mime: SPEECH_MIME.sovits,
+    scheduling: 'lazy',
+    synthAhead: 1,
+    genDropout: true,
+    dropQueued: true,
+    exclusiveLane: 'sovits',
+    atDelivery: (adapters, text, _voice, request) => adapters.sovits(text, request.rate, resolveFor(request, text).lang)
+  }
 }
 
 /** 管线产出的一段：audio 为 null 时——system 是交给渲染层系统嗓子，其余引擎是合成失败（调用方跳过这句，绝不换系统嗓子）。 */
@@ -199,7 +218,6 @@ function logDrop(stage: string, text: string, extra: Record<string, unknown> = {
 /** 最新一次捕获的时间戳：投递闸对照它——合成这几秒里来了更新的消息，旧的就不投了。 */
 let latestCaptureAt = 0
 
-/** edge 的切段合成在入队时立刻全部发车——网络往返时间藏进投递顺位里；offline 到点现合成；system 无合成。 */
 /** 入队即发车：所有段的合成请求在排队时就全部发出去，往返时间藏进投递顺位里。 */
 function startEagerSynths(
   call: SynthCall,
@@ -210,28 +228,40 @@ function startEagerSynths(
   return segments.map((segment) => call(adapters, segment, resolveFor(request, segment).voice, request))
 }
 
-/** 投递一段产出：按序 await、投递闸拦截、失败留 null——调用方整句跳过，绝不换系统嗓子。 */
+/** 投递一段产出：所有引擎共用的唯一投递循环——按序 await、投递闸拦截、失败留 null
+ * （调用方整句跳过，绝不换系统嗓子）。时序差异（预取、换代作废）看引擎表，不看引擎名。 */
 async function deliverSegments(
   request: SpeechRequest,
   adapters: SpeechSynthAdapters,
   segments: string[],
   eager: Promise<Buffer | null>[] | null,
-  onSegment?: (segment: SpeechSegment) => void | Promise<void>
+  onSegment?: (segment: SpeechSegment) => void | Promise<void>,
+  jobGen?: number
 ): Promise<SpeechOutcome> {
+  const driver = ENGINE_DRIVERS[request.engine]
+  // 换代作废只属于本机推理引擎：新单一来，旧单剩下的段一分推理都不该再花。
+  const stale = (): boolean =>
+    driver.genDropout === true && isSpeakStale(request.dropStale === true, jobGen ?? 0, speechGen)
   let delivered = 0
   let dropped = 0
   let synthOkAny = false
+  // 段间预取：当前段在合成/播放时，下一段已经发车（同一时刻最多一段在推理，api_v2 不堆活）。
+  let inFlight: Promise<Buffer | null> | null = null
   for (let index = 0; index < segments.length; index += 1) {
     const text = segments[index]
-    // 投递时点再拦一道：宣布时只拦了宣布就过期的，这里拦合成期间变旧的。
+    // 投递闸：宣布时只拦了宣布就过期的，这里拦合成期间变旧的——过期的段连推理都不该有。
     if (isDeliverStale(request.dropStale === true, request.ts, latestCaptureAt)) {
       dropped += 1
       logDrop('deliver', text)
       continue
     }
+    if (stale()) {
+      dropped += segments.length - index
+      logDrop('stale', text)
+      break
+    }
     let audio: Buffer | null = null
     let audioMime: 'audio/mpeg' | 'audio/wav' | null = null
-    const driver = ENGINE_DRIVERS[request.engine]
     if (driver.scheduling === 'eager') {
       const pending = eager?.[index]
       if (pending) {
@@ -239,9 +269,20 @@ async function deliverSegments(
         audioMime = audio ? driver.mime : null
       }
     } else if (driver.atDelivery) {
-      // 到点现合成：本地推理在投递顺位上跑，过期单子根本不浪费推理。
-      audio = await driver.atDelivery(adapters, text, resolveFor(request, text).voice, request)
+      // 轮到才合成：上一段预取的正好接上，没有就现发车——过期单子根本不浪费推理。
+      audio = inFlight ? await inFlight : await driver.atDelivery(adapters, text, resolveFor(request, text).voice, request)
+      inFlight = null
       audioMime = audio ? driver.mime : null
+    }
+    // 合成期间来了新单：这条剩下的段不再投递（音频已花掉，认了）。
+    if (stale()) {
+      dropped += segments.length - index
+      logDrop('synthesized', text)
+      break
+    }
+    // 预取下一段：当前段合成一完成就发车，推理时间藏进投递顺位里，长句听完不出空窗。
+    if (driver.synthAhead > 0 && driver.atDelivery && index + 1 < segments.length) {
+      inFlight = driver.atDelivery(adapters, segments[index + 1], resolveFor(request, segments[index + 1]).voice, request)
     }
     if (audio) synthOkAny = true
     delivered += 1
@@ -255,18 +296,23 @@ async function deliverSegments(
 }
 
 /** 投递通道：同通道的单子按序投递，合成已在入队时发完、不被前一句的合成拖住。
- * 朗读每拍一批都进同一条通道保证跨批有序；声出/试听是单发调用，不传 lane 走内联投递。 */
+ * 朗读每拍一批都进同一条通道保证跨批有序；声出/试听是单发调用，不传 lane 走内联投递。
+ * 本机推理引擎（独占队列）也在这里排队——全局一条 FIFO，朗读/声出/试听混排也串行。 */
 interface LaneJob {
   request: SpeechRequest
   adapters: SpeechSynthAdapters
   segments: string[]
   eager: Promise<Buffer | null>[] | null
+  /** 换代编号：换代作废引擎的新单把旧单作废用，其他引擎恒 0（配合 genDropout 关掉检查）。 */
+  gen: number
   onSegment?: (segment: SpeechSegment) => void | Promise<void>
   resolve: (outcome: SpeechOutcome) => void
 }
 
 const lanes = new Map<string, LaneJob[]>()
 const lanePumping = new Set<string>()
+/** 换代计数器：独占队列引擎的每个新单都往前走一格，旧单对不上号就作废。 */
+let speechGen = 0
 
 function enqueueLane(
   key: string,
@@ -278,8 +324,21 @@ function enqueueLane(
     const segments = planSegments(request)
     const drive = ENGINE_DRIVERS[request.engine]
     const eager = drive.atEnqueue ? startEagerSynths(drive.atEnqueue, request, adapters, segments) : null
+    const job: LaneJob = { request, adapters, segments, eager, gen: drive.genDropout ? speechGen + 1 : 0, onSegment, resolve }
     const lane = lanes.get(key) ?? []
-    lanes.set(key, [...lane, { request, adapters, segments, eager, onSegment, resolve }])
+    // 排队积压丢弃（本机推理）：新单顶掉队里可丢的旧单，被顶掉的永不合成、当场结账，
+    // 调用方不等一场空；声出的整句回复不许丢（dropStale 关着的单子天然豁免）。
+    if (drive.dropQueued) {
+      const plan = applyBacklogPolicy(lane, request.dropStale === true, job, (queued) => queued.request.dropStale === true)
+      lanes.set(key, plan.queue)
+      if (plan.dropped.length > 0) {
+        for (const dropped of plan.dropped) dropped.resolve({ delivered: 0, dropped: dropped.segments.length, synthFailed: false })
+        logDrop('queued', request.text, { dropped: plan.dropped.length })
+      }
+      speechGen += 1
+    } else {
+      lanes.set(key, [...lane, job])
+    }
     void pumpLane(key)
   })
 }
@@ -289,7 +348,7 @@ async function pumpLane(key: string): Promise<void> {
   lanePumping.add(key)
   try {
     for (let job = lanes.get(key)?.shift(); job; job = lanes.get(key)?.shift()) {
-      job.resolve(await deliverSegments(job.request, job.adapters, job.segments, job.eager, job.onSegment))
+      job.resolve(await deliverSegments(job.request, job.adapters, job.segments, job.eager, job.onSegment, job.gen))
     }
   } finally {
     lanePumping.delete(key)
@@ -305,8 +364,9 @@ export async function speakPipeline(
   // 截止线只前进不后退：新的一拍把更旧的候选全部作废。
   if (request.cutoff !== undefined && request.cutoff > latestCaptureAt) latestCaptureAt = request.cutoff
   const driver = ENGINE_DRIVERS[request.engine]
-  if (driver.scheduling === 'sovits') return enqueueSovits(request, adapters, onSegment)
-  if (request.lane) return enqueueLane(request.lane, request, adapters, onSegment)
+  // 本机推理引擎独占一条全局队列（朗读/声出/试听混排也串行）；其余引擎按请求指定的通道。
+  const lane = driver.exclusiveLane ?? request.lane
+  if (lane) return enqueueLane(lane, request, adapters, onSegment)
   const segments = planSegments(request)
   return deliverSegments(
     request,
@@ -317,98 +377,3 @@ export async function speakPipeline(
   )
 }
 
-/**
- * GPT-SoVITS 专用朗读队列。与 Edge 不同，sovits 在本机显卡上推理（游戏吃着显卡时一句
- * 2–7 s），「进队列就把所有段的合成请求都发出去」会让 api_v2 服务端堆一串排不完的活，
- * 显卡被按住几十秒——游戏掉帧，读到的还是过时消息。这里改成：
- * - 合成懒启动：轮到谁才合成谁，同一时刻服务端最多积一段（段间预取保连续）；
- * - 「丢弃积压」开启时，新消息一来就顶掉队列里可丢的旧单，被顶掉的永不合成；
- *   消息放到一半来了新的，剩下的段也当场作废。声出的整句回复不许丢（isDroppable 豁免）。
- */
-interface SovitsLaneJob {
-  request: SpeechRequest
-  adapters: SpeechSynthAdapters
-  segments: string[]
-  gen: number
-  drop: boolean
-  onSegment?: (segment: SpeechSegment) => void | Promise<void>
-  resolve: (outcome: SpeechOutcome) => void
-}
-
-const sovitsLane: SovitsLaneJob[] = []
-let sovitsGen = 0
-let sovitsPumping = false
-
-function enqueueSovits(
-  request: SpeechRequest,
-  adapters: SpeechSynthAdapters,
-  onSegment?: (segment: SpeechSegment) => void | Promise<void>
-): Promise<SpeechOutcome> {
-  return new Promise((resolve) => {
-    const segments = planSegments(request)
-    const plan = applyBacklogPolicy(
-      sovitsLane,
-      request.dropStale === true,
-      { request, adapters, segments, gen: sovitsGen + 1, drop: request.dropStale === true, onSegment, resolve },
-      (job) => job.drop
-    )
-    sovitsGen += 1
-    sovitsLane.length = 0
-    sovitsLane.push(...plan.queue)
-    if (plan.dropped.length > 0) {
-      // 被顶掉的单子永不合成：当场按「全部作废」结账，调用方不等一场空。
-      for (const job of plan.dropped) job.resolve({ delivered: 0, dropped: job.segments.length, synthFailed: false })
-      logDrop('queued', request.text, { dropped: plan.dropped.length })
-    }
-    void pumpSovits()
-  })
-}
-
-async function pumpSovits(): Promise<void> {
-  if (sovitsPumping) return
-  sovitsPumping = true
-  try {
-    while (sovitsLane.length > 0) {
-      const job = sovitsLane.shift()!
-      const stale = (): boolean => isSpeakStale(job.drop, job.gen, sovitsGen)
-      let delivered = 0
-      let dropped = 0
-      let synthOkAny = false
-      // 预取下一段：当前段在播放时下一段已在合成，长句听完不出空窗。
-      let prefetch: Promise<Buffer | null> | null = null
-      for (let index = 0; index < job.segments.length; index += 1) {
-        const text = job.segments[index]
-        if (stale()) {
-          logDrop('stale', text)
-          dropped += job.segments.length - index
-          break
-        }
-        const resolved = resolveFor(job.request, text)
-        const audio = prefetch ? await prefetch : await job.adapters.sovits(text, job.request.rate, resolved.lang)
-        prefetch = null
-        // 合成期间来了新消息：这条剩下的段不再投递（音频已花掉，认了）。
-        if (stale()) {
-          logDrop('synthesized', text)
-          dropped += job.segments.length - index
-          break
-        }
-        prefetch =
-          index + 1 < job.segments.length
-            ? job.adapters.sovits(job.segments[index + 1], job.request.rate, resolveFor(job.request, job.segments[index + 1]).lang)
-            : null
-        // 投递时点再拦一道：宣布时只拦了宣布就过期的，这里拦合成期间变旧的。
-        if (isDeliverStale(job.drop, job.request.ts, latestCaptureAt)) {
-          logDrop('deliver', text)
-          dropped += job.segments.length - index
-          break
-        }
-        if (audio) synthOkAny = true
-        delivered += 1
-        if (job.onSegment) await job.onSegment({ index, text, audio, audioMime: audio ? 'audio/wav' : null })
-      }
-      job.resolve({ delivered, dropped, synthFailed: job.segments.length > 0 && !synthOkAny && dropped === 0 })
-    }
-  } finally {
-    sovitsPumping = false
-  }
-}
