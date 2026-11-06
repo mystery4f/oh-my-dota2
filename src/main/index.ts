@@ -135,14 +135,11 @@ function createDashboard(): void {
   dashboard.once('ready-to-show', () => dashboard?.show())
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    // PROTOTYPE (throwaway): OMD2_PROTO=a|b|c opens the panel-redesign prototype
-    // variant instead of the real panel (`npm run dev:proto`). Delete when the
-    // redesign lands.
-    const proto = process.env.OMD2_PROTO
-    const url = proto
-      ? `${process.env.ELECTRON_RENDERER_URL}?variant=${proto}`
-      : process.env.ELECTRON_RENDERER_URL
-    void dashboard.loadURL(url)
+    // Dev-only: OMD2_QUERY appends a query string to the renderer URL so a view
+    // can be opened directly (`npm run dev:panel` → panel=v2, `dev:proto` →
+    // variant=b). Nothing sets it in a packaged build.
+    const query = process.env.OMD2_QUERY
+    void dashboard.loadURL(query ? `${process.env.ELECTRON_RENDERER_URL}?${query}` : process.env.ELECTRON_RENDERER_URL)
   } else {
     void dashboard.loadFile(join(__dirname, '../renderer/index.html'))
   }
