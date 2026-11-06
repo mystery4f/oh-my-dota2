@@ -446,18 +446,23 @@ function pumpSpeech(): void {
   utter.onerror = done
   window.speechSynthesis.speak(utter)
 }
-
-window.api.onVoiceSpeak((payload) => {
-  // 新消息一到就清掉队列里更旧的待念：宁可不念旧的，也别让新消息排在旧消息后面——
-  // 「收到第二条还在念第一条」就是这么听出来的。ts 相等（同一条消息的后续段）不清。
-  if (payload.ts !== undefined) {
-    for (let index = speakQueue.length - 1; index >= 0; index -= 1) {
-      const item = speakQueue[index]
-      if (item.ts !== undefined && item.ts < payload.ts) speakQueue.splice(index, 1)
+/** 新朗读单入场时该留谁：ts 更旧的整单让位（宁可不念旧的，也别让新消息排在旧消息后面——
+ * 「收到第二条还在念第一条」就是这么听出来的），ts 相等（同一条消息的后续段）不清；
+ * 容量满了丢最旧。system 引擎的队列只能住在渲染进程（speechSynthesis 只在这边有），
+ * 所以这份准入策略是主进程引擎表之外的唯一一份，不是漏改。 */
+function admitSpeak(queue: SpeakPayload[], incoming: SpeakPayload): void {
+  if (incoming.ts !== undefined) {
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      const item = queue[index]
+      if (item.ts !== undefined && item.ts < incoming.ts) queue.splice(index, 1)
     }
   }
-  while (speakQueue.length >= SPEAK_QUEUE_MAX) speakQueue.shift()
-  speakQueue.push(payload)
+  while (queue.length >= SPEAK_QUEUE_MAX) queue.shift()
+  queue.push(incoming)
+}
+
+window.api.onVoiceSpeak((payload) => {
+  admitSpeak(speakQueue, payload)
   pumpSpeech()
 })
 
