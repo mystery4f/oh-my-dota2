@@ -7,8 +7,6 @@
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
-    "dev:panel": "node scripts/dev-query.mjs panel=v2",
-    "dev:proto": "node scripts/dev-query.mjs variant=a",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

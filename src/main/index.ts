@@ -135,9 +135,9 @@ function createDashboard(): void {
   dashboard.once('ready-to-show', () => dashboard?.show())
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    // Dev-only: OMD2_QUERY appends a query string to the renderer URL so a view
-    // can be opened directly (`npm run dev:panel` → panel=v2, `dev:proto` →
-    // variant=b). Nothing sets it in a packaged build.
+    // Dev-only: OMD2_QUERY appends a query string to the renderer URL so a panel
+    // section can be opened directly (`set OMD2_QUERY=s=talk` before `npm run dev`).
+    // Nothing sets it in a packaged build.
     const query = process.env.OMD2_QUERY
     void dashboard.loadURL(query ? `${process.env.ELECTRON_RENDERER_URL}?${query}` : process.env.ELECTRON_RENDERER_URL)
   } else {

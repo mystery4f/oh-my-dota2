@@ -154,6 +154,8 @@ flowchart LR
 - 搜索：顶栏常驻，`Ctrl+K` 聚焦。匹配行标题与分区名，命中项就地把所在组展开并高亮，清空后恢复原折叠状态。
 - 折叠：每组折叠状态记在 localStorage，不写进 `settings.json`（属于视图状态，不该跨设备同步）。
 - 保存：全部即时保存。改动后在该行右侧闪一个「已保存」1.2 秒，失败则原地显示红色原因。删除「保存」按钮。
+  唯一例外是「热键」页的「保存热键表」：两个动作撞同一个键必须整表校验，逐行落库会让中间状态注册到一个已被占用的
+  键上，所以那里保留一次显式保存（实现时确认过，`src/renderer/src/panel/pages/hotkeys.tsx:163`）。
 - 空态：每个折叠组打开后若依赖未就绪（如未装音色包），就地给一句话 + 一个行动按钮，不弹窗。
 
 ## 保存与反馈
@@ -170,10 +172,15 @@ flowchart LR
 | M4 | 迁「对讲」「直发」「总览」 | 语音链路与声出设备可选可试听 |
 | M5 | 删旧 App.tsx、删原型目录 | 仓库里只剩一套实现 |
 
+M1–M5 已落地（提交 `ab2eb85` … `f1e228f` 之后的 `M4`/`M5` 两次提交）。删掉的东西：`App.tsx`、
+`prototype/`、`components/hotkey-card.tsx`、`ui/{badge,card,label,tabs,textarea}`（除 `App.tsx` 无别处引用）、
+`scripts/dev-query.mjs` 与 `dev:panel`/`dev:proto` 两个脚本（面板只有一套，deep link 改由 `OMD2_QUERY` 承担）。
+eslint 的常驻警告从 2 个降到 1 个：`badge.tsx` 删了，只剩 `button.tsx:41`。
+
 ## 验收标准
 
 - 每个设置项有且只有一个归属分区，全仓库搜不到重复渲染
-- `npx tsc --noEmit` 两套配置 0 错；`npx eslint .` 仍只有既有的 2 个 `react-refresh` 警告
+- `npx tsc --noEmit` 两套配置 0 错；`npx eslint .` 只剩 1 个 `react-refresh` 警告（`button.tsx:41`）
 - 首屏（总览）不滚动即可看到四个链路的当前状态
 - 改任意一项后 1 秒内能在浮层或状态条上看到效果，无需手动保存
 - 面板文案里不再出现写死的热键名或导航路径

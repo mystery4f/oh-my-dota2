@@ -15,13 +15,9 @@ import { OverviewPage } from './pages/overview'
 
 
 /**
- * 面板 v2 的壳：标题栏 + 侧边栏 + 内容区。
- * 迁移期间每页逐个从旧 App 迁入（M2 引擎/热键/关于，M3 浮层/朗读，M4 对讲/直发/总览）；
- * 默认入口仍是旧 App，加 `?panel=v2` 才用这套，随时能对照。
+ * 面板的壳：标题栏 + 侧边栏 + 内容区。八个分区之间的导航只有侧边栏，
+ * 不再有 tab；`?s=<分区>` 才能直达某一页（开发时用 OMD2_QUERY 注入）。
  */
-
-/** 还没迁的页显示这句，免得看的人以为坏了。 */
-
 export function PanelApp(): React.ReactElement {
   const [active, setActive] = React.useState<SectionId>(() => {
     const fromUrl = new URLSearchParams(window.location.search).get('s')

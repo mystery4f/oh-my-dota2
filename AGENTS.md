@@ -29,7 +29,7 @@ constant into a compile error too.
   old window is still alive, then check the process count before starting a new one
 - `npm run build` — electron-vite build into `out/`
 - `npx tsc --noEmit -p tsconfig.node.json --composite false` and the same with `tsconfig.web.json`
-- `npx eslint .` — 0 errors expected; exactly 2 permanent `react-refresh` warnings (badge.tsx:31, button.tsx:41)
+- `npx eslint .` — 0 errors expected; exactly 1 permanent `react-refresh` warning (button.tsx:41)
 - Probes (run `taskkill /F /IM electron.exe` first — a leftover process holds the single-instance lock
   and the probe exits silently):
   `npx electron out/main/index.js --<probe>`
@@ -59,6 +59,37 @@ constant into a compile error too.
   - `--train-probe` the pure training decision seam (`src/shared/train.ts`): `canStartTrain` mutex (preparing/running rejected, stopping rejected until drained, null/idle/done/failed/stopped free), `shouldPauseInference`/`shouldResumeInference` complementary per state (wired since T2: the train manager pauses the app-managed GV server at start via `pauseSovitsForTraining` and resumes at finish via `ensureSovitsServer`, external instances untouched; `TrainTaskInfo.inference` + `inferenceHoldLabel` carry the window's mutual-exclusion status), `deriveTrainPlan` (demo runs an inline node script; gv-gpt/gv-sovits run real training once the injected `gvResolved` carries the engine home/python/config file — s2 uses `--config`, s1 uses `--config_file`, both argv shapes pinned by the probe; asr-ft is real and needs the injected attachment, see below; unknown kind → demo), the GV config-build seam (T3, same file: `GV_VERSION_INFO` six-version table copied from upstream `config.py` with per-version weight roots, `buildS2TrainConfigData`/`buildS1TrainConfigData` patching the upstream `s2.json`/`s1longer*.yaml` templates exactly like webui's `open1Ba`/`open1Bb` (null when the template lacks key nodes), `judgeGvDataset` four-artifact readiness (phoneme table/semantic table/4-cnhubert/5-wav32k)), and `parseTrainProgress` priority (epoch a/b percent → tqdm percent bar → step a/b → bare percent → null for plain log lines), the #14 dataset-packing seam (`buildFtDatasetEntries` recorded lines-only, free groups skipped; `splitTrainEval` tail-2 holdout that keeps everything in train for tiny sets; `buildFtJsonlLine` emitting the `language Chinese<asr_text>` prefix), and the T4 progress seam (`buildFtGroupProgress` per-group done/total/durationMs/missing line numbers — free groups count T01.. until the chain breaks — feeding the window's always-on overview strip), the recording-policy seam (T4a: `advanceRecording` step machine (speech-seen → quiet-arm → quiet-stop vs maxMs cap, quiet wins on collision), `shouldKeepTake` (short/silent-take discards, duration judged first), `takeLineId`/`recordingKey` (Gxx-Lnn / Gxx-Tnn keys, same shape as the main-process `safeKeys` whitelist)), and the T5 fine-tune chain seams: `deriveTrainPlan` asr-ft now requires the injected `asrFt` attachment ("环境没就绪" when missing), `pickLastCheckpointName` (highest checkpoint-N), `asrFtSwapSteps` (rm-bak → bak-active → promote-next; empty without an export dir), `asrFtRollbackSteps` (rm-active → restore-bak; empty without a backup), `deriveAsrFtEnvGaps` naming each missing env item, plus the installer seams in `asr-ft-install.ts`: `planAsrFtInstallSteps` (five-stage fill-what's-missing plan, empty when the env is complete) and `pickLatestUvAsset` (version-number comparison, not string sort — 0.10.2 must beat 0.9.5). Pure only — spawning the demo task and stopping it mid-run is manual acceptance.
   - `--input-probe` draft → translate → command text (sends no keys)
   - `--inplace-guard-probe` the pure seam behind in-place send (`src/shared/inplace.ts`), zero game and zero input bridge: `pickInPlaceDraft` (fresh text wins, `NOCONTENT` + an orphaned draft from an interrupted run continues that sentence instead of reporting an empty chat box, other codes never borrow the orphan, blank text is `empty`, missing reason still says something human), `decideInPlaceDelivery` (cancelled abandons before anything else and never touches the box, empty translation restores the Chinese, `INPLACE_STALE_MS` = 20 s turns a late arrival into a restore with the seconds named, a hair under the threshold still sends, normal path sends the line verbatim), and `inplaceFailureLine` (prefix 「直发失败：」, says 「原文已放回聊天框」 only when it really was, clips a 200-char reason to under 80 chars). Pure only — the bridge's real behaviour (`enter:false` paste-without-Enter, `Ctrl+A`+`Delete` clearing the box during grab) and the timing gates are manual acceptance, listed as M8b in `docs/ACCEPTANCE.md`.
+
+## Panel
+
+The whole dashboard is `src/renderer/src/panel/`, and it is the only dashboard: the old
+`App.tsx` (2234 lines, 6 tabs) is gone, along with `components/hotkey-card.tsx` and the
+`ui/{badge,card,label,tabs,textarea}` pieces nothing else imported.
+
+- `panel-app.tsx` — the shell: 38 px drag title bar + `Sidebar` + one scrolling `<main>`.
+  Navigation is the sidebar alone (no tabs); `?s=<section>` deep-links a section, and
+  `OMD2_QUERY=s=talk` injects that query in dev.
+- `sections.ts` — the eight sections and their two sidebar groups. A page that exists in
+  the switch only through `default: { const unhandled: never = active }` means a forgotten
+  case is a compile error, not a blank screen.
+- `pages/*.tsx` — one file per section. A page returns `Panel` / `Group` / `Row` only; the
+  shell renders the `<Section>` heading, so no page repeats its own title.
+- `components/primitives.tsx` — the entire typography and spacing scale lives here
+  (`Panel` 720 px column, `Group` as a `border-t` list, `Row` at `min-h-11`, `StatusPill`,
+  `CollapsibleGroup`). Change a spacing decision here, not per page.
+- `components/search.tsx` + `search-index.ts` — Ctrl+K. A hit navigates to its section and
+  force-opens the collapsed group it lives in (`openCollapseGroup`), otherwise searching a
+  hidden row looks broken.
+- `collapse.ts` — group open/closed in `localStorage`, read through `useSyncExternalStore`;
+  `defaultOpen` seeds the first visit and an explicit toggle wins afterwards.
+
+Rules the layout encodes, not preferences: every setting has exactly one home; saving is
+immediate, so there is no 保存 button anywhere (the flash says 已保存); a `StatusPill` is
+only for state that can change (a static attribute such as 默认 is plain text); colour is
+spent only on three things — selection, primary action, warning — so a page that looks
+grey is the intended look. `docs/DESIGN-panel-v2.md` is the signed record; the two
+deliberate deviations are written down there (no extra token layer — the HSL variables in
+`styles.css` already are one — and `rounded-lg` 8 px instead of the documented 10 px).
 
 ## Hotkeys
 
