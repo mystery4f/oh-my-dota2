@@ -4,6 +4,7 @@ import {
   initialRecordingState,
   RECORDING_LIMITS,
   recordingKey,
+  parseRecordingKeyParts,
   shouldKeepTake,
   takeLineId,
   buildFtDatasetEntries,
@@ -206,8 +207,18 @@ export function runTrainProbe(): void {
   )
   const sampleKey = recordingKey('G01', 'lines', 3)
   push(
-    '录音键 Gxx-Lnn / Gxx-Tnn，过 safeKeys 白名单正则',
-    sampleKey === 'G01-L03' && /^G\d{2}-(?:L|T)\d{2}$/.test(sampleKey) && /^G\d{2}-(?:L|T)\d{2}$/.test(recordingKey('G01', 'free', 1)),
+    '录音键 Gxx-Lnn / Gxx-Tnn，写盘白名单放行合法、拦下穿越',
+    sampleKey === 'G01-L03' &&
+      /^G\d{2}-(?:L|T)\d{2}$/.test(sampleKey) &&
+      /^G\d{2}-(?:L|T)\d{2}$/.test(recordingKey('G01', 'free', 1)) &&
+      (() => {
+        try {
+          parseRecordingKeyParts('../evil', 'L01/../x')
+          return false
+        } catch {
+          return parseRecordingKeyParts('G15', 'T03').group === 'G15'
+        }
+      })(),
     sampleKey,
   )
   // —— 推理互斥状态文案（T2 训练窗口的「为什么暂时没声」）——

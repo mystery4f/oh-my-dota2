@@ -491,11 +491,22 @@ export function takeLineId(mode: 'lines' | 'free', no: number): string {
   return `${mode === 'free' ? 'T' : 'L'}${String(no).padStart(2, '0')}`
 }
 
-/** 完整录音键（Gxx-Lnn / Gxx-Tnn）：渲染端查表用；主进程 safeKeys 独立校验同一形状。 */
+/** 录音键的合法形状：组 Gxx、句 Lxx（逐句）或 Txx（自由说）。格式化与主进程写盘白名单共用这一条知识。 */
+export const RECORDING_GROUP_SHAPE = /^G\d{2}$/
+export const RECORDING_LINE_SHAPE = /^(?:L|T)\d{2}$/
+
+/** 校验并归一（组号，句号）字符串对，非法输入抛错；主进程写盘靠它防路径穿越。 */
+export function parseRecordingKeyParts(group: string, line: string): { group: string; line: string } {
+  const g = RECORDING_GROUP_SHAPE.exec(group)
+  const l = RECORDING_LINE_SHAPE.exec(line)
+  if (!g || !l) throw new Error(`非法的组/句号：${group}-${line}`)
+  return { group: g[0], line: l[0] }
+}
+
+/** 完整录音键（Gxx-Lnn / Gxx-Tnn）：渲染端查表用；主进程写盘前经 parseRecordingKeyParts 白名单校验。 */
 export function recordingKey(groupId: string, mode: 'lines' | 'free', no: number): string {
   return `${groupId}-${takeLineId(mode, no)}`
 }
-
 // —— GV（GPT-SoVITS）微调（T3）：版本映射、备料验收与训练配置拼装的纯缝 ——
 
 export type GvVersion = 'v1' | 'v2' | 'v3' | 'v4' | 'v2Pro' | 'v2ProPlus'

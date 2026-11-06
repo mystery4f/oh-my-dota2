@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { FtRecInfo, FtScriptGroup, FtScriptState } from '@shared/ipc'
+import { parseRecordingKeyParts, RECORDING_GROUP_SHAPE } from '@shared/train'
 
 /**
  * ASR 微调录音（T4a）：内置读稿解析 + 录音存取。
@@ -60,16 +61,8 @@ function recDir(): string {
   return join(app.getPath('userData'), 'asr-ft')
 }
 
-/** 组号/句号白名单，防路径穿越：组 G01，句 L03（逐句）或 T01（自由说段）。 */
-function safeKeys(group: string, line: string): { group: string; line: string } {
-  const g = /^G\d{2}$/.exec(group)
-  const l = /^(?:L|T)\d{2}$/.exec(line)
-  if (!g || !l) throw new Error(`非法的组/句号：${group}-${line}`)
-  return { group: g[0], line: l[0] }
-}
-
 function recPath(group: string, line: string): string {
-  const keys = safeKeys(group, line)
+  const keys = parseRecordingKeyParts(group, line)
   return join(recDir(), keys.group, `${keys.group}-${keys.line}.wav`)
 }
 
@@ -82,7 +75,7 @@ export async function ftRecList(): Promise<FtRecInfo[]> {
   if (!existsSync(root)) return []
   const infos: FtRecInfo[] = []
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^G\d{2}$/.test(entry.name)) continue
+    if (!entry.isDirectory() || !RECORDING_GROUP_SHAPE.test(entry.name)) continue
     for (const file of await readdir(join(root, entry.name))) {
       if (!file.endsWith('.wav')) continue
       const full = join(root, entry.name, file)
@@ -94,7 +87,7 @@ export async function ftRecList(): Promise<FtRecInfo[]> {
 }
 
 export async function ftRecSave(group: string, line: string, data: Uint8Array): Promise<FtRecInfo> {
-  const keys = safeKeys(group, line)
+  const keys = parseRecordingKeyParts(group, line)
   const dir = join(recDir(), keys.group)
   await mkdir(dir, { recursive: true })
   const target = join(dir, `${keys.group}-${keys.line}.wav`)
