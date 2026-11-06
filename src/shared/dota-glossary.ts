@@ -1,10 +1,14 @@
 /**
  * 内置 Dota 术语双向对照表：黑话（萨尔）、物品（黑皇杖）、行话（肉山）各归一类。
  * 只收高置信度的映射 —— 一条错词表比没有词表更糟（glm 把 bkb 译成 bkg 那次，
- * 就是模型不知道 bkb 必须原样保留）。词条双向可用：zh-en 拿 CN→EN，en-zh 拿 EN→CN。
+ * 就是模型不知道 bkb 必须原样保留）。
+ *
+ * 这份数据现在只喂代码侧：keepVerbatim → 保真守卫的 KEEP_VERBATIM_TOKENS，
+ * 全表匹配（glossaryFor）由探针验证边界规则。提示词不再灌全表——6-8 条示例
+ * 定风格（见 providers 的 SYSTEM_PROMPTS），术语本身模型认识。
  *
  * keepVerbatim: EN 短缩写两种方向都必须原样保留（bkb / tp / rosh / gg / od…）。
- * 中英混排的聊天行（bkb还差200块钱）靠两侧同时匹配命中，方向参数只为提示词排版保留。
+ * 中英混排的聊天行（bkb还差200块钱）靠两侧同时匹配命中。
  */
 import type { TranslateDirection } from './ipc'
 
@@ -133,9 +137,9 @@ const PREPARED: PreparedEntry[] = GLOSSARY.map(prepare)
 
 /**
  * 这行聊天里出现了哪些词条：中文侧按子串、英文侧按整词边界，两侧同时匹配
- * （bkb还差200块钱 这种混排行必须命中 bkb，提示词才能告诉模型保留它）。
- * direction 只保留在签名里（提示词排版各方向自选行列）；匹配本身不分方向。
- * 上限 12 条，防长行把提示词撑爆。
+ * （bkb还差200块钱 这种混排行必须命中 bkb）。探针用例覆盖边界规则；
+ * direction 只保留在签名里，匹配本身不分方向。
+ * 上限 12 条，防长行把候选撑爆。
  */
 export function glossaryFor(text: string, direction: TranslateDirection, cap = 12): GlossaryEntry[] {
   void direction
@@ -148,7 +152,7 @@ export function glossaryFor(text: string, direction: TranslateDirection, cap = 1
   return out
 }
 
-/** providers 的 JARGON_KEEP 散文的词表镜像：提示词散文与保真守卫共用同一份。 */
+/** 保真守卫的 keep token 全表：zh-en 全查这些 token，en-zh/auto-zh 只盯这些。 */
 export const JARGON_KEEP_TOKENS: readonly string[] = [
   'gg',
   'wp',
@@ -197,17 +201,3 @@ export const KEEP_VERBATIM_TOKENS: ReadonlySet<string> = (() => {
   return set
 })()
 
-/**
- * 系统指令的静态术语速查块：会话指令按会话（不是按行）配置，所以这里放全量对照，
- * 不走 glossaryFor 的按行匹配。zh-en 排 CN→EN，en-zh/auto-zh 排 EN→CN；
- * keepVerbatim 词条两种方向都标 keep as。
- */
-export function glossaryPromptBlock(direction: TranslateDirection): string {
-  const toEnglish = direction === 'zh-en'
-  const lines = PREPARED.map((entry) => {
-    if (entry.keepVerbatim === true) return `- ${toEnglish ? entry.zh : entry.en} = keep as ${entry.en}`
-    return toEnglish ? `- ${entry.zh} = ${entry.en}` : `- ${entry.en} = ${entry.zh}`
-  })
-  const keep = Array.from(KEEP_VERBATIM_TOKENS).sort().join(', ')
-  return '\n\nGlossary (Dota slang; use these exact forms):\n' + lines.join('\n') + `\n- Always keep verbatim: ${keep}`
-}

@@ -33,7 +33,8 @@ export async function voiceReply(transcript: string): Promise<VoiceReplyResult> 
   }
   let translated: string | null
   try {
-    translated = await translateReply(settings.provider, recognized, settings.replyTone)
+    // $ 前缀 = 对讲口语模式标记（SYSTEM_PROMPTS zh-en 的 spoken mode）：让译文带自然停顿，念出来更像人。
+    translated = await translateReply(settings.provider, '$' + recognized, settings.replyTone)
   } catch (err) {
     return {
       translated: null,
@@ -42,6 +43,8 @@ export async function voiceReply(transcript: string): Promise<VoiceReplyResult> 
       error: errorMessage(err)
     }
   }
+  // 模型偶尔把标记原样抄进译文：念出来就成了「dollar」。对讲侧剥掉开头泄漏的 $。
+  translated = translated.replace(/^\$\s*/, '')
   const plan = decideVoiceOutReply({ recognized, translated })
   if (!plan.speak) {
     return {

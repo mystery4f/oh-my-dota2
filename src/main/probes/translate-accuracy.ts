@@ -2,13 +2,12 @@
  * 翻译准确度包的纯决策缝，零网络零模型零窗口：
  * - @shared/dota-glossary：双向词表的检索（两侧同匹配、词边界、上限）、提示词块、保真词表一致性
  * - @shared/translate-fidelity：拉丁 token 保真守卫（zh-en 全查，en-zh 只盯 keep 词表）
- * - instructionsFor / SYSTEM_PROMPTS：词表块真的进了两个方向的系统指令，散文措辞与词表同步
+ * - instructionsFor / SYSTEM_PROMPTS：示例驱动的方向提示词真的进了两个方向的会话指令
  */
 import { app } from 'electron'
 import {
   GLOSSARY,
   glossaryFor,
-  glossaryPromptBlock,
   JARGON_KEEP_TOKENS,
   KEEP_VERBATIM_TOKENS
 } from '@shared/dota-glossary'
@@ -182,66 +181,47 @@ export async function runTranslateAccuracyProbe(): Promise<void> {
     clampReply('a b c d e f g h i j k', 4) === 'a b c d' && clampReply('a b c d e f g h i j k', 16) === 'a b c d e f g h i j k'
   )
   add('replyWithinLimits 跟随上限', replyWithinLimits('a b c d', 4) && !replyWithinLimits('a b c d e', 4))
-  // ---- instructionsFor：词表块进了两个方向的会话指令 ----
+  // ---- instructionsFor：示例提示词进了两个方向的会话指令 ----
   const zhEnInstructions = instructionsFor('zh-en', 'terse')
   add(
-    'zh-en 指令含词表块',
-    zhEnInstructions.includes('- 蓝猫 = Storm Spirit') &&
-      zhEnInstructions.includes('- 黑皇杖 = keep as bkb') &&
-      zhEnInstructions.includes('- 黑鸟 = keep as od') &&
-      zhEnInstructions.includes('Always keep verbatim:')
-  )
-  add(
-    'zh-en 指令仍带基础提示词与编号契约',
+    'zh-en 指令含示例与编号契约',
     zhEnInstructions.includes('You turn one Chinese Dota 2 in-game message') &&
+      zhEnInstructions.includes('影魔不见了 → sf ss') &&
       zhEnInstructions.includes('"1| text"')
   )
   const enZhInstructions = instructionsFor('en-zh')
   add(
-    'en-zh 指令含词表块',
-    enZhInstructions.includes('- Storm Spirit = 蓝猫') &&
-      enZhInstructions.includes('- bkb = keep as bkb') &&
-      enZhInstructions.includes('Always keep verbatim:')
-  )
-  const promptBlock = glossaryPromptBlock('zh-en')
-  add(
-    '词表块行数与词表一致',
-    promptBlock.split('\n').filter((line) => line.startsWith('- ') && !line.startsWith('- Always')).length ===
-      GLOSSARY.length,
-    `lines=${promptBlock.split('\n').filter((line) => line.startsWith('- ') && !line.startsWith('- Always')).length}`
+    'en-zh 指令含示例与编号契约',
+    enZhInstructions.includes('sf missing → 影魔不见了') &&
+      enZhInstructions.includes('gg wp → gg wp') &&
+      enZhInstructions.includes('"1| text"')
   )
 
-  // ---- SYSTEM_PROMPTS：新措辞 + JARGON_KEEP 扩表 + 保真词表与散文同步 ----
+  // ---- SYSTEM_PROMPTS：示例驱动措辞 + 旧的全量词表块必须消失 ----
   add(
-    'en-zh 措辞：glossary + CN slang + 缩写进 JARGON_KEEP',
-    SYSTEM_PROMPTS['en-zh'].includes('glossary block') &&
-      SYSTEM_PROMPTS['en-zh'].includes('CN slang') &&
-      SYSTEM_PROMPTS['en-zh'].includes('bkb') &&
-      SYSTEM_PROMPTS['en-zh'].includes('mkb') &&
-      SYSTEM_PROMPTS['en-zh'].includes('od, linken')
+    'en-zh 措辞：Dota 2 + 示例',
+    SYSTEM_PROMPTS['en-zh'].includes('Dota 2') &&
+      SYSTEM_PROMPTS['en-zh'].includes('影魔不见了') &&
+      SYSTEM_PROMPTS['en-zh'].includes('插个眼')
   )
   add(
-    'zh-en 措辞：CN 黑话映射 + 缩写原样',
-    SYSTEM_PROMPTS['zh-en'].includes('glossary block') &&
-      SYSTEM_PROMPTS['zh-en'].includes('CN hero slang') &&
-      SYSTEM_PROMPTS['zh-en'].includes('stay verbatim') &&
-      SYSTEM_PROMPTS['zh-en'].includes('bkb')
+    'zh-en 措辞：Dota 2 + 缩写示例 + 对讲口语标记',
+    SYSTEM_PROMPTS['zh-en'].includes('Dota 2') &&
+      SYSTEM_PROMPTS['zh-en'].includes('影魔不见了 → sf ss') &&
+      SYSTEM_PROMPTS['zh-en'].includes('bkb ready?') &&
+      SYSTEM_PROMPTS['zh-en'].includes('spoken aloud') &&
+      SYSTEM_PROMPTS['zh-en'].includes('$影魔不见了 → sf is missing')
   )
-  add('auto-zh 措辞同步', SYSTEM_PROMPTS['auto-zh'].includes('glossary block'))
-  // 旧措辞必须消失：不再有「一律原样保留英雄名」的行
+  add(
+    'auto-zh 措辞同步',
+    SYSTEM_PROMPTS['auto-zh'].includes('Dota 2') && SYSTEM_PROMPTS['auto-zh'].includes('already Chinese')
+  )
   add(
     '旧措辞已移除',
     !SYSTEM_PROMPTS['en-zh'].includes('Keep hero names, item names, player nicknames') &&
       !SYSTEM_PROMPTS['auto-zh'].includes('Keep hero names, item names, player nicknames') &&
-      !SYSTEM_PROMPTS['zh-en'].includes('hero names, item names, player nicknames')
-  )
-  const keepOutOfPrompt = Array.from(KEEP_VERBATIM_TOKENS).filter(
-    (token) => !new RegExp(`\\b${token}\\b`, 'i').test(SYSTEM_PROMPTS['en-zh'])
-  )
-  add(
-    '保真词表每个 token 都在提示词散文里',
-    keepOutOfPrompt.length === 0,
-    keepOutOfPrompt.join(',')
+      !SYSTEM_PROMPTS['zh-en'].includes('hero names, item names, player nicknames') &&
+      !instructionsFor('zh-en').includes('Glossary (Dota slang')
   )
 
   const failed = checks.filter((item) => !item.ok)

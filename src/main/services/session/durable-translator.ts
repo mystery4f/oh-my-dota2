@@ -12,7 +12,6 @@ import type {
   SettledSubmissionRecord
 } from '@earendil-works/pi-durable'
 import type { ProviderConfig, ReplyTone, TranslateDirection } from '@shared/ipc'
-import { glossaryPromptBlock } from '@shared/dota-glossary'
 import { thinkingCompatFor, thinkingLevelFor } from '@shared/provider-reasoning'
 import { ensureTerminalPunct, latinTokenViolations } from '@shared/translate-fidelity'
 import { loadSettings } from '../settings'
@@ -214,13 +213,13 @@ function writeState(path: string, value: Record<string, number>): void {
   }
 }
 
-/** 会话系统指令 = 方向提示词 + 编号契约 + 术语速查块（静态：会话按会话配置指令，不按行）。 */
+/** 会话系统指令 = 方向提示词（短格式 + 示例）+ 编号契约；静态，会话按会话配置指令，不按行。 */
 export function instructionsFor(
   direction: TranslateDirection,
   tone: ReplyTone = 'terse',
   maxWords = DEFAULT_MAX_WORDS
 ): string {
-  return buildSystemPrompt(direction, tone, maxWords) + NUMBERED_CONTRACT_NOTE + glossaryPromptBlock(direction)
+  return buildSystemPrompt(direction, tone, maxWords) + NUMBERED_CONTRACT_NOTE
 }
 
 function withTimeout<T>(promise: Promise<T>, label: string, ms = SUBMIT_TIMEOUT_MS): Promise<T> {
