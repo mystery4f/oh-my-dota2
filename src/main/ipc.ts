@@ -19,7 +19,14 @@ import { ensureQwen3Model, qwen3Status } from './services/voice/qwen3-asr'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
-import { autoVoicePackSetup, deleteVoicePack, ensureSovitsSeedRef, installVoicePack, sovitsVoicePacks } from './services/voice/sovits-voicepack'
+import {
+  autoVoicePackSetup,
+  deleteVoicePack,
+  ensureSovitsSeedRef,
+  installVoicePack,
+  selectVoicePack,
+  sovitsVoicePacks
+} from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
 import { getTrainWindow } from './windows/train'
 import { getTrainManager } from './services/train/manager'
@@ -149,6 +156,8 @@ const handlers: MainHandlers = {
   sovitsVoicepacks: () => sovitsVoicePacks(),
   sovitsVoicepackInstall: (id) => installVoicePack(String(id ?? '')),
   sovitsVoicepackDelete: (id) => deleteVoicePack(String(id ?? '')),
+  // 选音频色包（朗读页同样能直接选）：条目与激活都在主进程里定，渲染层不碰 refs.json。
+  sovitsSelectPack: (id) => selectVoicePack(String(id ?? '')),
   // 选定一条参考：统一走主进程「写设置 → 切权重 → 预热」，且只认库里真实存在的条目。
   sovitsSelectRef: async (entry) => {
     const known = listSovitsRefs(

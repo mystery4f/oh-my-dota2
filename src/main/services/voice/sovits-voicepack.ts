@@ -478,6 +478,26 @@ export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
   return sovitsVoicePacks()
 }
 
+/**
+ * 选中一个音色包：条目取自 refs.json 里装包时写下的那条，激活统一走 activateSovitsRef
+ * （写设置 → 切微调权重 → 预热），与参考音频下拉、启动恢复是同一条路径。
+ * 没装好的包激活不了——调用方应先装；升级会重写条目，装完再选一次即可。
+ */
+export async function selectVoicePack(id: string): Promise<SovitsVoicePack[]> {
+  const pack = (await resolveVoicePacks()).find((item) => item.id === id)
+  if (!pack) return sovitsVoicePacks()
+  const refsRoot = sovitsRefsRoot(app.getPath('userData'))
+  const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
+  const entry = listSovitsRefs(refsRoot, weightsRoot).find((item) => item.name === pack.name)
+  if (!entry) {
+    recordSovitsLog('TTS_SOVITS_SELECT_PACK_SKIP', { id: pack.id, reason: 'not-installed' })
+    return sovitsVoicePacks()
+  }
+  const ok = await activateSovitsRef(entry)
+  recordSovitsLog(ok ? 'TTS_SOVITS_SELECT_PACK' : 'TTS_SOVITS_SELECT_PACK_FAIL', { id: pack.id, name: pack.name })
+  return sovitsVoicePacks()
+}
+
 /** 保底参考（幂等）：库里还没有晓晓保底条目时用 Edge 现合成一条；有别的参考（音色包）不拦着。 */
 export const SEED_REF_DIR = SOVITS_SEED_REF_DIR
 export const SEED_REF_TEXT = '队友们小心，敌人可能在中路埋伏，我们先撤一下再来打。'

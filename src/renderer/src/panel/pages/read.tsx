@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { OFFLINE_VOICES, type OfflineStatus, type OfflineVoiceId, type VoicePreviewResult } from '@shared/ipc'
+import {
+  OFFLINE_VOICES,
+  type OfflineStatus,
+  type OfflineVoiceId,
+  type SovitsVoicePack,
+  type VoicePreviewResult
+} from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +18,12 @@ type SpeakPrefix = 'front' | 'back' | 'off'
 const PREVIEW_LINE = '小心，他们可能在打肉山，快回来'
 
 /** 朗读页：我听别人说。引擎、嗓子、说话人念法都在这里调，试听当场验证。 */
-export function ReadPage(): React.ReactElement {
+export function ReadPage({
+  onManageVoicePacks
+}: {
+  /** 跳到对讲页的音色包组：这一行只负责选，下载/删除/参考音频都在那边。 */
+  onManageVoicePacks?: () => void
+}): React.ReactElement {
   const { settings, update, loadError } = useSettings()
   const save = useSaveFlash()
   const [offline, setOffline] = useState<OfflineStatus | null>(null)
@@ -20,10 +31,55 @@ export function ReadPage(): React.ReactElement {
     busy: false,
     result: null
   })
+  const [packs, setPacks] = useState<SovitsVoicePack[] | null>(null)
+  const [packBusy, setPackBusy] = useState(false)
+  const [packError, setPackError] = useState<string | null>(null)
 
   useEffect(() => {
     void window.api.ttsOfflineState().then(setOffline)
   }, [])
+  // 只有真选了 GV 引擎才去拉音色包清单；下载中的包 2 秒一问，装完自己停。
+  const engineForPacks = settings?.ttsEngine
+  useEffect(() => {
+    if (engineForPacks !== 'sovits') return
+    let alive = true
+    const pull = (): void => {
+      void window.api.sovitsVoicepacks().then((list) => alive && setPacks(list))
+    }
+    pull()
+    const timer = setInterval(() => {
+      void window.api.sovitsVoicepacks().then((list) => {
+        if (!alive) return
+        setPacks(list)
+        if (!list.some((pack) => pack.downloading)) clearInterval(timer)
+      })
+    }, 2000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [engineForPacks])
+
+  /**
+   * 选包：已就绪的直接激活；没装/要升级的先下载，装完再激活一次——
+   * 装包只在「还没配任何参考」时自动选中，用户主动挑的这条得自己补。
+   */
+  const pickPack = (id: string): void => {
+    const pack = packs?.find((item) => item.id === id)
+    if (!pack) return
+    setPackError(null)
+    setPackBusy(true)
+    const ready = pack.installed && !pack.upgradable
+    const job = ready
+      ? window.api.sovitsSelectPack(id)
+      : window.api.sovitsVoicepackInstall(id).then(() => window.api.sovitsSelectPack(id))
+    void job
+      .catch((err: unknown) => setPackError(err instanceof Error ? err.message : String(err)))
+      .then((list) => {
+        setPackBusy(false)
+        if (list) setPacks(list)
+      })
+  }
 
   const runPreview = (): void => {
 
@@ -53,6 +109,7 @@ export function ReadPage(): React.ReactElement {
   }
 
   const engine = settings.ttsEngine
+  const currentPack = packs?.find((pack) => pack.active)
 
   return (
     <>
@@ -93,35 +150,76 @@ export function ReadPage(): React.ReactElement {
             htmlFor="v2-tts-voice"
             hint={
               engine === 'sovits'
-                ? '音色由参考音频决定，到「对讲」页的音色包管理里换'
+                ? '音色由参考音频决定：一个音色包＝参考音频＋它自己的微调权重'
                 : engine === 'system'
                   ? '系统嗓子由操作系统决定，没有选项'
                   : '挑一个喜欢的嗓子，点右边的试听当场验证'
             }
           >
-            <select
-              id="v2-tts-voice"
-              value={engine === 'offline' ? settings.ttsOfflineVoice : settings.ttsVoice || DEFAULT_EDGE_VOICE}
-              disabled={engine === 'system' || engine === 'sovits'}
-              onChange={(e) => {
-                if (engine === 'offline')
-                  void save.wrap(update({ ttsOfflineVoice: e.target.value as OfflineVoiceId }))
-                else void save.wrap(update({ ttsVoice: e.target.value }))
-              }}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
-            >
-              {engine === 'offline'
-                ? OFFLINE_VOICES.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.label} · {v.note}
+            {engine === 'sovits' ? (
+              <>
+                <select
+                  id="v2-tts-voice"
+                  value={currentPack?.id ?? ''}
+                  disabled={packs === null || packBusy}
+                  onChange={(e) => pickPack(e.target.value)}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
+                >
+                  {packs === null ? (
+                    <option value="">读取音色包…</option>
+                  ) : currentPack ? null : (
+                    <option value="">还没选音色包</option>
+                  )}
+                  {packs?.map((pack) => (
+                    <option key={pack.id} value={pack.id}>
+                      {pack.name} ·{' '}
+                      {pack.downloading
+                        ? `下载中 ${Math.round(pack.progress * 100)}%`
+                        : pack.upgradable
+                          ? '可升级'
+                          : pack.installed
+                            ? '已就绪'
+                            : '未下载'}
                     </option>
-                  ))
-                : engine === 'sovits'
-                  ? <option value="sovits">音色由参考音频决定</option>
+                  ))}
+                </select>
+                {currentPack?.downloading ? (
+                  <StatusPill tone="warn">↓ {Math.round(currentPack.progress * 100)}%</StatusPill>
+                ) : null}
+                {packError ? <StatusPill tone="bad">{packError}</StatusPill> : null}
+                {onManageVoicePacks ? (
+                  <button
+                    type="button"
+                    onClick={onManageVoicePacks}
+                    className="text-xs text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                  >
+                    管理音色包
+                  </button>
+                ) : null}
+              </>
+            ) : (
+              <select
+                id="v2-tts-voice"
+                value={engine === 'offline' ? settings.ttsOfflineVoice : settings.ttsVoice || DEFAULT_EDGE_VOICE}
+                disabled={engine === 'system'}
+                onChange={(e) => {
+                  if (engine === 'offline')
+                    void save.wrap(update({ ttsOfflineVoice: e.target.value as OfflineVoiceId }))
+                  else void save.wrap(update({ ttsVoice: e.target.value }))
+                }}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
+              >
+                {engine === 'offline'
+                  ? OFFLINE_VOICES.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.label} · {v.note}
+                      </option>
+                    ))
                   : engine === 'system'
                     ? <option value="system">系统嗓子</option>
                     : EDGE_VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-            </select>
+              </select>
+            )}
           </Row>
           <Row label="语速" stacked hint={engine === 'offline' ? '本地模型 1.0 正常，0.8 更慢（实测 0.8 以下会变得拖沓）' : '1.0 正常'}>
             <div className="flex items-center gap-3">

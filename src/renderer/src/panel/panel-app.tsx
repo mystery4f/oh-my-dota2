@@ -54,7 +54,14 @@ export function PanelApp(): React.ReactElement {
       case 'about':
         return <AboutPage />
       case 'read':
-        return <ReadPage />
+        return (
+          <ReadPage
+            onManageVoicePacks={() => {
+              openCollapseGroup('talk.packs')
+              select('talk')
+            }}
+          />
+        )
       case 'overlay':
         return <OverlayPage />
       case 'overview':

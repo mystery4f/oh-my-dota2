@@ -772,6 +772,7 @@ export const IPC = {
   TTS_SOVITS_VOICEPACKS: 'tts:sovits-voicepacks',
   TTS_SOVITS_VOICEPACK_INSTALL: 'tts:sovits-voicepack-install',
   TTS_SOVITS_VOICEPACK_DELETE: 'tts:sovits-voicepack-delete',
+  TTS_SOVITS_SELECT_PACK: 'tts:sovits-select-pack',
   TTS_SOVITS_SELECT_REF: 'tts:sovits-select-ref',
   TTS_SOVITS_SEED: 'tts:sovits-seed',
   OVERLAY_GEOMETRY: 'overlay:geometry',
@@ -987,6 +988,7 @@ export const ipcContract = {
   sovitsVoicepacks: invoke<[], SovitsVoicePack[]>(IPC.TTS_SOVITS_VOICEPACKS),
   sovitsVoicepackInstall: invoke<[string], SovitsVoicePack[]>(IPC.TTS_SOVITS_VOICEPACK_INSTALL),
   sovitsVoicepackDelete: invoke<[string], SovitsVoicePack[]>(IPC.TTS_SOVITS_VOICEPACK_DELETE),
+  sovitsSelectPack: invoke<[string], SovitsVoicePack[]>(IPC.TTS_SOVITS_SELECT_PACK),
   sovitsSelectRef: invoke<[SovitsRefEntry], boolean>(IPC.TTS_SOVITS_SELECT_REF),
   sovitsSeed: invoke<[], boolean>(IPC.TTS_SOVITS_SEED),
   // 训练管理与 ASR 微调
