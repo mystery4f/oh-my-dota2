@@ -134,3 +134,19 @@ export function StatusPill({
     </span>
   )
 }
+
+/**
+ * 即时保存的微反馈：成功闪「已保存」1.2 秒，失败常驻红字。
+ * 放在触发行里，和控件并排；打字类的输入框不挂它（每键一闪太吵）。
+ */
+export function SaveFlash({
+  flash,
+  error
+}: {
+  flash: string
+  error: string
+}): React.ReactElement | null {
+  if (error) return <span className="text-[11px] text-destructive">{error}</span>
+  if (flash) return <span className="text-[11px] text-emerald-400">{flash}</span>
+  return null
+}
