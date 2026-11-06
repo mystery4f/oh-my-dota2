@@ -12,7 +12,7 @@ export function SearchPalette({
   onPick
 }: {
   onClose: () => void
-  onPick: (id: SearchHit['id']) => void
+  onPick: (hit: SearchHit) => void
 }): React.ReactElement {
   const [query, setQuery] = React.useState('')
   const [index, setIndex] = React.useState(0)
@@ -23,8 +23,8 @@ export function SearchPalette({
     setIndex(0)
   }, [query])
 
-  const pick = (id: SearchHit['id']): void => {
-    onPick(id)
+  const pick = (hit: SearchHit): void => {
+    onPick(hit)
     onClose()
   }
 
@@ -41,7 +41,7 @@ export function SearchPalette({
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const hit = hits[index]
-      if (hit) pick(hit.id)
+      if (hit) pick(hit)
     }
   }
 
@@ -61,7 +61,9 @@ export function SearchPalette({
         />
         <ul className="max-h-80 overflow-y-auto py-1">
           {hits.length === 0 ? (
-            <li className="px-4 py-3 text-sm text-muted-foreground">没有匹配的分区</li>
+            <li className="px-4 py-3 text-sm text-muted-foreground">
+              {query.trim() ? '没有匹配的分区' : '输入关键词：热键 / 缓存 / 语速 / 音色包'}
+            </li>
           ) : (
             hits.map((hit, i) => {
               const group = SECTION_GROUPS.find((g) => g.ids.includes(hit.id))?.label ?? ''
@@ -73,7 +75,7 @@ export function SearchPalette({
                       i === index ? 'bg-accent/15 text-foreground' : 'text-foreground/80'
                     }`}
                     onMouseEnter={() => setIndex(i)}
-                    onClick={() => pick(hit.id)}
+                    onClick={() => pick(hit)}
                   >
                     <span className="font-medium">{hit.title}</span>
                     <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">

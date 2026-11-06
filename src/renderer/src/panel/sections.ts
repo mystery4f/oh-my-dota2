@@ -7,8 +7,8 @@ export const SECTIONS = [
   { id: 'engine', title: '翻译引擎', hint: '模型服务与试验台' },
   { id: 'talk', title: '对讲', hint: '我说给别人听' },
   { id: 'chatout', title: '直发', hint: '打字发进聊天框' },
-  { id: 'read', title: '朗读', hint: '我听别人说' },
-  { id: 'overlay', title: '浮层', hint: '对局里那块透明窗' },
+  { id: 'read', title: '朗读', hint: '我听别人说：把对局里新来的聊天念出来，打团时眼睛不用离开战场' },
+  { id: 'overlay', title: '浮层', hint: '对局里贴在屏幕上的译文条：只改视觉，不影响翻译。锁定时几何冻住且点击穿透，想拖动先解锁' },
   { id: 'hotkeys', title: '热键', hint: '面板与动作键' },
   { id: 'about', title: '关于', hint: '版本与更新' }
 ] as const

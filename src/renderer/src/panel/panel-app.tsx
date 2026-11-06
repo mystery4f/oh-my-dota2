@@ -1,11 +1,15 @@
 import * as React from 'react'
 import { Sidebar } from './components/sidebar'
 import { Panel, Section } from './components/primitives'
+import { openCollapseGroup } from './collapse'
 import { SearchPalette } from './components/search'
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections'
 import { EnginePage } from './pages/engine'
 import { HotkeysPage } from './pages/hotkeys'
 import { AboutPage } from './pages/about'
+import { ReadPage } from './pages/read'
+import { OverlayPage } from './pages/overlay'
+
 
 /**
  * 面板 v2 的壳：标题栏 + 侧边栏 + 内容区。
@@ -57,6 +61,10 @@ export function PanelApp(): React.ReactElement {
         return <HotkeysPage />
       case 'about':
         return <AboutPage />
+      case 'read':
+        return <ReadPage />
+      case 'overlay':
+        return <OverlayPage />
       default:
         return (
           <Panel>
@@ -93,8 +101,9 @@ export function PanelApp(): React.ReactElement {
       {searchOpen ? (
         <SearchPalette
           onClose={() => setSearchOpen(false)}
-          onPick={(id) => {
-            select(id)
+          onPick={(hit) => {
+            if (hit.group) openCollapseGroup(hit.group)
+            select(hit.id)
           }}
         />
       ) : null}

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
-
+import { readCollapseOpen, subscribeCollapse, writeCollapseOpen } from '../collapse'
 /**
  * 面板 v2 的四种积木。设置行只允许由它们拼出来：
  * 排版刻度写在组件里，调用方拿不到裸 class，全站就不会漂。
@@ -149,4 +149,48 @@ export function SaveFlash({
   if (error) return <span className="text-[11px] text-destructive">{error}</span>
   if (flash) return <span className="text-[11px] text-emerald-400">{flash}</span>
   return null
+}
+
+
+/**
+ * 折叠组：默认收起，展开状态记在 localStorage——重新打开面板不用再点一遍。
+ * 语义是「低频的高级项」，不是「隐藏问题」：里面必须有行有说明。
+ */
+export function CollapsibleGroup({
+  id,
+  label,
+  defaultOpen = false,
+  action,
+  children
+}: {
+  id: string
+  label: string
+  defaultOpen?: boolean
+  action?: React.ReactNode
+  children: React.ReactNode
+}): React.ReactElement {
+  // 展开状态活在 collapse.ts 里：搜索命中时它会从外部把组翻开，并通知这里重渲染。
+  const open = React.useSyncExternalStore(subscribeCollapse, () => readCollapseOpen(id, defaultOpen))
+  const toggle = (): void => {
+    writeCollapseOpen(id, !open)
+  }
+  return (
+    <div className="border-t border-border/60 first:border-t-0">
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex min-h-9 w-full items-center justify-between px-4 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className="flex items-center gap-2">
+          {action}
+          <span className="text-[10px] text-muted-foreground">{open ? '收起 ▲' : '展开 ▼'}</span>
+        </span>
+      </button>
+      {open ? <div className="divide-y divide-border/40">{children}</div> : null}
+    </div>
+  )
 }
