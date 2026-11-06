@@ -135,7 +135,14 @@ function createDashboard(): void {
   dashboard.once('ready-to-show', () => dashboard?.show())
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void dashboard.loadURL(process.env.ELECTRON_RENDERER_URL)
+    // PROTOTYPE (throwaway): OMD2_PROTO=a|b|c opens the panel-redesign prototype
+    // variant instead of the real panel (`npm run dev:proto`). Delete when the
+    // redesign lands.
+    const proto = process.env.OMD2_PROTO
+    const url = proto
+      ? `${process.env.ELECTRON_RENDERER_URL}?variant=${proto}`
+      : process.env.ELECTRON_RENDERER_URL
+    void dashboard.loadURL(url)
   } else {
     void dashboard.loadFile(join(__dirname, '../renderer/index.html'))
   }
