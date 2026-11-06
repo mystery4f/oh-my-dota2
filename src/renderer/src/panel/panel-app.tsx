@@ -3,6 +3,7 @@ import { Sidebar } from './components/sidebar'
 import { Section } from './components/primitives'
 import { openCollapseGroup } from './collapse'
 import { SearchPalette } from './components/search'
+import { VoicePackDialog } from './components/voice-pack-dialog'
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections'
 import { EnginePage } from './pages/engine'
 import { HotkeysPage } from './pages/hotkeys'
@@ -32,6 +33,8 @@ export function PanelApp(): React.ReactElement {
   }
 
   const [searchOpen, setSearchOpen] = React.useState(false)
+  // 音色包弹窗由壳持有：朗读页和声出页各给一个按钮，打开的永远是同一个弹窗。
+  const [packsOpen, setPacksOpen] = React.useState(false)
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -54,20 +57,13 @@ export function PanelApp(): React.ReactElement {
       case 'about':
         return <AboutPage />
       case 'read':
-        return (
-          <ReadPage
-            onManageVoicePacks={() => {
-              openCollapseGroup('talk.packs')
-              select('talk')
-            }}
-          />
-        )
+        return <ReadPage onOpenVoicePacks={() => setPacksOpen(true)} />
       case 'overlay':
         return <OverlayPage />
       case 'overview':
         return <OverviewPage />
       case 'talk':
-        return <TalkPage />
+        return <TalkPage onOpenVoicePacks={() => setPacksOpen(true)} />
       case 'chatout':
         return <ChatoutPage />
       default: {
@@ -118,6 +114,8 @@ export function PanelApp(): React.ReactElement {
           </div>
         </main>
       </div>
+
+      <VoicePackDialog open={packsOpen} onClose={() => setPacksOpen(false)} />
     </div>
   )
 }

@@ -3,7 +3,6 @@ import {
   OFFLINE_VOICES,
   type OfflineStatus,
   type OfflineVoiceId,
-  type SovitsVoicePack,
   type VoicePreviewResult
 } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
@@ -11,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
 import { useSaveFlash, useSettings } from '../use-settings'
+import { useVoicePacks } from '../use-voice-packs'
 
 type TtsEngine = 'system' | 'edge' | 'offline' | 'sovits'
 type SpeakPrefix = 'front' | 'back' | 'off'
@@ -19,10 +19,10 @@ const PREVIEW_LINE = '小心，他们可能在打肉山，快回来'
 
 /** 朗读页：我听别人说。引擎、嗓子、说话人念法都在这里调，试听当场验证。 */
 export function ReadPage({
-  onManageVoicePacks
+  onOpenVoicePacks
 }: {
-  /** 跳到对讲页的音色包组：这一行只负责选，下载/删除/参考音频都在那边。 */
-  onManageVoicePacks?: () => void
+  /** 打开音色包弹窗：下载、删除、参考音频、GV 服务都在那里，这一行只负责选。 */
+  onOpenVoicePacks?: () => void
 }): React.ReactElement {
   const { settings, update, loadError } = useSettings()
   const save = useSaveFlash()
@@ -31,55 +31,12 @@ export function ReadPage({
     busy: false,
     result: null
   })
-  const [packs, setPacks] = useState<SovitsVoicePack[] | null>(null)
-  const [packBusy, setPackBusy] = useState(false)
-  const [packError, setPackError] = useState<string | null>(null)
-
   useEffect(() => {
     void window.api.ttsOfflineState().then(setOffline)
   }, [])
-  // 只有真选了 GV 引擎才去拉音色包清单；下载中的包 2 秒一问，装完自己停。
-  const engineForPacks = settings?.ttsEngine
-  useEffect(() => {
-    if (engineForPacks !== 'sovits') return
-    let alive = true
-    const pull = (): void => {
-      void window.api.sovitsVoicepacks().then((list) => alive && setPacks(list))
-    }
-    pull()
-    const timer = setInterval(() => {
-      void window.api.sovitsVoicepacks().then((list) => {
-        if (!alive) return
-        setPacks(list)
-        if (!list.some((pack) => pack.downloading)) clearInterval(timer)
-      })
-    }, 2000)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
-  }, [engineForPacks])
 
-  /**
-   * 选包：已就绪的直接激活；没装/要升级的先下载，装完再激活一次——
-   * 装包只在「还没配任何参考」时自动选中，用户主动挑的这条得自己补。
-   */
-  const pickPack = (id: string): void => {
-    const pack = packs?.find((item) => item.id === id)
-    if (!pack) return
-    setPackError(null)
-    setPackBusy(true)
-    const ready = pack.installed && !pack.upgradable
-    const job = ready
-      ? window.api.sovitsSelectPack(id)
-      : window.api.sovitsVoicepackInstall(id).then(() => window.api.sovitsSelectPack(id))
-    void job
-      .catch((err: unknown) => setPackError(err instanceof Error ? err.message : String(err)))
-      .then((list) => {
-        setPackBusy(false)
-        if (list) setPacks(list)
-      })
-  }
+  // 只有真选了 GV 引擎才去拉清单：取数、轮询、装包、选用全在 useVoicePacks 里。
+  const voicePacks = useVoicePacks(settings?.ttsEngine === 'sovits')
 
   const runPreview = (): void => {
 
@@ -109,7 +66,8 @@ export function ReadPage({
   }
 
   const engine = settings.ttsEngine
-  const currentPack = packs?.find((pack) => pack.active)
+  const packs = voicePacks.packs
+  const currentPack = voicePacks.current
 
   return (
     <>
@@ -161,8 +119,8 @@ export function ReadPage({
                 <select
                   id="v2-tts-voice"
                   value={currentPack?.id ?? ''}
-                  disabled={packs === null || packBusy}
-                  onChange={(e) => pickPack(e.target.value)}
+                  disabled={packs === null || voicePacks.busy}
+                  onChange={(e) => voicePacks.select(e.target.value)}
                   className="h-8 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
                 >
                   {packs === null ? (
@@ -186,15 +144,11 @@ export function ReadPage({
                 {currentPack?.downloading ? (
                   <StatusPill tone="warn">↓ {Math.round(currentPack.progress * 100)}%</StatusPill>
                 ) : null}
-                {packError ? <StatusPill tone="bad">{packError}</StatusPill> : null}
-                {onManageVoicePacks ? (
-                  <button
-                    type="button"
-                    onClick={onManageVoicePacks}
-                    className="text-xs text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
-                  >
-                    管理音色包
-                  </button>
+                {voicePacks.error ? <StatusPill tone="bad">{voicePacks.error}</StatusPill> : null}
+                {onOpenVoicePacks ? (
+                  <Button size="sm" variant="outline" onClick={onOpenVoicePacks}>
+                    音色包…
+                  </Button>
                 ) : null}
               </>
             ) : (

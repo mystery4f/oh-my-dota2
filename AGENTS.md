@@ -82,12 +82,17 @@ The whole dashboard is `src/renderer/src/panel/`, and it is the only dashboard: 
   hidden row looks broken.
 - `collapse.ts` — group open/closed in `localStorage`, read through `useSyncExternalStore`;
   `defaultOpen` seeds the first visit and an explicit toggle wins afterwards.
+- `use-voice-packs.ts` + `components/voice-pack-dialog.tsx` — the voice packs live in one
+  `Modal`, opened from both 朗读 and 对讲 (「音色包…」), never inline in a page: install,
+  progress, switching and GV server settings are all rare, and inlining them pushed the
+  common rows down. `useVoicePacks(active)` is the only reader of that state, and `active`
+  is false while the engine is not sovits, so a closed dialog makes no IPC calls.
 
 Rules the layout encodes, not preferences: every setting has exactly one home; saving is
 immediate, so there is no 保存 button anywhere (the flash says 已保存); a `StatusPill` is
 only for state that can change (a static attribute such as 默认 is plain text); colour is
 spent only on three things — selection, primary action, warning — so a page that looks
-grey is the intended look. `docs/DESIGN-panel-v2.md` is the signed record; the two
+grey is the intended look. `docs/DESIGN-panel-v2.md` is the signed record; the
 deliberate deviations are written down there (no extra token layer — the HSL variables in
 `styles.css` already are one — and `rounded-lg` 8 px instead of the documented 10 px).
 

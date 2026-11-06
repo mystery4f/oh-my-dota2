@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
 import { useSaveFlash, useSettings } from '../use-settings'
-import { SovitsPanel } from './voice-pack'
+import { useVoicePacks } from '../use-voice-packs'
 
 type LogEntry = VoiceChainSummary & { at: number; corrected?: boolean }
 
@@ -24,11 +24,18 @@ const selectClass = 'h-8 rounded-md border border-input bg-background px-2 text-
 
 /**
  * 对讲页：我说给别人听。麦克风 → 识别 → 翻译 → 声出，一条链一屏看完。
- * 声出的嗓子与音色包也在这里：说话的声音只有一个来源，分两页放必然对不上。
+ * 声出用哪个音色包也在这里显示，但换包走弹窗——下载/删除/服务不属于这一页的常规流程。
  */
-export function TalkPage(): React.ReactElement {
+export function TalkPage({
+  onOpenVoicePacks
+}: {
+  /** 打开音色包弹窗（与朗读页同一个）。 */
+  onOpenVoicePacks?: () => void
+}): React.ReactElement {
   const { settings, update, loadError } = useSettings()
   const save = useSaveFlash()
+  // 声出走 GV 时才需要报出当前音色包；换包本身在弹窗里，这里只读。
+  const voicePacks = useVoicePacks(settings?.ttsOutEngine === 'sovits')
 
   const [asrStatus, setAsrStatus] = useState<OfflineStatus | null>(null)
   const [voiceProbe, setVoiceProbe] = useState<VoiceProbeResult | null>(null)
@@ -259,7 +266,7 @@ export function TalkPage(): React.ReactElement {
             htmlFor="v2-outEngine"
             hint={
               engine === 'sovits'
-                ? '音色由参考音频决定：权重随音色包自动切换'
+                ? '音色包是全局的：声出和朗读共用一个，换了两边一起变'
                 : engine === 'offline'
                   ? '离线模型是中文嗓，念英文会吞字——只用来验证链路'
                   : '免费端点的英文神经嗓；合成失败这句静默跳过，绝不回退系统嗓子'
@@ -279,7 +286,14 @@ export function TalkPage(): React.ReactElement {
           </Row>
           <Row label="声出音色" htmlFor="v2-outVoice">
             {engine === 'sovits' ? (
-              <StatusPill tone="idle">音色由参考音频决定</StatusPill>
+              <>
+                <span className="text-sm">{voicePacks.current ? voicePacks.current.name : '还没选音色包'}</span>
+                {onOpenVoicePacks ? (
+                  <Button size="sm" variant="outline" onClick={onOpenVoicePacks}>
+                    音色包…
+                  </Button>
+                ) : null}
+              </>
             ) : (
               <select
                 id="v2-outVoice"
@@ -425,9 +439,6 @@ export function TalkPage(): React.ReactElement {
         ) : null}
       </Panel>
 
-      <CollapsibleGroup id="talk.packs" label="音色包与 GV 服务">
-        <SovitsPanel />
-      </CollapsibleGroup>
 
       <CollapsibleGroup id="talk.train" label="训练">
         <Row
