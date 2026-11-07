@@ -38,7 +38,7 @@ import {
   sovitsVoicePacks
 } from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
-import { getTrainWindow } from './windows/train'
+import { listTrainRuns, loadTrainRun } from './services/train/run-store'
 import { getTrainManager } from './services/train/manager'
 import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
 import { prepareFtDataset } from './services/train/ft-dataset'
@@ -221,8 +221,9 @@ const handlers: MainHandlers = {
     void refreshVoiceOutReadiness()
     return sovitsStatusSnapshot()
   },
-  // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
-  trainOpen: () => getTrainWindow().open(),
+  // 训练管理（v3）：记录落盘，面板两页从磁盘读；互斥与计划推导都在 manager/纯缝里。
+  trainRuns: () => listTrainRuns(),
+  trainRun: (id) => loadTrainRun(id),
   trainStart: async (request) => {
     const kind = normalizeTrainKind(request.kind)
     // gv-*：先把引擎包/底模/数据集/配置文件备齐，缺口在这里就报出来，不进 manager。

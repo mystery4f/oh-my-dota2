@@ -6,6 +6,8 @@ import { SearchPalette } from './components/search'
 import { VoicePackDialog } from './components/voice-pack-dialog'
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections'
 import { EnginePage } from './pages/engine'
+import { VoiceTrainPage } from './pages/voice-train'
+import { AsrTrainPage } from './pages/asr-train'
 import { HotkeysPage } from './pages/hotkeys'
 import { AboutPage } from './pages/about'
 import { ReadPage } from './pages/read'
@@ -52,6 +54,10 @@ export function PanelApp(): React.ReactElement {
     switch (active) {
       case 'engine':
         return <EnginePage />
+      case 'voice':
+        return <VoiceTrainPage />
+      case 'asr':
+        return <AsrTrainPage />
       case 'hotkeys':
         return <HotkeysPage />
       case 'about':
