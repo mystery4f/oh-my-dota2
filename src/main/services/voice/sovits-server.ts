@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -333,16 +333,38 @@ export function stopSovitsServer(): void {
 export type SovitsPauseOutcome = 'paused' | 'untouched'
 
 /**
- * 训练让路（T2 推理互斥）：只停应用自己拉起的服务；端口上的服务是用户自己起的
- * （child 为空 = external）就绝不动它，训练照样开跑——那是用户的进程，不是我们的。
+ * 端口上那份服务如果是本应用以前拉起的（命令行指向本应用的引擎包目录），就把它认回来：
+ * 应用重启后 child 指针丢了，训练让路必须还能认得自己人，否则「开跑自动让路」是句空话。
+ * 只认命令行里带 home 路径的 api_v2.py，别的一律当外部进程，绝不动。
  */
+function adoptOwnedServerPid(home: string): number | null {
+  const script = [
+    "$p = Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*api_v2.py*' } | Select-Object -First 1",
+    "if ($p) { Write-Output ($p.ProcessId.ToString() + '|' + $p.CommandLine) }"
+  ].join('; ')
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 8000, windowsHide: true })
+  if (r.status !== 0 || !r.stdout) return null
+  const [pidText, commandLine] = String(r.stdout).trim().split('|')
+  const pid = Number(pidText)
+  return Number.isFinite(pid) && commandLine && commandLine.includes(home) ? pid : null
+}
+
 export function pauseSovitsForTraining(): SovitsPauseOutcome {
-  if (!child) return 'untouched'
-  const pid = child.pid
-  child = null
-  if (pid) spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+  const managed = child
+  if (managed) {
+    const pid = managed.pid
+    child = null
+    if (pid) spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    setPhase('off', '训练占用显卡，推理服务暂停')
+    recordSovitsLog('TTS_SOVITS_SERVER_PAUSE', { pid })
+    return 'paused'
+  }
+  const home = discoverSovitsHome()
+  const adopted = home ? adoptOwnedServerPid(home) : null
+  if (adopted === null) return 'untouched'
+  spawn('taskkill', ['/pid', String(adopted), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
   setPhase('off', '训练占用显卡，推理服务暂停')
-  recordSovitsLog('TTS_SOVITS_SERVER_PAUSE', { pid })
+  recordSovitsLog('TTS_SOVITS_SERVER_PAUSE', { pid: adopted, adopted: true })
   return 'paused'
 }
 
