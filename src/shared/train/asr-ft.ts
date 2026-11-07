@@ -64,9 +64,19 @@ export function pickLastCheckpointName(names: readonly string[]): string | null 
 
 export type AsrFtSwapOp = 'rm-bak' | 'bak-active' | 'promote-next' | 'rm-active' | 'restore-bak'
 
-/** 应用新模型的动作序列：旧备份先删，现役挪去备份，next 转正。next 不在 = 空序列（调用方报错）。 */
-export function asrFtSwapSteps(state: { activeExists: boolean; bakExists: boolean; nextExists: boolean }): AsrFtSwapOp[] {
-  if (!state.nextExists) return []
+/**
+ * 应用新模型的动作序列：旧备份先删，现役挪去备份，next 转正。
+ * 触发条件看「有没有东西可转正」——导出产物在（正常路径，promote-next 自己把它拷成 next），
+ * 或者上次换模被中断留下的 next 还在；两样都没有才是空序列。
+ * 只认 next 会让「导出成功、点按钮」这条主路径永远返回空序列（曾经的 bug）。
+ */
+export function asrFtSwapSteps(state: {
+  activeExists: boolean
+  bakExists: boolean
+  nextExists: boolean
+  exportExists: boolean
+}): AsrFtSwapOp[] {
+  if (!state.nextExists && !state.exportExists) return []
   const steps: AsrFtSwapOp[] = []
   if (state.bakExists) steps.push('rm-bak')
   if (state.activeExists) steps.push('bak-active')

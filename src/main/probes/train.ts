@@ -101,8 +101,14 @@ export function runTrainProbe(): void {
   const deviceAt = exportArgv.indexOf('--device')
   push('导出腿：CPU 上跑并带自校验', deviceAt >= 0 && exportArgv[deviceAt + 1] === 'cpu' && exportArgv.includes('--verify'), exportArgv.join(' '))
   push('checkpoint 挑编号最大的', pickLastCheckpointName(['eval', 'checkpoint-150', 'checkpoint-330']) === 'checkpoint-330' && pickLastCheckpointName([]) === null && pickLastCheckpointName(['checkpoint-x']) === null, String(pickLastCheckpointName(['checkpoint-150', 'checkpoint-330'])))
-  push('换模序列：删旧备份→现役进备份→next 转正', JSON.stringify(asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: true })) === JSON.stringify(['rm-bak', 'bak-active', 'promote-next']), JSON.stringify(asrFtSwapSteps({ activeExists: false, bakExists: false, nextExists: true })))
-  push('换模：没有导出产物就是空序列', asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: false }).length === 0, '[]')
+  push('换模序列：删旧备份→现役进备份→next 转正', JSON.stringify(asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: true, exportExists: false })) === JSON.stringify(['rm-bak', 'bak-active', 'promote-next']), JSON.stringify(asrFtSwapSteps({ activeExists: false, bakExists: false, nextExists: true, exportExists: false })))
+  // 回归：正常路径上 .next 还不存在，只有导出产物——旧实现只认 next，于是「导出成功点按钮」永远报没有新模型。
+  push(
+    '换模：只有导出产物（没有 next）也要组成序列',
+    JSON.stringify(asrFtSwapSteps({ activeExists: true, bakExists: false, nextExists: false, exportExists: true })) === JSON.stringify(['bak-active', 'promote-next']),
+    JSON.stringify(asrFtSwapSteps({ activeExists: true, bakExists: false, nextExists: false, exportExists: true }))
+  )
+  push('换模：没有导出产物也没有 next 才是空序列', asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: false, exportExists: false }).length === 0, '[]')
   push('回滚序列：有备份才动手', JSON.stringify(asrFtRollbackSteps({ bakExists: true })) === JSON.stringify(['rm-active', 'restore-bak']) && asrFtRollbackSteps({ bakExists: false }).length === 0, '')
   push('环境点名：全缺四项、全齐空数组', deriveAsrFtEnvGaps({}).length === 4 && deriveAsrFtEnvGaps({ venvOk: true, sftScript: 's', exportScript: 'e', baseModelDir: 'm' }).length === 0, String(deriveAsrFtEnvGaps({}).length))
   push('安装步骤：全缺五步、全齐空序列', JSON.stringify(planAsrFtInstallSteps({ scripts: false, uv: false, venv: false, deps: false, model: false })).includes('下载 uv') && planAsrFtInstallSteps({ scripts: true, uv: true, venv: true, deps: true, model: true }).length === 0, String(planAsrFtInstallSteps({ scripts: false, uv: true, venv: false, deps: true, model: true }).length))

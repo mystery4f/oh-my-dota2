@@ -133,8 +133,9 @@ function ensureTokenizerConfig(into: string, fallbackDirs: string[]): string | n
 
 export function applyAsrFtModel(): AsrFtSwapResult {
   const status = asrFtStatus()
-  const steps = asrFtSwapSteps(status.swap)
-  if (steps.length === 0 || !status.swap.lastExportDir) {
+  // 正常路径上 .next 根本不存在（它只在 promote-next 里现拷现改名），所以判据是「有导出产物」。
+  const steps = asrFtSwapSteps({ ...status.swap, exportExists: Boolean(status.swap.lastExportDir) })
+  if (steps.length === 0) {
     return { ok: false, error: '没有可应用的新模型：先跑一次训练，等「导出 ONNX」完成再点' }
   }
   const active = activeDir()
@@ -145,8 +146,11 @@ export function applyAsrFtModel(): AsrFtSwapResult {
       if (op === 'rm-bak') rmSync(bak, { recursive: true, force: true })
       if (op === 'bak-active') renameSync(active, bak)
       if (op === 'promote-next') {
-        rmSync(next, { recursive: true, force: true })
-        cpSync(status.swap.lastExportDir, next, { recursive: true })
+        // 有导出产物才拷成 next；只有上次中断留下的 next 时就直接转正它。
+        if (status.swap.lastExportDir) {
+          rmSync(next, { recursive: true, force: true })
+          cpSync(status.swap.lastExportDir, next, { recursive: true })
+        }
         if (ensureTokenizerConfig(next, [bak, asrModelsRoot()]) === 'no-source') {
           throw new Error('导出产物缺 tokenizer/tokenizer_config.json，也没有旧模型可以借')
         }

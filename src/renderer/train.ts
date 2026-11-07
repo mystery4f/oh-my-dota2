@@ -561,6 +561,8 @@ async function startFt(): Promise<void> {
 async function applyModel(): Promise<void> {
   ftApplyBtn.disabled = true
   const result = await window.api.ftAsrftApply()
+  // 换模失败只改一行红字，窗口一关就查不到；落一行日志（跟 start 一样）。
+  console.log('[train-ft] apply', result.ok, result.error ?? '')
   ftAsrResult.textContent = result.ok ? '新模型已转正，下一句识别就用它' : result.error ?? '应用失败'
   await refreshAsrft()
 }
