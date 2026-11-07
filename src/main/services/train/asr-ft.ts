@@ -117,18 +117,29 @@ export function asrFtStatus(): Omit<AsrFtStatusResult, 'install'> {
   }
 }
 
-/** tokenizer_config.json 兜底：导出产物不带它，sherpa 启动又要它（词表没变，从备份或原始模型目录借）。 */
-function ensureTokenizerConfig(into: string, fallbackDirs: string[]): string | null {
-  const target = join(into, 'tokenizer', 'tokenizer_config.json')
-  if (existsSync(target)) return null
-  for (const dir of fallbackDirs) {
-    const source = join(dir, 'tokenizer', 'tokenizer_config.json')
-    if (existsSync(source)) {
-      cpSync(source, target)
-      return source
+/**
+ * tokenizer/ 目录兜底：导出产物只含三个 onnx，sherpa 加载还要 vocab.json / merges.txt /
+ * tokenizer_config.json（微调没动词表，逐文件从备份或原始模型目录借）。
+ * 任何一件哪都没有 = 'no-source'，调用方报错——缺词表的模型目录只会让 worker 静默死。
+ */
+function ensureTokenizerFiles(into: string, fallbackDirs: string[]): string | null {
+  const dir = join(into, 'tokenizer')
+  for (const f of ['tokenizer_config.json', 'vocab.json', 'merges.txt']) {
+    const target = join(dir, f)
+    if (existsSync(target)) continue
+    let borrowed = false
+    for (const src of fallbackDirs) {
+      const source = join(src, 'tokenizer', f)
+      if (existsSync(source)) {
+        mkdirSync(dir, { recursive: true })
+        cpSync(source, target)
+        borrowed = true
+        break
+      }
     }
+    if (!borrowed) return 'no-source'
   }
-  return 'no-source'
+  return null
 }
 
 export function applyAsrFtModel(): AsrFtSwapResult {
@@ -151,8 +162,10 @@ export function applyAsrFtModel(): AsrFtSwapResult {
           rmSync(next, { recursive: true, force: true })
           cpSync(status.swap.lastExportDir, next, { recursive: true })
         }
-        if (ensureTokenizerConfig(next, [bak, asrModelsRoot()]) === 'no-source') {
-          throw new Error('导出产物缺 tokenizer/tokenizer_config.json，也没有旧模型可以借')
+        // 兜底顺序：刚进备份的上一版 → asr-models 下任何自带词表的目录（原始出厂解压包）。
+        const fallbacks = [bak, ...readdirSync(asrModelsRoot()).map((d) => join(asrModelsRoot(), d))]
+        if (ensureTokenizerFiles(next, fallbacks) === 'no-source') {
+          throw new Error('导出产物缺 tokenizer 词表文件，备份和原始模型目录里也没得借')
         }
         renameSync(next, active)
       }
