@@ -229,6 +229,13 @@ it and nothing happened". The overlay and the pause hint print key names from th
 - Text edits here are performed through `pi.edit`/`pi.write`; any content containing backticks or
   template literals must go through the tool's `payloads` parameter. PowerShell one-liners in bash
   lose their `$variables` — write `.tmp/*.ps1` and run it with `-File`.
+- hashline anchors belong to one file: reusing a `write` auto-read anchor while editing a different
+  file lands the edit silently in the wrong place (an import once ended up inside a function body).
+  `grep` the file you are about to edit and take the anchors from there; a single-line `replace`
+  must repeat the whole original line or the surrounding lines duplicate.
+- `eslint` allows exactly one warning (`--max-warnings 1`), so any non-component export in a `.tsx`
+  file breaks the build: pure helpers (`runTone`, `formatDuration`, …) live in their own `.ts`
+  module next to the component.
 - Overlay diagnostics: a locked overlay is click-through *and* content-protected, so it is absent from
   every screenshot and ignores the mouse. Never conclude "the overlay is not showing" from a desktop
   capture — read the panel badge or the `overlay:status` payload instead. Both rules (ignore clicks,
