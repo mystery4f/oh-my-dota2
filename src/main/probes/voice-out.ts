@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { OFFLINE_VOICES } from '@shared/ipc'
+import { speechFailHint } from '@shared/speech-plan'
 import {
   DEFAULT_SINK_ID,
   DEFAULT_SPEAK_KEY,
@@ -22,6 +23,14 @@ import {
   spokenStatusLine,
   type AudioOutputDevice
 } from '@shared/voice-out'
+import {
+  judgeVoiceOutReadiness,
+  sameVoiceOutReadiness,
+  voiceOutReadinessVisible,
+  type VoiceOutBlockReason,
+  type VoiceOutReadiness,
+  type VoiceOutReadinessInput
+} from '@shared/voice-out-readiness'
 import { splitForSpeech } from '../services/voice/speech-pipeline'
 
 /**
@@ -352,6 +361,135 @@ export function runVoiceOutProbe(): void {
     '无标点超长句硬切也不丢字',
     sliced.join('') === hardSlice && sliced.every((segment) => segment.length <= 30),
     `${sliced.length} 段`
+  )
+
+  // —— 决策九（#46）：声出就绪 ——
+  // 判断的输入只有四个短值，探针不用真装机：每条断链都是「默认全好 + 改一项」。
+  const readiness = (broken: Partial<VoiceOutReadinessInput>): VoiceOutReadiness =>
+    judgeVoiceOutReadiness({
+      engineInstalled: true,
+      serverPhase: 'ready',
+      packInstalled: true,
+      refAudio: 'data/tts/sovits-refs/mirana/ref.wav',
+      ...broken
+    })
+
+  const ready = readiness({})
+  push(
+    '就绪：四环齐了 → ready 且不推任何按钮',
+    ready.ready && ready.reason === null && ready.action === null,
+    JSON.stringify(ready)
+  )
+  const noEngine = readiness({ engineInstalled: false })
+  push(
+    '断环：引擎包没装 → engine-missing + 安装引擎',
+    noEngine.reason === 'engine-missing' && noEngine.action === 'install-engine' && noEngine.line.includes('引擎'),
+    noEngine.line
+  )
+  const noPack = readiness({ packInstalled: false })
+  push(
+    '断环：没有音色包 → pack-missing + 音色包…',
+    noPack.reason === 'pack-missing' && noPack.action === 'open-packs' && noPack.line.includes('音色包'),
+    noPack.line
+  )
+  const starting = readiness({ serverPhase: 'starting' })
+  push(
+    '断环：服务正在启动 → service-starting，不给按钮（稍等自变）',
+    starting.reason === 'service-starting' && starting.action === null && starting.line.includes('启动'),
+    starting.line
+  )
+  const down = readiness({ serverPhase: 'off' })
+  push(
+    '断环：服务没在跑 → service-down + 启动服务',
+    down.reason === 'service-down' && down.action === 'start-service' && down.line.includes('服务'),
+    down.line
+  )
+  const noRef = readiness({ refAudio: '   ' })
+  push(
+    '断环：参考音频没选 → refs-missing + 音色包…（不用重装）',
+    noRef.reason === 'refs-missing' && noRef.action === 'open-packs' && noRef.line.includes('参考'),
+    noRef.line
+  )
+  const external = readiness({ serverPhase: 'external' })
+  push('外部实例占着端口也算服务在', external.ready && external.reason === null, external.line)
+
+  const engineWins = readiness({ engineInstalled: false, packInstalled: false, serverPhase: 'off' })
+  push(
+    '优先级：引擎先于包（没引擎，装了包也发不出声）',
+    engineWins.reason === 'engine-missing' && engineWins.action === 'install-engine',
+    engineWins.line
+  )
+  const packWins = readiness({ packInstalled: false, serverPhase: 'off', refAudio: '' })
+  push(
+    '优先级：包先于服务（没有音色包，服务起来也白起）',
+    packWins.reason === 'pack-missing',
+    packWins.line
+  )
+  const serviceWins = readiness({ serverPhase: 'off', refAudio: '' })
+  push(
+    '优先级：服务先于参考（参考得由服务来加载）',
+    serviceWins.reason === 'service-down' && serviceWins.action === 'start-service',
+    serviceWins.line
+  )
+  const startingWins = readiness({ serverPhase: 'starting', refAudio: '' })
+  push(
+    '优先级：启动中压过缺参考（别教用户此刻去挑参考）',
+    startingWins.reason === 'service-starting' && startingWins.action === null,
+    startingWins.line
+  )
+
+  push(
+    '引擎门：只有声出引擎是 GV 才显示就绪行',
+    voiceOutReadinessVisible('sovits') &&
+      !voiceOutReadinessVisible('edge') &&
+      !voiceOutReadinessVisible('offline') &&
+      !voiceOutReadinessVisible('nonsense'),
+    'sovits on / edge, offline, garbage off'
+  )
+
+  push(
+    '去重判据：同输入判为相等（广播层只在它说不等时才喊人）',
+    sameVoiceOutReadiness(noPack, readiness({ packInstalled: false })) && sameVoiceOutReadiness(ready, ready),
+    'equal input → same'
+  )
+  push(
+    '快照变了才广播',
+    !sameVoiceOutReadiness(ready, noPack) && !sameVoiceOutReadiness(null, ready) && !sameVoiceOutReadiness(ready, null),
+    'ready≠noPack / null≠ready'
+  )
+
+  // 原因词用独立字面抄自规格，而不是从 BLOCK_COPY 里取，否则断言是自证。
+  const causeWord: Record<Exclude<VoiceOutBlockReason, null>, string> = {
+    'engine-missing': '引擎',
+    'pack-missing': '音色包',
+    'service-starting': '启动',
+    'service-down': '没在跑',
+    'refs-missing': '参考'
+  }
+  const snapshots = [noEngine, noPack, starting, down, noRef]
+  const failHint = speechFailHint('sovits')
+  // 真断言：知道缺哪一环时，失败短语点名那一环、且不点别的环——只念「四样里缺一样」的总括句会在这里挂。
+  const named = snapshots.every((item) => {
+    if (item.reason === null) return false
+    const hint = speechFailHint('sovits', item.reason)
+    const others = Object.entries(causeWord).filter(([reason]) => reason !== item.reason)
+    return (
+      hint.includes(causeWord[item.reason]) &&
+      others.every(([, word]) => !hint.includes(word)) &&
+      item.line.includes(causeWord[item.reason])
+    )
+  })
+  push('GV 失败短语点名缺的那一环，不点别的环（与就绪行同源）', named, snapshots.map((i) => i.line).join(' | '))
+  push(
+    '不知道原因时失败短语退回总括句，并指到就绪行（不猜成某一种故障）',
+    failHint.includes('GV') && !Object.values(causeWord).some((word) => failHint.includes(word)),
+    failHint
+  )
+  push(
+    '用户可见文案不出现内部词（api_v2 / refs.json / 设置键）',
+    [ready, ...snapshots].every((item) => !/api_v2|refs\.json|ttsSovitsRefAudio/i.test(item.line)) &&
+      !/api_v2|refs\.json|ttsSovitsRefAudio/i.test(failHint),
+    failHint
   )
 
   const failed = cases.filter((item) => !item.ok)

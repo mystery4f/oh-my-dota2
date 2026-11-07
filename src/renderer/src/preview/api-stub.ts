@@ -245,6 +245,15 @@ const implemented = {
   },
   sovitsSelectRef: async () => true,
   sovitsSeed: async () => true,
+  // #46：预演里给一条「就绪」快照，就能看到中性文字（无按钮）那半边的样子。
+  sovitsStartServer: async () => sovitsStatus,
+  voiceOutReadiness: async () => ({
+    ready: true,
+    reason: null,
+    line: 'GV 就绪：引擎、音色包、服务、参考音频都在',
+    action: null
+  }),
+  onVoiceOutReadiness: () => () => {},
   overlayStatus: async () => overlaySnap(),
   overlayPanelToggle: async () => {
     overlay.panelOpen = !overlay.panelOpen

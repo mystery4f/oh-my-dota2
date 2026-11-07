@@ -9,6 +9,11 @@ import {
 } from '@shared/ipc'
 import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
+import {
+  voiceOutReadinessVisible,
+  type VoiceOutAction,
+  type VoiceOutReadiness
+} from '@shared/voice-out-readiness'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
@@ -19,6 +24,13 @@ import { useVoicePacks } from '../use-voice-packs'
 import { VoicePackDisplay } from '../components/voice-pack-display'
 
 type LogEntry = VoiceChainSummary & { at: number; corrected?: boolean }
+
+/** 断链时的唯一动作按钮文案：动作是给人看的，不是给代码看的。 */
+const READINESS_ACTION_LABEL: Record<VoiceOutAction, string> = {
+  'install-engine': '去装引擎包…',
+  'open-packs': '装音色包…',
+  'start-service': '启动服务'
+}
 
 
 /**
@@ -40,6 +52,8 @@ export function TalkPage({
   const [runtime, setRuntime] = useState<VoiceRuntimeStatus | null>(null)
   const [outBusy, setOutBusy] = useState(false)
   const [outResult, setOutResult] = useState<VoiceOutTestResult | null>(null)
+  // 声出就绪快照：进页读一次，之后主进程只在变化时推（面板不自己开定时器）。
+  const [readiness, setReadiness] = useState<VoiceOutReadiness | null>(null)
   const [recording, setRecording] = useState(false)
   const [log, setLog] = useState<LogEntry[]>([])
   const [editingAt, setEditingAt] = useState<number | null>(null)
@@ -63,6 +77,10 @@ export function TalkPage({
     void window.api.voiceRuntimeStatus().then(setRuntime)
   }, [])
   useEffect(() => window.api.onVoiceRuntimeState(setRuntime), [])
+  useEffect(() => {
+    void window.api.voiceOutReadiness().then(setReadiness)
+  }, [])
+  useEffect(() => window.api.onVoiceOutReadiness(setReadiness), [])
   useEffect(() => {
     // 输出设备只在面板里枚举：插拔后重新打开页面就能看到。
     navigator.mediaDevices
@@ -123,6 +141,20 @@ export function TalkPage({
     } finally {
       setOutBusy(false)
     }
+  }
+
+  // 就绪门：只有声出引擎是 GV 才拦。判断与文案都来自主进程那一份快照，这里只管用。
+  // 首屏那一拍快照还没到，算「检查中」而不是「就绪」：否则断链的用户会先看见一个能点的按钮。
+  const gvReadiness: VoiceOutReadiness | null = !voiceOutReadinessVisible(settings?.ttsOutEngine)
+    ? null
+    : (readiness ?? { ready: false, reason: null, line: '正在检查 GV 就绪…', action: null })
+  const gate =
+    gvReadiness && !gvReadiness.ready ? { locked: true, reason: gvReadiness.line } : { locked: false, reason: '' }
+  const action = gvReadiness && !gvReadiness.ready ? gvReadiness.action : null
+  const runReadinessAction = (choice: VoiceOutAction): void => {
+    // 装引擎要 8GB、装音色包要挑，两件事的家都在音色包弹窗里，按钮只负责把人送到。
+    if (choice === 'start-service') void window.api.sovitsStartServer()
+    else onOpenVoicePacks?.()
   }
 
   if (settings === null) {
@@ -293,7 +325,12 @@ export function TalkPage({
             >
               {recording ? '● 录音中 · 再点结束' : '说一句试试'}
             </Button>
-            <Button size="sm" variant="outline" disabled={outBusy} onClick={() => void runVoiceOutTest()}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={outBusy || gate.locked}
+              onClick={() => void runVoiceOutTest()}
+            >
               测试声出
             </Button>
             {outResult ? (
@@ -305,6 +342,22 @@ export function TalkPage({
             ) : null}
             {recording ? <span className="text-xs text-amber-400">● 正在录音，说完再点一次</span> : null}
           </Row>
+          {gvReadiness ? (
+            <Row
+              label="GV 就绪"
+              hint={gate.locked ? gate.reason : '引擎 → 音色包 → 服务 → 参考音频，缺哪一环就说哪一环'}
+            >
+              {/* 就绪是常态，不铺颜色；断链才是要拦人的事，用警告色说清楚缺什么。 */}
+              <span className={gvReadiness.ready ? 'text-xs text-zinc-400' : 'text-xs text-amber-400'}>
+                {gvReadiness.line}
+              </span>
+              {action ? (
+                <Button size="sm" variant="outline" onClick={() => runReadinessAction(action)}>
+                  {READINESS_ACTION_LABEL[action]}
+                </Button>
+              ) : null}
+            </Row>
+          ) : null}
           <Row label="测试模式" hint="只放音频、不按说话键：游戏没开也能试听">
             <Button
               size="sm"
