@@ -448,7 +448,7 @@ export function runVoiceOutProbe(): void {
   )
 
   push(
-    '快照相等不广播（3 秒空刷不许惊动面板）',
+    '去重判据：同输入判为相等（广播层只在它说不等时才喊人）',
     sameVoiceOutReadiness(noPack, readiness({ packInstalled: false })) && sameVoiceOutReadiness(ready, ready),
     'equal input → same'
   )
@@ -458,21 +458,31 @@ export function runVoiceOutProbe(): void {
     'ready≠noPack / null≠ready'
   )
 
-  // 原因词用独立字面抄自规格，而不是从 BLOCK_COPY 里取，否则这两条是自证。
+  // 原因词用独立字面抄自规格，而不是从 BLOCK_COPY 里取，否则断言是自证。
   const causeWord: Record<Exclude<VoiceOutBlockReason, null>, string> = {
     'engine-missing': '引擎',
     'pack-missing': '音色包',
-    'service-starting': '服务',
-    'service-down': '服务',
+    'service-starting': '启动',
+    'service-down': '没在跑',
     'refs-missing': '参考'
   }
-  const failHint = speechFailHint('sovits')
   const snapshots = [noEngine, noPack, starting, down, noRef]
+  const failHint = speechFailHint('sovits')
+  // 真断言：知道缺哪一环时，失败短语点名那一环、且不点别的环——只念「四样里缺一样」的总括句会在这里挂。
+  const named = snapshots.every((item) => {
+    if (item.reason === null) return false
+    const hint = speechFailHint('sovits', item.reason)
+    const others = Object.entries(causeWord).filter(([reason]) => reason !== item.reason)
+    return (
+      hint.includes(causeWord[item.reason]) &&
+      others.every(([, word]) => !hint.includes(word)) &&
+      item.line.includes(causeWord[item.reason])
+    )
+  })
+  push('GV 失败短语点名缺的那一环，不点别的环（与就绪行同源）', named, snapshots.map((i) => i.line).join(' | '))
   push(
-    'GV 失败提示与就绪行说的是同一套原因词',
-    failHint.includes('GV') &&
-      snapshots.every((item) => item.reason !== null && failHint.includes(causeWord[item.reason])) &&
-      snapshots.every((item) => item.reason !== null && item.line.includes(causeWord[item.reason])),
+    '不知道原因时失败短语退回总括句，并指到就绪行（不猜成某一种故障）',
+    failHint.includes('GV') && !Object.values(causeWord).some((word) => failHint.includes(word)),
     failHint
   )
   push(

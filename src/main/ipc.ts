@@ -206,10 +206,12 @@ const handlers: MainHandlers = {
       sovitsRefsRoot(app.getPath('userData')),
       sovitsWeightsRoot(app.getPath('userData'))
     ).find((item) => item.audioPath === entry.audioPath)
-    return known ? activateSovitsRef(known) : false
+    // 这一步正是清掉 refs-missing 的动作，但它在主进程里直接 saveSettings，
+    // 走不到 setSettings 的刷新钩子，所以必须在这里自己补一次。
+    return known ? refreshReadinessAfter(activateSovitsRef(known)) : false
   },
   // 首启保底：库一条参考都没有时，用 Edge 现场合成一条晓晓参考入库（零分发）。
-  sovitsSeed: () => ensureSovitsSeedRef(false),
+  sovitsSeed: () => refreshReadinessAfter(ensureSovitsSeedRef(false)),
   // #46 就绪行：首屏读一次，之后靠广播（判断只有一份，在 shared 纯缝里）。
   voiceOutReadiness: () => refreshVoiceOutReadiness(),
   // 幂等启动：服务已在跑就直接返回现状。拉起要 15–40 秒，这里不 await——

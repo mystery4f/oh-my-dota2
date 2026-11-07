@@ -144,7 +144,10 @@ export function TalkPage({
   }
 
   // 就绪门：只有声出引擎是 GV 才拦。判断与文案都来自主进程那一份快照，这里只管用。
-  const gvReadiness = voiceOutReadinessVisible(settings?.ttsOutEngine) ? readiness : null
+  // 首屏那一拍快照还没到，算「检查中」而不是「就绪」：否则断链的用户会先看见一个能点的按钮。
+  const gvReadiness: VoiceOutReadiness | null = !voiceOutReadinessVisible(settings?.ttsOutEngine)
+    ? null
+    : (readiness ?? { ready: false, reason: null, line: '正在检查 GV 就绪…', action: null })
   const gate =
     gvReadiness && !gvReadiness.ready ? { locked: true, reason: gvReadiness.line } : { locked: false, reason: '' }
   const action = gvReadiness && !gvReadiness.ready ? gvReadiness.action : null
@@ -326,7 +329,6 @@ export function TalkPage({
               size="sm"
               variant="outline"
               disabled={outBusy || gate.locked}
-              title={gate.locked ? gate.reason : undefined}
               onClick={() => void runVoiceOutTest()}
             >
               测试声出
@@ -341,7 +343,10 @@ export function TalkPage({
             {recording ? <span className="text-xs text-amber-400">● 正在录音，说完再点一次</span> : null}
           </Row>
           {gvReadiness ? (
-            <Row label="GV 就绪" hint="引擎 → 音色包 → 服务 → 参考音频，缺哪一环就说哪一环">
+            <Row
+              label="GV 就绪"
+              hint={gate.locked ? gate.reason : '引擎 → 音色包 → 服务 → 参考音频，缺哪一环就说哪一环'}
+            >
               {/* 就绪是常态，不铺颜色；断链才是要拦人的事，用警告色说清楚缺什么。 */}
               <span className={gvReadiness.ready ? 'text-xs text-zinc-400' : 'text-xs text-amber-400'}>
                 {gvReadiness.line}

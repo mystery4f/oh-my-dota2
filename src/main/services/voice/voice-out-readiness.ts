@@ -12,6 +12,7 @@ import { sovitsVoicePacks } from './sovits-voicepack'
  * 设置保存、装包、装引擎、选择音色这些明确动作则当场刷一次，让面板立刻翻牌。
  */
 let cached: VoiceOutReadiness | null = null
+let inflight: Promise<VoiceOutReadiness | null> | null = null
 const listeners = new Set<(snapshot: VoiceOutReadiness | null) => void>()
 
 function emit(snapshot: VoiceOutReadiness | null): void {
@@ -35,6 +36,20 @@ export function currentVoiceOutReadiness(): VoiceOutReadiness | null {
  * 拿不到 GV 状态（例如早期启动、服务还没初始化）时保持上一次的值。
  */
 export async function refreshVoiceOutReadiness(): Promise<VoiceOutReadiness | null> {
+  // 声出不走 GV 的用户不该为这条链付任何成本：探测端口、读 refs.json、
+  // 必要时还会拉远端音色包清单——3 秒一次的空刷在 Edge/离线用户那里纯属浪费。
+  if (loadSettings().ttsOutEngine !== 'sovits') return cached
+  // 一轮没跑完就不再叠一轮（远端清单慢时 3 秒 tick 会堆请求）。
+  if (inflight) return inflight
+  inflight = compute()
+  try {
+    return await inflight
+  } finally {
+    inflight = null
+  }
+}
+
+async function compute(): Promise<VoiceOutReadiness | null> {
   let next: VoiceOutReadiness
   try {
     const [status, packs] = await Promise.all([sovitsStatusSnapshot(), sovitsVoicePacks()])

@@ -18,6 +18,7 @@ import {
 import { speakPipeline } from './speech-pipeline'
 import { errorMessage } from '@shared/errors'
 import { speechFailHint } from '@shared/speech-plan'
+import { currentVoiceOutReadiness } from './voice-out-readiness'
 import { loadSettings } from '../settings'
 import { getPttKeySender } from '../input/ptt-key'
 import { getVoiceOutWindow } from '../../windows/voice-out'
@@ -143,7 +144,11 @@ class VoiceOutService {
     const audioOrNull: Buffer | null = got[0] ?? null
     const plan = decideVoiceOutTest(audioOrNull !== null, VOICE_OUT_TEST_LINE, synth)
     if (!plan.speak || audioOrNull === null) {
-      const error = plan.skip === 'synth-failed' ? `${speechFailHint(synth.engine)}，这句不出声` : '测试句为空'
+      // 知道缺哪一环就把原因念出来（与对讲页就绪行同源），不知道才退回总括句。
+      const error =
+        plan.skip === 'synth-failed'
+          ? `${speechFailHint(synth.engine, currentVoiceOutReadiness()?.reason)}，这句不出声`
+          : '测试句为空'
       console.log('VOICE_OUT_SKIP', JSON.stringify({ skip: plan.skip, engine: synth.engine }))
       showHint(error)
       return { ok: false, durationMs: null, hint: null, error }
@@ -355,7 +360,7 @@ class VoiceOutService {
     if (!synthOkAny) {
       // 全部段合成失败：不播、不按键，引擎跟设置走——别把「断网」误报给离线/GV 用户（与测试腿同一份提示表）。
       const engine = normalizeVoiceOutEngine(settings.ttsOutEngine)
-      const error = `${speechFailHint(engine)}，这句不出声`
+      const error = `${speechFailHint(engine, currentVoiceOutReadiness()?.reason)}，这句不出声`
       console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', engine, segments: segmentCount }))
       showHint(error)
       return { spoken: false, error }

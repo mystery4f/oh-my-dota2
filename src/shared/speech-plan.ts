@@ -9,6 +9,7 @@
  */
 import { OFFLINE_VOICES, type OfflineVoiceId, type VoiceOutEngine } from './ipc'
 import type { TtsVoiceOption } from './tts-voices'
+import { voiceOutFailPhrase, type VoiceOutBlockReason } from './voice-out-readiness'
 
 /** 四个引擎：声出侧只有三个（系统嗓子合成不出能送进频道的声音），朗读多一个 system。 */
 export type SpeechEngine = VoiceOutEngine | 'system'
@@ -108,17 +109,16 @@ export function resolveSpeechPlan(input: SpeechPlanInput): SpeechPlan {
 }
 
 /**
-/**
  * 引擎失败的原因短语。各腿自己接后缀（「这句不出声」/「试听失败」），
  * 但「离线失败是没装模型、GV 失败是缺某一环」这个判断只有一份——
  * 把断网的提示报给离线用户，是最容易写出来又最难发现的错。
  *
- * GV 那一条故意把四环都念一遍：它就一句话的篇幅，说清「可能是哪几样」，
- * 具体缺哪一环由对讲页的就绪行点名（同一个 reason 枚举，不会说两套话）。
+ * GV 那一条不再自己写死：知道缺哪一环就把那个原因念出来，与对讲页就绪行同源；
+ * 不知道（链齐了仍合成失败）才退回总括句，并把人指到就绪行。
  */
-export function speechFailHint(engine: SpeechEngine): string {
+export function speechFailHint(engine: SpeechEngine, reason?: VoiceOutBlockReason | null): string {
   if (engine === 'offline') return '离线引擎合成失败（模型没装好或推理失败）'
-  if (engine === 'sovits') return 'GV 合成失败（引擎、音色包、服务或参考音频缺一环，对讲页就绪行会点名）'
+  if (engine === 'sovits') return voiceOutFailPhrase(reason ?? null)
   if (engine === 'system') return '系统嗓子不出音频'
   return 'Edge 合成失败（断网或接口不可用）'
 }

@@ -245,7 +245,7 @@ const implemented = {
   },
   sovitsSelectRef: async () => true,
   sovitsSeed: async () => true,
-  // #46：预演里给一条「就绪」快照，就能看到绿色（无按钮）那半边的样子。
+  // #46：预演里给一条「就绪」快照，就能看到中性文字（无按钮）那半边的样子。
   sovitsStartServer: async () => sovitsStatus,
   voiceOutReadiness: async () => ({
     ready: true,
