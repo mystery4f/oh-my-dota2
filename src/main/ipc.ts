@@ -237,7 +237,7 @@ const handlers: MainHandlers = {
     const resolved = await resolveAsrFtTrainRequest(Boolean(request.resume))
     if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
     const exportRequest = resolved.request
-    return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest))
+    return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest), resolved.warning)
   },
   trainGvDatasets: () => {
     const home = discoverSovitsHome()

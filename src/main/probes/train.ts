@@ -34,6 +34,10 @@ import {
   ftLedgerMatchedOnDisk,
   ftTrainCoverage,
   judgeFtVram,
+  ftVramNote,
+  judgeFtDataset,
+  missingFtExportFiles,
+  ftAppliedNote,
   parseNvidiaComputeApps,
   pickLastCheckpointName,
   planAsrFtExportArgv,
@@ -146,9 +150,40 @@ export function runTrainProbe(): void {
   const okGpu = judgeFtVram({ totalMiB: 8188, usedMiB: 4488, apps: [{ pid: 9, name: 'api_v2.py', usedMiB: 3000 }], excludePids: [9] })
   const badGpu = judgeFtVram({ totalMiB: 8188, usedMiB: 7000, apps: [{ pid: 5, name: 'python.exe', usedMiB: 2000 }], excludePids: [] })
   push(
-    '显存闸：自家 GV 让路后够 6400 放行；外部占 2000 拒并点名',
+    '显存账：自家 GV 让路后够 6400；外部占 2000 判不够并点名（判定只出提示，不拦启动）',
     okGpu.ok && okGpu.holders.length === 0 && !badGpu.ok && badGpu.holders[0].includes('python.exe'),
     JSON.stringify({ okGpu, badGpu })
+  )
+  push('显存账带出空闲数：4488 已用 − GV 3000 → 6700；7000 已用 → 1188', okGpu.freeMiB === 6700 && badGpu.freeMiB === 1188, `${okGpu.freeMiB}/${badGpu.freeMiB}`)
+  const naRows = parseNvidiaComputeApps('49992, python.exe, [N/A]\n1844, dwm.exe, [N/A]\n')
+  const naNote = ftVramNote({ totalMiB: 8188, usedMiB: 6724, apps: naRows, excludePids: [49992] })
+  push(
+    '显存预检：WDDM 的 [N/A] 行被跳过，提示里没有 NaN 且给出整卡数字',
+    naRows.length === 0 && naNote !== null && !naNote.includes('NaN') && naNote.includes('6724') && naNote.includes('8188'),
+    naNote ?? 'null'
+  )
+  push(
+    '显存预检不再拦启动：够用没提示；不够时明说「照常开跑」',
+    ftVramNote({ totalMiB: 8188, usedMiB: 1000, apps: [] }) === null &&
+      (ftVramNote({ totalMiB: 8188, usedMiB: 7000, apps: [] }) ?? '').includes('照常开跑'),
+    String(ftVramNote({ totalMiB: 8188, usedMiB: 7000, apps: [] }))
+  )
+  // 回归：官方脚本 eval_strategy="steps" 无条件，空验证集会在 trainer 构造时 ValueError，
+  // 所以两个 JSONL 都得有；缺哪个就报哪个，别只给「打包失败」四个字。
+  const packOk = judgeFtDataset({ ok: true, trainPath: 'D:/d/train.jsonl', evalPath: 'D:/d/eval.jsonl', error: null })
+  const packNoEval = judgeFtDataset({ ok: true, trainPath: 'D:/d/train.jsonl', evalPath: '', error: null })
+  const packNoTrain = judgeFtDataset({ ok: true, trainPath: '', evalPath: 'D:/d/eval.jsonl', error: null })
+  const packNoRecord = judgeFtDataset({ ok: false, trainPath: '', evalPath: '', error: '还没有已录的句子——先在上方录几条再打包' })
+  push(
+    '打包判据：两个 JSONL 缺一不可，失败原因逐条说清',
+    packOk.ok === true &&
+      !packNoEval.ok &&
+      packNoEval.error.includes('验证集') &&
+      !packNoTrain.ok &&
+      packNoTrain.error.includes('训练集') &&
+      !packNoRecord.ok &&
+      packNoRecord.error.includes('还没有已录的句子'),
+    JSON.stringify({ packOk, packNoEval, packNoTrain, packNoRecord })
   )
   const exportArgv = planAsrFtExportArgv(ftPaths, 'R/checkpoint-330', 'X')
   const deviceAt = exportArgv.indexOf('--device')
@@ -162,6 +197,22 @@ export function runTrainProbe(): void {
     JSON.stringify(asrFtSwapSteps({ activeExists: true, bakExists: false, nextExists: false, exportExists: true }))
   )
   push('换模：没有导出产物也没有 next 才是空序列', asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: false, exportExists: false }).length === 0, '[]')
+  // 回归：导出腿中途断掉时目录里已有 conv_frontend/encoder，缺 decoder.int8；
+  // 那时点「应用新模型」会把残缺目录转正（识别 worker 静默死），必须逐件点名。
+  push(
+    '导出齐全判据：缺 decoder.int8 就不许应用，缺哪件报哪件',
+    missingFtExportFiles(['conv_frontend.onnx', 'encoder.int8.onnx', 'decoder.int8.onnx']).length === 0 &&
+      JSON.stringify(missingFtExportFiles(['conv_frontend.onnx', 'encoder.onnx', 'encoder.onnx.data'])) === '["encoder.int8.onnx","decoder.int8.onnx"]' &&
+      missingFtExportFiles([]).length === 3,
+    JSON.stringify(missingFtExportFiles(['conv_frontend.onnx', 'encoder.onnx', 'encoder.onnx.data']))
+  )
+  push(
+    '换模文案点名是哪次导出：带 run id / 不带 / 失败透传',
+    ftAppliedNote({ ok: true, error: null, model: 'ft-20261107181058' }).includes('ft-20261107181058') &&
+      ftAppliedNote({ ok: true, error: null }) === '新模型已转正，下一句识别就用它' &&
+      ftAppliedNote({ ok: false, error: '导出没跑完' }) === '导出没跑完',
+    ftAppliedNote({ ok: true, error: null, model: 'ft-20261107181058' })
+  )
   push('回滚序列：有备份才动手', JSON.stringify(asrFtRollbackSteps({ bakExists: true })) === JSON.stringify(['rm-active', 'restore-bak']) && asrFtRollbackSteps({ bakExists: false }).length === 0, '')
   push('环境点名：全缺四项、全齐空数组', deriveAsrFtEnvGaps({}).length === 4 && deriveAsrFtEnvGaps({ venvOk: true, sftScript: 's', exportScript: 'e', baseModelDir: 'm' }).length === 0, String(deriveAsrFtEnvGaps({}).length))
   push('安装步骤：全缺五步、全齐空序列', JSON.stringify(planAsrFtInstallSteps({ scripts: false, uv: false, venv: false, deps: false, model: false })).includes('下载 uv') && planAsrFtInstallSteps({ scripts: true, uv: true, venv: true, deps: true, model: true }).length === 0, String(planAsrFtInstallSteps({ scripts: false, uv: true, venv: false, deps: true, model: true }).length))
@@ -208,7 +259,9 @@ export function runTrainProbe(): void {
   const jsonl = buildFtJsonlLine(built.entries[0])
   push('JSONL 行带 language Chinese 前缀', jsonl.includes('"audio":"X:/rec/G15-L01.wav"') && jsonl.includes('language Chinese<asr_text>中路二塔快没了。'), jsonl)
   const split = splitTrainEval(built.entries)
-  push('数据太少全归训练（验证留空）', split.train.length === 2 && split.eval.length === 0, `train=${split.train.length} eval=${split.eval.length}`)
+  push('两条起必切验证集（官方脚本 eval_strategy 无条件 steps）', split.train.length === 1 && split.eval.length === 1, `train=${split.train.length} eval=${split.eval.length}`)
+  const splitOne = splitTrainEval(built.entries.slice(0, 1))
+  push('只有一条时验证集留空（打包层会先拒）', splitOne.train.length === 1 && splitOne.eval.length === 0, `train=${splitOne.train.length} eval=${splitOne.eval.length}`)
   const splitBig = splitTrainEval([1, 2, 3, 4, 5].map((no) => ({ key: `G01-L${String(no).padStart(2, '0')}`, wavPath: `w${no}`, text: `t${no}` })))
   push('够量时尾部 2 条进验证', splitBig.train.length === 3 && splitBig.eval.length === 2 && splitBig.eval[0].wavPath === 'w4', `train=${splitBig.train.length} eval=${splitBig.eval.length}`)
   // —— 录音判定（T4a 录音面板）：开停/收尾/命名全在共享缝 ——

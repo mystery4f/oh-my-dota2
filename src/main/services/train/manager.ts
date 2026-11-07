@@ -32,6 +32,8 @@ import { markRunStatus } from './asr-ft'
 const LOG_RING_LIMIT = 500
 /** 进度广播节流：真训练栈一秒几十行日志，不节流会把窗口渲染按住。 */
 const BROADCAST_MIN_MS = 250
+/** 训练栈 OOM 的原文标记：torch 抛 `torch.OutOfMemoryError: CUDA out of memory`，也有 RuntimeError 包装的写法。 */
+const OOM_RE = /CUDA out of memory|OutOfMemoryError|out of memory/i
 /** 训练日志落盘上限：一圈环形日志挡不住崩溃现场，磁盘这份才是事后唯一证据。 */
 const TRAIN_LOG_MAX_BYTES = 4 * 1024 * 1024
 let trainLogSize = -1
@@ -104,7 +106,7 @@ class TrainManager {
     return check.status === 0 ? candidate : null
   }
 
-  start(request: TrainStartRequest, chain?: () => TrainPlan | null): TrainStartResult {
+  start(request: TrainStartRequest, chain?: () => TrainPlan | null, warning?: string | null): TrainStartResult {
     const gate = canStartTrain(this.status())
     if (!gate.ok) return { ok: false, error: gate.reason }
     const kind: TrainTaskKind = normalizeTrainKind(request.kind)
@@ -126,6 +128,8 @@ class TrainManager {
       inference: null
     }
     this.logs = []
+    // 显存预检的提示（只提示不拦）：放在第一行，用户点完就能看见「现在有多少、差多少」。
+    if (warning) this.record(warning)
     this.emit(true)
     if (shouldPauseInference(this.status()) && this.task) {
       const outcome = pauseSovitsForTraining()
@@ -214,11 +218,24 @@ class TrainManager {
     return { ok: true, error: null }
   }
 
+  /** 日志环最近一段有没有 OOM 原文：失败收场要说人话，别只丢一个 exit code。 */
+  private sawOom(): boolean {
+    return this.logs.slice(-60).some((line) => OOM_RE.test(line.text))
+  }
+
   private finish(status: Extract<TrainTaskStatus, 'done' | 'failed' | 'stopped'>, code: number | null): void {
     // asr-ft 失败收场回写 run.json（成功标 trained 走链回调、转正标 applied 走 apply）；缺账本就跳过。
     if (status === 'failed' && this.request?.asrFt) markRunStatus(this.request.asrFt.data.runDir, 'failed')
     const stage =
-      status === 'done' ? (this.chained ? '完成（可应用新模型）' : '完成') : status === 'stopped' ? '已停止' : `失败 (exit ${code ?? '?'})`
+      status === 'done'
+        ? this.chained
+          ? '完成（可应用新模型）'
+          : '完成'
+        : status === 'stopped'
+          ? '已停止'
+          : this.sawOom()
+            ? '失败：显存不足（CUDA OOM），关掉占卡程序再点一次'
+            : `失败 (exit ${code ?? '?'})`
     if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
     this.child = null
     this.emit(true)

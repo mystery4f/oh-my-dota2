@@ -120,6 +120,17 @@ export function asrFtSwapSteps(state: {
   steps.push('promote-next')
   return steps
 }
+/** sherpa 真正加载的三件 int8 文件：导出目录里除此之外还躺着 3–5 GB 的 fp32 外置数据。 */
+export const FT_MODEL_FILES = ['conv_frontend.onnx', 'encoder.int8.onnx', 'decoder.int8.onnx'] as const
+
+/**
+ * 导出产物齐全判据：sherpa 只认上面这三个 int8 文件（导出脚本默认量化）。
+ * 训练腿跑完而导出腿还在写 decoder.int8.onnx 时，目录里已经有别的文件了——
+ * 那时点「应用新模型」会把残缺目录转正，识别直接加载失败，所以必须逐件点名。
+ */
+export function missingFtExportFiles(names: readonly string[]): string[] {
+  return FT_MODEL_FILES.filter((name) => !names.includes(name))
+}
 
 /** 回滚动作序列：现役删掉、备份归位。没有备份 = 空序列。 */
 export function asrFtRollbackSteps(state: { bakExists: boolean }): AsrFtSwapOp[] {
@@ -149,6 +160,14 @@ export interface AsrFtInstallState {
 export interface AsrFtSwapResult {
   ok: boolean
   error: string | null
+  /** 转正时用的那次导出（run id）；回滚与失败为空。 */
+  model?: string | null
+}
+
+/** 换模结果的用户可见文案：带上转正的是哪一次导出，免得以为换的是刚训完那版。 */
+export function ftAppliedNote(result: AsrFtSwapResult): string {
+  if (!result.ok) return result.error ?? '应用失败'
+  return result.model ? `新模型已转正（${result.model}），下一句识别就用它` : '新模型已转正，下一句识别就用它'
 }
 
 /** 环境缺什么：四条路径逐项点名，全齐 = 空数组。 */
@@ -225,7 +244,7 @@ export function ftLedgerMatchedOnDisk(
   return past.every((e) => now.get(e.key) === `${e.bytes}|${e.mtimeMs}`)
 }
 
-/** 8G 卡实测训练净占 ~6.2G（峰值 7661 − 空闲基线 1488）；留 200 MiB 余量做开跑闸。 */
+/** 8G 卡实测训练净占 ~6.2G（峰值 7661 − 空闲基线 1488）+ 200 MiB 余量。这是「建议线」，不是硬闸。 */
 export const FT_TRAIN_NEED_MIB = 6400
 
 export interface FtGpuApp {
@@ -249,20 +268,53 @@ export function parseNvidiaComputeApps(text: string): FtGpuApp[] {
   return out
 }
 
-/** 显存闸：可用 = 总 − (已用 − 自家将暂停的占用)。excludePids 是应用托管 GV（训练前会被 pause 让显存）。 */
+/** 显存账：可用 = 总 − (已用 − 自家将暂停的占用)。excludePids 是应用托管 GV（训练前会被 pause 让显存）。 */
 export function judgeFtVram(q: {
   totalMiB: number
   usedMiB: number
   apps: FtGpuApp[]
   excludePids?: readonly number[]
-}): { ok: boolean; holders: string[] } {
+}): { ok: boolean; freeMiB: number; holders: string[] } {
   const excluded = q.apps
     .filter((a) => (q.excludePids ?? []).includes(a.pid))
     .reduce((n, a) => n + a.usedMiB, 0)
-  const free = q.totalMiB - (q.usedMiB - excluded)
+  const freeMiB = q.totalMiB - (q.usedMiB - excluded)
   const holders = q.apps
     .filter((a) => !(q.excludePids ?? []).includes(a.pid) && a.usedMiB >= 200)
     .map((a) => `${a.name || '未知进程'} ${a.usedMiB} MiB`)
-  return { ok: free >= FT_TRAIN_NEED_MIB, holders }
+  return { ok: freeMiB >= FT_TRAIN_NEED_MIB, freeMiB, holders }
+}
+
+/**
+ * 显存预检的提示语：够用返回 null。这里只提示、不拒绝——8G 卡上「关程序凑够 6.4G」经常凑不到，
+ * 硬拦会把本来能跑的训练永久挡在门外；真正的兜底是训练真 OOM 时按原文点名（manager 认 OOM 标记）。
+ */
+export function ftVramNote(q: {
+  totalMiB: number
+  usedMiB: number
+  apps: FtGpuApp[]
+  excludePids?: readonly number[]
+}): string | null {
+  const verdict = judgeFtVram(q)
+  if (verdict.ok) return null
+  const holders = verdict.holders.length > 0 ? `；占卡较多的是 ${verdict.holders.join('、')}` : ''
+  return `显存偏紧：整卡已用 ${q.usedMiB} / ${q.totalMiB} MiB，可空出约 ${verdict.freeMiB} MiB（训练建议 ${FT_TRAIN_NEED_MIB} MiB）${holders}。照常开跑；真不够会在训练里报 CUDA OOM，那时关掉占卡程序再点一次。`
+}
+
+/**
+ * 打包结果的放行判据：两个 JSONL 都必须有。验证集不是可选项——官方脚本的
+ * `eval_strategy="steps"` 是无条件的，空验证集会在 trainer 构造时直接 ValueError（安装版实测）。
+ * 只有一条录音时 prepareFtDataset 会先拒打包并说清楚要补录，所以这里的报错文案只兜底。
+ */
+export function judgeFtDataset(pack: {
+  ok: boolean
+  trainPath: string
+  evalPath: string
+  error: string | null
+}): { ok: boolean; error: string } {
+  if (!pack.ok) return { ok: false, error: pack.error || '训练数据打包失败' }
+  if (!pack.trainPath) return { ok: false, error: '训练集是空的——先录几条再打包' }
+  if (!pack.evalPath) return { ok: false, error: '验证集没生成——至少录两条再打包' }
+  return { ok: true, error: '' }
 }
 

@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import {
   asrFtRollbackSteps,
   asrFtSwapSteps,
@@ -18,10 +18,12 @@ import {
   type FtRunMeta,
   deriveFtEpochs,
   deriveFtResumeEpochs,
-  FT_TRAIN_NEED_MIB,
+  ftVramNote,
+  judgeFtDataset,
+  missingFtExportFiles,
+  FT_MODEL_FILES,
   ftLedgerMatchedOnDisk,
   ftTrainCoverage,
-  judgeFtVram,
   parseNvidiaComputeApps
 } from '@shared/train/asr-ft'
 import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
@@ -90,6 +92,14 @@ function asrModelsRoot(): string {
 
 function activeDir(): string {
   return join(asrModelsRoot(), 'qwen3-asr')
+}
+
+/**
+ * 对讲下载的官方模型（voice-runtime/models/qwen3-asr）。第一次换模时 asr-models 还不存在，
+ * 词表只能从这里借——微调不动词表，借来仍是同一份。
+ */
+function shippedModelDir(): string {
+  return join(app.getPath('userData'), 'voice-runtime', 'models', 'qwen3-asr')
 }
 
 function backupDir(): string {
@@ -169,6 +179,14 @@ export function applyAsrFtModel(): AsrFtSwapResult {
   if (steps.length === 0) {
     return { ok: false, error: '没有可应用的新模型：先跑一次训练，等「导出 ONNX」完成再点' }
   }
+  // 导出腿中途断掉时目录里已经有 conv_frontend/encoder，唯独缺 decoder.int8——
+  // 那时转正会让识别 worker 加载失败，所以先点名缺件，不碰现役模型。
+  if (swap.lastExportDir) {
+    const missing = missingFtExportFiles(safeReaddir(swap.lastExportDir))
+    if (missing.length > 0) {
+      return { ok: false, error: `导出没跑完（缺 ${missing.join('、')}）：重新点一次「开始训练」，等导出完成再应用` }
+    }
+  }
   const active = activeDir()
   const bak = backupDir()
   const next = stagingDir()
@@ -177,13 +195,17 @@ export function applyAsrFtModel(): AsrFtSwapResult {
       if (op === 'rm-bak') rmSync(bak, { recursive: true, force: true })
       if (op === 'bak-active') renameSync(active, bak)
       if (op === 'promote-next') {
-        // 有导出产物才拷成 next；只有上次中断留下的 next 时就直接转正它。
+        // 只拷 sherpa 加载的三件 int8（+ 词表）：导出目录里还躺着 3–5 GB 的 fp32 外置分片，
+        // 整盘转正会让现役目录翻几倍，下一轮换模又得再拷一遍。
         if (swap.lastExportDir) {
           rmSync(next, { recursive: true, force: true })
-          cpSync(swap.lastExportDir, next, { recursive: true })
+          mkdirSync(next, { recursive: true })
+          for (const file of FT_MODEL_FILES) cpSync(join(swap.lastExportDir, file), join(next, file))
+          const tokenizer = join(swap.lastExportDir, 'tokenizer')
+          if (existsSync(tokenizer)) cpSync(tokenizer, join(next, 'tokenizer'), { recursive: true })
         }
-        // 兜底顺序：刚进备份的上一版 → asr-models 下任何自带词表的目录（原始出厂解压包）。
-        const fallbacks = [bak, ...readdirSync(asrModelsRoot()).map((d) => join(asrModelsRoot(), d))]
+        // 兜底顺序：刚进备份的上一版 → asr-models 下任何自带词表的目录 → 对讲下载的官方模型。
+        const fallbacks = [bak, ...safeReaddir(asrModelsRoot()).map((d) => join(asrModelsRoot(), d)), shippedModelDir()]
         if (ensureTokenizerFiles(next, fallbacks) === 'no-source') {
           throw new Error('导出产物缺 tokenizer 词表文件，备份和原始模型目录里也没得借')
         }
@@ -195,7 +217,7 @@ export function applyAsrFtModel(): AsrFtSwapResult {
   }
   markAppliedForExport(swap.lastExportDir ?? '')
   resetSherpaWorker()
-  return { ok: true, error: null }
+  return { ok: true, error: null, model: swap.lastExportDir ? basename(swap.lastExportDir) : null }
 }
 
 function runsRoot(): string {
@@ -270,8 +292,9 @@ function latestResumableRun(currentLedger: FtLedgerEntry[]): { resumeFrom: strin
 }
 
 /**
- * 显存闸（4060 8G 实测训练净占 ~6.2G）：nvidia-smi 在就查，查不到（无 N 卡 / 不在 PATH）放行。
- * 应用托管的 GV 子进程开跑时会被暂停让出显存，所以它的占用不计入——外部进程才拦。
+ * 显存预检：nvidia-smi 在就量一次，查不到（无 N 卡 / 不在 PATH）静默跳过。
+ * 只回提示不回拒绝：Windows 的 WDDM 不暴露每进程显存（used_memory 全是 [N/A]），
+ * 自家 GV 的占用既扣不掉、也点不出名字，硬闸在本机只会永远判不过。
  */
 function ftVramGuard(): string | null {
   const q = spawnSync('nvidia-smi', ['--query-gpu=memory.total,memory.used', '--format=csv,noheader,nounits'], { timeout: 5000, windowsHide: true })
@@ -281,10 +304,7 @@ function ftVramGuard(): string | null {
   const raw = spawnSync('nvidia-smi', ['--query-compute-apps=pid,process_name,used_memory', '--format=csv,noheader,nounits'], { timeout: 5000, windowsHide: true })
   const apps = raw.error || raw.status !== 0 ? [] : parseNvidiaComputeApps(String(raw.stdout))
   const ownPid = sovitsChildPid()
-  const verdict = judgeFtVram({ totalMiB, usedMiB, apps, excludePids: ownPid ? [ownPid] : [] })
-  if (verdict.ok) return null
-  const holders = verdict.holders.length > 0 ? verdict.holders.join('、') : '未知进程'
-  return `显存不够训练（要空出约 ${FT_TRAIN_NEED_MIB} MiB）：现在被 ${holders} 占着。先关掉占卡的程序再点一次；本应用托管的语音服务开跑时会自动让路。`
+  return ftVramNote({ totalMiB, usedMiB, apps, excludePids: ownPid ? [ownPid] : [] })
 }
 
 export function rollbackAsrFtModel(): AsrFtSwapResult {
@@ -306,21 +326,23 @@ export function rollbackAsrFtModel(): AsrFtSwapResult {
   return { ok: true, error: null }
 }
 
-/** 训练启动前把环境、显存、数据、目录都备齐：缺一样就拒启动，成功返回带 asrFt 附件的请求。 */
+/** 训练启动前把环境、数据、目录备齐：缺一样就拒启动；显存只给提示（warning），不拦。 */
 export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
   ok: boolean
   request?: TrainStartRequest
   error?: string
+  warning?: string | null
 }> {
   const env = detectAsrFtEnv()
   if (!env.ok || !env.paths.pythonExe) {
     return { ok: false, error: `微调环境没就绪：${env.gaps.join('；')}` }
   }
-  const vramError = ftVramGuard()
-  if (vramError) return { ok: false, error: vramError }
+  const vramNote = ftVramGuard()
   const pack = await prepareFtDataset()
-  if (!pack.ok || !pack.trainPath || !pack.evalPath) {
-    return { ok: false, error: pack.error ?? '训练数据打包失败' }
+  // 两个 JSONL 都得有（官方脚本的 eval_strategy 是无条件 steps），判据在共享缝里，好让探针盯住。
+  const ready = judgeFtDataset(pack)
+  if (!ready.ok) {
+    return { ok: false, error: ready.error }
   }
   // 续训：窗口开关 + 上次账本对得上才接旧 checkpoint（lr 降一档防把权重带飞）；接不上静默新开。
   const prior = resume ? latestResumableRun(pack.ledger) : null
@@ -352,6 +374,7 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
   })
   return {
     ok: true,
+    warning: vramNote,
     request: {
       kind: 'asr-ft',
       // ASR 微调没有「数据集名」这个概念：目录名固定 ft-<时间戳>，字段留空只为满足请求契约。
