@@ -13,8 +13,8 @@ export const NODE_RUNTIME_ZIP = {
   url: 'https://registry.npmmirror.com/-/binary/node/v22.21.0/node-v22.21.0-win-x64.zip',
   bytes: 35546209,
   sha256: '84d31df6571c3c7156707265bf51e2a021656fa1584bf6f4486b792dcde54d7d',
-  /** zip 内要取出的文件（7zr 只解这一个，不铺 100MB 的 npm 全家桶）。 */
-  inner: 'node.exe',
+  /** zip 里 node.exe 的真实路径（tar --include 按它过滤，只落这 85 MB 的一个文件）。 */
+  inner: 'node-v22.21.0-win-x64/node.exe',
   version: 'v22.21.0'
 } as const
 

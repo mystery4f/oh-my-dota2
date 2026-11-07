@@ -6,11 +6,12 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync
 } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { errorMessage } from '@shared/errors'
 import {
   NODE_RUNTIME_ZIP,
@@ -190,17 +191,21 @@ export async function installVoiceRuntime(): Promise<{ ok: boolean; error: strin
     }
 
     emit({ stage: 'node-extract', progress: 0.8 })
-    const sevenZip = join(process.resourcesPath ?? '', '7zr.exe')
-    const sevenZipCandidates = [sevenZip, join(app.getAppPath(), 'resources/7zr.exe')]
-    const extractor = sevenZipCandidates.find((candidate) => candidate && existsSync(candidate))
-    if (!extractor) throw new Error('找不到 7zr.exe（安装包缺资源），无法解压 node.exe')
-    const extract = spawnSync(extractor, ['x', zipDest, NODE_RUNTIME_ZIP.inner, `-o${voiceRuntimeDir()}`, '-y'], {
+    // 7zr 只认 .7z（喂 zip 直接退出码 2）；Windows 自带的 bsdtar 原生读 zip，
+    // --include 按路径过滤，只解 node.exe 这一个文件，不铺 100 MB 的 npm 全家桶。
+    const tarPath = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+    const extract = spawnSync(tarPath, ['-xf', zipDest, '-C', voiceRuntimeDir(), '--include', `*/${basename(NODE_RUNTIME_ZIP.inner)}`], {
       encoding: 'utf8',
       windowsHide: true
     })
-    if (extract.status !== 0 || !existsSync(voiceRuntimeNode())) {
-      throw new Error(`解压 node.exe 失败（7zr 退出码 ${extract.status}）`)
+    const extractedNode = join(voiceRuntimeDir(), NODE_RUNTIME_ZIP.inner)
+    if (extract.status !== 0 || !existsSync(extractedNode)) {
+      const tail = (extract.stderr ?? '').slice(-200)
+      throw new Error(`解压 node.exe 失败（tar 退出码 ${extract.status}${tail ? `：${tail}` : ''}）`)
     }
+    renameSync(extractedNode, voiceRuntimeNode())
+    // --include 过滤后，版本目录里只剩这一个文件，搬空即删。
+    rmSync(dirname(extractedNode), { recursive: true, force: true })
     rmSync(zipDest, { force: true })
 
     const meta: VoiceRuntimeJson = {

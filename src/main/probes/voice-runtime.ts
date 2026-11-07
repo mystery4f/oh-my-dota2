@@ -21,8 +21,7 @@ import { sha256File } from '../services/voice/runtime'
 /**
  * `--voice-runtime-probe`：语音运行时（#45）的两层行为锁。
  * 纯规则（NODE_PATH 拼接/node 候选/三态推导/下载清单/hf 直链/runtime.json 解析）
- * + 下载副作用（本地假 HTTP 源：200 全量、Range 续传、长度不符、哈希校验）。
- * 真机/打包后的安装链（拷包 + 7zr 解 node.exe）是人工验收，不在这里模拟。
+ * 真机/打包后的安装链（拷包 + tar 解 node.exe）是人工验收，不在这里模拟。
  */
 
 interface Row {
