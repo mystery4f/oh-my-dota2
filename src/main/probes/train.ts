@@ -29,9 +29,17 @@ import {
   asrFtRollbackSteps,
   asrFtSwapSteps,
   deriveAsrFtEnvGaps,
+  deriveFtEpochs,
+  deriveFtResumeEpochs,
+  ftLedgerMatchedOnDisk,
+  ftTrainCoverage,
+  judgeFtVram,
+  parseNvidiaComputeApps,
   pickLastCheckpointName,
   planAsrFtExportArgv,
-  type AsrFtPaths
+  planAsrFtTrainArgv,
+  type AsrFtPaths,
+  type FtLedgerEntry
 } from '@shared/train/asr-ft'
 import {
   buildS1TrainConfigData,
@@ -97,6 +105,51 @@ export function runTrainProbe(): void {
   const ftPlan = deriveTrainPlan({ kind: 'asr-ft', dataset: '', asrFt: { paths: ftPaths, data: ftData, exportDir: 'X' } })
   const epochAt = ftPlan.args.indexOf('--epochs')
   push('asr-ft：带环境附件出真命令（python + 冻结的试点参数）', ftPlan.exe === ftPaths.pythonExe && epochAt >= 0 && ftPlan.args[epochAt + 1] === '66' && !ftPlan.unavailable, ftPlan.args.join(' '))
+  push(
+    '自适应轮数：38 条→66 封顶、122→26、400→10 保底、99→32、0→66',
+    deriveFtEpochs(38) === 66 && deriveFtEpochs(122) === 26 && deriveFtEpochs(400) === 10 && deriveFtEpochs(99) === 32 && deriveFtEpochs(0) === 66,
+    [38, 122, 400, 99, 0].map((n) => deriveFtEpochs(n)).join('/')
+  )
+  const tuned = planAsrFtTrainArgv(ftPaths, ftData, { epochs: 26, lr: '1e-5', resumeFrom: 'R/checkpoint-660' })
+  const flagValue = (argv: string[], flag: string): string => argv[argv.indexOf(flag) + 1] ?? ''
+  push(
+    'tuning 覆盖：--lr/--epochs/--resume_from 三对值都对',
+    flagValue(tuned, '--lr') === '1e-5' && flagValue(tuned, '--epochs') === '26' && flagValue(tuned, '--resume_from') === 'R/checkpoint-660',
+    tuned.join(' ')
+  )
+  push('默认 argv 不带 --resume_from（新开跑）', !ftPlan.args.includes('--resume_from'), ftPlan.args.join(' '))
+  const fp = (key: string, bytes: number, mtime: number): FtLedgerEntry => ({ key, wavPath: `X:/${key}.wav`, bytes, mtimeMs: mtime, text: '', split: 'train' })
+  const coverage = ftTrainCoverage([fp('G14-L01', 100, 1), fp('G14-L02', 200, 2)], [
+    { key: 'G14-L01', bytes: 100, mtimeMs: 1 },
+    { key: 'G14-L02', bytes: 201, mtimeMs: 2 },
+    { key: 'G14-L05', bytes: 300, mtimeMs: 3 }
+  ])
+  push(
+    '已训标记：指纹全等=done、变动=stale、账本没有=没训（都计 total）',
+    coverage.G14.done === 1 && coverage.G14.stale === 1 && coverage.G14.total === 3,
+    JSON.stringify(coverage)
+  )
+  push(
+    '续训对账：逐条全等放行、一条重录拒绝、空账本拒绝',
+    ftLedgerMatchedOnDisk([fp('G14-L01', 100, 1)], [{ key: 'G14-L01', bytes: 100, mtimeMs: 1 }]) &&
+      !ftLedgerMatchedOnDisk([fp('G14-L01', 100, 1)], [{ key: 'G14-L01', bytes: 101, mtimeMs: 1 }]) &&
+      !ftLedgerMatchedOnDisk([], [{ key: 'G14-L01', bytes: 100, mtimeMs: 1 }]),
+    '三态判定'
+  )
+  push('续训轮数：checkpoint 660 + 补 200 步、每轮 5 步 → 172', deriveFtResumeEpochs(20, 660) === 172, String(deriveFtResumeEpochs(20, 660)))
+  const apps = parseNvidiaComputeApps('1234, python.exe, 4096\n7, C:\\py, torch.exe, 512\nrubbish\n')
+  push(
+    'nvidia-smi compute-apps 解析：pid 首逗号、显存末逗号、中间当名字、垃圾行跳过',
+    apps.length === 2 && apps[0].pid === 1234 && apps[0].usedMiB === 4096 && apps[1].name === 'C:\\py, torch.exe' && apps[1].usedMiB === 512,
+    JSON.stringify(apps)
+  )
+  const okGpu = judgeFtVram({ totalMiB: 8188, usedMiB: 4488, apps: [{ pid: 9, name: 'api_v2.py', usedMiB: 3000 }], excludePids: [9] })
+  const badGpu = judgeFtVram({ totalMiB: 8188, usedMiB: 7000, apps: [{ pid: 5, name: 'python.exe', usedMiB: 2000 }], excludePids: [] })
+  push(
+    '显存闸：自家 GV 让路后够 6400 放行；外部占 2000 拒并点名',
+    okGpu.ok && okGpu.holders.length === 0 && !badGpu.ok && badGpu.holders[0].includes('python.exe'),
+    JSON.stringify({ okGpu, badGpu })
+  )
   const exportArgv = planAsrFtExportArgv(ftPaths, 'R/checkpoint-330', 'X')
   const deviceAt = exportArgv.indexOf('--device')
   push('导出腿：CPU 上跑并带自校验', deviceAt >= 0 && exportArgv[deviceAt + 1] === 'cpu' && exportArgv.includes('--verify'), exportArgv.join(' '))
@@ -156,7 +209,7 @@ export function runTrainProbe(): void {
   push('JSONL 行带 language Chinese 前缀', jsonl.includes('"audio":"X:/rec/G15-L01.wav"') && jsonl.includes('language Chinese<asr_text>中路二塔快没了。'), jsonl)
   const split = splitTrainEval(built.entries)
   push('数据太少全归训练（验证留空）', split.train.length === 2 && split.eval.length === 0, `train=${split.train.length} eval=${split.eval.length}`)
-  const splitBig = splitTrainEval([1, 2, 3, 4, 5].map((no) => ({ wavPath: `w${no}`, text: `t${no}` })))
+  const splitBig = splitTrainEval([1, 2, 3, 4, 5].map((no) => ({ key: `G01-L${String(no).padStart(2, '0')}`, wavPath: `w${no}`, text: `t${no}` })))
   push('够量时尾部 2 条进验证', splitBig.train.length === 3 && splitBig.eval.length === 2 && splitBig.eval[0].wavPath === 'w4', `train=${splitBig.train.length} eval=${splitBig.eval.length}`)
   // —— 录音判定（T4a 录音面板）：开停/收尾/命名全在共享缝 ——
   const t0 = 1_000_000

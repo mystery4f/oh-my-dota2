@@ -1,6 +1,9 @@
 /** 备料打包纯缝（一键数据集）：录音 × 稿子 → 训练条目、JSONL 拼装、组进度。零 IO，磁盘真值由调用方注入。 */
 import { recordingKey } from './recording'
+import type { FtLedgerEntry } from './asr-ft'
 export interface FtDatasetEntry {
+  /** 完整录音键（组-句，如 G14-L03）：账本/续训判定按它对账。 */
+  key: string
   wavPath: string
   text: string
 }
@@ -12,6 +15,8 @@ export interface FtDatasetPrepareResult {
   evalCount: number
   trainPath: string
   evalPath: string
+  /** 本次打包的磁盘账本（每条录音的 bytes/mtimeMs 指纹）：run 目录里的 dataset.jsonl 由备料服务写。 */
+  ledger: FtLedgerEntry[]
   error: string | null
 }
 
@@ -41,7 +46,7 @@ export function buildFtDatasetEntries(
         notRecorded += 1
         continue
       }
-      entries.push({ wavPath: wavPath(group.id, key), text: line.text })
+      entries.push({ key: `${group.id}-${key}`, wavPath: wavPath(group.id, key), text: line.text })
     }
   }
   return { entries, notRecorded }

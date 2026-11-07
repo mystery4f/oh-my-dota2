@@ -214,6 +214,11 @@ export function currentSovitsPort(): number {
   return serverPort(loadSettings().ttsSovitsUrl || 'http://127.0.0.1:9880')
 }
 
+/** 应用托管的 GV 子进程 pid（训练显存预检把它视作「将释放」）；没在跑或外部起的返回 null。 */
+export function sovitsChildPid(): number | null {
+  return child && child.exitCode === null ? child.pid ?? null : null
+}
+
 /**
  * 激活一条参考音频：写设置 → 确保服务在 → 切微调权重 → 首句预热。
  * 面板下拉选择、音色包装完自动选中、启动恢复三路共用，保证顺序一致：

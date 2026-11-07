@@ -34,6 +34,8 @@ export interface FtRecInfo {
   key: string
   bytes: number
   durationMs: number
+  /** 文件修改时间（续训对账/已训标记的指纹之一）。 */
+  mtimeMs: number
 }
 export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'zhipu' | 'custom'
 

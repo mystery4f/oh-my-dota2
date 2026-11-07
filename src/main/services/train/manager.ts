@@ -20,6 +20,7 @@ import {
 } from '@shared/train/task'
 import { parseTrainProgress } from '@shared/train/progress'
 import { ensureSovitsServer, pauseSovitsForTraining } from '../voice/sovits-server'
+import { markRunStatus } from './asr-ft'
 
 /**
  * 训练任务管理器：同一时刻只允许一个训练进程（编排器约定）。
@@ -67,6 +68,8 @@ class TrainManager {
   private chain: (() => TrainPlan | null) | null = null
   /** 本任务走过链式导出没有：决定 done 的收场文案。 */
   private chained = false
+  /** 本任务的启动请求：asr-ft 失败时回写 run.json（其他 kind 不碰账本）。 */
+  private request: TrainStartRequest | null = null
   onState(listener: (snapshot: TrainSnapshot) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -131,6 +134,7 @@ class TrainManager {
       this.emit(true)
     }
 
+    this.request = request
     this.chain = chain ?? null
     this.chained = false
     this.spawnChild(plan.exe === 'node' ? (node ?? 'node') : plan.exe, plan)
@@ -211,6 +215,8 @@ class TrainManager {
   }
 
   private finish(status: Extract<TrainTaskStatus, 'done' | 'failed' | 'stopped'>, code: number | null): void {
+    // asr-ft 失败收场回写 run.json（成功标 trained 走链回调、转正标 applied 走 apply）；缺账本就跳过。
+    if (status === 'failed' && this.request?.asrFt) markRunStatus(this.request.asrFt.data.runDir, 'failed')
     const stage =
       status === 'done' ? (this.chained ? '完成（可应用新模型）' : '完成') : status === 'stopped' ? '已停止' : `失败 (exit ${code ?? '?'})`
     if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import {
   asrFtRollbackSteps,
@@ -10,12 +11,25 @@ import {
   pickLastCheckpointName,
   type AsrFtPaths,
   type AsrFtStatusResult,
-  type AsrFtSwapResult
+  type AsrFtSwapResult,
+  type AsrFtTrainTuning,
+
+  type FtLedgerEntry,
+  type FtRunMeta,
+  deriveFtEpochs,
+  deriveFtResumeEpochs,
+  FT_TRAIN_NEED_MIB,
+  ftLedgerMatchedOnDisk,
+  ftTrainCoverage,
+  judgeFtVram,
+  parseNvidiaComputeApps
 } from '@shared/train/asr-ft'
 import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
 import { loadSettings } from '../settings'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { prepareFtDataset } from './ft-dataset'
+import { ftRecList } from './ft-record'
+import { sovitsChildPid } from '../voice/sovits-server'
 
 /**
  * ASR 微调闭环（T5）的环境与换模：
@@ -103,17 +117,23 @@ function lastExportDir(): string | null {
   return entries.length > 0 ? join(root, entries[entries.length - 1]) : null
 }
 
-/** 环境检测 + 换模视图；安装进行时由 ipc 层补（install 字段），避免和安装器互相 import。 */
-export function asrFtStatus(): Omit<AsrFtStatusResult, 'install'> {
+
+/** 换模四态的同步视图：asrFtStatus（含已训标记，异步）和 applyAsrFtModel（同步）共用。 */
+function swapView(): AsrFtStatusResult['swap'] {
+  return {
+    activeExists: existsSync(join(activeDir(), 'decoder.int8.onnx')),
+    bakExists: existsSync(join(backupDir(), 'decoder.int8.onnx')),
+    nextExists: existsSync(join(stagingDir(), 'decoder.int8.onnx')),
+    lastExportDir: lastExportDir()
+  }
+}
+/** 环境检测 + 换模视图 + 已训标记（coverage）；安装进行时由 ipc 层补（install 字段），避免和安装器互相 import。 */
+export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>> {
   const env = detectAsrFtEnv()
   return {
     env: { ok: env.ok, gaps: env.gaps, envRoot: env.envRoot },
-    swap: {
-      activeExists: existsSync(join(activeDir(), 'decoder.int8.onnx')),
-      bakExists: existsSync(join(backupDir(), 'decoder.int8.onnx')),
-      nextExists: existsSync(join(stagingDir(), 'decoder.int8.onnx')),
-      lastExportDir: lastExportDir()
-    }
+    swap: swapView(),
+    coverage: ftTrainCoverage(latestFtLedger(), await ftRecList())
   }
 }
 
@@ -143,9 +163,9 @@ function ensureTokenizerFiles(into: string, fallbackDirs: string[]): string | nu
 }
 
 export function applyAsrFtModel(): AsrFtSwapResult {
-  const status = asrFtStatus()
+  const swap = swapView()
   // 正常路径上 .next 根本不存在（它只在 promote-next 里现拷现改名），所以判据是「有导出产物」。
-  const steps = asrFtSwapSteps({ ...status.swap, exportExists: Boolean(status.swap.lastExportDir) })
+  const steps = asrFtSwapSteps({ ...swap, exportExists: Boolean(swap.lastExportDir) })
   if (steps.length === 0) {
     return { ok: false, error: '没有可应用的新模型：先跑一次训练，等「导出 ONNX」完成再点' }
   }
@@ -158,9 +178,9 @@ export function applyAsrFtModel(): AsrFtSwapResult {
       if (op === 'bak-active') renameSync(active, bak)
       if (op === 'promote-next') {
         // 有导出产物才拷成 next；只有上次中断留下的 next 时就直接转正它。
-        if (status.swap.lastExportDir) {
+        if (swap.lastExportDir) {
           rmSync(next, { recursive: true, force: true })
-          cpSync(status.swap.lastExportDir, next, { recursive: true })
+          cpSync(swap.lastExportDir, next, { recursive: true })
         }
         // 兜底顺序：刚进备份的上一版 → asr-models 下任何自带词表的目录（原始出厂解压包）。
         const fallbacks = [bak, ...readdirSync(asrModelsRoot()).map((d) => join(asrModelsRoot(), d))]
@@ -173,8 +193,98 @@ export function applyAsrFtModel(): AsrFtSwapResult {
   } catch (err) {
     return { ok: false, error: `换模失败：${errorMessage(err)}（模型目录可能停在中间态，按「回滚上一版」恢复）` }
   }
+  markAppliedForExport(swap.lastExportDir ?? '')
   resetSherpaWorker()
   return { ok: true, error: null }
+}
+
+function runsRoot(): string {
+  return join(app.getPath('userData'), 'asr-ft-runs')
+}
+
+function readRunMeta(runDir: string): FtRunMeta | null {
+  try {
+    return JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8')) as FtRunMeta
+  } catch {
+    return null
+  }
+}
+
+function writeRunMeta(runDir: string, meta: FtRunMeta): void {
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify(meta, null, 2), 'utf8')
+}
+
+/** run.json 缺了（老 run / 磁盘问题）就静默跳过——记账不能反过来挡训练。 */
+/** 供 manager 失败收场回写（账本状态只前进不回退；run.json 缺了就跳过）。 */
+export function markRunStatus(runDir: string, status: FtRunMeta['status'], patch?: Partial<FtRunMeta>): void {
+  const meta = readRunMeta(runDir)
+  if (!meta) return
+  writeRunMeta(runDir, { ...meta, ...patch, status, finishedAt: status === 'running' ? null : Date.now() })
+}
+
+/** 转正后回写：找 exportDir 对上的那次 run 标 applied；找不到（老 run 没账本）就跳过。 */
+function markAppliedForExport(exportDir: string): void {
+  if (!exportDir) return
+  for (const name of safeReaddir(runsRoot())) {
+    const runDir = join(runsRoot(), name)
+    const meta = readRunMeta(runDir)
+    if (meta?.exportDir === exportDir) markRunStatus(runDir, 'applied', { applied: true })
+  }
+}
+
+/** 读一个 run 的 dataset.jsonl 账本；没有 / 坏了回空。 */
+function readRunLedger(runDir: string): FtLedgerEntry[] {
+  try {
+    return readFileSync(join(runDir, 'dataset.jsonl'), 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as FtLedgerEntry)
+  } catch {
+    return []
+  }
+}
+
+/** 最近一次微调的账本：runs 按名字倒序（ft-<时间戳> 字典序 = 时间序），第一个有账本的。 */
+function latestFtLedger(): FtLedgerEntry[] {
+  for (const name of safeReaddir(runsRoot()).sort().reverse()) {
+    const ledger = readRunLedger(join(runsRoot(), name))
+    if (ledger.length > 0) return ledger
+  }
+  return []
+}
+
+/**
+ * 续训候选：最新的 run，其账本与当前打包账本逐条指纹全等（旧数据只增不改）且还留着 checkpoint。
+ * 对不上（重录 / 删过）就 null——静默落回全新开跑，续训绝不接错底。
+ */
+function latestResumableRun(currentLedger: FtLedgerEntry[]): { resumeFrom: string; lastStep: number } | null {
+  for (const name of safeReaddir(runsRoot()).sort().reverse()) {
+    const runDir = join(runsRoot(), name)
+    const past = readRunLedger(runDir)
+    if (!ftLedgerMatchedOnDisk(past, currentLedger)) continue
+    const checkpoint = pickLastCheckpointName(safeReaddir(runDir))
+    if (!checkpoint) continue
+    return { resumeFrom: join(runDir, checkpoint), lastStep: Number(checkpoint.slice('checkpoint-'.length)) }
+  }
+  return null
+}
+
+/**
+ * 显存闸（4060 8G 实测训练净占 ~6.2G）：nvidia-smi 在就查，查不到（无 N 卡 / 不在 PATH）放行。
+ * 应用托管的 GV 子进程开跑时会被暂停让出显存，所以它的占用不计入——外部进程才拦。
+ */
+function ftVramGuard(): string | null {
+  const q = spawnSync('nvidia-smi', ['--query-gpu=memory.total,memory.used', '--format=csv,noheader,nounits'], { timeout: 5000, windowsHide: true })
+  if (q.error || q.status !== 0) return null
+  const [totalMiB, usedMiB] = String(q.stdout).trim().split(',').map((n) => Number(n.trim()))
+  if (!Number.isFinite(totalMiB) || !Number.isFinite(usedMiB)) return null
+  const raw = spawnSync('nvidia-smi', ['--query-compute-apps=pid,process_name,used_memory', '--format=csv,noheader,nounits'], { timeout: 5000, windowsHide: true })
+  const apps = raw.error || raw.status !== 0 ? [] : parseNvidiaComputeApps(String(raw.stdout))
+  const ownPid = sovitsChildPid()
+  const verdict = judgeFtVram({ totalMiB, usedMiB, apps, excludePids: ownPid ? [ownPid] : [] })
+  if (verdict.ok) return null
+  const holders = verdict.holders.length > 0 ? verdict.holders.join('、') : '未知进程'
+  return `显存不够训练（要空出约 ${FT_TRAIN_NEED_MIB} MiB）：现在被 ${holders} 占着。先关掉占卡的程序再点一次；本应用托管的语音服务开跑时会自动让路。`
 }
 
 export function rollbackAsrFtModel(): AsrFtSwapResult {
@@ -196,8 +306,8 @@ export function rollbackAsrFtModel(): AsrFtSwapResult {
   return { ok: true, error: null }
 }
 
-/** 训练启动前把环境、数据、目录都备齐：缺一样就拒启动，成功返回带 asrFt 附件的请求。 */
-export async function resolveAsrFtTrainRequest(): Promise<{
+/** 训练启动前把环境、显存、数据、目录都备齐：缺一样就拒启动，成功返回带 asrFt 附件的请求。 */
+export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
   ok: boolean
   request?: TrainStartRequest
   error?: string
@@ -206,10 +316,17 @@ export async function resolveAsrFtTrainRequest(): Promise<{
   if (!env.ok || !env.paths.pythonExe) {
     return { ok: false, error: `微调环境没就绪：${env.gaps.join('；')}` }
   }
+  const vramError = ftVramGuard()
+  if (vramError) return { ok: false, error: vramError }
   const pack = await prepareFtDataset()
   if (!pack.ok || !pack.trainPath || !pack.evalPath) {
     return { ok: false, error: pack.error ?? '训练数据打包失败' }
   }
+  // 续训：窗口开关 + 上次账本对得上才接旧 checkpoint（lr 降一档防把权重带飞）；接不上静默新开。
+  const prior = resume ? latestResumableRun(pack.ledger) : null
+  const tuning: AsrFtTrainTuning = prior
+    ? { epochs: deriveFtResumeEpochs(pack.trainCount, prior.lastStep), lr: '1e-5', resumeFrom: prior.resumeFrom }
+    : { epochs: deriveFtEpochs(pack.trainCount) }
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')
   // 目录名固定 ASCII（ft-<时间戳>）：decoder 的 fp32 中间产物超过 2 GB，torch 的 external-data
   // 写入在 Windows 上用窄字符路径开文件，路径里带中文（曾用数据集名当目录名「地图」）会
@@ -220,6 +337,19 @@ export async function resolveAsrFtTrainRequest(): Promise<{
   // 官方脚本不建输出目录，先垫好省得训练第一步就摔。
   mkdirSync(runDir, { recursive: true })
   mkdirSync(exportDir, { recursive: true })
+  // 账本落盘：dataset.jsonl（逐条指纹，续训对账 + 已训标记）+ run.json（这次跑到哪一步）。
+  writeFileSync(join(runDir, 'dataset.jsonl'), `${pack.ledger.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf8')
+  writeRunMeta(runDir, {
+    runId: stem,
+    startedAt: Date.now(),
+    epochs: tuning.epochs ?? 66,
+    lr: tuning.lr ?? '2e-5',
+    resumeFrom: tuning.resumeFrom ?? null,
+    status: 'running',
+    finishedAt: null,
+    exportDir,
+    applied: false
+  })
   return {
     ok: true,
     request: {
@@ -229,7 +359,8 @@ export async function resolveAsrFtTrainRequest(): Promise<{
       asrFt: {
         paths: env.paths as AsrFtPaths,
         data: { trainJsonl: pack.trainPath, evalJsonl: pack.evalPath, runDir },
-        exportDir
+        exportDir,
+        tuning
       }
     }
   }
@@ -239,6 +370,8 @@ export async function resolveAsrFtTrainRequest(): Promise<{
 export function buildAsrFtExportPlan(request: TrainStartRequest): TrainPlan | null {
   const asr = request.asrFt
   if (!asr || !asr.paths.exportScript) return null
+  // 走到这里 = 训练腿 exit 0（manager 的链回调）：账本标 trained；导出腿接着跑，转正再标 applied。
+  markRunStatus(asr.data.runDir, 'trained')
   const checkpoint = pickLastCheckpointName(safeReaddir(asr.data.runDir))
   if (!checkpoint) return null
   return {

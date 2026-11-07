@@ -5,6 +5,7 @@ import { canStartTrain, inferenceHoldLabel, type TrainSnapshot } from '@shared/t
 import { encodeWav16k } from '@shared/wav'
 import type { FtRecInfo, FtScriptGroup } from '@shared/ipc'
 import { buildFtGroupProgress } from '@shared/train/dataset'
+import type { FtCoverageGroup } from '@shared/train/asr-ft'
 import {
   GV_DEFAULTS,
   GV_VERSION_DEFAULT,
@@ -32,6 +33,8 @@ const ftHint = $<HTMLElement>('ftHint')
 const ftError = $<HTMLDivElement>('ftError')
 const gvError = $<HTMLDivElement>('gvError')
 const ftOverview = $<HTMLElement>('ftOverview')
+const ftTrainedEl = $<HTMLElement>('ftTrained')
+const ftResumeCb = $<HTMLInputElement>('ftResume')
 const gvDatasetSel = $<HTMLSelectElement>('gvDataset')
 const gvDatasetInfo = $<HTMLElement>('gvDatasetInfo')
 const gvVersionSel = $<HTMLSelectElement>('gvVersion')
@@ -99,6 +102,8 @@ async function start(): Promise<void> {
   // 数据集只有 GV 分支是真数据（实验目录名）；ASR 微调没有名字可选，目录名固定 ft-<时间戳>。
   void window.api.setSettings(isGv ? { trainKind: kind, trainDataset: dataset } : { trainKind: kind })
   const request: TrainStartRequest = { kind, dataset }
+  // asr-ft 的「续训」开关进请求；主进程备料时和上一次的账本对账，接不上会静默新开。
+  if (kind === 'asr-ft') request.resume = ftResumeCb.checked
   // gv-*：数据集下拉就是实验名；备料/配置文件由主进程准备，缺口会原样报回。
   if (isGv) {
     request.gv = {
@@ -249,6 +254,16 @@ function renderFtOverview(): void {
     parts.push(`${p.id} 缺 ${p.missing.map((no) => takeLineId('lines', no)).join('、')}`)
   }
   ftOverview.textContent = parts.join(' ｜ ')
+}
+
+/** 已训标记行：最近一次微调的账本 vs 当前录音，按组显示 done/total；重录过的句子单独点名。 */
+function renderFtTrained(coverage: Record<string, FtCoverageGroup>): void {
+  const parts: string[] = []
+  for (const [group, g] of Object.entries(coverage)) {
+    if (g.total === 0) continue
+    parts.push(g.stale > 0 ? `${group} 已训 ${g.done}/${g.total}（重录 ${g.stale} 句未入训）` : `${group} 已训 ${g.done}/${g.total}`)
+  }
+  ftTrainedEl.textContent = parts.length > 0 ? `已训标记：${parts.join(' ｜ ')}` : '已训标记：还没有训练记录（跑完一次微调后这里按组显示）'
 }
 
 /** 当前要录的那句：lines 模式取第一个没录的句号（都录完就停在最后一句），free 模式下一段。 */
@@ -536,6 +551,7 @@ async function refreshAsrft(): Promise<void> {
     ftApplyBtn.disabled = !status.swap.lastExportDir || Boolean(install?.running)
     ftApplyBtn.title = status.swap.lastExportDir ? `应用 ${status.swap.lastExportDir}` : '先跑一次「微调并替换模型」'
     ftRollbackBtn.disabled = !status.swap.bakExists
+    renderFtTrained(status.coverage)
   } catch (err) {
     ftEnvEl.textContent = `微调环境：状态读取失败（${String(err)}）`
   }
@@ -553,8 +569,10 @@ async function startInstall(): Promise<void> {
 /** 一键微调：打包 → 训练 → 导出是一个任务，跑完点「应用新模型」转正。 */
 async function startFt(): Promise<void> {
   kindSel.value = 'asr-ft'
-  // 66 epoch × 10 步 ≈ 660 步；实测 3.6 s/步（4060 8G），约 40 分钟，导出另算（CPU）。
-  ftAsrResult.textContent = '已开跑：打包 → 训练 66 epoch（约 40 分钟，看显卡）→ 导出 ONNX；完成后点「应用新模型」'
+  // 轮数主进程按数据量自适应（目标≈800 步，10–66 轮）；续训接上次 checkpoint 再补 200 步。
+  ftAsrResult.textContent = ftResumeCb.checked
+    ? '已开跑（续训）：打包 → 接着上次的 checkpoint 再训一段 → 导出 ONNX；完成后点「应用新模型」'
+    : '已开跑：打包 → 自适应轮数训练（约半小时到一小时，看数据量和显卡）→ 导出 ONNX；完成后点「应用新模型」'
   await start()
 }
 

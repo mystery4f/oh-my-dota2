@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import {
@@ -8,6 +8,8 @@ import {
   splitTrainEval,
   type FtDatasetPrepareResult
 } from '@shared/train/dataset'
+import type { FtLedgerEntry } from '@shared/train/asr-ft'
+import type { FtDatasetEntry } from '@shared/train/dataset'
 import { ftRecList, ftRecPath, readFtScript } from './ft-record'
 
 /**
@@ -51,10 +53,21 @@ export async function prepareFtDataset(): Promise<FtDatasetPrepareResult> {
     evalCount: evalSet.length,
     trainPath,
     evalPath: evalSet.length > 0 ? evalPath : '',
+    ledger: buildLedger(train, evalSet),
     error: null,
   }
 }
 
 function fail(error: string): FtDatasetPrepareResult {
-  return { ok: false, trainCount: 0, evalCount: 0, trainPath: '', evalPath: '', error }
+  return { ok: false, trainCount: 0, evalCount: 0, trainPath: '', evalPath: '', ledger: [], error }
+}
+
+/** 账本 = 打包那一刻每条录音的磁盘指纹；续训对账、已训标记、重录检测全靠它。 */
+function buildLedger(train: FtDatasetEntry[], evalSet: FtDatasetEntry[]): FtLedgerEntry[] {
+  const mark = (entries: FtDatasetEntry[], split: FtLedgerEntry['split']): FtLedgerEntry[] =>
+    entries.map((entry) => {
+      const st = statSync(entry.wavPath)
+      return { key: entry.key, wavPath: entry.wavPath, bytes: st.size, mtimeMs: Math.round(st.mtimeMs), text: entry.text, split }
+    })
+  return [...mark(train, 'train'), ...mark(evalSet, 'eval')]
 }

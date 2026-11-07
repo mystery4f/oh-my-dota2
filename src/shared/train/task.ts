@@ -3,7 +3,7 @@
  * 只做决策不碰进程——spawn/停止/日志环在主进程 services/train/manager.ts。
  * asr-ft / gv 两个子缝往 deriveTrainPlan 的 switch 里补真命令即可，结构不动。
  */
-import { planAsrFtTrainArgv, type AsrFtDatasetPlan, type AsrFtPaths } from './asr-ft'
+import { planAsrFtTrainArgv, type AsrFtDatasetPlan, type AsrFtPaths, type AsrFtTrainTuning } from './asr-ft'
 import type { GvResolvedPaths, GvTrainOptions } from './gv'
 export type TrainTaskKind = 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
 
@@ -64,7 +64,11 @@ export interface TrainStartRequest {
     data: AsrFtDatasetPlan
     /** 导出产物目录（训练成功后链式导出写这里，应用新模型从这里拷）。 */
     exportDir: string
+    /** 自适应轮数 / 续训点 / lr（备料服务算好填进来）；没填 = 冻结默认 66 轮 2e-5 新开。 */
+    tuning?: AsrFtTrainTuning
   }
+  /** asr-ft 专用：窗口上的「续训」开关；主进程备料时据此挑上次 checkpoint，失败自动落回新开。 */
+  resume?: boolean
   /** gv-* 专用：窗口表单里的意图；主进程校验模板/底模/数据集后才转成 gvResolved。 */
   gv?: GvTrainOptions
   /** gv-* 专用：主进程写好训练配置后填（argv/cwd 全从这里来）；没填按环境没就绪拒启动。 */
@@ -134,7 +138,7 @@ export function deriveTrainPlan(req: TrainStartRequest): TrainPlan {
       if (!asr) {
         return { exe: '', args: [], cwd: null, unavailable: 'ASR 微调环境没就绪：先在训练窗口里把环境装好（并至少录一条句子）' }
       }
-      return { exe: asr.paths.pythonExe, args: planAsrFtTrainArgv(asr.paths, asr.data), cwd: null }
+      return { exe: asr.paths.pythonExe, args: planAsrFtTrainArgv(asr.paths, asr.data, asr.tuning), cwd: null }
     }
     case 'gv-gpt':
     case 'gv-sovits': {

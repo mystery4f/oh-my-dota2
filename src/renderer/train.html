@@ -119,11 +119,13 @@
       <button id="ftAsr" disabled>识别测试</button>
       <button id="ftPack">打包训练数据</button>
       <button id="startFt" class="primary">微调并替换模型</button>
+      <label class="hint" style="margin-left: 12px"><input type="checkbox" id="ftResume" /> 续训（接上次 checkpoint）</label>
       <span class="hint" id="ftHint">点录制后念屏幕上的句子，停顿约 1 秒自动停</span>
     </div>
     <div class="hint" id="ftAsrResult"></div>
     <!-- T4 组总览：一句汇总 + 只列没录满的组；保存/切组自动刷。 -->
     <div class="hint" id="ftOverview"></div>
+    <div class="hint" id="ftTrained"></div>
     <div class="row" style="margin-top: 12px">
       <span class="hint" id="ftEnv">微调环境：检测中…</span>
       <button id="ftInstall" hidden>一键安装训练环境</button>

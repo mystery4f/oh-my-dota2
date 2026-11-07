@@ -66,8 +66,8 @@ function recPath(group: string, line: string): string {
   return join(recDir(), keys.group, `${keys.group}-${keys.line}.wav`)
 }
 
-function toInfo(bytes: number, key: string): FtRecInfo {
-  return { key, bytes, durationMs: Math.max(0, Math.round((bytes - WAV_HEADER_BYTES) / BYTES_PER_MS)) }
+function toInfo(bytes: number, key: string, mtimeMs: number): FtRecInfo {
+  return { key, bytes, durationMs: Math.max(0, Math.round((bytes - WAV_HEADER_BYTES) / BYTES_PER_MS)), mtimeMs }
 }
 
 export async function ftRecList(): Promise<FtRecInfo[]> {
@@ -80,7 +80,7 @@ export async function ftRecList(): Promise<FtRecInfo[]> {
       if (!file.endsWith('.wav')) continue
       const full = join(root, entry.name, file)
       const info = await stat(full)
-      infos.push(toInfo(info.size, file.replace(/\.wav$/, '')))
+      infos.push(toInfo(info.size, file.replace(/\.wav$/, ''), Math.round(info.mtimeMs)))
     }
   }
   return infos.sort((a, b) => a.key.localeCompare(b.key))
@@ -93,7 +93,7 @@ export async function ftRecSave(group: string, line: string, data: Uint8Array): 
   const target = join(dir, `${keys.group}-${keys.line}.wav`)
   await writeFile(target, data)
   const info = await stat(target)
-  return toInfo(info.size, `${keys.group}-${keys.line}`)
+  return toInfo(info.size, `${keys.group}-${keys.line}`, Math.round(info.mtimeMs))
 }
 
 export async function ftRecRead(group: string, line: string): Promise<Uint8Array> {
