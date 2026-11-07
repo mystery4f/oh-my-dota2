@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   OFFLINE_VOICES,
-  QWEN3_ASR_RELEASE_URL,
   type OfflineStatus,
-  type VoiceAssetProgress,
-  type VoiceAssetsResult,
   type VoiceChainSummary,
   type VoiceOutEngine,
   type VoiceOutTestResult,
-  type VoiceProbeResult
+  type VoiceRuntimeStatus
 } from '@shared/ipc'
 import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
@@ -40,10 +37,7 @@ export function TalkPage({
   const voicePacks = useVoicePacks(settings?.ttsOutEngine === 'sovits')
 
   const [asrStatus, setAsrStatus] = useState<OfflineStatus | null>(null)
-  const [voiceProbe, setVoiceProbe] = useState<VoiceProbeResult | null>(null)
-  const [voiceAssets, setVoiceAssets] = useState<VoiceAssetsResult | null>(null)
-  const [voiceProgress, setVoiceProgress] = useState<VoiceAssetProgress | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [runtime, setRuntime] = useState<VoiceRuntimeStatus | null>(null)
   const [outBusy, setOutBusy] = useState(false)
   const [outResult, setOutResult] = useState<VoiceOutTestResult | null>(null)
   const [recording, setRecording] = useState(false)
@@ -64,7 +58,11 @@ export function TalkPage({
 
   useEffect(() => window.api.onVoiceChainResult((r) => setLog((l) => [{ ...r, at: Date.now() }, ...l].slice(0, 6))), [])
   useEffect(() => window.api.onVoiceRecordState((s) => setRecording(s.recording)), [])
-  useEffect(() => window.api.onWhisperProgress(setVoiceProgress), [])
+  useEffect(() => {
+    // 运行时状态：进页问一次，装的时候主进程广播各阶段，不再轮询。
+    void window.api.voiceRuntimeStatus().then(setRuntime)
+  }, [])
+  useEffect(() => window.api.onVoiceRuntimeState(setRuntime), [])
   useEffect(() => {
     // 输出设备只在面板里枚举：插拔后重新打开页面就能看到。
     navigator.mediaDevices
@@ -99,29 +97,22 @@ export function TalkPage({
     }
   }
 
-  const probeWhisper = async (): Promise<void> => {
-    setBusy(true)
+  const installRuntime = async (): Promise<void> => {
     try {
-      setVoiceProbe(await window.api.whisperProbe(settings?.whisperBinPath ?? ''))
-    } catch (e) {
-      setVoiceProbe({ ok: false, configured: false, error: errorMessage(e) })
-    } finally {
-      setBusy(false)
+      await window.api.voiceRuntimeInstall()
+      setRuntime(await window.api.voiceRuntimeStatus())
+    } catch (err) {
+      setLog((l) => [
+        { transcript: '', translated: null, spoken: false, stage: null, error: `运行时安装失败：${errorMessage(err)}`, at: Date.now() },
+        ...l
+      ])
     }
   }
 
-  const setupWhisper = async (): Promise<void> => {
-    setBusy(true)
-    setVoiceProgress(null)
-    try {
-      setVoiceAssets(await window.api.whisperSetup())
-    } catch (e) {
-      setVoiceAssets({ ok: false, binaryPath: null, modelPath: null, error: errorMessage(e) })
-    } finally {
-      setBusy(false)
-    }
+  const removeModel = async (): Promise<void> => {
+    await window.api.voiceModelRemove()
+    setAsrStatus(await window.api.asrStatus())
   }
-
   const runVoiceOutTest = async (): Promise<void> => {
     setOutBusy(true)
     setOutResult(null)
@@ -158,17 +149,26 @@ export function TalkPage({
     <>
       <Panel>
         <Group label="怎么听">
-          <Row label="识别引擎" htmlFor="v2-asrEngine" hint="whisper 轻；Qwen3 抗噪、自带标点，也是唯一支持热词的">
-            <select
-              id="v2-asrEngine"
-              value={settings.asrEngine}
-              onChange={(e) => void save.wrap(update({ asrEngine: e.target.value as 'whisper' | 'qwen3' }))}
-              className={selectClass}
-            >
-              <option value="whisper">whisper（ggml-small）</option>
-              <option value="qwen3">Qwen3（模型 ~838 MB）</option>
-            </select>
-            <SaveFlash flash={save.flash} error={save.error} />
+          <Row label="识别引擎" hint="Qwen3-ASR（阿里开源 0.6B）：抗噪、自带标点、支持热词与口音微调；whisper.cpp 已退役">
+            <StatusPill tone="ready">Qwen3（唯一引擎）</StatusPill>
+          </Row>
+          <Row label="语音运行时" hint="识别跑在独立的 node.exe + sherpa 插件里（sherpa 原生插件进不了 Electron）；一键装到数据目录，约 35 MB">
+            {!runtime ? (
+              <StatusPill tone="idle">检查中…</StatusPill>
+            ) : runtime.installing ? (
+              <StatusPill tone="warn">安装中…</StatusPill>
+            ) : runtime.state === 'ready' ? (
+              <StatusPill tone="ready">已就绪</StatusPill>
+            ) : (
+              <>
+                <StatusPill tone={runtime.installError ? 'bad' : 'idle'}>
+                  {runtime.installError ?? (runtime.state === 'broken' ? '安装不完整' : '未安装')}
+                </StatusPill>
+                <Button size="sm" variant="outline" onClick={() => void installRuntime()}>
+                  {runtime.state === 'broken' ? '重试安装' : '安装运行时'}
+                </Button>
+              </>
+            )}
           </Row>
           <Row label="说话键" htmlFor="v2-speakKey" hint="游戏里按住才能发言的那个键：声出时由程序按住它把话送进频道">
             <Input
@@ -179,87 +179,42 @@ export function TalkPage({
               placeholder="F5"
             />
           </Row>
-          {settings.asrEngine === 'qwen3' ? (
-            <>
-              <Row
-                label="热词"
-                htmlFor="v2-hotwords"
-                stacked
-                hint="填容易认错的词，下一句录音就生效；识别记录里点「纠错」，差异词会自动并进这里。whisper 不支持"
-              >
-                <Input
-                  id="v2-hotwords"
-                  value={settings.asrHotwords}
-                  onChange={(e) => update({ asrHotwords: e.target.value })}
-                  placeholder="肉山, 买活, 风暴之灵"
-                />
-              </Row>
-              <Row label="Qwen3 模型">
-                {!asrStatus ? (
-                  <StatusPill tone="idle">检查中…</StatusPill>
-                ) : asrStatus.ready ? (
-                  <StatusPill tone="ready">已就绪 {Math.round(asrStatus.bytes / 1024 / 1024)} MB</StatusPill>
-                ) : asrStatus.downloading ? (
-                  <StatusPill tone="warn">解压中 {Math.round(asrStatus.progress * 100)}%</StatusPill>
-                ) : (
-                  <>
-                    <StatusPill tone={asrStatus.error ? 'bad' : 'idle'}>
-                      {asrStatus.error ? '解压失败' : '模型未下载'}
-                    </StatusPill>
-                    <a
-                      className="text-xs text-muted-foreground underline hover:text-foreground"
-                      href={QWEN3_ASR_RELEASE_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      打开下载页
-                    </a>
-                    <Button size="sm" variant="outline" disabled={!asrStatus.available} onClick={() => void downloadAsr()}>
-                      解压模型
-                    </Button>
-                  </>
-                )}
-              </Row>
-              {!asrStatus?.available && asrStatus && !asrStatus.ready ? (
-                <Row label="运行环境" hint="装 Node 后重启应用；sherpa 的原生插件在 Electron 里跑不了，只能借外部 node 进程">
-                  <StatusPill tone="bad">本机没找到 node.exe</StatusPill>
-                </Row>
-              ) : null}
-            </>
-          ) : (
-            <Row label="whisper.cpp" stacked hint="本机可执行文件；资源（二进制 + 模型）由下面两个按钮准备">
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  className="w-80"
-                  value={settings.whisperBinPath}
-                  onChange={(e) => update({ whisperBinPath: e.target.value })}
-                  placeholder="C:\\tools\\whisper.cpp\\whisper-cli.exe"
-                />
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void probeWhisper()}>
-                  探测
+          <Row
+            label="热词"
+            htmlFor="v2-hotwords"
+            stacked
+            hint="填容易认错的词，下一句录音就生效；识别记录里点「纠错」，差异词会自动并进这里。"
+          >
+            <Input
+              id="v2-hotwords"
+              value={settings.asrHotwords}
+              onChange={(e) => update({ asrHotwords: e.target.value })}
+              placeholder="肉山, 买活, 风暴之灵"
+            />
+          </Row>
+          <Row label="Qwen3 模型" hint="底模从 hf-mirror 按文件下载（约 940 MB，断点续传 + 校验）；微调转正的模型优先生效">
+            {!asrStatus ? (
+              <StatusPill tone="idle">检查中…</StatusPill>
+            ) : asrStatus.ready ? (
+              <>
+                <StatusPill tone="ready">已就绪 {Math.round(asrStatus.bytes / 1024 / 1024)} MB</StatusPill>
+                <Button size="sm" variant="outline" onClick={() => void removeModel()}>
+                  删除下载
                 </Button>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void setupWhisper()}>
-                  下载资源
+              </>
+            ) : asrStatus.downloading ? (
+              <StatusPill tone="warn">下载中 {Math.round(asrStatus.progress * 100)}%</StatusPill>
+            ) : (
+              <>
+                <StatusPill tone={asrStatus.error ? 'bad' : 'idle'}>
+                  {asrStatus.error ?? '模型未下载'}
+                </StatusPill>
+                <Button size="sm" variant="outline" onClick={() => void downloadAsr()}>
+                  下载模型
                 </Button>
-                {voiceProbe ? (
-                  <StatusPill tone={voiceProbe.ok ? 'ready' : 'bad'}>
-                    {voiceProbe.ok ? '正常' : voiceProbe.error ?? '异常'}
-                    {voiceProbe.detail ? ` · ${voiceProbe.detail}` : ''}
-                  </StatusPill>
-                ) : null}
-                {voiceAssets ? (
-                  <StatusPill tone={voiceAssets.ok ? 'ready' : 'bad'}>
-                    {voiceAssets.ok ? '资源就绪' : voiceAssets.error ?? '资源准备失败'}
-                  </StatusPill>
-                ) : null}
-                {voiceProgress ? (
-                  <StatusPill tone="warn">
-                    {voiceProgress.phase} {voiceProgress.pct}%
-                  </StatusPill>
-                ) : null}
-              </div>
-            </Row>
-          )}
+              </>
+            )}
+          </Row>
         </Group>
 
         <Group label="说给谁听">

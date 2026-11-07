@@ -1,8 +1,6 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
-import { app } from 'electron'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { locateWorkerScript, voiceRuntimeNodeBinary, voiceWorkerEnv } from './runtime'
 
 /**
  * sherpa-onnx 识别（Qwen3-ASR）的推理管道：唯一引擎共用一个 Node 子进程
@@ -19,35 +17,14 @@ export interface SherpaAsrRequest {
   hotwords?: string
 }
 
-let nodeChecked = false
-let nodePath: string | null = null
-
-/** 与 offline.ts 同一条规矩：sherpa 原生插件只认真正的 node.exe。 */
 export function sherpaNodeBinary(): string | null {
-  if (nodeChecked) return nodePath
-  nodeChecked = true
-  const candidates = [process.env.OHMYDOTA2_NODE, 'node'].filter((value): value is string => Boolean(value))
-  for (const candidate of candidates) {
-    const probe = spawnSync(candidate, ['-v'], { encoding: 'utf8', windowsHide: true })
-    if (probe.status === 0) {
-      nodePath = candidate
-      return nodePath
-    }
-  }
-  console.log('ASR_SHERPA_NO_NODE', JSON.stringify({ tried: candidates }))
-  return null
+  return voiceRuntimeNodeBinary()
 }
 
 function workerScript(): string {
-  // 探针从 out/main/index.js 起，app.getAppPath() 是 out/main，不能直接拼 resources；
-  // 打包后在 resourcesPath 下（electron-builder.yml 的 extraResources 摆进去）。
-  const candidates = [
-    join(process.resourcesPath ?? '', 'asr-sherpa-worker.cjs'),
-    join(__dirname, '../../resources/asr-sherpa-worker.cjs'),
-    join(app.getAppPath(), 'resources/asr-sherpa-worker.cjs')
-  ]
-  return candidates.find((candidate) => candidate && existsSync(candidate)) ?? candidates[candidates.length - 1]
+  return locateWorkerScript('asr-sherpa-worker.cjs')
 }
+
 
 let worker: ChildProcess | null = null
 let workerSeq = 0
@@ -57,7 +34,7 @@ function ensureWorker(): ChildProcess {
   if (worker && !worker.killed) return worker
   const node = sherpaNodeBinary()
   if (!node) throw new Error('ASR_SHERPA_NO_NODE')
-  const child = spawn(node, [workerScript()], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+  const child = spawn(node, [workerScript()], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: voiceWorkerEnv() })
   let buffer = ''
   child.stdout?.setEncoding('utf8')
   child.stdout?.on('data', (chunk: string) => {

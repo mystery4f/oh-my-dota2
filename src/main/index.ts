@@ -44,6 +44,7 @@ import { runAsrHotwordsProbe } from './probes/asr-hotwords'
 import { runProviderReasoningProbe } from './probes/provider-reasoning'
 import { runZhipuLiveProbe } from './probes/zhipu-live'
 import { runTrainProbe } from './probes/train'
+import { runVoiceRuntimeProbe } from './probes/voice-runtime'
 import { loadSettings } from './services/settings'
 import { hotkeysState, installHotkeys, releaseHotkeys } from './services/hotkeys'
 import { warmTranslator } from './services/session/durable-translator'
@@ -194,6 +195,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--provider-reasoning-probe')) void runProviderReasoningProbe()
   if (process.argv.includes('--zhipu-live-probe')) void runZhipuLiveProbe()
   if (process.argv.includes('--train-probe')) void runTrainProbe()
+  if (process.argv.includes('--voice-runtime-probe')) void runVoiceRuntimeProbe()
   if (process.argv.includes('--inplace-guard-probe')) void runInPlaceGuardProbe()
 
   const startup = loadSettings()

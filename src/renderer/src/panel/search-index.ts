@@ -14,7 +14,7 @@ const KEYWORDS: Record<SectionId, string[]> = {
     'api key', 'key', '密钥', '模型', 'deepseek', 'openai', 'ollama', 'mimo', '智谱',
     'glm', '自定义', '代理', 'proxy', '推理', '思考', '词数', '缓存', '试验台', '试翻'
   ],
-  talk: ['麦克风', '说话键', '语音输入', 'asr', 'whisper', 'qwen3', '热词', '识别', '音色包', 'gpt-sovits'],
+  talk: ['麦克风', '说话键', '语音输入', 'asr', 'qwen3', '热词', '识别', '运行时', '音色包', 'gpt-sovits'],
   chatout: ['直发', '发送', '回车', 'enter', '语气', '回复'],
   read: ['朗读', 'tts', '念出来', '嗓子', '音色', 'edge', 'offline', '语速', '音高', '试听'],
   overlay: ['浮层', '透明窗', '锁定', '收起', '位置', '透明度', '点击', '昵称', '自动捕获'],

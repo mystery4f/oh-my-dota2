@@ -3,6 +3,7 @@ import type { HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import { DEFAULT_HOTKEYS } from './hotkeys'
 
 import type { AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
+import type { VoiceRuntimeState } from '@shared/voice-runtime'
 import type { FtDatasetPrepareResult } from '@shared/train/dataset'
 import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@shared/train/gv'
 import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
@@ -159,7 +160,6 @@ export interface AppSettings {
   translationMaxWords?: number
   proxyUrl: string
   targetLang: string
-  whisperBinPath: string
   ttsOutputDevice: string
   /**
    * 声出引擎：edge = 英文神经嗓占位（默认）；offline = 本地离线模型（中文嗓，念英文吞字）；
@@ -329,12 +329,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   translationMaxWords: 16,
   proxyUrl: '',
   targetLang: 'zh-CN',
-  whisperBinPath: '',
   ttsOutputDevice: '',
   ttsSpeakKey: 'F5',
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
-  asrEngine: 'whisper',
+  /** 识别引擎默认 qwen3（#45 运行时可装）；'whisper' 只在旧设置里出现，读入时归一成 qwen3。 */
+  asrEngine: 'qwen3',
   trainKind: 'demo',
   trainDataset: '',
   asrFtEnvDir: '',
@@ -608,23 +608,12 @@ export interface VoiceBackendStatus {
   exists: boolean
 }
 
-/** Result of probing / previewing a voice helper (whisper.cpp, edge-tts). */
-/** Progress of the whisper binary/model download. */
-export interface VoiceAssetProgress {
-  phase: 'binary' | 'model'
-  pct: number
-}
-
-/** Outcome of ensuring the whisper binary and model are on disk. */
-export interface VoiceAssetsResult {
+/** Result of a speech transcription (Qwen3-ASR；#45 起 whisper.cpp 已退役，只剩这一种形状). */
+export interface VoiceTranscribeResult {
   ok: boolean
-  binaryPath: string | null
-  modelPath: string | null
-  downloadedBin?: boolean
-  downloadedModel?: boolean
+  text: string
   error?: string
 }
-
 /** Result of a TTS preview; audio is base64 (edge=mp3, sovits=wav) for the renderer. */
 export interface VoicePreviewResult {
   ok: boolean
@@ -635,19 +624,6 @@ export interface VoicePreviewResult {
   error?: string
 }
 
-/** Outcome of a whisper transcription. */
-export interface VoiceTranscribeResult {
-  ok: boolean
-  text: string
-  error?: string
-}
-export interface VoiceProbeResult {
-  ok: boolean
-  configured: boolean
-  detail?: string
-  note?: string
-  error?: string
-}
 
 export interface OverlayStatus {
   visible: boolean
@@ -713,9 +689,6 @@ export const IPC = {
   UPDATE_STATUS: 'update:status',
   CAPTURE_UPDATE: 'capture:update',
   SESSION_STATUS: 'session:status',
-  VOICE_WHISPER_PROBE: 'voice:whisper-probe',
-  VOICE_WHISPER_SETUP: 'voice:whisper-setup',
-  VOICE_WHISPER_PROGRESS: 'voice:whisper-progress',
   VOICE_TRANSCRIBE: 'voice:transcribe',
   // 语音链状态回显：overlay 起录/停录/出结果时报给主进程，主进程广播给面板。
   OVERLAY_VOICE_STATE: 'overlay:voice-record-state',
@@ -745,6 +718,12 @@ export const IPC = {
   // 识别模型（Qwen3）状态与解压：和离线朗读同一套「状态 + 获取」面板节奏。
   ASR_STATUS: 'asr:status',
   ASR_DOWNLOAD: 'asr:download',
+  // 语音运行时（#45）：自带 node.exe + sherpa 插件的一键安装；模型下载复用 ASR_DOWNLOAD。
+  VOICE_RUNTIME_STATUS: 'voice:runtime-status',
+  VOICE_RUNTIME_INSTALL: 'voice:runtime-install',
+  VOICE_MODEL_REMOVE: 'voice:model-remove',
+  /** 主进程广播运行时状态（安装各阶段/结束时），面板据此翻状态牌。 */
+  VOICE_RUNTIME_STATE: 'voice:runtime-state',
   // 训练管理（T1：窗口骨架 + 任务模型；真实训练栈 T3/T5 接入）。
   TRAIN_OPEN: 'train:open',
   TRAIN_START: 'train:start',
@@ -804,10 +783,24 @@ export interface OfflineStatus {
   error: string | null
 }
 
-/** Qwen3-ASR 模型包（GitHub release，~838MB）；国内网络建议浏览器手动下载。 */
+/** 通用语音侧操作回执（安装运行时 / 删除模型下载）。 */
+export interface VoiceOperationResult {
+  ok: boolean
+  error: string | null
+}
+
+/** 语音运行时（自带 node.exe + sherpa 插件）状态，面板的「语音运行时」行。 */
+export interface VoiceRuntimeStatus {
+  state: VoiceRuntimeState
+  /** 实际探测可用的 node.exe 路径（运行时内的优先，找不到为 null）。 */
+  nodePath: string | null
+  installing: boolean
+  installError: string | null
+}
+
+/** 旧的一键下载入口（GitHub release tar 包），只留在文档里给离线用户。 */
 export const QWEN3_ASR_RELEASE_URL =
   'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2'
-
 
 /** GPT-SoVITS：引擎包安装状态 + api_v2 服务状态 + 最近日志（面板一眼看出「起没起来」）。 */
 export interface SovitsStatus {
@@ -973,9 +966,7 @@ export const ipcContract = {
   onVoiceRecordToggle: listen<void>(IPC.VOICE_RECORD_TOGGLE),
   onVoiceRecordState: listen<{ recording: boolean }>(IPC.VOICE_RECORD_STATE),
   onVoiceChainResult: listen<VoiceChainSummary>(IPC.VOICE_CHAIN_RESULT),
-  whisperProbe: invoke<[string], VoiceProbeResult>(IPC.VOICE_WHISPER_PROBE),
-  whisperSetup: invoke<[], VoiceAssetsResult>(IPC.VOICE_WHISPER_SETUP),
-  onWhisperProgress: listen<VoiceAssetProgress>(IPC.VOICE_WHISPER_PROGRESS),
+  onVoiceRuntimeState: listen<VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATE),
   transcribeAudio: invoke<[string, string?], VoiceTranscribeResult>(IPC.VOICE_TRANSCRIBE),
   ttsPreview: invoke<[string], VoicePreviewResult>(IPC.VOICE_TTS_PREVIEW),
   voiceOutTest: invoke<[], VoiceOutTestResult>(IPC.VOICE_OUT_TEST),
@@ -983,6 +974,9 @@ export const ipcContract = {
   ttsOfflineDownload: invoke<[], OfflineStatus>(IPC.TTS_OFFLINE_DOWNLOAD),
   asrStatus: invoke<[], OfflineStatus>(IPC.ASR_STATUS),
   asrDownload: invoke<[], OfflineStatus>(IPC.ASR_DOWNLOAD),
+  voiceRuntimeStatus: invoke<[], VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATUS),
+  voiceRuntimeInstall: invoke<[], VoiceOperationResult>(IPC.VOICE_RUNTIME_INSTALL),
+  voiceModelRemove: invoke<[], VoiceOperationResult>(IPC.VOICE_MODEL_REMOVE),
   // GPT-SoVITS
   sovitsStatus: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_STATUS),
   sovitsInstall: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_INSTALL),

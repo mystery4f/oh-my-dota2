@@ -1,12 +1,13 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
 import { app } from 'electron'
 import type { OfflineStatus } from '../../../shared/ipc'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { GITHUB_MIRRORS } from '../net/download'
+import { locateWorkerScript, voiceRuntimeNodeBinary, voiceWorkerEnv } from './runtime'
 import { offlineVoicePreset, type OfflineVoiceId } from '../../../shared/ipc'
+import { join } from 'node:path'
 
 /**
  * 离线朗读引擎：sherpa-onnx 本地 TTS（matcha/vits 三款模型，见 MODEL_FILES）。
@@ -279,39 +280,15 @@ interface WorkerReply {
 }
 
 function workerScript(): string {
-  // 探针从 out/main/index.js 起，app.getAppPath() 是 out/main，不能直接拼 resources；
-  // 打包后则在 resourcesPath 下（electron-builder.yml 的 extraResources 把它摆在那里）。
-  const candidates = [
-    join(process.resourcesPath ?? '', 'tts-offline-worker.cjs'),
-    join(__dirname, '../../resources/tts-offline-worker.cjs'),
-    join(app.getAppPath(), 'resources/tts-offline-worker.cjs')
-  ]
-  const found = candidates.find((candidate) => candidate && existsSync(candidate))
-  return found ?? candidates[candidates.length - 1]
+  return locateWorkerScript('tts-offline-worker.cjs')
 }
 
 /**
- * sherpa 的原生插件在**任何** Electron 运行时里都会抛 External buffers are not allowed
- * （试过 1.13.8 与 2.0.0，也试过 ELECTRON_RUN_AS_NODE），只有真正的 node.exe 才正常。
- * 所以先找系统的 node；找不到就老实返回 null，由面板提示改用联网引擎。
+ * sherpa 的原生插件在任何 Electron 运行时里都会抛 External buffers are not allowed，
+ * 只有真正的 node.exe 才正常——解析规则收口在语音运行时模块（自带 node 优先）。
  */
-let nodeChecked = false
-let nodePath: string | null = null
-
 export function offlineNodeBinary(): string | null {
-  if (nodeChecked) return nodePath
-  nodeChecked = true
-  const candidates = [process.env.OHMYDOTA2_NODE, 'node'].filter((value): value is string => Boolean(value))
-  for (const candidate of candidates) {
-    const probe = spawnSync(candidate, ['-v'], { encoding: 'utf8', windowsHide: true })
-    if (probe.status === 0) {
-      nodePath = candidate
-      console.log('TTS_OFFLINE_NODE', JSON.stringify({ node: candidate, version: (probe.stdout || '').trim() }))
-      return nodePath
-    }
-  }
-  console.log('TTS_OFFLINE_NO_NODE', JSON.stringify({ tried: candidates }))
-  return null
+  return voiceRuntimeNodeBinary()
 }
 
 function ensureWorker(): ChildProcess {
@@ -322,7 +299,8 @@ function ensureWorker(): ChildProcess {
   if (!node) throw new Error('TTS_OFFLINE_NO_NODE')
   const child = spawn(node, [script], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true
+    windowsHide: true,
+    env: voiceWorkerEnv()
   })
   let buffer = ''
   child.stdout?.setEncoding('utf8')

@@ -91,12 +91,10 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     // 声出引擎：只认三引擎层的合法值，乱填打回 edge（英文占位）；声出音色不在这里钳，
     // resolveVoiceOutSynth 决策时对不上清单自会打回默认（和 ttsVoice 同一策略）。
     merged.ttsOutEngine = normalizeVoiceOutEngine(merged.ttsOutEngine)
-    // 识别引擎：只认 whisper / qwen3；老存档的 sensevoice（已废弃）迁移成 qwen3，
-    // 其他乱填打回 whisper（模型没就绪时路由层还会兜一层提示，这里只保证枚举干净）。
+    // 识别引擎：只认 qwen3；whisper / sensevoice 都是已退役值，读入时统一迁成 qwen3
+    // （#45：whisper.cpp 的下载/探测链路已删，引擎不再分流）。乱填打回默认。
     const rawEngine = merged.asrEngine as string
-    if (rawEngine === 'sensevoice') {
-      merged.asrEngine = 'qwen3'
-    } else if (rawEngine !== 'whisper' && rawEngine !== 'qwen3') {
+    if (rawEngine !== 'qwen3') {
       merged.asrEngine = DEFAULT_SETTINGS.asrEngine
     }
     // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。

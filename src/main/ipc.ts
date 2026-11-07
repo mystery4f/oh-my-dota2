@@ -1,6 +1,7 @@
 import { BrowserWindow, app, clipboard, ipcMain } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { errorMessage } from '@shared/errors'
 import { IPC, ipcContract, type MainHandlers } from '@shared/ipc'
 import { translateInPlace, voiceReply } from './services/reply/reply-service'
 import { generatePanelSuggestions } from './services/reply/panel-suggestions'
@@ -11,12 +12,19 @@ import { checkForUpdates, installUpdate } from './services/updater'
 import { testProvider, translateText } from './services/providers'
 import { clearTranslationCache, inspectTranslationCache, sessionStatus, translateTry } from './services/session/durable-translator'
 import { getCaptureService } from './services/capture/capturer'
-import { getWhisperAdapter } from './services/voice/whisper'
 import { getVoiceOutService } from './services/voice/voice-out'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { transcribeWav } from './services/voice/asr'
 import { ensureQwen3Model, qwen3Status } from './services/voice/qwen3-asr'
+import {
+  installVoiceRuntime,
+  removeVoiceModel,
+  voiceRuntimeInstallState,
+  voiceRuntimeNodeBinary,
+  voiceRuntimeState,
+  onVoiceRuntimeProgress
+} from './services/voice/runtime'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
@@ -53,9 +61,16 @@ const broadcast = (channel: string, payload: unknown): void => {
 }
 
 /**
- * 契约 handler 表（#30）：每条 invoke/send 通道一行，签名由 MainHandlers 钉死；
- * listen 通道是主进程推送侧，不进这张表。注册循环在 registerIpc 里。
- */
+/** 语音运行时状态快照：handler 表与广播共用同一份拼装，别处不要再各拼一份。 */
+function runtimeStatusSnapshot() {
+  return {
+    state: voiceRuntimeState(),
+    nodePath: voiceRuntimeNodeBinary(),
+    ...voiceRuntimeInstallState()
+  }
+}
+
+/** 契约 handler 表（#30）：每条 invoke/send 通道一行，签名由 MainHandlers 钉死； */
 const handlers: MainHandlers = {
   // 设置 / 提供商 / 翻译
   getSettings: () => loadSettings(),
@@ -120,14 +135,7 @@ const handlers: MainHandlers = {
   reportVoiceChain: (result) => {
     broadcast(IPC.VOICE_CHAIN_RESULT, result)
   },
-  whisperProbe: (binPath) => getWhisperAdapter().probe(String(binPath ?? '')),
-  whisperSetup: () =>
-    getWhisperAdapter().ensureAssets((phase, pct) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send(IPC.VOICE_WHISPER_PROGRESS, { phase, pct })
-      }
-    }),
-  transcribeAudio: async (wavBase64, language) => {
+  transcribeAudio: async (wavBase64) => {
     const base64 = String(wavBase64 ?? '')
     if (!base64) return { ok: false, text: '', error: '音频为空' }
     const dir = join(app.getPath('userData'), 'voice')
@@ -135,7 +143,7 @@ const handlers: MainHandlers = {
     const wavPath = join(dir, 'utterance.wav')
     writeFileSync(wavPath, Buffer.from(base64, 'base64'))
     // 引擎路由在这里只有一行：识别引擎的选择与「模型没就绪」的提示都由 transcribeWav 负责。
-    return transcribeWav(wavPath, language ?? 'zh')
+    return transcribeWav(wavPath)
   },
   ttsPreview: (text) => getTtsAdapter().preview(String(text ?? '')),
   voiceOutTest: () => getVoiceOutService().test(),
@@ -143,6 +151,20 @@ const handlers: MainHandlers = {
   ttsOfflineDownload: () => ensureOfflineModel(),
   asrStatus: () => qwen3Status(),
   asrDownload: () => ensureQwen3Model(),
+  // 语音运行时（#45）：状态即时算；安装是长任务，结束后广播一次终态。
+  voiceRuntimeStatus: () => runtimeStatusSnapshot(),
+  voiceRuntimeInstall: async () => {
+    try {
+      await installVoiceRuntime()
+      broadcast(IPC.VOICE_RUNTIME_STATE, runtimeStatusSnapshot())
+      return { ok: true, error: null }
+    } catch (err) {
+      const message = errorMessage(err)
+      broadcast(IPC.VOICE_RUNTIME_STATE, runtimeStatusSnapshot())
+      return { ok: false, error: message }
+    }
+  },
+  voiceModelRemove: () => removeVoiceModel(),
   // GPT-SoVITS：面板每 3 秒问一次「包在不在、服务起没起、最近日志」，不再靠翻控制台猜。
   sovitsStatus: () => sovitsStatusSnapshot(),
   // 一键安装：.7z 已放数据目录就只解压；否则下 8GB 再解压。装完顺手把服务拉起来，
@@ -209,7 +231,7 @@ const handlers: MainHandlers = {
   ftRecRead: (group, line) => ftRecRead(group, line),
   // 训练窗口「识别测试」：已存录音直接喂给当前识别引擎，和稿子原文对比。
   ftRecAsr: async (group, line) => {
-    return transcribeWav(ftRecPath(String(group ?? ''), String(line ?? '')), 'zh')
+    return transcribeWav(ftRecPath(String(group ?? ''), String(line ?? '')))
   },
   // 一键打包：录音 × 稿子 → 官方微调 JSONL（#14 的核心件，试点格式已验证）。
   ftDatasetPrepare: () => prepareFtDataset(),
@@ -233,4 +255,6 @@ export function registerIpc(): void {
   }
   // 契约表之外的主进程接线：训练快照广播（listen 通道的推送侧）。
   getTrainManager().onState((snapshot) => broadcast(IPC.TRAIN_STATE, snapshot))
+  // 语音运行时安装进度：主进程推、面板翻状态牌（面板不装事件重复订阅的轮询）。
+  onVoiceRuntimeProgress(() => broadcast(IPC.VOICE_RUNTIME_STATE, runtimeStatusSnapshot()))
 }

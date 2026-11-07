@@ -222,13 +222,10 @@ const implemented = {
   }),
   asrStatus: async () => asrState(),
   asrDownload: async () => asrState(),
-  whisperProbe: async () => ({ ok: true, configured: true, detail: 'stub 就绪' }),
-  whisperSetup: async () => ({
-    ok: true,
-    binaryPath: 'data/whisper/bin/whisper-cli.exe',
-    modelPath: 'data/whisper/models/ggml-small.bin'
-  }),
-  onWhisperProgress: () => () => {},
+  voiceRuntimeStatus: async () => ({ state: 'ready', nodePath: 'stub-node.exe', installing: false, installError: null }),
+  voiceRuntimeInstall: async () => ({ ok: true, error: null }),
+  voiceModelRemove: async () => ({ ok: true, error: null }),
+  onVoiceRuntimeState: () => () => {},
   onVoiceChainResult: () => () => {},
   onVoiceRecordState: () => () => {},
   voiceOutTest: async () => ({ ok: true, durationMs: 900, hint: 'stub 声出已播' }),

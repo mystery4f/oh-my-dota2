@@ -38,7 +38,9 @@ files:
 asarUnpack:
   - '**/*.node'
   - '**/node_modules/sharp/**'
-
+  # sherpa 原生插件整目录解包：.node 之外还有 onnxruntime/sherpa 的 dll 要同目录可寻（#45）
+  - '**/node_modules/sherpa-onnx-node/**'
+  - '**/node_modules/sherpa-onnx-win-x64/**'
 win:
   target:
     - target: nsis
