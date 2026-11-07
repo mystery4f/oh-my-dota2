@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { asrFtEnvRoot } from './asr-ft'
@@ -12,12 +12,18 @@ import type { AsrFtInstallState } from '@shared/train/asr-ft'
  * 断点续传。装完的标准布局和 asr-ft.ts 的 layoutCandidates 对上。
  */
 
-/** npmmirror 的 uv 目录列表（JSON），挑最新版本下 zip 再用系统 tar 解。 */
-const UV_LIST_URL = 'https://registry.npmmirror.com/-/binary/uv/'
-/** PyPI 国内镜像（普通依赖）。 */
-const PYPI_MIRROR = 'https://pypi.tuna.tsinghua.edu.cn/simple'
-/** torch cu121 轮子镜像（+cu121 版本不在 PyPI 上，只能 find-links）。 */
-const TORCH_CU121_MIRROR = 'https://mirror.nju.edu.cn/pytorch-wheels/cu121/'
+/**
+ * uv 二进制来源：npmmirror 的 /-/binary/uv/ 已下线（404），改取阿里云 PyPI 镜像里的 uv
+ * win_amd64 wheel——wheel 自带 uv.exe，位置在 uv-<ver>.data/scripts/ 下。
+ */
+const UV_WHEEL_INDEX = 'https://mirrors.aliyun.com/pypi/simple/uv/'
+/** wheel 链接改写：索引给的是 files.pythonhosted.org（国内连不上），同路径阿里云可直取。 */
+const PYPI_PACKAGES_HOST = 'https://files.pythonhosted.org/packages/'
+const MIRROR_PACKAGES_HOST = 'https://mirrors.aliyun.com/pypi/packages/'
+/** PyPI 国内镜像（普通依赖）：清华 simple 已回 403，用阿里云。 */
+const PYPI_MIRROR = 'https://mirrors.aliyun.com/pypi/simple'
+/** torch cu121 轮子镜像（+cu121 版本不在 PyPI 上，只能 find-links）：nju 路径已 404，用阿里云。 */
+const TORCH_CU121_MIRROR = 'https://mirrors.aliyun.com/pytorch-wheels/cu121/'
 /** HuggingFace 国内镜像（底模断点续传走 huggingface-hub）。 */
 const HF_MIRROR = 'https://hf-mirror.com'
 /** python-build-standalone 国内镜像（uv venv 缺解释器时用它拉）。 */
@@ -94,18 +100,61 @@ export function copyAsrFtScripts(envRoot: string): { sftScript: string; exportSc
   return { sftScript, exportScript }
 }
 
-/** npmmirror 目录列表里挑最新的 uv zip 文件名（版本按数值比较，0.10 > 0.9）。 */
+/** 索引里的 wheel 文件名挑最新（版本按数值比较，0.10 > 0.9）。 */
 export function pickLatestUvAsset(entries: Array<{ name: string; type?: string }>): string | null {
-  const zips = entries
-    .map((e) => /^uv-(\d+)\.(\d+)\.(\d+)-x86_64-pc-windows-msvc\.zip$/.exec(e.name))
+  const wheels = entries
+    .map((e) => /^uv-(\d+)\.(\d+)\.(\d+)-py3-none-win_amd64\.whl$/.exec(e.name))
     .filter((m): m is RegExpExecArray => m !== null)
     .map((m) => ({ name: m[0], parts: [Number(m[1]), Number(m[2]), Number(m[3])] }))
-  if (zips.length === 0) return null
+  if (wheels.length === 0) return null
   const newer = (a: { parts: number[] }, b: { parts: number[] }): number => {
     for (let i = 0; i < 3; i++) if (a.parts[i] !== b.parts[i]) return a.parts[i] - b.parts[i]
     return 0
   }
-  return zips.reduce((best, cur) => (newer(cur, best) > 0 ? cur : best)).name
+  return wheels.reduce((best, cur) => (newer(cur, best) > 0 ? cur : best)).name
+}
+
+/** PyPI 索引 HTML → uv 的 win_amd64 wheel 候选（文件名 + 原始 href）。 */
+export function uvWheelCandidates(html: string): Array<{ name: string; href: string }> {
+  const out: Array<{ name: string; href: string }> = []
+  for (const m of html.matchAll(/href="([^"#]+?\.whl)[^"]*"/g)) {
+    const name = m[1].split('/').pop() ?? ''
+    if (/^uv-\d+\.\d+\.\d+-py3-none-win_amd64\.whl$/.test(name)) out.push({ name, href: m[1] })
+  }
+  return out
+}
+
+/** 索引 href → 可下载 URL：相对路径接索引目录；pythonhosted 换阿里云同路径。 */
+export function resolveUvWheelUrl(href: string, indexUrl: string = UV_WHEEL_INDEX): string {
+  const clean = href.split('#')[0]
+  const absolute = /^https?:\/\//.test(clean) ? clean : new URL(clean, indexUrl).toString()
+  return absolute.startsWith(PYPI_PACKAGES_HOST)
+    ? MIRROR_PACKAGES_HOST + absolute.slice(PYPI_PACKAGES_HOST.length)
+    : absolute
+}
+
+/** 目录读不了就当空（换模/安装时目录可能刚被挪走）。 */
+function readDirOrEmpty(root: string): Dirent[] {
+  try {
+    return readdirSync(root, { withFileTypes: true })
+  } catch {
+    return []
+  }
+}
+/** 在 root 下有限深度找同名文件（wheel 把 uv.exe 埋在 uv-<ver>.data/scripts/ 里）。 */
+export function findFileShallow(root: string, fileName: string, depth: number): string | null {
+  if (depth < 0) return null
+  const entries = readDirOrEmpty(root)
+  if (entries.length === 0) return null
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.toLowerCase() === fileName) return join(root, entry.name)
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const hit = findFileShallow(join(root, entry.name), fileName, depth - 1)
+    if (hit) return hit
+  }
+  return null
 }
 
 function setStage(stage: string, progress = 0): void {
@@ -199,15 +248,20 @@ export async function installAsrFtEnv(): Promise<AsrFtInstallState> {
       if (steps[i] === '复制训练脚本') {
         copyAsrFtScripts(envRoot)
       } else if (steps[i] === '下载 uv') {
-        const res = await fetch(UV_LIST_URL)
-        if (!res.ok) throw new Error(`uv 目录列表 HTTP ${res.status}`)
-        const entries = (await res.json()) as Array<{ name: string }>
-        const asset = pickLatestUvAsset(entries)
-        if (!asset) throw new Error('uv 目录列表里没有 windows zip')
+        const res = await fetch(UV_WHEEL_INDEX)
+        if (!res.ok) throw new Error(`uv 索引 HTTP ${res.status}`)
+        const candidates = uvWheelCandidates(await res.text())
+        const asset = pickLatestUvAsset(candidates)
+        if (!asset) throw new Error('uv 索引里没有 win_amd64 wheel')
+        const href = candidates.find((c) => c.name === asset)?.href ?? asset
         const zip = join(envRoot, 'uv.zip')
-        await downloadZip(`${UV_LIST_URL}${asset}`, zip, `下载 uv (${asset})`)
+        await downloadZip(resolveUvWheelUrl(href), zip, `下载 uv (${asset})`)
         await extractZip(zip, envRoot)
-        if (!existsSync(uvExe)) throw new Error('解压后没找到 uv.exe')
+        if (!existsSync(uvExe)) {
+          const found = findFileShallow(envRoot, 'uv.exe', 4)
+          if (!found) throw new Error('解压后没找到 uv.exe')
+          copyFileSync(found, uvExe)
+        }
       } else if (steps[i] === '创建虚拟环境') {
         await runStep(
           uvExe,

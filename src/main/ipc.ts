@@ -185,7 +185,7 @@ const handlers: MainHandlers = {
     }
     if (kind !== 'asr-ft') return getTrainManager().start(request)
     // asr-ft：先把环境/数据/目录备齐，再带着「训练完接导出」的链子交给 manager。
-    const resolved = await resolveAsrFtTrainRequest(String(request.dataset ?? ''))
+    const resolved = await resolveAsrFtTrainRequest()
     if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
     const exportRequest = resolved.request
     return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest))

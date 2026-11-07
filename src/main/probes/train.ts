@@ -41,7 +41,7 @@ import {
   judgeGvDataset,
   normalizeGvVersion
 } from '@shared/train/gv'
-import { pickLatestUvAsset, planAsrFtInstallSteps } from '../services/train/asr-ft-install'
+import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
 
 /**
  * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度/录音判定/GV 微调配置）。
@@ -106,7 +106,10 @@ export function runTrainProbe(): void {
   push('回滚序列：有备份才动手', JSON.stringify(asrFtRollbackSteps({ bakExists: true })) === JSON.stringify(['rm-active', 'restore-bak']) && asrFtRollbackSteps({ bakExists: false }).length === 0, '')
   push('环境点名：全缺四项、全齐空数组', deriveAsrFtEnvGaps({}).length === 4 && deriveAsrFtEnvGaps({ venvOk: true, sftScript: 's', exportScript: 'e', baseModelDir: 'm' }).length === 0, String(deriveAsrFtEnvGaps({}).length))
   push('安装步骤：全缺五步、全齐空序列', JSON.stringify(planAsrFtInstallSteps({ scripts: false, uv: false, venv: false, deps: false, model: false })).includes('下载 uv') && planAsrFtInstallSteps({ scripts: true, uv: true, venv: true, deps: true, model: true }).length === 0, String(planAsrFtInstallSteps({ scripts: false, uv: true, venv: false, deps: true, model: true }).length))
-  push('uv 资产挑最新 windows zip', pickLatestUvAsset([{ name: 'uv-0.9.5-x86_64-pc-windows-msvc.zip' }, { name: 'uv-0.10.2-x86_64-pc-windows-msvc.zip' }, { name: 'uv-0.10.2-aarch64-apple-darwin.tar.gz' }]) === 'uv-0.10.2-x86_64-pc-windows-msvc.zip' && pickLatestUvAsset([{ name: 'uv-installer.ps1' }]) === null, String(pickLatestUvAsset([{ name: 'uv-0.9.5-x86_64-pc-windows-msvc.zip' }])))
+  const uvHtml = '<a href="../../packages/aa/bb/uv-0.9.5-py3-none-win_amd64.whl#sha256=x">u</a><a href="../../packages/cc/dd/uv-0.10.2-py3-none-win_amd64.whl#sha256=y">u</a><a href="../../packages/ee/ff/uv-0.10.2-py3-none-macosx_11_0_arm64.whl">u</a>'
+  const uvCands = uvWheelCandidates(uvHtml)
+  push('uv 资产挑最新 win_amd64 wheel', pickLatestUvAsset([{ name: 'uv-0.9.5-py3-none-win_amd64.whl' }, { name: 'uv-0.10.2-py3-none-win_amd64.whl' }, { name: 'uv-0.10.2-py3-none-macosx_11_0_arm64.whl' }]) === 'uv-0.10.2-py3-none-win_amd64.whl' && pickLatestUvAsset([{ name: 'uv-installer.ps1' }]) === null, String(pickLatestUvAsset(uvCands)))
+  push('uv 索引解析与链接改写', uvCands.length === 2 && pickLatestUvAsset(uvCands) === 'uv-0.10.2-py3-none-win_amd64.whl' && resolveUvWheelUrl('../../packages/cc/dd/uv-0.10.2-py3-none-win_amd64.whl#sha256=y', 'https://mirrors.aliyun.com/pypi/simple/uv/') === 'https://mirrors.aliyun.com/pypi/packages/cc/dd/uv-0.10.2-py3-none-win_amd64.whl' && resolveUvWheelUrl('https://files.pythonhosted.org/packages/cc/dd/uv-0.10.2-py3-none-win_amd64.whl#sha256=y') === 'https://mirrors.aliyun.com/pypi/packages/cc/dd/uv-0.10.2-py3-none-win_amd64.whl', resolveUvWheelUrl(uvCands[1].href))
 
   // —— 日志行 → 进度 ——
   const p = (line: string): string => JSON.stringify(parseTrainProgress(line))

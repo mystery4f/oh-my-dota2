@@ -176,6 +176,39 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 - [x] #15 T5 ASR 训练与部署：官方 SFT + ONNX 导出 + 部署口 + A/B 试音（blocked by #12、#14；asr-ft 安装/切换/回滚缝已在库）（闭环已在库并真机验证过：272adcc 一键微调+换模闭环、abbe673 一键环境安装器；G15 试点 19/20 vs 底模 13/20；`--resume` 未接——每次开新 run 目录，参数已冻结，留待真需要时再接）
 - [ ] #16 T6 验收与基线：ACCEPTANCE/BENCH/NOTES 回写（blocked by #13、#15）
 ## 候选方案（未排期）
+### ASR 微调的自适应轮数与续训（2026-11-07 想法，未排期）
+
+现状：`planAsrFtTrainArgv` 里的 `--epochs 66` 是给「20 条录音」实测冻下来的（G15 试点参数，勿随手改）。数据一涨代价就线性放大，而且明显过拟合：
+
+```
+训练条数 = 全部录音 − 2（splitTrainEval 只留尾部 2 条做验证）
+每轮步数 = ceil(训练条数 / 4)        （batch_size 1 × grad_acc 4）
+总步数   = 每轮步数 × 66
+```
+
+实测（RTX 4060 8G，约 4.1 s/步）：40 条 → 660 步 / 45 分钟；60 条 → 990 步 / 68 分钟；100 条 → 1650 步 / 1.9 小时；122 条 → 1980 步 / 2.3 小时。
+
+优化的三件事，按收益排序：
+
+- **目标步数定轮数**（收益最大、改动最小）：固定 `目标步数 ≈ 800`，`epochs = clamp(round(800 / 每轮步数), 10, 66)`。20 条时仍是 66（行为不变），100 条时自动降到 32 → 800 步。窗口把「预计 N 步 / 约 X 分钟」写出来，点之前就知道要等多久。改动：`src/shared/train/asr-ft.ts` 的 `planAsrFtTrainArgv` 一处 + `src/renderer/train.ts` 文案 + `src/main/probes/train.ts` 补用例。
+- **接 `--resume_from` 续训**（增量）：官方脚本已支持（`data/asr-ft-env/sft/qwen3_asr_sft.py` 的 `parse_args()` 里有 `--resume_from` / `--resume`），应用没接。落地要连带改三件事——设置项「从上一份 checkpoint 续训」、resume 时 lr 降到 1e-5、总步数按新增数据重算（否则等于把老数据再喂一遍）。
+- **训练前显存预检**：GV 服务器空闲占 1.4 G、加载模型后 4.3 G，训练峰值 7.6 G，8 G 卡容不下第二个人。现在靠 `pauseSovitsForTraining` 让调用方让路，但**外部启动的** api_v2 让不了（`kept-off`），只能在开跑前查一次显存并对用户明说「先关外部 TTS 服务」，别让他等 40 分钟才看见 OOM。
+
+### 录音组的「已录 / 已训」状态标记（2026-11-07 想法，未排期）
+
+用户诉求：录音组里哪些已经录完、哪些已经被训练吃过，要能直接看出来——现在完全看不出来。
+
+现状缺口：
+
+- `renderFtOverview()`（`src/renderer/train.ts:238`）只汇总「已录 N 段 · 时长 · 逐句组完成 x/y · 缺哪几句」，**没有任何训练记录**。
+- 训练侧也没有账本：`data/asr-ft-runs/<stem>/` 里只有 `checkpoint-*`，无法反查「这些话练过没有、哪次练的」。`data/asr-ft-datasets/` 每次重打包都会被覆盖，不能当账本。
+
+要补的两半（主进程记账 + 纯缝派生状态）：
+
+- **训练账本**：`resolveAsrFtTrainRequest()` 已经先建好 runDir（`src/main/services/train/asr-ft.ts:198`），紧接着写 `<runDir>/dataset.jsonl`，一行一条 `{group, line, key, wav, bytes, mtimeMs, text}`；真正 spawn 成功后再补 `<runDir>/run.json`（`{runId, startedAt, epochs, status, finishedAt, exportDir, applied}`），导出完成、点「应用新模型」时把 `applied` 置真。
+- **纯缝派生**：新增 `ftTrainCoverage(manifests, recs)` → 每组 `{trained, total, stale}`。「已训」按 `key + bytes + mtimeMs` 全等判定，重录过的行自动算 stale（提示需重训）；跨多个 run 取最新一份。整组齐 = 已训练，部分 = 部分训练，零 = 未训练。
+- **UI**：组标题右侧挂状态，「已录完 · 已训练（11-07 09:34）」「已录完 · 未训练」「已训练，其中 3 句重录过（需重训）」；逐句行加小点标记。文案沿用现有 `Group`/`Row`，不新增控件。
+- **探针**：`--train-probe` 补 `ftTrainCoverage` 用例——未训 / 全训 / 重录变 stale / 跨 run 取最新 / 空账本。
 
 ### 监听控制台输出代替屏幕 OCR ❌ 已验证不可行（2026-11）
 

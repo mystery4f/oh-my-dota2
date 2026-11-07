@@ -16,7 +16,6 @@ import type { TrainStartRequest } from '@shared/train/task'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 const kindSel = $<HTMLSelectElement>('kind')
-const datasetInput = $<HTMLInputElement>('dataset')
 const startBtn = $<HTMLButtonElement>('start')
 const stopBtn = $<HTMLButtonElement>('stop')
 const bar = $<HTMLDivElement>('bar')
@@ -95,9 +94,10 @@ function render(snap: TrainSnapshot): void {
 async function start(): Promise<void> {
   const kind = kindSel.value as 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
   const isGv = kind === 'gv-gpt' || kind === 'gv-sovits'
-  const dataset = isGv ? gvDatasetSel.value : datasetInput.value.trim()
+  const dataset = isGv ? gvDatasetSel.value : ''
   // 记住这单的选择，下次开窗自动填（setSettings 在主进程落盘）。
-  void window.api.setSettings({ trainKind: kind, trainDataset: dataset })
+  // 数据集只有 GV 分支是真数据（实验目录名）；ASR 微调没有名字可选，目录名固定 ft-<时间戳>。
+  void window.api.setSettings(isGv ? { trainKind: kind, trainDataset: dataset } : { trainKind: kind })
   const request: TrainStartRequest = { kind, dataset }
   // gv-*：数据集下拉就是实验名；备料/配置文件由主进程准备，缺口会原样报回。
   if (isGv) {
@@ -108,6 +108,8 @@ async function start(): Promise<void> {
     }
   }
   const result = await window.api.trainStart(request)
+  // 启动被拒时不弹任何东西，只改状态文字；落一行日志，否则「点了没反应」永远查不到原因
+  console.log('[train-ft] start', kind, result.ok, result.error ?? '')
   if (!result.ok && result.error) {
     if (isGv) {
       gvError.textContent = result.error
@@ -550,9 +552,9 @@ async function startInstall(): Promise<void> {
 
 /** 一键微调：打包 → 训练 → 导出是一个任务，跑完点「应用新模型」转正。 */
 async function startFt(): Promise<void> {
-  if (!datasetInput.value.trim()) datasetInput.value = '微调'
   kindSel.value = 'asr-ft'
-  ftAsrResult.textContent = '已开跑：打包 → 训练 → 导出（GPU，约半小时量级）；完成后点「应用新模型」'
+  // 66 epoch × 10 步 ≈ 660 步；实测 3.6 s/步（4060 8G），约 40 分钟，导出另算（CPU）。
+  ftAsrResult.textContent = '已开跑：打包 → 训练 66 epoch（约 40 分钟，看显卡）→ 导出 ONNX；完成后点「应用新模型」'
   await start()
 }
 
@@ -575,7 +577,6 @@ async function init(): Promise<void> {
   await refreshAsrft()
   const settings = await window.api.getSettings()
   kindSel.value = settings.trainKind
-  datasetInput.value = settings.trainDataset
   render(await window.api.trainSnapshot())
   window.api.onTrainState(render)
   await loadScriptAndRecs()

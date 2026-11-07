@@ -180,9 +180,11 @@ export function rollbackAsrFtModel(): AsrFtSwapResult {
 }
 
 /** 训练启动前把环境、数据、目录都备齐：缺一样就拒启动，成功返回带 asrFt 附件的请求。 */
-export async function resolveAsrFtTrainRequest(
-  dataset: string
-): Promise<{ ok: boolean; request?: TrainStartRequest; error?: string }> {
+export async function resolveAsrFtTrainRequest(): Promise<{
+  ok: boolean
+  request?: TrainStartRequest
+  error?: string
+}> {
   const env = detectAsrFtEnv()
   if (!env.ok || !env.paths.pythonExe) {
     return { ok: false, error: `微调环境没就绪：${env.gaps.join('；')}` }
@@ -191,7 +193,11 @@ export async function resolveAsrFtTrainRequest(
   if (!pack.ok || !pack.trainPath || !pack.evalPath) {
     return { ok: false, error: pack.error ?? '训练数据打包失败' }
   }
-  const stem = `${dataset || 'ft'}-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')
+  // 目录名固定 ASCII（ft-<时间戳>）：decoder 的 fp32 中间产物超过 2 GB，torch 的 external-data
+  // 写入在 Windows 上用窄字符路径开文件，路径里带中文（曾用数据集名当目录名「地图」）会
+  // `Could not open file or directory: <dir>/thinker.model.embed_tokens.weight` 直接失败。
+  const stem = `ft-${stamp}`
   const runDir = join(app.getPath('userData'), 'asr-ft-runs', stem)
   const exportDir = join(app.getPath('userData'), 'asr-ft-onnx', stem)
   // 官方脚本不建输出目录，先垫好省得训练第一步就摔。
@@ -201,7 +207,8 @@ export async function resolveAsrFtTrainRequest(
     ok: true,
     request: {
       kind: 'asr-ft',
-      dataset,
+      // ASR 微调没有「数据集名」这个概念：目录名固定 ft-<时间戳>，字段留空只为满足请求契约。
+      dataset: '',
       asrFt: {
         paths: env.paths as AsrFtPaths,
         data: { trainJsonl: pack.trainPath, evalJsonl: pack.evalPath, runDir },

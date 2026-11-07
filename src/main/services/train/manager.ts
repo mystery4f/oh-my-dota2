@@ -1,4 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { app } from 'electron'
+import { appendFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   canStartTrain,
   deriveTrainPlan,
@@ -28,6 +31,31 @@ import { ensureSovitsServer, pauseSovitsForTraining } from '../voice/sovits-serv
 const LOG_RING_LIMIT = 500
 /** 进度广播节流：真训练栈一秒几十行日志，不节流会把窗口渲染按住。 */
 const BROADCAST_MIN_MS = 250
+/** 训练日志落盘上限：一圈环形日志挡不住崩溃现场，磁盘这份才是事后唯一证据。 */
+const TRAIN_LOG_MAX_BYTES = 4 * 1024 * 1024
+let trainLogSize = -1
+
+/**
+ * 训练子进程输出落盘（logs/train.log）：窗口里的环形日志一关就没，
+ * 崩在加载模型还是第一步只能看这份。写不进去不能反过来影响训练。
+ */
+function appendTrainLog(text: string): void {
+  try {
+    const dir = join(app.getPath('userData'), 'logs')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, 'train.log')
+    if (trainLogSize < 0) trainLogSize = statSync(file, { throwIfNoEntry: false })?.size ?? 0
+    if (trainLogSize > TRAIN_LOG_MAX_BYTES) {
+      writeFileSync(file, '')
+      trainLogSize = 0
+    }
+    const line = `[${new Date().toISOString()}] ${text}\n`
+    appendFileSync(file, line, 'utf8')
+    trainLogSize += Buffer.byteLength(line)
+  } catch {
+    // 日志失败不影响训练
+  }
+}
 
 class TrainManager {
   private task: TrainTaskInfo | null = null
@@ -56,6 +84,7 @@ class TrainManager {
   private record(text: string): void {
     this.logs.push({ at: Date.now(), text })
     if (this.logs.length > LOG_RING_LIMIT) this.logs.splice(0, this.logs.length - LOG_RING_LIMIT)
+    appendTrainLog(text)
   }
 
   private emit(force = false): void {
@@ -76,7 +105,8 @@ class TrainManager {
     const gate = canStartTrain(this.status())
     if (!gate.ok) return { ok: false, error: gate.reason }
     const kind: TrainTaskKind = normalizeTrainKind(request.kind)
-    const plan = deriveTrainPlan({ kind, dataset: String(request.dataset ?? '') })
+    // 整份 request 一起传：asrFt / gvResolved 是备料阶段挂上来的附件，丢掉就一定会报「环境没就绪」
+    const plan = deriveTrainPlan({ ...request, kind })
     if (plan.unavailable) return { ok: false, error: plan.unavailable }
     const node = this.nodeBin()
     if (plan.exe === 'node' && !node) return { ok: false, error: '没找到 node，演示任务跑不了（装 node 或设 OHMYDOTA2_NODE）' }
