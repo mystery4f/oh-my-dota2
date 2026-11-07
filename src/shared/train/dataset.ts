@@ -53,15 +53,18 @@ export function buildFtDatasetEntries(
 }
 
 /**
- * 训练/验证切分：尾部 holdout 条进验证集（录音天然按组序落盘，尾部=最晚录的）；
- * 数据太少（≤2×holdout）就全给训练，验证集留空——试点别为切分浪费数据。
+ * 训练/验证切分：尾部 holdout 条进验证集（录音天然按组序落盘，尾部=最晚录的）。
+ * 两条起就必须切出验证集：官方脚本 `eval_strategy="steps"` 是无条件的，没给 eval_dataset 会
+ * `ValueError: You have set args.eval_strategy to IntervalStrategy.STEPS but you didn't pass an eval_dataset`
+ * （安装版实测）。只有一条时才留空，那种情况 prepareFtDataset 直接拒打包并让人多录一条。
  */
 export function splitTrainEval(
   entries: FtDatasetEntry[],
   holdout = 2,
 ): { train: FtDatasetEntry[]; eval: FtDatasetEntry[] } {
-  if (entries.length <= holdout * 2) return { train: entries.slice(), eval: [] }
-  return { train: entries.slice(0, entries.length - holdout), eval: entries.slice(entries.length - holdout) }
+  if (entries.length < 2) return { train: entries.slice(), eval: [] }
+  const tail = Math.max(1, Math.min(holdout, Math.floor(entries.length / 2)))
+  return { train: entries.slice(0, entries.length - tail), eval: entries.slice(entries.length - tail) }
 }
 
 /** 官方 qwen3_asr_sft.py 要的 JSONL 行：中文固定带 language 前缀（实测格式）。 */

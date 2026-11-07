@@ -36,6 +36,9 @@ export async function prepareFtDataset(): Promise<FtDatasetPrepareResult> {
   if (entries.length === 0) {
     return fail('还没有已录的句子——先在上方录几条再打包')
   }
+  if (entries.length < 2) {
+    return fail('只有一条录音不够——官方脚本必须带验证集，至少再录一条再打包')
+  }
   if (!entries.every((entry) => existsSync(entry.wavPath))) {
     return fail('有录音文件丢失（列表和磁盘对不上），重录缺失的句子后再打包')
   }
@@ -45,8 +48,8 @@ export async function prepareFtDataset(): Promise<FtDatasetPrepareResult> {
   const trainPath = join(dir, 'train.jsonl')
   const evalPath = join(dir, 'eval.jsonl')
   await writeFile(trainPath, buildFtJsonlText(train), 'utf8')
-  // 验证集可能为空（数据太少），训练脚本给空文件会当 0 条验证，安全；但别写文件免得误导。
-  if (evalSet.length > 0) await writeFile(evalPath, buildFtJsonlText(evalSet), 'utf8')
+  // 两条起 splitTrainEval 一定切出验证集：官方脚本 eval_strategy="steps" 无条件，空验证集会 ValueError。
+  await writeFile(evalPath, buildFtJsonlText(evalSet), 'utf8')
   return {
     ok: true,
     trainCount: train.length,
