@@ -57,6 +57,8 @@ export function saveTrainRun(run: TrainRunRecord): void {
     const tmp = `${target}.tmp`
     writeFileSync(tmp, JSON.stringify(run, null, 2), 'utf8')
     renameSync(tmp, target)
+    // 每条落盘后顺手裁一次：列表只留最近 keep 条，不靠调用方记得清理。
+    pruneTrainRuns()
   } catch {
     // 记录失败不能拖垮训练本身：日志里会留痕，列表少一条可以接受。
   }

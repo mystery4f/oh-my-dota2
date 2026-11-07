@@ -88,6 +88,9 @@ export function useRecorder(onSaved: () => void | Promise<void>): {
   )
   stopRef.current = stop
 
+  // 录到一半切走 section 不能把麦克风留在占用状态。
+  React.useEffect(() => teardown, [teardown])
+
   const begin = React.useCallback(
     async (next: RecorderTarget): Promise<void> => {
       if (graph.current) return
