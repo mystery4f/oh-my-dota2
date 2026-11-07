@@ -247,6 +247,8 @@ export interface VoiceModelProgress {
   progress: number
   /** 当前文件（相对路径），完成清单里最后一件的名字。 */
   file: string
+  /** download=字节在走；verify=该件已下完、正在算 sha256（UI 显示「校验中」而不是卡死的 100%）。 */
+  phase: 'download' | 'verify'
 }
 
 export type VoiceModelProgressListener = (progress: VoiceModelProgress) => void
@@ -262,6 +264,7 @@ export function onVoiceModelProgress(listener: VoiceModelProgressListener): () =
 
 function emitModel(progress: VoiceModelProgress): void {
   lastModelProgress = progress.progress
+  lastModelVerifying = progress.phase === 'verify'
   for (const listener of modelListeners) listener(progress)
 }
 
@@ -269,10 +272,24 @@ let downloading = false
 let modelError: string | null = null
 /** 最近一次进度（0–1）：面板一秒一问 asrStatus 时不用等字节回调。 */
 let lastModelProgress = 0
+/** 最近一次事件是不是校验阶段：字节到 100% 后还要逐件算哈希，UI 靠它别把 100% 画成下载卡死。 */
+let lastModelVerifying = false
 
-export function voiceModelState(): { downloading: boolean; error: string | null; missing: string[]; progress: number } {
+export function voiceModelState(): {
+  downloading: boolean
+  verifying: boolean
+  error: string | null
+  missing: string[]
+  progress: number
+} {
   const missing = pendingModelFiles(modelFileSizes()).map((file) => file.path)
-  return { downloading, error: modelError, missing, progress: downloading ? lastModelProgress : missing.length === 0 ? 1 : 0 }
+  return {
+    downloading,
+    verifying: downloading && lastModelVerifying,
+    error: modelError,
+    missing,
+    progress: downloading ? lastModelProgress : missing.length === 0 ? 1 : 0
+  }
 }
 
 const TOTAL_BYTES = QWEN3_MODEL_FILES.reduce((sum, file) => sum + file.bytes, 0)
@@ -302,9 +319,10 @@ export async function downloadVoiceModel(): Promise<{ ok: boolean; error: string
         dest,
         expectedBytes: file.bytes,
         stallMs: 60_000,
-        onProgress: (done) => emitModel({ progress: (doneBytes + done) / TOTAL_BYTES, file: file.path }),
+        onProgress: (done) => emitModel({ progress: (doneBytes + done) / TOTAL_BYTES, file: file.path, phase: 'download' }),
         onLog: (tag, detail) => console.log('VOICE_MODEL_DL', JSON.stringify({ file: file.path, tag, ...detail }))
       })
+      emitModel({ progress: (doneBytes + file.bytes) / TOTAL_BYTES, file: file.path, phase: 'verify' })
       const actualSha = sha256File(dest)
       if (actualSha !== file.sha256) {
         rmSync(dest, { force: true })

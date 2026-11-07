@@ -778,6 +778,8 @@ export interface OfflineStatus {
   bytes: number
   dir: string
   downloading: boolean
+  /** 真=字节已走完、正在逐件算 sha256（大文件上能停几秒，UI 要显示「校验中」而不是 100%）。 */
+  verifying?: boolean
   /** 0–1；拿不到 Content-Length 时会停在 0。 */
   progress: number
   error: string | null

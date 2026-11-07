@@ -203,7 +203,7 @@ export function TalkPage({
                 </Button>
               </>
             ) : asrStatus.downloading ? (
-              <StatusPill tone="warn">下载中 {Math.round(asrStatus.progress * 100)}%</StatusPill>
+              <StatusPill tone="warn">{asrStatus.verifying ? '校验中…' : `下载中 ${Math.round(asrStatus.progress * 100)}%`}</StatusPill>
             ) : (
               <>
                 <StatusPill tone={asrStatus.error ? 'bad' : 'idle'}>

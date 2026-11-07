@@ -68,6 +68,7 @@ export function qwen3Status(): OfflineStatus {
     dir,
     downloading: state.downloading,
     progress: state.progress,
+    verifying: state.verifying,
     error: state.error
   }
 }
