@@ -58,3 +58,13 @@ Autonomous 执行中（老板已睡）。每完成一项就改这里的复选框
 - 录音 hook 是最难的一块：旧实现 640 行原生 DOM。判定逻辑不动，只换外壳。
 - GV loss 在 tfevents 里，本版不做（spec 已写 out of scope）。
 - 8G 显存：不要在本机跑真实训练来验证，用探针 + fixture。
+
+## 完成记录（2026-11-08）
+
+- 分支 `feat/train-v3`：cd6f852 计划 → b4400e2 两页 + run 记录 → 6e2223d 体检/文档 → 29eef83 复查修复。
+- 证据：typecheck / lint（仅 button.tsx:41 永久告警）/ build 全绿；`--train-probe` **90/90 PASS**；
+  `npm run panel:preview` 的 `?s=voice` 与 `?s=asr` 无 console 错误；两页各只剩 1 个 primary。
+- 票 #50–#55 与 spec #49 已在 GitHub 关闭并附证据评论。
+- 复查抓到并修掉两个泄漏：`saveTrainRun` 从未裁过 `train-runs/`（文档写的 200 条上限是空的）、
+  录音到一半切走 section 会一直占着麦克风。
+- 未做（spec 已列 out of scope）：GV loss 的 tfevents 解析；真训练验收（8G 显存，需人工）。
