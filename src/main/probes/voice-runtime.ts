@@ -179,6 +179,78 @@ export async function runVoiceRuntimeProbe(): Promise<void> {
       }
     )
   })()
+    // —— 分段并发下载（Range 全支持的假源） ——
+    await (async () => {
+      const fullRange = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
+        const m = /bytes=(\d+)-(\d*)/.exec((req.headers.range as string | undefined) ?? '')
+        if (!m) {
+          res.setHeader('accept-ranges', 'bytes')
+          res.setHeader('content-length', String(payload.length))
+          res.end(payload)
+          return
+        }
+        const start = Number(m[1])
+        const end = m[2] === '' ? payload.length - 1 : Math.min(Number(m[2]), payload.length - 1)
+        res.statusCode = 206
+        res.setHeader('content-range', `bytes ${start}-${end}/${payload.length}`)
+        res.setHeader('content-length', String(end - start + 1))
+        res.end(payload.subarray(start, end + 1))
+      }
+      // 整链：3 段并发拼装、段文件清走、进度终点到 100%
+      await withServer(fullRange, async (url) => {
+        const dest = join(dir, 'parallel.bin')
+        const seen: Array<[number, number]> = []
+        const got = await downloadResumable({
+          url,
+          dest,
+          expectedBytes: payload.length,
+          minParallelBytes: 100,
+          concurrency: 3,
+          onProgress: (done, total) => seen.push([done, total])
+        })
+        const hashOk = sha256File(dest) === payloadSha
+        const partsLeft = existsSyncPart(`${dest}.part-0`) || existsSyncPart(`${dest}.part-1`) || existsSyncPart(`${dest}.part-2`)
+        const last = seen.at(-1)
+        push(
+          '下载：分段并发整链 → 拼装完整、段文件清走、进度到头',
+          got === payload.length && hashOk && !partsLeft && last?.[0] === payload.length && last?.[1] === payload.length,
+          `${got}B sha_ok=${hashOk} parts_left=${partsLeft} last=${JSON.stringify(last ?? null)}`
+        )
+      })
+      // 断点：三段里两段已在盘 → 只补缺口（concurrency 3、段长 334：seg0/seg2 齐，seg1 差 434-667）
+      await withServer(fullRange, async (url) => {
+        const dest = join(dir, 'parallel-resume.bin')
+        writeFileSync(`${dest}.part-0`, payload.subarray(0, 334))
+        writeFileSync(`${dest}.part-1`, payload.subarray(334, 434))
+        writeFileSync(`${dest}.part-2`, payload.subarray(668))
+        const got = await downloadResumable({ url, dest, expectedBytes: payload.length, minParallelBytes: 100, concurrency: 3 })
+        const hashOk = sha256File(dest) === payloadSha
+        push('下载：分段断点 → 只补缺口拼装完整', got === payload.length && hashOk, `${got}B sha_ok=${hashOk}`)
+      })
+      // 旧单流 .part 是文件前缀 → 按段界播种给各段，断点不浪费
+      await withServer(fullRange, async (url) => {
+        const dest = join(dir, 'parallel-seed.bin')
+        writeFileSync(`${dest}.part`, payload.subarray(0, 600))
+        const got = await downloadResumable({ url, dest, expectedBytes: payload.length, minParallelBytes: 100, concurrency: 3 })
+        const hashOk = sha256File(dest) === payloadSha
+        const legacyGone = !existsSyncPart(`${dest}.part`)
+        push('下载：旧 .part 前缀按段播种 → 不浪费断点', got === payload.length && hashOk && legacyGone, `${got}B sha_ok=${hashOk} legacy_gone=${legacyGone}`)
+      })
+      // 服务端不认 Range（永远 200 全量）→ 探针失败退回单流，照样落盘
+      await withServer(
+        (_req, res) => {
+          res.setHeader('content-length', String(payload.length))
+          res.end(payload)
+        },
+        async (url) => {
+          const dest = join(dir, 'parallel-fallback.bin')
+          const got = await downloadResumable({ url, dest, expectedBytes: payload.length, minParallelBytes: 1 })
+          const hashOk = sha256File(dest) === payloadSha
+          push('下载：不认 Range → 退回单流落盘', got === payload.length && hashOk, `${got}B sha_ok=${hashOk}`)
+        }
+      )
+    })()
+
 
   rmSync(dir, { recursive: true, force: true })
 
