@@ -173,11 +173,12 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 - [x] #12 T2 推理互斥接线：训练运行自动停 GV 推理、终态自动恢复、恢复失败窗口明示（blocked by #11）（本提交；`--train-probe` 56/56）
 - [x] #13 T3 GV 侧 MVP：数据集登记（备料四件套验收 + webui 开关）、gv-gpt/gv-sovits 真训练编排（s2 `--config` / s1 `--config_file`，配置照抄 webui open1Ba/open1Bb）、产物一键注册音色包（两腿最新权重 + 参考音频 upsert refs）（blocked by #11、#12）（本提交；`--train-probe` 62/62；降噪/切分/标注仍走官方 webui）
 - [x] #14 T4 ASR 数据准备与录音组状态：组总览/回放在库，差准备报告与组完成总览（blocked by #11；开工以第一轮手动微调跑通为排期条件）（本提交；组完成总览 = `buildFtGroupProgress` 纯缝 + 窗口常驻总览条「已录 X 段 · Ys · 逐句组完成 a/b ｜ Gxx 缺 Lnn」；句数/总时长/失败清单齐；`--train-probe` 63/63；真实录音→打包演示验收留给 T6 清单）
-- [x] #15 T5 ASR 训练与部署：官方 SFT + ONNX 导出 + 部署口 + A/B 试音（blocked by #12、#14；asr-ft 安装/切换/回滚缝已在库）（闭环已在库并真机验证过：272adcc 一键微调+换模闭环、abbe673 一键环境安装器；G15 试点 19/20 vs 底模 13/20；`--resume` 未接——每次开新 run 目录，参数已冻结，留待真需要时再接）
+- [x] #15 T5 ASR 训练与部署：官方 SFT + ONNX 导出 + 部署口 + A/B 试音（blocked by #12、#14；asr-ft 安装/切换/回滚缝已在库）（闭环已在库并真机验证过：272adcc 一键微调+换模闭环、abbe673 一键环境安装器；G15 试点 19/20 vs 底模 13/20；9f40d4f 补齐自适应轮数（目标 ≈800 步 clamp 10–66）、训练账本（run.json+dataset.jsonl，trained/applied/failed 回写）、续训（账本对账后接 --resume_from，lr 1e-5）、开跑前显存预检、已训标记）
 - [ ] #16 T6 验收与基线：ACCEPTANCE/BENCH/NOTES 回写（blocked by #13、#15）
 ## 候选方案（未排期）
-### ASR 微调的自适应轮数与续训（2026-11-07 想法，未排期）
+### ASR 微调的自适应轮数与续训（✅ 已落地 9f40d4f）
 
+落地形态（9f40d4f）：`deriveFtEpochs`（目标 ≈800 步，clamp 10–66）经 `planAsrFtTrainArgv` 的 tuning 参数生效；续训开关在训练窗口（勾选 → 主进程按 dataset.jsonl 指纹逐条对账后接 `--resume_from`，lr 1e-5，总步数 = 上次 checkpoint 步数 + 200）；显存闸 `ftVramGuard` 开跑前查 nvidia-smi（排除应用自家 GV 子进程，外部占卡点名拒启）。「预计 N 步 / 约 X 分钟」窗口文案未做。
 现状：`planAsrFtTrainArgv` 里的 `--epochs 66` 是给「20 条录音」实测冻下来的（G15 试点参数，勿随手改）。数据一涨代价就线性放大，而且明显过拟合：
 
 ```
@@ -194,8 +195,9 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 - **接 `--resume_from` 续训**（增量）：官方脚本已支持（`data/asr-ft-env/sft/qwen3_asr_sft.py` 的 `parse_args()` 里有 `--resume_from` / `--resume`），应用没接。落地要连带改三件事——设置项「从上一份 checkpoint 续训」、resume 时 lr 降到 1e-5、总步数按新增数据重算（否则等于把老数据再喂一遍）。
 - **训练前显存预检**：GV 服务器空闲占 1.4 G、加载模型后 4.3 G，训练峰值 7.6 G，8 G 卡容不下第二个人。现在靠 `pauseSovitsForTraining` 让调用方让路，但**外部启动的** api_v2 让不了（`kept-off`），只能在开跑前查一次显存并对用户明说「先关外部 TTS 服务」，别让他等 40 分钟才看见 OOM。
 
-### 录音组的「已录 / 已训」状态标记（2026-11-07 想法，未排期）
+### 录音组的「已录 / 已训」状态标记（✅ 已落地 9f40d4f，形态简化）
 
+落地形态（9f40d4f，比原设想简化）：账本 = 每次开跑写 `<runDir>/dataset.jsonl`（逐条 key+bytes+mtimeMs 指纹）+ `run.json`（trained/applied/failed 状态回写）；派生缝 `ftTrainCoverage` + 总览下独立一行「已训标记：Gxx 已训 a/b（重录 n 句未入训）」；组标题挂状态与逐句小点未做。
 用户诉求：录音组里哪些已经录完、哪些已经被训练吃过，要能直接看出来——现在完全看不出来。
 
 现状缺口：

@@ -328,15 +328,22 @@
 
 ### 换模的两个坑
 - sherpa worker 是常驻进程，启动时就把模型文件读进内存——**换文件不杀 worker 等于白换**。`resetSherpaWorker()` 先杀再让下句识别重新拉起。
-- 导出产物不带 `tokenizer/tokenizer_config.json`，但 sherpa 启动必须要它。词表没变（训练只动 encoder/decoder），从旧模型或备份借一份是安全的；`ensureTokenizerConfig()` 已固化这条借用链。
+- 导出产物不带 tokenizer，但 sherpa 启动必须要 `tokenizer_config.json` + `vocab.json` + `merges.txt` 三件。词表没变（训练只动 encoder/decoder），从备份或出厂包借是安全的；`ensureTokenizerFiles()` 已固化这条借用链（曾只兜底 config，结果转正后缺 vocab/merges 静默装不回）。
 
-### 一键环境安装器（M-B）的镜像清单
-- uv 单文件：npmmirror binary（`registry.npmmirror.com/-/binary/uv/`）；python 解释器：npmmirror python-build-standalone。
-- 依赖：PyPI 清华镜像；`torch==2.4.1+cu121` 不在 PyPI 上，`--find-links` 指南京大学 pytorch-wheels 镜像。
-- 底模 `Qwen/Qwen3-ASR-0.6B`：hf-mirror.com，huggingface-hub `snapshot_download` 自带断点续传。
+### 一键环境安装器的镜像清单（2026-11-07 实测换源）
+- uv wheel：阿里云 `mirrors.aliyun.com/pypi/simple/uv/`——npmmirror 的 uv 镜像已下线（404）；wheel 把 uv.exe 埋在 `uv-<版本>.data/scripts/`，解压后要往上层挖出来。
+- PyPI 包与 torch cu121 wheel：阿里云 `mirrors.aliyun.com/pypi`——清华 simple 403、南大 pytorch-wheels 404、pythonhosted 直连超时，四个源全测过才定它。
+- python 解释器：npmmirror python-build-standalone；底模 `Qwen/Qwen3-ASR-0.6B`：hf-mirror.com，huggingface-hub `snapshot_download` 自带断点续传。
 - 全部版本冻结自试点实测组合（`ASR_FT_PIP_SPEC`），别随手升级 torch/transformers——官方脚本对版本敏感。
-- 教训：uv 版本号不能按字符串排序挑「最新」，`0.10.2` 会输给 `0.9.5`——按段转数值比较（探针抓过一次）。
+- 教训一：uv 版本号不能按字符串排序挑「最新」，`0.10.2` 会输给 `0.9.5`——按段转数值比较（探针抓过一次）。教训二：国内镜像会悄悄失效，装失败先 curl 一下索引本身再怀疑代码。
+- 环境布局：`data/asr-ft-env/{venv,sft,export,models}/`；缺 `venv/Scripts/python.exe` 或底模时 `deriveAsrFtEnvGaps` 点名拒启。
 
+### G14 全链实测与四个坑（2026-11-07，RTX 4060 8G）
+- 实测：40 句（38 训 + 2 验）660 步 1:05:18（尾段 3.4 s/it，全程均 5.9 s/步），显存峰值 7661/8188 MiB 只剩 296 MiB——GV 推理必须先让路；train_loss 0.0305。换模（3 次重命名 + tokenizer 借用 + worker 重启）秒级。
+- **中文路径导出炸**：decoder 的 fp32 中间产物 >2 GB 时 torch 走 external-data 分片写入，Windows 上用窄字符路径开文件——run 目录名带中文（曾拿数据集名当目录名「地图」）报 `Could not open file or directory: <dir>/thinker.model.embed_tokens.weight`；encoder 701 MB 走另一条路反而能过，看起来像「随机失败」。修法：run/导出目录名固定 ASCII `ft-<时间戳>`。
+- **备料附件丢失秒退**：`TrainManager.start()` 原来只把 kind/dataset 传给 `deriveTrainPlan`，丢掉备料挂上的 `asrFt`/`gvResolved` 附件 → 必报「环境没就绪」，且发生在写日志之前，现场全丢。修法：整份 request 透传 + `appendTrainLog()` 把训练状态机落盘 `logs/train.log`（4 MB 滚动）。
+- **续训 max_steps 陷阱**：HF Trainer 拿 `--resume_from` 恢复 global_step 后，若本轮 `--epochs` 折算的 max_steps ≤ 已到步数，**整轮跳过不训练直接退场**（一行 `epoch` 都不跑）。续训轮数必须保证总步数 > 上次 checkpoint（应用按「上次步数 + 200」重算）。
+- **账本与续训对账**：每次开跑写 `<runDir>/dataset.jsonl`（逐条 key+bytes+mtimeMs 指纹）+ `run.json`；续训前逐条对账，重录/删除过就静默新开，绝不接错底；「应用新模型」按 exportDir 对上回写 applied——账本只前进不回退，缺文件静默跳过，记账不能反过来挡训练。
 ## GV 微调（GPT-SoVITS v2pro 包）
 
 ### 训练命令真相源（读自上游 webui.py，2026-11-04）
