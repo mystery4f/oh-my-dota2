@@ -208,6 +208,31 @@ const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
   ]
 }
 
+/**
+ * 训练页的假数据：读稿只放 4 组（逐句 3 组 + 自由说 1 组），录音给 G14 三条，够看清
+ * 句号条三态、覆盖率与体检提示，又不至于把预览页撑成一屏滚不到底。
+ */
+const stubScript = {
+  groups: [
+    { id: 'G14', title: '对线', mode: 'lines' as const, note: '', lines: [1, 2, 3, 4, 5, 6].map((no) => ({ no, text: `这是 G14 的第 ${no} 句稿子` })) },
+    { id: 'G15', title: '团战', mode: 'lines' as const, note: '', lines: [1, 2, 3, 4].map((no) => ({ no, text: `这是 G15 的第 ${no} 句稿子` })) },
+    { id: 'G19', title: '报点', mode: 'lines' as const, note: '', lines: [1, 2, 3].map((no) => ({ no, text: `这是 G19 的第 ${no} 句稿子` })) },
+    { id: 'G21', title: '自由说', mode: 'free' as const, note: '想到什么说什么', lines: [] }
+  ],
+  error: null
+}
+const stubRecs = [1, 2, 3].map((no) => ({
+  key: `G14-L${String(no).padStart(2, '0')}`,
+  bytes: 62_000 + no * 4000,
+  durationMs: 1900 + no * 120,
+  mtimeMs: stubNow - no * 86_400_000
+}))
+const stubGvDatasets = [
+  { expName: 'mirana', ready: true, missing: [] },
+  { expName: 'windranger', ready: false, missing: ['语义表 6-name2semantic.tsv'] }
+]
+let stubWebuiRunning = false
+
 /** 面板真正调用的通道，逐个给出类型正确的假答复。 */
 const implemented = {
   getSettings: async () => settings,
@@ -295,6 +320,41 @@ const implemented = {
   trainStart: async () => ({ ok: true, error: null }),
   trainStop: async () => ({ ok: true, error: null }),
   onTrainState: () => () => {},
+  trainGvDatasets: async () => stubGvDatasets,
+  trainGvWebui: async ({ open }) => {
+    stubWebuiRunning = open
+    return { ok: true, running: stubWebuiRunning }
+  },
+  trainGvRegister: async ({ name }) => ({ ok: true, entry: { name } }),
+  ftScriptRead: async () => stubScript,
+  ftRecList: async () => stubRecs,
+  ftRecSave: async (_group, _line, bytes) => ({
+    key: `${_group}-${_line}`,
+    bytes: bytes.length,
+    durationMs: Math.round((bytes.length / 32000) * 1000),
+    mtimeMs: Date.now()
+  }),
+  ftRecDelete: async () => {},
+  ftRecRead: async () => new Uint8Array(0),
+  ftRecAsr: async () => ({ ok: true, text: '预览里没有真识别引擎' }),
+  ftDatasetPrepare: async () => ({
+    ok: true,
+    trainCount: 38,
+    evalCount: 4,
+    trainPath: 'data/asr-ft-runs/stub/dataset/train.jsonl',
+    evalPath: 'data/asr-ft-runs/stub/dataset/eval.jsonl',
+    ledger: [],
+    error: null
+  }),
+  ftAsrftStatus: async () => ({
+    env: { ok: true, gaps: [], envRoot: 'data/asr-ft-env' },
+    swap: { activeExists: true, bakExists: true, nextExists: false, lastExportDir: 'ft-stub' },
+    coverage: { G14: { done: 3, total: 6, stale: 0 }, G15: { done: 1, total: 8, stale: 1 } },
+    install: null
+  }),
+  ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
+  ftAsrftApply: async () => ({ ok: true, error: null, model: 'ft-stub' }),
+  ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),
   sovitsStatus: async () => sovitsStatus,
   sovitsInstall: async () => sovitsStatus,
   sovitsRefs: async () => sovitsRefs,

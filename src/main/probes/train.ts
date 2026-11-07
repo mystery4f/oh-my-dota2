@@ -62,6 +62,7 @@ import {
   parseAsrTrainerState,
   parseGvTrainLog
 } from '@shared/train/run'
+import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
 
 /**
@@ -474,7 +475,7 @@ export function runTrainProbe(): void {
       compacted[0].step === 1 &&
       compacted[compacted.length - 1].step === 1400 &&
       compacted.every((p, i) => i === 0 || p.step > compacted[i - 1].step),
-    `${compacted.length} / ${compacted[400].step}`,
+    `${compacted.length} / ${compacted[Math.floor(compacted.length / 2)].step}`,
   )
   const asrMetrics = parseAsrTrainerState({
     log_history: [
@@ -502,12 +503,41 @@ export function runTrainProbe(): void {
     gvParsed.epochs === 2 && gvParsed.checkpoints.join(',') === 'mirana_e1,mirana_e8' && gvParsed.series.length === 2,
     `${gvParsed.epochs} | ${gvParsed.checkpoints.join(',')}`,
   )
-  const newer = buildTrainRun({ kind: 'gv-sovits', experiment: 'mirana', startedAt: 2_000 })
+  const newer = buildTrainRun({ kind: 'gv-sovits', experiment: 'mirana', startedAt: started.startedAt + 60_000 })
   push(
     'run 排序：新的在前',
-    [started, newer].sort(compareRunsDesc)[0].startedAt === 2_000,
-    String([started, newer].sort(compareRunsDesc)[0].startedAt),
+    [started, newer].sort(compareRunsDesc)[0].id === newer.id,
+    `${started.id} vs ${newer.id}`,
   )
+  // 开训体检：缺环境/没录音必须 block；录音太少只 warn；没有续训点不算问题。
+  const blocked = judgeAsrPreflight({
+    env: { ok: false, gaps: ['torch'] },
+    recordedLines: 0,
+    packed: null,
+    activeModel: false,
+    resumeAvailable: false,
+    vramNote: null
+  })
+  push(
+    '体检：缺环境阻断',
+    preflightBlocks(blocked).map((item) => item.id).join(',') === 'env,rec,model',
+    preflightBlocks(blocked).map((item) => item.id).join(',')
+  )
+  const healthy = judgeAsrPreflight({
+    env: { ok: true, gaps: [] },
+    recordedLines: 4,
+    packed: { train: 3, eval: 1 },
+    activeModel: true,
+    resumeAvailable: false,
+    vramNote: '6GB 显卡建议批大小 1'
+  })
+  push(
+    '体检：数据少只告警',
+    preflightBlocks(healthy).length === 0 && healthy.some((item) => item.id === 'rec' && item.level === 'warn'),
+    healthy.map((item) => `${item.id}:${item.level}`).join(' ')
+  )
+  const gv = judgeGvPreflight({ expName: 'mirana', missing: ['音素表 2-name2text.txt'], gptTrained: false, sovitsTrained: false })
+  push('体检：GV 缺备料阻断', preflightBlocks(gv).map((item) => item.id).join(',') === 'data', gv.map((item) => `${item.id}:${item.level}`).join(' '))
   let failed = 0
   for (const item of cases) {
     if (!item.ok) failed++

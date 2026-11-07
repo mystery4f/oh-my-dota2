@@ -59,7 +59,8 @@ The whole dashboard is `src/renderer/src/panel/`, and it is the only dashboard: 
 - `panel-app.tsx` — the shell: 38 px drag title bar + `Sidebar` + one scrolling `<main>`.
   Navigation is the sidebar alone (no tabs); `?s=<section>` deep-links a section, and
   `OMD2_QUERY=s=talk` injects that query in dev.
-- `sections.ts` — the eight sections and their two sidebar groups. A page that exists in
+- `sections.ts` — the ten sections and their two sidebar groups (系统: 翻译引擎 / 音色训练 /
+  识别训练 / 热键). A page that exists in
   the switch only through `default: { const unhandled: never = active }` means a forgotten
   case is a compile error, not a blank screen.
 - `pages/*.tsx` — one file per section. A page returns `Panel` / `Group` / `Row` only; the
@@ -88,6 +89,27 @@ spent only on three things — selection, primary action, warning — so a page 
 grey is the intended look. `docs/DESIGN-panel-v2.md` is the signed record; the
 deliberate deviations are written down there (no extra token layer — the HSL variables in
 `styles.css` already are one — and `rounded-lg` 8 px instead of the documented 10 px).
+
+## Training (音色训练 / 识别训练)
+
+Two sections, one shape: 数据 → 运行 → 产物. There is no training window and no
+`train:open` channel — the standalone BrowserWindow was deleted in v3.
+
+- `src/shared/train/run.ts` is the run model: `TrainRunRecord` plus the builders
+  (`buildTrainRun`, `finishTrainRun`) and metric parsers (`parseAsrTrainerState`,
+  `parseGvTrainLog`, `compactMetricSeries`). One run = one JSON under
+  `userData/train-runs/`, written atomically by `services/train/run-store.ts`; a run is
+  history, the training process is `TrainTaskInfo` — never conflate them.
+- Metrics are read back from the artifacts (ASR `checkpoint-*/trainer_state.json`,
+  GV `logs/<exp>/train.log`), not duplicated into the record.
+- `src/shared/train/preflight.ts` is the gate: `judgeAsrPreflight` / `judgeGvPreflight`
+  return `PreflightItem[]` where only `block` disables 开始训练; `warn` explains risk.
+  Add a new gate there, never inline in a page.
+- `panel/use-recorder.ts` owns mic capture (getUserMedia → ScriptProcessor → rms →
+  `advanceRecording` → `shouldKeepTake` → `encodeWav16k` → `ftRecSave`). Page-level
+  components stay free of audio plumbing.
+- `npm run build` must stay silent about the training pages: no inline colours, no
+  custom font sizes, at most one primary button per screen.
 
 ## Hotkeys
 
@@ -141,9 +163,13 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `asr-models/` (Qwen3-ASR: the `sherpa-onnx-qwen3-asr-*.tar.bz2` the user drops here, extracted
   by the panel with the system tar.exe into `sherpa-onnx-qwen3-asr-*/`; SenseVoice was removed —
   engine is now whisper or qwen3 only),
-  `asr-ft/` (ASR accent fine-tune recordings from the training window's recording panel:
+  `asr-ft/` (ASR accent fine-tune recordings from 识别训练's recording panel:
   one wav per line, `Gxx/Gxx-Lnn.wav` (or `Gxx-Tnn.wav` for the free-speech group); the
   recording script ships as a bundled resource, `resources/asr-ft-script.md`),
+  `train-runs/` (训练记录: one JSON per training run, atomic temp+rename, capped at
+  `TRAIN_RUN_KEEP` 200 newest — the only history of what was trained, with what data,
+  and where the artifacts went; metrics are read back from the run's own
+  `checkpoint-*/trainer_state.json` or GV `logs/<exp>/train.log`, never stored twice),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB
   (truncated and rewritten past that). Fields worth reading: `act` = `ocr|same|gap|idle|error|busy`,
   `src` = `stream|sources`, `brk`/`rst` = new-match streak and reset, plus `grabMs`/`ocrMs`/`chg`/`fresh`/`streak`. It is the only way to tell

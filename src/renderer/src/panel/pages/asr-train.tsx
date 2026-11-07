@@ -2,11 +2,12 @@ import * as React from 'react'
 import type { FtRecInfo, FtScriptState } from '@shared/ipc'
 import type { AsrFtStatusResult } from '@shared/train/asr-ft'
 import type { TrainSnapshot } from '@shared/train/task'
+import { judgeAsrPreflight, preflightBlocks } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 import { recordingKey, takeLineId } from '@shared/train/recording'
 import { Button } from '@/components/ui/button'
-import { Group, Panel, Row, Section, StatusPill } from '../components/primitives'
-import { RunRow, Sparkline } from '../components/run-view'
+import { Group, Panel, Row, StatusPill } from '../components/primitives'
+import { PreflightList, RunRow, Sparkline } from '../components/run-view'
 import { formatDuration } from '../run-format'
 import { selectClass } from '../components/select-class'
 import { useRecorder } from '../use-recorder'
@@ -29,6 +30,7 @@ export function AsrTrainPage(): React.ReactElement {
   const [busy, setBusy] = React.useState('')
   const [note, setNote] = React.useState('')
   const [asrText, setAsrText] = React.useState('')
+  const [packed, setPacked] = React.useState<{ train: number; eval: number } | null>(null)
 
   const groups = script?.groups ?? []
   const group = groups.find((item) => item.id === groupId) ?? groups[0] ?? null
@@ -86,6 +88,19 @@ export function AsrTrainPage(): React.ReactElement {
   const currentLine = group?.lines.find((line) => line.no === lineNo) ?? null
   const coverage = group && status ? status.coverage[group.id] : undefined
 
+  // 体检是纯函数缝（shared/train/preflight）：页面只负责把事实喂进去，结论与文案都在一起测。
+  const { preflight, blocks } = React.useMemo(() => {
+    const items = judgeAsrPreflight({
+      env: status?.env ?? { ok: false, gaps: ['状态还没读到'] },
+      recordedLines: Object.keys(recs).length,
+      packed,
+      activeModel: Boolean(status?.swap.activeExists),
+      resumeAvailable: runs.some((run) => run.kind === 'asr-ft' && run.status === 'trained'),
+      vramNote: null
+    })
+    return { preflight: items, blocks: preflightBlocks(items) }
+  }, [status, recs, packed, runs])
+
   const runAction = async (label: string, action: () => Promise<string>): Promise<void> => {
     if (busy) return
     setBusy(label)
@@ -101,10 +116,7 @@ export function AsrTrainPage(): React.ReactElement {
   }
 
   return (
-    <Section
-      title="识别训练"
-      hint="录 19 组读稿 → 打包数据集 → 微调 Qwen3-ASR → 换掉生效模型。训练数据与部署时听到的一致，录音路径只有这一条"
-    >
+    <>
       <Panel>
         <Group
           label="数据"
@@ -172,6 +184,7 @@ export function AsrTrainPage(): React.ReactElement {
           >
             <Button
               size="sm"
+              variant="outline"
               disabled={recorder.recording || !group || group.mode !== 'lines'}
               onClick={() => void recorder.begin({ group: group?.id ?? '', mode: group?.mode ?? 'lines', line: lineNo })}
             >
@@ -232,6 +245,7 @@ export function AsrTrainPage(): React.ReactElement {
               onClick={() =>
                 void runAction('打包', async () => {
                   const result = await window.api.ftDatasetPrepare()
+                  if (result.ok) setPacked({ train: result.trainCount, eval: result.evalCount })
                   return result.ok
                     ? `已打包：训练 ${result.trainCount} 条 / 验证 ${result.evalCount} 条`
                     : `打包失败：${result.error ?? '未知错误'}`
@@ -266,19 +280,19 @@ export function AsrTrainPage(): React.ReactElement {
             ) : null}
           </Row>
 
+          <PreflightList items={preflight} />
+
           <Row
             label="开训"
             hint={
-              status
-                ? status.env.ok
-                  ? '环境就绪；轮数按录音量自动算，够 800 步就停'
-                  : `环境缺件：${status.env.gaps.join('、') || '未知'}`
-                : '正在体检…'
+              blocks.length > 0
+                ? `先解决：${blocks.map((item) => item.label).join('、')}`
+                : '轮数按录音量自动算，够 800 步就停'
             }
           >
             <Button
               size="sm"
-              disabled={taskRunning || !status?.env.ok}
+              disabled={taskRunning || blocks.length > 0}
               onClick={() =>
                 void runAction('开训', async () => {
                   const result = await window.api.trainStart({ kind: 'asr-ft', dataset: group?.id ?? 'asr-ft' })
@@ -318,8 +332,7 @@ export function AsrTrainPage(): React.ReactElement {
             </StatusPill>
           </Row>
           <Row label="应用 / 回滚" hint="应用会把当前的模型挪进回滚槽，失败能退回来">
-            <Button
-              size="sm"
+            <Button size="sm" variant="outline"
               disabled={Boolean(busy) || taskRunning}
               onClick={() =>
                 void runAction('应用', async () => {
@@ -359,6 +372,6 @@ export function AsrTrainPage(): React.ReactElement {
           </Row>
         </Group>
       </Panel>
-    </Section>
+    </>
   )
 }

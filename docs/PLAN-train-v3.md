@@ -12,46 +12,46 @@ Autonomous 执行中（老板已睡）。每完成一项就改这里的复选框
 
 ## T1 shared 训练记录模型（#50）
 
-- [ ] `src/shared/train/run.ts`：TrainRunRecord 类型 + buildTrainRun / finishTrainRun / runIdFor / compareRunsDesc
-- [ ] metrics：compactMetricSeries（定长 ≤200）、parseAsrTrainerState（log_history → series）、parseGvTrainLog（epoch 时间线 + checkpoint 列表）
-- [ ] 探针用例加入 `src/main/probes/train.ts`
+- [x] `src/shared/train/run.ts`：TrainRunRecord 类型 + buildTrainRun / finishTrainRun / runIdFor / compareRunsDesc
+- [x] metrics：compactMetricSeries（定长 ≤200）、parseAsrTrainerState（log_history → series）、parseGvTrainLog（epoch 时间线 + checkpoint 列表）
+- [x] 探针用例加入 `src/main/probes/train.ts`
 
 ## T2 main 存储与 IPC（#51）
 
-- [ ] `src/main/services/train/run-store.ts`：一条 run 一文件、原子写、列表/详情、容错解析
-- [ ] `src/shared/ipc.ts` 增 TRAIN_RUNS_LIST / TRAIN_RUN_READ，删 TRAIN_OPEN；`src/main/ipc.ts` handler 与 `trainOpen` 同步删
-- [ ] manager 在开训/结束/失败/停止写记录（数据指纹、产物路径、指标）
-- [ ] 长跑结束发一次系统通知
-- [ ] 预览 stub 补新通道
+- [x] `src/main/services/train/run-store.ts`：一条 run 一文件、原子写、列表/详情、容错解析
+- [x] `src/shared/ipc.ts` 增 TRAIN_RUNS_LIST / TRAIN_RUN_READ，删 TRAIN_OPEN；`src/main/ipc.ts` handler 与 `trainOpen` 同步删
+- [x] manager 在开训/结束/失败/停止写记录（数据指纹、产物路径、指标）
+- [x] 长跑结束发一次系统通知
+- [x] 预览 stub 补新通道
 
 ## T3 renderer 两页骨架（#52）
 
-- [ ] `sections.ts` 加 voice / asr（系统组）
-- [ ] `pages/voice-train.tsx`、`pages/asr-train.tsx`：数据 → 运行 → 产物 三段
-- [ ] `components/run-view.tsx`：RunList / RunDetail / 进度 / 指标折线（currentColor，无内联色值）
-- [ ] demo 从产品 UI 移除（共享类型与探针保留）
+- [x] `sections.ts` 加 voice / asr（系统组）
+- [x] `pages/voice-train.tsx`、`pages/asr-train.tsx`：数据 → 运行 → 产物 三段
+- [x] `components/run-view.tsx`：RunList / RunDetail / 进度 / 指标折线（currentColor，无内联色值）
+- [x] demo 从产品 UI 移除（共享类型与探针保留）
 
 ## T4 录音搬进 React（#53）
 
-- [ ] `use-recorder.ts`：复用 advanceRecording / shouldKeepTake / encodeWav16k，参数与原实现一致
-- [ ] 识别训练页录音段：组列表 + 覆盖率 + 当前句 + 录/停/回放/识别测试 + 重录覆盖提示
-- [ ] 录音跑通后，才删 `windows/train.ts` + `train.html` + `train.ts` + vite 入口 + talk 页入口
+- [x] `use-recorder.ts`：复用 advanceRecording / shouldKeepTake / encodeWav16k，参数与原实现一致
+- [x] 识别训练页录音段：组列表 + 覆盖率 + 当前句 + 录/停/回放/识别测试 + 重录覆盖提示
+- [x] 录音跑通后，才删 `windows/train.ts` + `train.html` + `train.ts` + vite 入口 + talk 页入口
 
 ## T5 体检与 GV 视图（#54）
 
-- [ ] `src/shared/train/preflight.ts`：聚合环境缺口 / 备料 / 录音覆盖 / 显存 / 续训点 → PreflightItem[]（ok/warn/block）
-- [ ] 两页顶部体检清单，缺项带修复动作；只有 block 禁用开训
-- [ ] 音色训练页：实验列表（备料四件套、两腿是否已训）、注册音色包与来源 run、webui 开关
+- [x] `src/shared/train/preflight.ts`：聚合环境缺口 / 备料 / 录音覆盖 / 显存 / 续训点 → PreflightItem[]（ok/warn/block）
+- [x] 两页顶部体检清单，缺项带修复动作；只有 block 禁用开训
+- [x] 音色训练页：实验列表（备料四件套、两腿是否已训）、注册音色包与来源 run、webui 开关
 
 ## T6 验证与文档（#55）
 
-- [ ] `npm run typecheck` node + web 通过
-- [ ] `npm run lint` 只剩 button.tsx:41 告警
-- [ ] `npm run build` 通过
-- [ ] `npx electron out/main/index.js --train-probe` 全 PASS（先 taskkill electron）
-- [ ] 验收脚本：训练页 0 内联色值 / 0 自定义字号；每屏 primary ≤ 1
-- [ ] `npm run panel:preview` 两页截图（`?s=voice`、`?s=asr`）
-- [ ] GLOSSARY 术语变更；新增 ADR；docs/PROBES.md 加行；ACCEPTANCE 五条；本文件勾完
+- [x] `npm run typecheck` node + web 通过
+- [x] `npm run lint` 只剩 button.tsx:41 告警
+- [x] `npm run build` 通过
+- [x] `npx electron out/main/index.js --train-probe` 全 PASS（先 taskkill electron）
+- [x] 验收脚本：训练页 0 内联色值 / 0 自定义字号；每屏 primary ≤ 1
+- [x] `npm run panel:preview` 两页截图（`?s=voice`、`?s=asr`）
+- [x] GLOSSARY 术语变更；新增 ADR；docs/PROBES.md 加行；ACCEPTANCE 五条；本文件勾完
 
 ## 已知风险
 

@@ -1,6 +1,7 @@
 import * as React from 'react'
 import type { TrainRunRecord } from '@shared/train/run'
 import { runStatusLabel } from '@shared/train/run'
+import type { PreflightItem } from '@shared/train/preflight'
 import { Row, StatusPill } from './primitives'
 import { runHint, runTone, runTitle } from '../run-format'
 
@@ -50,5 +51,23 @@ export function Sparkline({ run }: { run: TrainRunRecord }): React.ReactElement 
         最低 {min.toFixed(4)} · 最新 {points[points.length - 1].toFixed(4)} · {points.length} 点
       </p>
     </div>
+  )
+}
+
+/**
+ * 开训体检清单：一行一条，「阻断」红、「注意」黄、「就绪」绿。
+ * 只有阻断会禁用开训按钮——体检不是让用户点确认的弹窗。
+ */
+export function PreflightList({ items }: { items: PreflightItem[] }): React.ReactElement {
+  return (
+    <>
+      {items.map((item) => (
+        <Row key={item.id} label={item.label} hint={item.detail}>
+          <StatusPill tone={item.level === 'block' ? 'bad' : item.level === 'warn' ? 'warn' : 'ready'}>
+            {item.level === 'block' ? '阻断' : item.level === 'warn' ? '注意' : '就绪'}
+          </StatusPill>
+        </Row>
+      ))}
+    </>
   )
 }

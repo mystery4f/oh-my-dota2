@@ -1,5 +1,6 @@
 import * as React from 'react'
 import type { TrainSnapshot } from '@shared/train/task'
+import { judgeGvPreflight } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 import {
   GV_DEFAULTS,
@@ -9,8 +10,8 @@ import {
   type GvVersion
 } from '@shared/train/gv'
 import { Button } from '@/components/ui/button'
-import { Group, Panel, Row, Section, StatusPill } from '../components/primitives'
-import { RunRow, Sparkline } from '../components/run-view'
+import { Group, Panel, Row, StatusPill } from '../components/primitives'
+import { PreflightList, RunRow, Sparkline } from '../components/run-view'
 import { formatDuration } from '../run-format'
 import { selectClass } from '../components/select-class'
 
@@ -60,6 +61,20 @@ export function VoiceTrainPage(): React.ReactElement {
   const taskRunning = task !== null && (task.status === 'running' || task.status === 'preparing' || task.status === 'stopping')
   const gvRuns = runs
 
+  // 体检看的是「当前选中的实验」：换实验就在上面的数据行里选它，别让人猜在看谁。
+  const preflight = React.useMemo(() => {
+    const demo = datasets.find((dataset) => dataset.expName === targetExp)
+    if (!demo) return []
+    return judgeGvPreflight({
+      expName: demo.expName,
+      missing: demo.missing,
+      gptTrained: runs.some((run) => run.kind === 'gv-gpt' && run.experiment === demo.expName && run.status !== 'failed'),
+      sovitsTrained: runs.some(
+        (run) => run.kind === 'gv-sovits' && run.experiment === demo.expName && run.status !== 'failed'
+      )
+    })
+  }, [datasets, runs, targetExp])
+
   const act = async (label: string, action: () => Promise<string>): Promise<void> => {
     if (busy) return
     setBusy(label)
@@ -75,10 +90,7 @@ export function VoiceTrainPage(): React.ReactElement {
   }
 
   return (
-    <Section
-      title="音色训练"
-      hint="GPT 语义腿与 SoVITS 声学腿各自开训；备料（打标注、降噪、切音频）仍走 GPT-SoVITS 的 webui，这里只验收与开训"
-    >
+    <>
       <Panel>
         <Group
           label="数据"
@@ -192,6 +204,7 @@ export function VoiceTrainPage(): React.ReactElement {
 
       <Panel>
         <Group label="运行">
+          <PreflightList items={preflight} />
           <Row
             label={task ? `当前任务 · ${task.kind}` : '当前任务'}
             hint={
@@ -278,6 +291,6 @@ export function VoiceTrainPage(): React.ReactElement {
           </Row>
         </Group>
       </Panel>
-    </Section>
+    </>
   )
 }
