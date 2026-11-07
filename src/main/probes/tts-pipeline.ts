@@ -250,7 +250,7 @@ export async function runTtsPipelineProbe(): Promise<void> {
     push('计划：英文句判 en', resolveSpeechPlan({ ...leg, engine: 'sovits', text: 'gg wp' }).lang === 'en', 'en')
     push(
       '计划：失败原因按引擎分域（断网不报给离线）',
-      speechFailHint('offline').includes('模型') && speechFailHint('edge').includes('断网') && speechFailHint('sovits').includes('api_v2'),
+      speechFailHint('offline').includes('模型') && speechFailHint('edge').includes('断网') && speechFailHint('sovits').includes('GV'),
       speechFailHint('offline')
     )
   }

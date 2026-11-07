@@ -34,6 +34,7 @@ import { startGsi, stopGsi } from './services/gsi'
 import { startUpdateCheck } from './services/updater'
 import { registerIpc } from './ipc'
 import { installProxyAwareFetch } from './services/session/net-fetch'
+import { refreshVoiceOutReadiness } from './services/voice/voice-out-readiness'
 import { runChatBlockProbe } from './probes/chat-block'
 import { runInPlaceProbe, runReplyLatencyProbe } from './probes/latency'
 import { runOverlayGeometryProbe } from './probes/overlay-geometry'
@@ -277,6 +278,14 @@ app.whenReady().then(() => {
         // 计时器不该把主进程拖垮：拿不到状态就当没有提示。
       }
     }, 2000)
+  }
+
+  // #46 声出就绪：外部起的 GV 服务、被外部杀掉的进程只能靠探测发现，
+  // 3 秒一轮足够快；快照相等不广播，空刷不会惊动面板。
+  if (!probeRun) {
+    setInterval(() => {
+      void refreshVoiceOutReadiness()
+    }, 3000)
   }
 
   app.on('activate', () => {

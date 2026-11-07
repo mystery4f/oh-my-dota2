@@ -4,6 +4,7 @@ import { DEFAULT_HOTKEYS } from './hotkeys'
 
 import type { AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
+import type { VoiceOutReadiness } from '@shared/voice-out-readiness'
 import type { FtDatasetPrepareResult } from '@shared/train/dataset'
 import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@shared/train/gv'
 import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
@@ -757,6 +758,11 @@ export const IPC = {
   TTS_SOVITS_SELECT_PACK: 'tts:sovits-select-pack',
   TTS_SOVITS_SELECT_REF: 'tts:sovits-select-ref',
   TTS_SOVITS_SEED: 'tts:sovits-seed',
+  /** #46：幂等的「把服务拉起来」，面板就绪行的一键动作走它。 */
+  TTS_SOVITS_START_SERVER: 'tts:sovits-start-server',
+  /** #46：声出就绪快照（读一次 + 变更推送），判断在 shared 的纯函数里。 */
+  VOICE_OUT_READINESS: 'voice-out:readiness',
+  VOICE_OUT_READINESS_STATE: 'voice-out:readiness-state',
   OVERLAY_GEOMETRY: 'overlay:geometry',
   OVERLAY_GEOMETRY_RESET: 'overlay:geometry-reset',
   OVERLAY_VOICE: 'overlay:voice',
@@ -989,6 +995,10 @@ export const ipcContract = {
   sovitsSelectPack: invoke<[string], SovitsVoicePack[]>(IPC.TTS_SOVITS_SELECT_PACK),
   sovitsSelectRef: invoke<[SovitsRefEntry], boolean>(IPC.TTS_SOVITS_SELECT_REF),
   sovitsSeed: invoke<[], boolean>(IPC.TTS_SOVITS_SEED),
+  // #46 声出就绪：一键把服务拉起 + 读/订阅就绪快照（判断只有一份，在 shared 里）。
+  sovitsStartServer: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_START_SERVER),
+  voiceOutReadiness: invoke<[], VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS),
+  onVoiceOutReadiness: listen<VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS_STATE),
   // 训练管理与 ASR 微调
   trainOpen: send<[]>(IPC.TRAIN_OPEN),
   trainStart: invoke<[TrainStartRequest], TrainStartResult>(IPC.TRAIN_START),

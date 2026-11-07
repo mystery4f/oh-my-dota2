@@ -27,6 +27,7 @@ import {
 } from './services/voice/runtime'
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
+import { onVoiceOutReadiness, refreshVoiceOutReadiness } from './services/voice/voice-out-readiness'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
 import {
   autoVoicePackSetup,
@@ -60,6 +61,15 @@ const broadcast = (channel: string, payload: unknown): void => {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
 }
 
+/** 明确的 GV 动作之后立刻重算就绪：3 秒 tick 只是兜底，点了按钮必须当场翻牌。 */
+function refreshReadinessAfter<T>(job: Promise<T>): Promise<T> {
+  void job.then(
+    () => refreshVoiceOutReadiness(),
+    () => refreshVoiceOutReadiness()
+  )
+  return job
+}
+
 /**
 /** 语音运行时状态快照：handler 表与广播共用同一份拼装，别处不要再各拼一份。 */
 function runtimeStatusSnapshot() {
@@ -74,7 +84,12 @@ function runtimeStatusSnapshot() {
 const handlers: MainHandlers = {
   // 设置 / 提供商 / 翻译
   getSettings: () => loadSettings(),
-  setSettings: (patch) => saveSettings(patch),
+  // 存完设置顺手重算声出就绪：换引擎、换参考音频都得让对讲页那一行立刻翻牌。
+  setSettings: (patch) => {
+    const next = saveSettings(patch)
+    void refreshVoiceOutReadiness()
+    return next
+  },
   getHotkeys: () => hotkeysState(),
   // 存完热键要重发一次浮层状态：浮层和自己那行提示上的键名都来自 status()，
   // 不重发就会出现「键改了、浮层还在教旧键」，直到下一次状态变化。
@@ -173,6 +188,7 @@ const handlers: MainHandlers = {
     const state = await ensureSovitsInstall()
     void ensureSovitsServer()
     if (state.phase === 'ready') void autoVoicePackSetup()
+    void refreshVoiceOutReadiness()
     return sovitsStatusSnapshot()
   },
   // 参考音频库：读数据根下 tts/sovits-refs/refs.json，坏条目与缺失音频已在纯函数里滤掉。
@@ -180,10 +196,10 @@ const handlers: MainHandlers = {
     listSovitsRefs(sovitsRefsRoot(app.getPath('userData')), sovitsWeightsRoot(app.getPath('userData'))),
   // 音色包：目录 + 本地状态一张表；安装 = 下载三件套 → refs.json 落条目 →（没选过音色）自动选中。
   sovitsVoicepacks: () => sovitsVoicePacks(),
-  sovitsVoicepackInstall: (id) => installVoicePack(String(id ?? '')),
-  sovitsVoicepackDelete: (id) => deleteVoicePack(String(id ?? '')),
+  sovitsVoicepackInstall: (id) => refreshReadinessAfter(installVoicePack(String(id ?? ''))),
+  sovitsVoicepackDelete: (id) => refreshReadinessAfter(deleteVoicePack(String(id ?? ''))),
   // 选音频色包（朗读页同样能直接选）：条目与激活都在主进程里定，渲染层不碰 refs.json。
-  sovitsSelectPack: (id) => selectVoicePack(String(id ?? '')),
+  sovitsSelectPack: (id) => refreshReadinessAfter(selectVoicePack(String(id ?? ''))),
   // 选定一条参考：统一走主进程「写设置 → 切权重 → 预热」，且只认库里真实存在的条目。
   sovitsSelectRef: async (entry) => {
     const known = listSovitsRefs(
@@ -194,6 +210,15 @@ const handlers: MainHandlers = {
   },
   // 首启保底：库一条参考都没有时，用 Edge 现场合成一条晓晓参考入库（零分发）。
   sovitsSeed: () => ensureSovitsSeedRef(false),
+  // #46 就绪行：首屏读一次，之后靠广播（判断只有一份，在 shared 纯缝里）。
+  voiceOutReadiness: () => refreshVoiceOutReadiness(),
+  // 幂等启动：服务已在跑就直接返回现状。拉起要 15–40 秒，这里不 await——
+  // 面板先看到「正在启动」，就绪由广播翻牌，不会卡住一次点击。
+  sovitsStartServer: async () => {
+    void ensureSovitsServer()
+    void refreshVoiceOutReadiness()
+    return sovitsStatusSnapshot()
+  },
   // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
   trainOpen: () => getTrainWindow().open(),
   trainStart: async (request) => {
@@ -257,4 +282,6 @@ export function registerIpc(): void {
   getTrainManager().onState((snapshot) => broadcast(IPC.TRAIN_STATE, snapshot))
   // 语音运行时安装进度：主进程推、面板翻状态牌（面板不装事件重复订阅的轮询）。
   onVoiceRuntimeProgress(() => broadcast(IPC.VOICE_RUNTIME_STATE, runtimeStatusSnapshot()))
+  // #46：就绪快照变了才广播（纯缝已去过重），面板订阅即翻牌，不再自己开定时器。
+  onVoiceOutReadiness((snapshot) => broadcast(IPC.VOICE_OUT_READINESS_STATE, snapshot))
 }
