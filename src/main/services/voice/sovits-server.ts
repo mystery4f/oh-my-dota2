@@ -239,7 +239,23 @@ export async function activateSovitsRef(
   return true
 }
 
+/**
+ * 训练占用显存期间不许把 GV 拉回来：manager 在任务开跑时翻 true、退干净时翻 false。
+ * 这里不 import manager——manager 已经依赖本模块，反向引用会成环，所以用注册式开关。
+ */
+let inferenceHeld = false
+
+export function setInferenceHold(hold: boolean): void {
+  inferenceHeld = hold
+}
+
 export async function ensureSovitsServer(): Promise<boolean> {
+  // 训练跑着的时候「朗读」直接让路：不拉起进程，也不复用外部端口，让面板说清为什么没声。
+  if (inferenceHeld) {
+    setPhase('off', '训练占用显卡，朗读暂停')
+    recordSovitsLog('TTS_SOVITS_SERVER_HELD', { reason: 'training' })
+    return false
+  }
   const settings = loadSettings()
   const port = serverPort(settings.ttsSovitsUrl || 'http://127.0.0.1:9880')
   if (await portOpen(port)) {

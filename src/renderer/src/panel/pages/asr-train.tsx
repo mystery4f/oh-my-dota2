@@ -134,8 +134,8 @@ export function AsrTrainPage(): React.ReactElement {
           </Row>
 
           {group && group.mode === 'lines' ? (
-            <Row label="句子" hint={currentLine ? currentLine.text : '这一组没有稿子'}>
-              <div className="flex flex-wrap justify-end gap-1">
+            <Row label="句子" stacked hint={currentLine ? currentLine.text : '这一组没有稿子'}>
+              <div className="flex flex-wrap items-center gap-1">
                 {group.lines.map((line) => {
                   const has = recs[recordingKey(group.id, group.mode, line.no)]
                   return (
@@ -242,6 +242,17 @@ export function AsrTrainPage(): React.ReactElement {
         <Group label="运行">
           <TrainTaskRow task={task} running={taskRunning} />
 
+
+          <Row
+            label="训练目标"
+            hint={
+              status
+                ? `${status.target.trainer === 'funasr-paraformer' ? 'FunASR 全参数微调' : 'Qwen3 SFT'} · 底模 ${status.target.baseModel || '未定'} · 产物落到 ${status.target.modelDir}`
+                : '正在读状态…'
+            }
+          >
+            <span className="text-sm">{status?.target.label ?? '…'}</span>
+          </Row>
           <PreflightList items={preflight} />
 
           <Row

@@ -49,6 +49,40 @@ export function deriveFtEpochsFor(trainer: AsrFtTrainer, trainCount: number): nu
   return Math.min(40, Math.max(4, Math.round(FT_FUNASR_TARGET_STEPS / trainCount)))
 }
 
+/** 增量起点：上一个 run 留下的 pytorch 权重（导出产物只有 int8 onnx，接不上）。优先平均权重。 */
+export function incrementalWeightFile(names: readonly string[]): string | null {
+  return ['model.pt.avg1', 'model.pt.best', 'model.pt'].find((name) => names.includes(name)) ?? null
+}
+
+/** 增量微调的目标步数：只纠当前这批错，步数比从底模训少一半多。 */
+export const FT_INCREMENTAL_TARGET_STEPS = 300
+
+/** 增量轮数：目标 ≈300 步，clamp 2–12；数据为 0 回 4（防御，实际到不了）。 */
+export function deriveFtIncrementalEpochs(trainCount: number): number {
+  if (trainCount <= 0) return 4
+  return Math.min(12, Math.max(2, Math.round(FT_INCREMENTAL_TARGET_STEPS / trainCount)))
+}
+
+/** 开训口径：两条腿的轮数与学习率**只能**从这里出，别在调用点各拼一套。 */
+export type AsrFtMode = 'fresh' | 'incremental'
+
+export function planFtTuning(input: {
+  mode: AsrFtMode
+  trainer: AsrFtTrainer
+  trainCount: number
+  lastStep?: number
+  resumeFrom?: string | null
+  initFrom?: string | null
+}): AsrFtTrainTuning {
+  const { mode, trainer, trainCount } = input
+  if (mode !== 'incremental') return { epochs: deriveFtEpochsFor(trainer, trainCount), lr: ftDefaultLr(trainer) }
+  if (trainer === 'funasr-paraformer') {
+    // funasr 的续训只认自己 output_dir 里的 checkpoint，所以增量的接法是 init_param 指旧权重。
+    return { epochs: deriveFtIncrementalEpochs(trainCount), lr: '1e-5', initFrom: input.initFrom ?? undefined }
+  }
+  return { epochs: deriveFtResumeEpochs(trainCount, input.lastStep ?? 0), lr: '1e-5', resumeFrom: input.resumeFrom ?? undefined }
+}
+
 /** 默认学习率：qwen3 微调实测用 2e-5；funasr 官方 finetune.sh 给 2e-4。 */
 export function ftDefaultLr(trainer: AsrFtTrainer): string {
   return trainer === 'funasr-paraformer' ? '0.0002' : '2e-5'
@@ -77,6 +111,8 @@ export interface AsrFtTrainTuning {
   lr?: string
   /** 续训的 checkpoint 目录绝对路径；给了就拼 --resume_from，导出挑的就是它的下一个编号。 */
   resumeFrom?: string
+  /** funasr 的增量起点：上一个 run 留下的 pytorch 权重文件（导出产物是 int8 onnx，接不了）。 */
+  initFrom?: string
 }
 /** 训练参数：试点（G15，20 句）实测收敛的 v5 版本为默认，轮数/lr/续训点可按 tuning 覆盖。 */
 export function planAsrFtTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tuning?: AsrFtTrainTuning): string[] {
@@ -110,6 +146,7 @@ function planFunasrTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tuning?:
   return [
     '-m', 'funasr.bin.train',
     `++model=${paths.baseModelId}`,
+    ...(tuning?.initFrom ? [`++init_param=${tuning.initFrom}`] : []),
     `++train_data_set_list=${data.trainJsonl}`,
     `++valid_data_set_list=${data.evalJsonl}`,
     '++dataset=AudioDataset',
@@ -221,6 +258,11 @@ export function ftArtifactTargets(engineId: AsrEngineId = 'qwen3'): string[] {
   return (ASR_ENGINES[engineId].finetune?.artifacts ?? []).map((item) => item.to)
 }
 
+/** 换模槽位里缺哪几件：按表里声明的落位文件名查（qwen3 三个 onnx，paraformer 的 int8 + tokens）。 */
+export function missingFtSlotFiles(names: readonly string[], engineId: AsrEngineId = 'qwen3'): string[] {
+  return ftArtifactTargets(engineId).filter((name) => !names.includes(name))
+}
+
 /** sherpa 真正加载的几件文件：导出目录里除此之外还躺着 3–5 GB 的 fp32 外置数据。 */
 export const FT_MODEL_FILES: readonly string[] = ftArtifactTargets('qwen3')
 
@@ -243,6 +285,8 @@ export function asrFtRollbackSteps(state: { bakExists: boolean }): AsrFtSwapOp[]
 /** 窗口要的微调环境 + 换模状态（检测服务填，这里只定形状）。 */
 export interface AsrFtStatusResult {
   env: { ok: boolean; gaps: string[]; envRoot: string }
+  /** 这次训练落在哪个引擎上：面板必须能说清「训的是谁」，不然用户只能猜。 */
+  target: { engineId: string; label: string; trainer: AsrFtTrainer; modelDir: string; baseModel: string }
   swap: { activeExists: boolean; bakExists: boolean; nextExists: boolean; lastExportDir: string | null }
   /** 已训标记：最近一次微调的账本 vs 当前录音，按组算 done/total/stale（key = 组 id）。 */
   coverage: Record<string, FtCoverageGroup>

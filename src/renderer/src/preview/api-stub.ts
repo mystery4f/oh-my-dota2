@@ -214,7 +214,7 @@ const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
  */
 const stubScript = {
   groups: [
-    { id: 'G14', title: '对线', mode: 'lines' as const, note: '', lines: [1, 2, 3, 4, 5, 6].map((no) => ({ no, text: `这是 G14 的第 ${no} 句稿子` })) },
+    { id: 'G14', title: '对线', mode: 'lines' as const, note: '', lines: Array.from({ length: 20 }, (_, index) => ({ no: index + 1, text: `这是 G14 的第 ${index + 1} 句稿子，长度按真实稿子来，用来检查换行与按钮排布` })) },
     { id: 'G15', title: '团战', mode: 'lines' as const, note: '', lines: [1, 2, 3, 4].map((no) => ({ no, text: `这是 G15 的第 ${no} 句稿子` })) },
     { id: 'G19', title: '报点', mode: 'lines' as const, note: '', lines: [1, 2, 3].map((no) => ({ no, text: `这是 G19 的第 ${no} 句稿子` })) },
     { id: 'G21', title: '自由说', mode: 'free' as const, note: '想到什么说什么', lines: [] }
@@ -357,6 +357,7 @@ const implemented = {
   }),
   ftAsrftStatus: async () => ({
     env: { ok: true, gaps: [], envRoot: 'data/asr-ft-env' },
+    target: { engineId: 'paraformer', label: 'Paraformer（阿里 FunASR）', trainer: 'funasr-paraformer', modelDir: 'data/asr-models/paraformer-zh', baseModel: 'iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch' },
     swap: { activeExists: true, bakExists: true, nextExists: false, lastExportDir: 'ft-stub' },
     coverage: { G14: { done: 3, total: 6, stale: 0 }, G15: { done: 1, total: 8, stale: 1 } },
     install: null

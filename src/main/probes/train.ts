@@ -37,6 +37,7 @@ import {
   ftVramNote,
   judgeFtDataset,
   missingFtExportFiles,
+  missingFtSlotFiles,
   ftAppliedNote,
   parseNvidiaComputeApps,
   pickLastCheckpointName,
@@ -223,6 +224,15 @@ export function runTrainProbe(): void {
       JSON.stringify(missingFtExportFiles(['conv_frontend.onnx', 'encoder.onnx', 'encoder.onnx.data'])) === '["encoder.int8.onnx","decoder.int8.onnx"]' &&
       missingFtExportFiles([]).length === 3,
     JSON.stringify(missingFtExportFiles(['conv_frontend.onnx', 'encoder.onnx', 'encoder.onnx.data']))
+  )
+  // 回归：换模槽位判据按引擎表的落位文件名查。写死 qwen3 的文件名会让 paraformer 一直「缺模型」。
+  push(
+    '槽位判据跟引擎表走：paraformer 认 model.int8 + tokens，qwen3 认三件 onnx',
+    missingFtSlotFiles(['model.int8.onnx', 'tokens.txt'], 'paraformer').length === 0 &&
+      JSON.stringify(missingFtSlotFiles(['model.int8.onnx'], 'paraformer')) === '["tokens.txt"]' &&
+      missingFtSlotFiles(['conv_frontend.onnx', 'encoder.int8.onnx', 'decoder.int8.onnx'], 'qwen3').length === 0 &&
+      JSON.stringify(missingFtSlotFiles([], 'paraformer')) === '["model.int8.onnx","tokens.txt"]',
+    JSON.stringify(missingFtSlotFiles([], 'paraformer'))
   )
   push(
     '换模文案点名是哪次导出：带 run id / 不带 / 失败透传',

@@ -26,7 +26,9 @@ import {
   ftDefaultLr,
   ftLedgerMatchedOnDisk,
   ftTrainCoverage,
-  parseNvidiaComputeApps
+  parseNvidiaComputeApps,
+  ftArtifactTargets,
+  missingFtSlotFiles,
 } from '@shared/train/asr-ft'
 import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
 import { loadSettings } from '../settings'
@@ -36,7 +38,7 @@ import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList } from './ft-record'
 import { sovitsChildPid } from '../voice/sovits-server'
-import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
+import { ASR_ENGINE_LIST, type AsrEngineId, type AsrEngineSpec } from '@shared/asr/engines'
 
 /**
  * ASR 微调闭环（T5）的环境与换模：
@@ -168,11 +170,21 @@ function safeReaddir(dir: string): string[] {
   }
 }
 
-/** 导出产物目录：asr-ft-onnx/ 下最新一个带 decoder.int8.onnx 的（就是链式导出写出来的那个）。 */
-function lastExportDir(): string | null {
+/**
+ * 一个换模槽位算不算「备齐」：按现役引擎的产物清单逐件查。
+ * 写死 decoder.int8.onnx 是 qwen3 的旧习惯——paraformer 的产物叫 model.int8.onnx + tokens.txt，
+ * 用旧判据会让面板一直显示「缺模型」。
+ */
+function slotReady(dir: string, engineId: AsrEngineId): boolean {
+  const files = ftArtifactTargets(engineId)
+  return files.length > 0 && missingFtSlotFiles(safeReaddir(dir), engineId).length === 0
+}
+
+/** 导出产物目录：asr-ft-onnx/ 下最新一个产物齐全的（就是链式导出写出来的那个）。 */
+function lastExportDir(engineId: AsrEngineId): string | null {
   const root = join(app.getPath('userData'), 'asr-ft-onnx')
   const entries = safeReaddir(root)
-    .filter((name) => existsSync(join(root, name, 'decoder.int8.onnx')))
+    .filter((name) => slotReady(join(root, name), engineId))
     .sort()
   return entries.length > 0 ? join(root, entries[entries.length - 1]) : null
 }
@@ -180,11 +192,12 @@ function lastExportDir(): string | null {
 
 /** 换模四态的同步视图：asrFtStatus（含已训标记，异步）和 applyAsrFtModel（同步）共用。 */
 function swapView(): AsrFtStatusResult['swap'] {
+  const engineId = finetuneEngine().id
   return {
-    activeExists: existsSync(join(activeDir(), 'decoder.int8.onnx')),
-    bakExists: existsSync(join(backupDir(), 'decoder.int8.onnx')),
-    nextExists: existsSync(join(stagingDir(), 'decoder.int8.onnx')),
-    lastExportDir: lastExportDir()
+    activeExists: slotReady(activeDir(), engineId),
+    bakExists: slotReady(backupDir(), engineId),
+    nextExists: slotReady(stagingDir(), engineId),
+    lastExportDir: lastExportDir(engineId)
   }
 }
 /** python 包体检：只查 finetune.pythonExtra 点名的包，结果按解释器路径缓存（换环境后重启生效）。 */
@@ -214,8 +227,16 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
   const env = detectAsrFtEnv()
   const missing = missingPythonPackages(env.paths.pythonExe ?? '', finetuneSpec().pythonExtra)
   const gaps = missing.length > 0 ? [...env.gaps, `python 包缺 ${missing.join('、')}（在 ${env.envRoot} 里 pip install）`] : env.gaps
+  const engine = finetuneEngine()
   return {
     env: { ok: gaps.length === 0, gaps, envRoot: env.envRoot },
+    target: {
+      engineId: engine.id,
+      label: engine.label,
+      trainer: env.paths.trainer ?? 'qwen3-sft',
+      modelDir: join(app.getPath('userData'), engine.canonicalRel),
+      baseModel: env.paths.baseModelId || env.paths.baseModelDir || ''
+    },
     swap: swapView(),
     coverage: ftTrainCoverage(latestFtLedger(), await ftRecList())
   }
@@ -401,7 +422,7 @@ function ftVramGuard(): string | null {
 }
 
 export function rollbackAsrFtModel(): AsrFtSwapResult {
-  const steps = asrFtRollbackSteps({ bakExists: existsSync(join(backupDir(), 'decoder.int8.onnx')) })
+  const steps = asrFtRollbackSteps({ bakExists: slotReady(backupDir(), finetuneEngine().id) })
   if (steps.length === 0) {
     return { ok: false, error: '没有备份可回滚：应用过一次新模型之后才有' }
   }

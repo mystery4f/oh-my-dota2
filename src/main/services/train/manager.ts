@@ -19,7 +19,7 @@ import {
   type TrainTaskStatus
 } from '@shared/train/task'
 import { parseTrainProgress } from '@shared/train/progress'
-import { ensureSovitsServer, pauseSovitsForTraining } from '../voice/sovits-server'
+import { ensureSovitsServer, pauseSovitsForTraining, setInferenceHold } from '../voice/sovits-server'
 import { markRunStatus } from './asr-ft'
 import {
   buildTrainRun,
@@ -204,6 +204,8 @@ class TrainManager {
       this.record(inferenceHoldLabel(outcome === 'paused' ? 'held' : 'kept-off'))
       this.emit(true)
     }
+    // 训练占显存期间，朗读热键与试听都不许把 GV 拉回来——那等于把刚下的暂停命令撤销。
+    setInferenceHold(true)
 
     this.request = request
     this.chain = chain ?? null
@@ -334,6 +336,7 @@ class TrainManager {
     this.child = null
     this.emit(true)
     // 任务退干净就该恢复推理（T2 接线）；没停过（kept-off）不演恢复。
+    setInferenceHold(false)
     if (shouldResumeInference(this.status())) void this.resumeInference()
   }
 
