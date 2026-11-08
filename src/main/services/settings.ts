@@ -91,15 +91,13 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     // 声出引擎：只认三引擎层的合法值，乱填打回 edge（英文占位）；声出音色不在这里钳，
     // resolveVoiceOutSynth 决策时对不上清单自会打回默认（和 ttsVoice 同一策略）。
     merged.ttsOutEngine = normalizeVoiceOutEngine(merged.ttsOutEngine)
-    // 识别引擎：只认 qwen3；whisper / sensevoice 都是已退役值，读入时统一迁成 qwen3
-    // （#45：whisper.cpp 的下载/探测链路已删，引擎不再分流）。乱填打回默认。
-    const rawEngine = merged.asrEngine as string
-    if (rawEngine !== 'qwen3') {
-      merged.asrEngine = DEFAULT_SETTINGS.asrEngine
+    // 退役字段 asrEngine（#67）：引擎由 asrActiveModel 指向的模型所属引擎决定，这个字段已无读者。
+    // 老 settings.json 里还躺着它（whisper / qwen3 / sensevoice）：读入时直接删掉，不迁移也不写回，
+    // 否则下一次落盘会把死字段再写回去，用户以为改了引擎其实没人读。
+    delete (merged as AppSettings & { asrEngine?: unknown }).asrEngine
     // 现役识别模型 id：只认字符串，空 = 按可用性自动选（注册表回落）。
     // 不在读入时校验 id 是否还存在——模型目录是运行时可变的，校验放 asr-model 的钉选入口。
     if (typeof merged.asrActiveModel !== 'string') merged.asrActiveModel = ''
-    }
     // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
     if (typeof merged.asrHotwords !== 'string') merged.asrHotwords = DEFAULT_SETTINGS.asrHotwords
     // 纠错样本回喂：只认布尔；缺省/乱填都按默认开（关掉是显式动作，缺省不该悄悄少存数据）。

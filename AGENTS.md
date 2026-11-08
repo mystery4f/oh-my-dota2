@@ -83,7 +83,7 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
 - `overlayCollapse` (default `Alt+Shift+B`) collapse / expand the overlay to its 132x34 icon
 - `inplaceSend` (default `Alt+Shift+T`) the only text out: reads the game chat draft (Chinese typed, not yet sent), translates, pastes back and presses Enter
 - `overlayPanel` (default `Alt+Shift+H`) summon panel: the overlay temporarily becomes an interactive sheet (history 200 rows / quick phrases / AI suggestions, click a row to copy); pressing again or Esc closes it and restores click-through
-- `voiceCapture` (default `Alt+Shift+V`) toggle record: speak Chinese → whisper.cpp transcribes → translate → the reply
+- `voiceCapture` (default `Alt+Shift+V`) toggle record: speak Chinese → the active recognition model (`asrActiveModel`: Qwen3 or Paraformer) transcribes → translate → the reply
   is spoken through voice-out (the panel 「说一句试试」 button runs the same chain; keyboard auto-repeat is debounced
   500ms in `toggleVoiceCapture`)
 

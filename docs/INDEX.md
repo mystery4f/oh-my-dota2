@@ -1,6 +1,6 @@
 ---
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 tags: [docs, index]
 ---
 
@@ -19,7 +19,7 @@ tags: [docs, index]
 | 某个数字（延迟、耗时、内存）从哪来 | `docs/BENCH.md`；探针清单 `docs/PROBES.md` |
 | 出过的坑：症状 → 原因 → 修法 | `docs/NOTES.md`（中文长文） |
 | 写代码前该守什么规矩 | `docs/STANDARDS.md`（反重复标准，含三个可照抄的范例） |
-| 术语、缩写、英雄中文名 | `docs/GLOSSARY.md` |
+| 术语、缩写、英雄中文名 | 根 `GLOSSARY.md`（项目领域词：识别、训练、热词、转正…）；`docs/GLOSSARY.md` 只剩 GV/TTS 那套词表 |
 | 离线朗读模型从哪下、怎么加载 | `docs/VOICES.md` |
 | 音色包（GV 微调产物）怎么训练、怎么发布 | `docs/VOICEPACKS.md` |
 | Dota2 语音怎么变成训练集 | `docs/DESIGN-voice-corpus.md` |
@@ -32,6 +32,7 @@ tags: [docs, index]
 | `docs/PLAN.md` | 计划真相源，里程碑带勾选与证据 | 现行 |
 | `docs/PLAN-train-v3.md` | 训练管理 v3 执行计划 | 现行 |
 | `docs/TODO.md` | 跨会话交接的待办 | 现行 |
+| `GLOSSARY.md`（根） | 项目领域术语表：识别引擎 / 模型 / 微调腿 / 转正 / 热词 / 推理互斥… | 现行 |
 | `docs/IDEAS.md` | 功能想法池（未排期） | 现行 |
 | `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 那一轮的待验收项 | 历史快照 |
 | `docs/HANDOFF-2026-11-02.md` | 语音管线会话交接 | 历史快照 |
@@ -47,7 +48,7 @@ tags: [docs, index]
 | `docs/DESIGN-asr-engine-table.md` | ASR 引擎表：换模型 / 接新引擎不再破坏性，四层结构、迁移规则、探针断言与 paraformer 第二行（含 FunASR 微调腿） | 已落地（识别 + 微调双引擎） |
 | `docs/STANDARDS.md` | 反重复标准、表与分支的取舍、纯接缝契约 | 现行 |
 | `docs/ARCH-notes.md` | 面板文件清单、训练产物与解析、发布流程、Windows 进程检查的坑（从 AGENTS.md 移出） | 现行 |
-| `docs/GLOSSARY.md` | 术语表 | 现行 |
+| `docs/GLOSSARY.md` | GV / 朗读词表（项目领域词见根 `GLOSSARY.md`） | 现行 |
 
 ## 音频与训练
 
@@ -73,11 +74,12 @@ tags: [docs, index]
 
 ## 决定记录（ADR）
 
-一个决定一个文件；新决定先看有没有可复用的旧 ADR，改主意就在旧文件末尾追加「更正」，不要新开一份平行记录。
+一个决定一个文件；小修先在旧文件末尾追加「更正」。只有整条决定被推翻、继续按旧文件写会误导时，才新开一份并在标题下写明「取代：<旧文件>」，同时回旧文件顶部标注「已被 <新文件> 取代」——两条互相指认，索引里两份都留着。
 
 | 文件 | 决定 |
 | --- | --- |
-| `docs/adr/asr-hotwords-not-finetune.md` | 识别个性化走热词注入；两次更正（Qwen3 可微调、后续切 FunASR paraformer） |
+| `docs/adr/asr-finetune-leg.md` | 识别微调成为正式训练腿（两引擎、增量、底模保留、转正/回滚）；热词只给支持提示的引擎。取代 `asr-hotwords-not-finetune.md` |
+| `docs/adr/asr-hotwords-not-finetune.md` | 识别个性化走热词注入；两次更正（Qwen3 可微调、后续切 FunASR paraformer）。**已被 `asr-finetune-leg.md` 取代**，留作决策历史 |
 | `docs/adr/overlay-reply-and-send-channels-removed.md` | 移除浮层回复框与两条非原地文出通道 |
 | `docs/adr/provider-keys-per-provider.md` | 翻译供应商按家记忆密钥 |
 | `docs/adr/train-manager-orchestrator.md` | 训练管理页采用编排器定位 |

@@ -51,16 +51,56 @@ _Avoid_: 翻译区（只是收起小图标上的文案）、HUD、悬浮窗
 _Avoid_: 回复框（已移除的旧形态）、快捷面板
 
 **识别引擎（ASR engine）**：
-本地转写用的引擎，本项目只保留 whisper ggml-small 与 Qwen3-ASR 两个；SenseVoice 已废弃移除。
-_Avoid_: 识别模型（与文件层的模型文件混淆）
+本地转写用的引擎种类，来自 `src/shared/asr/engines.ts` 的引擎表：现在两行——`qwen3`（Qwen3-ASR，自带标点、支持热词）与 `paraformer`（FunASR Paraformer，不出标点、忽略热词）；whisper 与 SenseVoice 都已移除。引擎决定 worker 适配器（`ASR_KINDS`）、模型目录形状、下载来源和微调腿，调用点不再按引擎写分支。
+_Avoid_: 识别模型（那是磁盘上的一套权重文件，见下）、ASR 类型
+
+**引擎表（engine table）**：
+`ASR_ENGINES` 那张表，一个引擎一行：sherpa 适配器键、模型目录模式、必需文件、下载来源、能否吃热词/出标点、微调腿、每步训练耗时与采样率。加一个引擎 = 加一行 + worker 里一个适配器，绝不在调用点加 if。
+_Avoid_: 引擎列表、配置
+
+**识别模型（model）**：
+磁盘上的一套识别权重（`asr-models/` 或 `voice-runtime/models/` 下的一个目录），id 形如 `<engine>:<rel>`，来源分 download / manual / fine-tuned / backup。同一引擎可以有多套：现役、回滚槽里的、微调刚导出的。
+_Avoid_: 引擎（引擎是代码侧的种类，见上）
+
+**现役模型（active model）**：
+`asrActiveModel` 钉住、运行时真正加载的那套识别模型；空值 = 注册表按可用性自动挑一套。引擎跟着它走——#67 起不再有独立的引擎设置，换模型就是换引擎。
+_Avoid_: 当前引擎、默认模型
+
+**底模（base model）**：
+微调的起点：从上游下载的原始权重（Qwen3-ASR 0.6B / Paraformer-zh），导出建图时也要用它。识别训练页的「从底模重训」= 不接续任何旧权重、按默认轮数与学习率重跑一遍，产物与底模同形状，转正后直接顶替。
+_Avoid_: 预训练模型、原始模型
+
+**微调腿（fine-tune leg）**：
+一个引擎对应的一整套训练 / 导出流水（trainer、脚本、导出工具、数据格式、每步耗时）：现在两腿——qwen3（`qwen3_asr_sft.py` + ONNX 导出）与 paraformer（`funasr.bin.train` + `asr-ft-export-funasr.py`）。目标行、环境预检、估时都按腿算。
+_Avoid_: 训练腿（口语，正式用微调腿）、训练后端、框架
+
+**增量微调（incremental fine-tune）**：
+接着上一轮的 PyTorch 权重继续训练（funasr `++init_param`、qwen3 `--resume_from`），轮数（2–12）与学习率（1e-5）按「补一点」算；上一轮的录音指纹必须与当前录音逐条一致，否则拒绝并提示重训。导出的 int8 ONNX 不能续训，接续点永远是导出前的权重文件。
+_Avoid_: 继续训练（口语）、续训（正式用全称）
+
+**转正（promote）**：
+把一轮训练的产物换到现役位置的动作：导出到 `<engine>.next` → 现役进回滚槽 → 换上新模型。识别训练页的「应用」就是它，只有转正后才影响识别。
+_Avoid_: 应用（面板按钮文案，正式用转正）、部署
+
+**回滚槽（rollback slot）**：
+转正时被换下来的那套现役模型的存放处（同目录 `.bak`）。它是唯一的一键回滚来源：回滚 = 把槽里的换回去，下一次转正会先清掉旧槽。
+_Avoid_: 备份（口语）、上一版
+
+**待训（pending takes）**：
+已录、但还没被任何一轮训练用过的录音段与纠错样本。训练页按它算「新数据多少条」和覆盖比例；它只是报告，不会自动开训。
+_Avoid_: 新数据（口语）
+
+**纠错样本（correction sample）**：
+语音页里被改对的转写对应的原始录音 + 改后的文本，落成自由说录音段 `G01-Tnn` 进训练数据（`asrCorrectionsToDataset` 默认开）。它补的是识别真错的分布，不是手抄数据；要下一轮训练才生效。
+_Avoid_: 训练样本（泛指所有录音）
 
 **热词（hotwords）**：
-喂给 Qwen3 做词汇偏置的词表，改词表即时生效，专治术语选错；只在 Qwen3 引擎生效。
+喂给「支持提示的引擎」做词汇偏置的词表——现在只有 Qwen3，Paraformer 会忽略它；改词表即时生效，专治术语选错。它改的是当下的推理提示，不碰模型权重。
 _Avoid_: 提示词、prompt、词典
 
 **纠错回路（correction loop）**：
-在识别记录里把错的转写改成对的，差异片段自动并入热词表的闭环。
-_Avoid_: 训练、学习（它不更新模型权重）
+在识别记录里把错的转写改成对的：≥2 字的差异片段并入热词表，同时（`asrCorrectionsToDataset` 打开时）把这段录音留成纠错样本。热词那条不更新权重，纠错样本要下一轮训练才生效。
+_Avoid_: 训练、学习（热词那条不更新模型权重）
 
 **训练任务（training job）**：
 一次可启动、停止、看进度的微调训练进程抽象；同一时间只允许一个在跑。
@@ -76,7 +116,7 @@ _Avoid_: 数据集（它同时指 GV 侧）
 _Avoid_: 训练任务（它指正在跑的进程）、历史
 
 **部署口（deploy target）**：
-训练产物接入运行时的落点：ASR=识别引擎模型目录，GV=音色包。
+训练产物接入运行时的落点：ASR=引擎的现役模型目录（转正换进去，旧的在回滚槽），GV=音色包。
 _Avoid_: 安装（安装专指音色包下载动作）
 
 **训练页（training section）**：
@@ -84,8 +124,8 @@ _Avoid_: 安装（安装专指音色包下载动作）
 _Avoid_: 训练窗口（旧版独立窗口，已退休）
 
 **推理互斥（inference hold）**：
-训练任务占卡期间应用托管（app-managed）的 GV 推理服务自动暂停、任务退场自动恢复的互斥机制；端口上的外部服务不受影响。状态叫推理互斥状态（inference hold state）。
-
+训练任务占卡期间应用托管（app-managed）的 GV 推理服务自动暂停、任务退场自动恢复的互斥机制；端口上的外部服务不受影响。状态叫推理互斥状态（inference hold state），由 `training-inference-hold` 的标志位对外播报。
+_Avoid_: 显存管理、推理抢占（inference preemption）
 
 **实验（experiment）**：
 GPT-SoVITS 引擎包 `logs/` 下一次备料实验的目录名；音色训练页的实验行列的就是它。
@@ -110,10 +150,6 @@ _Avoid_: 录音文件
 **编排器（orchestrator）**：
 app 在训练产线里的角色——下命令、收日志、管产物；训练本身仍跑在各自的 python 栈里。
 _Avoid_: 内置训练
-
-**推理互斥（inference preemption）**：
-训练运行时自动暂停 GV 推理服务、训练结束自动恢复，防止 8G 显存打架。
-_Avoid_: 显存管理
 
 **供应商（provider）**：
 一个可切换的翻译接入，面板一次只有一家「当前生效」；内置六家 id（deepseek/openai/ollama/mimo/zhipu/custom），换供应商不丢各自的 key 与推理开关。

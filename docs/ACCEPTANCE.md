@@ -54,14 +54,13 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 
 ## M6 语音链路
 
-- [ ] 面板「对讲」页「whisper.cpp」行点下载资源 → 进度条显示下载阶段与百分比 → 完成后显示 whisper 二进制与模型两个路径（`%APPDATA%/…/whisper/bin/Release/whisper-cli.exe`、`whisper/models/ggml-base.bin`）
+- [ ] 面板「对讲」页「识别模型」行点「下载模型」→ 状态胶囊显示「下载中 N%」/「校验中…」→ 完成后「已就绪 N MB」；底模从 hf-mirror 按文件下载（断点续传 + 校验），微调转正的模型优先生效（whisper.cpp 的下载行已随引擎退役）
 - [ ] Windows 设置里允许桌面应用使用麦克风（首次会弹权限）
 - [ ] 游戏内按「语音对讲」热键（默认 `Alt+Shift+V`）→ overlay 顶部胶囊显示「● 录音中」；说一句中文，再按一次结束
 - [ ] overlay 出现 `🎤 原文` 与绿色英文译文行，剪贴板拿到译文（切回游戏 `Ctrl+V` 可发送）
 - [ ] 说话超 20 秒自动停止并进入识别；录音过短（<0.3 秒）提示「录音太短，已忽略」
-- [ ] 不说话直接按第二次 → 提示「没有检测到语音（音量 RMS …）」，不会出现幻觉文本（whisper 的 `[BLANK_AUDIO]` 标记已过滤）
+- [ ] 不说话直接按第二次 → 提示「没有检测到语音（音量 RMS …）」，空识别结果直接提示「未识别到语音」，不会写出幻觉句子
 - [ ] 面板「朗读」页「试听」→ 播放中文合成语音（24kHz mp3，走代理访问 Edge 语音服务）
-- [ ] 「探测 whisper.cpp」分支正确：路径不存在提示「binary not found」，清空后自动使用已下载的二进制
 - [ ] GPT-SoVITS 设置段出现「从参考音频库选择…」下拉框：候选来自数据根 `tts/sovits-refs/refs.json`，选中后路径/转写/语言三个框自动带出，下一句朗读立即用新参考（无需重启）
 - [ ] 参考音频库健壮性：删掉库里某个音频后下拉不再出现该条；`refs.json` 写坏（缺逗号/非数组）时下拉消失、应用不崩，控制台有 `[sovits-refs]` 日志
 ## M7 聊天翻译与回复体验
@@ -188,10 +187,11 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 - [ ] 全程只按这两下：停止录音后自动 识别 → 翻译 → 声出，没有确认步骤；译文同时进了剪贴板（`Ctrl+V` 可把同一句打进聊天框，文出备用）
 - [ ] 长句分段：说一句长中文（英文译文超 30 字符，上限在设置「分句长度」10–60）→ 队友听到连续的英文：段间不断频（说话键整句按住）、顺序不乱、第一段先出声
 - [ ] 合成失败静默：断网（或断代理）再说一句 → 浮层红字「✕ Edge 合成失败（断网或接口不可用），这句不出声」；没声音、说话键不动，**绝不会**冒出系统合成音（TTS 铁律）
-- [ ] 识别引擎切 Qwen3：面板「识别引擎」选 Qwen3 → 未就绪时按面板链接下载 tar.bz2（~838MB），放进数据目录 `data\asr-models\` 点「解压 Qwen3 模型」（或手动解开整个目录丢进去）→ 状态变「✓ 模型已就绪（约 936 MB）」→ 「说一句试试」带口音说一句：识别带完整标点，方言/噪音下更全；解码约 1 秒级，比 whisper 慢属正常
-- [ ] 热词手编：Qwen3 引擎下面板出现「热词」输入框（whisper 不显示）→ 填 `肉山,买活,风暴之灵`（失焦即存，重启还在）→ 说一句带这些词的话 → 错词随词表变对
-- [ ] 纠错回路：识别记录里某条原文有错词 → 点「纠错」→ 输入框预填原文，改成对的（至少补/改一个 ≥2 字的词）→ 点「存」→ 该条标记 ✏️，差异词自动出现在热词输入框里；下次再说同类话术，选词更贴
-- [ ] SenseVoice 已移除：识别引擎下拉只有 whisper 和 Qwen3；老存档里存的 sensevoice 自动迁移成 Qwen3
+- [ ] 选现役识别模型：面板「识别模型」下拉列出扫到的模型（id 形如 `qwen3:` / `paraformer:`，旁边一行能力：热词 / 标点 / 可微调）→ 选一个未就绪的 Qwen3 → 按面板链接下载 tar.bz2（~838MB），放进数据目录 `data\asr-models\` 点「解压 Qwen3 模型」（或手动解开整个目录丢进去）→ 状态变「✓ 模型已就绪（约 936 MB）」→ 「说一句试试」带口音说一句：识别带完整标点，方言/噪音下更全；解码约 1 秒级
+- [ ] 热词只给能提示的引擎：现役是 Qwen3 时面板出现「热词」输入框（现役是 Paraformer 时不显示，填了也不生效）→ 填 `肉山,买活,风暴之灵`（失焦即存，重启还在）→ 说一句带这些词的话 → 错词随词表变对
+- [ ] 纠错回路：识别记录里某条原文有错词 → 点「纠错」→ 输入框预填原文，改成对的（至少补/改一个 ≥2 字的词）→ 点「存」→ 该条标记 ✏️，差异词自动出现在热词输入框里；`asrCorrectionsToDataset` 开着时，这条录音还会被记成一条纠错样本（`G01-Tnn`），下次训练能吃到
+- [ ] 引擎只剩两条：下拉里只有 Qwen3 与 Paraformer（whisper 与 SenseVoice 均已移除）；老 `settings.json` 里残留的 `asrEngine` 不影响当前选中的模型——读入即丢弃，保存一次后文件里不再有这个键
+- [ ] Paraformer 无标点属预期：切到 Paraformer 说一句 → 识别结果连读、没有标点（引擎表里 `punctuation: false`）；要句读得等 `#30` 的标点外挂
 - [ ] 识别失败静默：不说话直接按第二次「语音对讲」热键 → 提示「🎤 没有检测到语音（音量 RMS …）」，不进翻译、不声出
 - [ ] 翻译失败静默：provider 不可用时 → 该行红色「✕ 翻译失败」（悬停见具体原因），不出声、也不退文出
 
@@ -257,7 +257,7 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 
 ## 已知限制（不算失败项）
 
-- 录音单次上限 20 秒；识别引擎只剩 Qwen3（whisper 与 SenseVoice 均已移除，2026-11-07 起旧 asrEngine 值读入即迁 qwen3；模型在面板一键下载，解码 1 秒级）
+- 录音单次上限 20 秒；识别只剩两个引擎——Qwen3 与 Paraformer（whisper 与 SenseVoice 均已移除）；现役由 `asrActiveModel` 决定，`asrEngine` 字段已在 #67 退役（老值读入即丢弃）；模型在面板一键下载，解码 1 秒级；Paraformer 输出无标点
 - 声出经虚拟声卡进游戏语音时，真麦克风同时进不了游戏语音（Dota 输入设备指向 CABLE Output 的必然结果）；VoiceMeeter 真麦混音留作后续可选升级
 - 离线引擎与 GV 中文音色包都是中文嗓，念英文会吞字（2026-10-31 跨语种实测整词吞字）；正式英文声出用 Edge 英文神经嗓占位，GV 英文包就绪后在面板切换
 - Windows OCR 引擎依赖系统语言包（默认请用 PaddleOCR，无需语言包）
@@ -278,7 +278,7 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 | overlay 没内容 | Capture 页是否 Start、区域是否框到聊天记录、`截图诊断` 是否识别出文本 |
 | 翻译为空 | Overview 的 provider Test 是否 OK；代理是否配置；日志里是否 `completion budget exhausted` |
 | 捕获 entries 一直 0 | 区域坐标是否随分辨率/窗口位置变化；`显示框选位置` 对齐检查 |
-| 语音无结果 | Download whisper assets 是否完成；麦克风隐私权限；overlay 底部胶囊是否进入录音态 |
+| 语音无结果 | 「对讲」页「识别模型」是否已就绪、现役是否指向它（`asrActiveModel`）；麦克风隐私权限；overlay 底部胶囊是否进入录音态 |
 | TTS 失败 | 代理是否可用（直连 Edge 语音在国内会 10 秒超时） |
 | 点「检查更新」一直说已是最新 | 该 Release 是否带 `latest.yml`；Nightly 是预发布，正式客户端本来就不该看到 |
 | 译文把英文原样吐回 | 回声守卫已自动重置会话；仍复现就删除 `%APPDATA%/…/sessions/translator.sqlite*` 后重启 |

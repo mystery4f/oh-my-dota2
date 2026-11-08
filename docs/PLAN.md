@@ -175,10 +175,24 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 - [x] #14 T4 ASR 数据准备与录音组状态：组总览/回放在库，差准备报告与组完成总览（blocked by #11；开工以第一轮手动微调跑通为排期条件）（本提交；组完成总览 = `buildFtGroupProgress` 纯缝 + 窗口常驻总览条「已录 X 段 · Ys · 逐句组完成 a/b ｜ Gxx 缺 Lnn」；句数/总时长/失败清单齐；`--train-probe` 63/63；真实录音→打包演示验收留给 T6 清单）
 - [x] #15 T5 ASR 训练与部署：官方 SFT + ONNX 导出 + 部署口 + A/B 试音（blocked by #12、#14；asr-ft 安装/切换/回滚缝已在库）（闭环已在库并真机验证过：272adcc 一键微调+换模闭环、abbe673 一键环境安装器；G15 试点 19/20 vs 底模 13/20；9f40d4f 补齐自适应轮数（目标 ≈800 步 clamp 10–66）、训练账本（run.json+dataset.jsonl，trained/applied/failed 回写）、续训（账本对账后接 --resume_from，lr 1e-5）、开跑前显存预检、已训标记）
 - [ ] #16 T6 验收与基线：ACCEPTANCE/BENCH/NOTES 回写（blocked by #13、#15）
+
+## ASR 个性化 v3（2026-11-09 落地）
+
+spec #58（GitHub issue）：把「识别个性化」从热词一条路扩成两条训练腿，并把训练记录与数据集账本收进一个库。八张票全部合并（`fda114a` → `7711a20`，文档与字段退役为 `#67`）：
+
+- #59 训练记录 + 数据集账本进 SQLite（`<userData>/train/runs.db`；老的 `train-runs/` 与 `asr-ft/runs` 首开导入一次，重跑幂等）
+- #60 录音推进到下一句未录；#61 `<userData>/asr-ft-script.md` 覆盖内置脚本（坏文件回落并给面板警告）
+- #62 推理互斥探针；#63 增量微调（接上一轮权重，账本指纹逐条对账）；#64 待训统计；#65 开训前估时；#66 纠错样本回喂
+- #67 文档与字段：根 `GLOSSARY.md` 补识别/训练词汇并合并重复的「推理互斥」；新 ADR `docs/adr/asr-finetune-leg.md` 取代「只走热词、不做微调」；`settings.asrEngine` 退役（判据见下）
+
+训练管理的最终形态（`#29` 收口）：面板两页——音色训练 / 识别训练，**没有独立训练窗口**（ADR `train-run-model-and-panel-pages.md`）。
+
+边界（不在本轮，已立号在 `docs/TODO.md`）：`#30` Paraformer 标点模型、`#31` 攒够待训后自动开训、`#32` 盲测协议与真 holdout。新增引擎、多任务队列、把 settings/会话/音色包迁进 SQLite 是明确不做，理由写在 `docs/adr/asr-finetune-leg.md`「仍然不做」。
+
 ## 候选方案（未排期）
 ### ASR 微调的自适应轮数与续训（✅ 已落地 9f40d4f）
 
-落地形态（9f40d4f）：`deriveFtEpochs`（目标 ≈800 步，clamp 10–66）经 `planAsrFtTrainArgv` 的 tuning 参数生效；续训开关在训练窗口（勾选 → 主进程按 dataset.jsonl 指纹逐条对账后接 `--resume_from`，lr 1e-5，总步数 = 上次 checkpoint 步数 + 200）；显存闸 `ftVramGuard` 开跑前查 nvidia-smi（排除应用自家 GV 子进程，外部占卡点名拒启）。「预计 N 步 / 约 X 分钟」窗口文案未做。
+落地形态（9f40d4f）：`deriveFtEpochs`（目标 ≈800 步，clamp 10–66）经 `planAsrFtTrainArgv` 的 tuning 参数生效；续训开关（勾选 → 主进程按数据集账本指纹逐条对账后接 `--resume_from`，lr 1e-5）；显存闸 `ftVramGuard` 开跑前查 nvidia-smi（排除应用自家 GV 子进程，外部占卡点名拒启）。后续演进：#63 把续训做成「接着上次权重」的正式一档（起点是上一轮 run 的 PyTorch 权重、轮数 2–12），#65 补上「预计 N 步 / 约 X 分钟」，#67 起训练记录与账本都在 `train/runs.db`；仍有「训练窗口」字样的段落是当时的形态，窗口已退休。
 现状：`planAsrFtTrainArgv` 里的 `--epochs 66` 是给「20 条录音」实测冻下来的（G15 试点参数，勿随手改）。数据一涨代价就线性放大，而且明显过拟合：
 
 ```
@@ -357,3 +371,5 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 - 2026-11-01: v1.1.0 正式版发布（tag `v1.1.0`，commit `c8b7f49`，GitHub Release 含安装器与便携包）。v2 立项「语音对讲（声出）」：spec #3 + 4 张票（#4/#5/#7/#8）已发布，设计与测试缝见上文 v2 节；GLOSSARY.md 落术语口径。
 - 2026-11：v2 声出四票全部落地（4864040 → 760427d → 716e199，集成修复 975829e，验收落档本提交）。测试按钮最小闭环 + `Alt+Shift+V` 一键到底（停止录音即 识别→翻译→声出，译文同时进剪贴板作文出备用）+ 声出引擎三选一（Edge 英文占位 / 离线 / GV 走音色包权重切换）；输出设备路由按 deviceId→label→回退默认并提示，说话键自动按住（头尾各 200ms，松键保险 ≥5 s）。失败语义全线「静默跳过 + 浮层提示」，绝不退文出、绝不换系统嗓。纯决策 60 项进 `--voice-out-probe`；并行票合并曾把 t-04 时代常量带进 t-05 代码（TS2552），教训「合并后 HEAD 必须重跑门禁」入 NOTES。物理层（VB-Cable、游戏内真听到、真麦不可用取舍）进 ACCEPTANCE M14 人工清单，端到端延迟公式与分段口径进 BENCH，待真机回填。
 - 2026-11-07: 浮层 v2 重做（设计记录 `docs/DESIGN-overlay-v2.md`，ADR `docs/adr/overlay-reply-and-send-channels-removed.md`）。① 渲染层推倒重写为 React（`src/renderer/src/overlay/`：app/chat-rows/summon-panel/mini-icon/toolbar/speech/voice-capture/drag/stage/hero），干净字幕风——行自成胶囊、无外框卡片、译文 13px 为主原文 12px 为辅、英雄色条、12 秒渐隐、解锁态虚线轮廓；旧 667 行 vanilla `overlay.ts` 删除。② 删浮层回复框（textarea/草稿落盘/sendReply IPC/已发送绿行）与两个备用发送通道（`chat-send`、`console-send` 及 `settings.sendMode`/`consoleKey`）——文字出口唯一保留原地直发 `Alt+Shift+T`；`--input-probe` 删除，`normalizeChatLine` 案例并入 `--inplace-guard-probe`。③ 新增「呼出面板」（`Alt+Shift+H`）：浮层临时变可交互 sheet（历史 200 条点行复制 / 快捷短语方向键+Enter / AI 建议回复），关闭恢复穿透；账本 200 条挂在 `ChatCaptureService.history()`；`settings.quickPhrases` 进默认设置。④ overlay-state 缝 `set-reply`/`replyOpen` 改名 `set-panel`/`panelOpen`，`shouldIgnoreMouse(locked, panelOpen)`；新纯缝 `src/shared/overlay-ledger.ts`（上限/渐隐/未读/heroHue/pickPhrase）。⑤ 探针全绿：geometry 35 项、settings-persist 44 项（数组字段哨兵改 JSON 比较）、inplace-guard 17、hotkeys 36；CDP 实跑 overlayStatus/togglePanel/copyText/快捷短语面板全通。
+
+- 2026-11-09: ASR 个性化 v3 落地（spec #58，八票 `fda114a` → `7711a20`）：训练记录 + 数据集账本进 SQLite（`train/runs.db`）、增量微调（上一轮权重，账本指纹逐条对账）、待训统计、开训估时、纠错样本回喂、录音脚本可由 `<userData>/asr-ft-script.md` 覆盖、推理互斥探针。文档侧新 ADR `docs/adr/asr-finetune-leg.md` 取代 `asr-hotwords-not-finetune.md`（微调是正式训练腿，热词只给支持提示的引擎）；根 `GLOSSARY.md` 补齐识别/训练词汇并删掉重复的「推理互斥」；`settings.asrEngine` 退役——从 `AppSettings` / `DEFAULT_SETTINGS` 删除，读入时丢弃老值，`--settings-persist-probe` 两条反向断言钉住「读入即丢弃 / 保存不写回」。引擎表仍是两行：`qwen3` / `paraformer`；Paraformer 输出无标点（`#30` 待做）。
