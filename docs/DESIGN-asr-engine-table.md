@@ -223,10 +223,11 @@ flowchart TD
 - `asrEngine` 兼容字段保留多久？提案：保留读、写入只写 `asrActiveModel`，下一个版本删掉，删时同步 `settings-persist` 探针。
 - 标点外挂（`OfflinePunctuation`）排不排进这一步？提案：不排，等 paraformer 真的被选成主引擎再做。
 - paraformer 微调要不要进这次范围？提案：这次只做「结构 + 能识别」，微调的 argv 规划进第四步但先不跑训练。
-- **两种训练形态还没分家（2026-11-09 记，用户提出）**：现在面板只有一条「开始训练」路径 = 从底模重训（`funasr-paraformer` 每条 run 都 `++model=<底模 hub id>` 起步，qwen3 走 `--model_path <底模目录>`）。但真实需求有两件事：
-  - **从原始底模重训**：现状已支持，适合一次性把某一批素材训进权重（G14 那种），产物覆盖 `asr-models/<engine>`。
-  - **在当前模型上增量微调**（「只补一句话」）：现在的续训开关只接「同一个 run 目录的 checkpoint」（`trainerCanResume`），拿不到「以现役模型为起点、喂 1–3 条新录音、学一个小步」这条路。要做就得：把现役模型目录当 `++init_param` / `--model_path`（而不是 hub 底模），lr 更低（1e-5 量级）、步数更少，并且**先复制一份现役模型到 `asr-models/<engine>.next` 再训**，否则一次小改就把能用的模型写坏了。
-  - 面板必须把这两种说清楚（现在的「训练目标」行只说引擎和落点，不说「从底模 / 从现役」）；数据侧也要区分「增量只打包新增句子」和「重训打包全部」。
+- **两种训练形态（#63 已落地）**：面板「开训方式」两档，默认「从底模重训」，另一档「接着上次权重」。
+  - **从底模重训**：今天的路径，一步没改（`funasr-paraformer` 走 `++model=<底模 hub id>`，qwen3 走 `--model_path <底模目录>`，轮数/lr/argv 逐字不变）。
+  - **接着上次权重（增量）**：起点是**上一轮 run 目录里的 pytorch 权重**（`model.pt.avg1` > `model.pt.best` > `model.pt`；qwen3 是最后一次 `checkpoint-<步数>`）——不是现役 `asr-models/<engine>`，因为现役是导出后的 int8 onnx，torch 接不上。决定后先把权重抄进 `asr-models/<engine>.next`（`stageIncrementalSource`），argv 只认这份副本：funasr `++init_param=<副本>`、qwen3 `--resume_from <副本>`，lr 1e-5，目标 ≈300 步（clamp 2–12 轮）。训练只写自己的 run 目录，失败也碰不到现役权重。
+  - **拒启动而非 fallback**：没有上一轮 / 账本对不上（重录过、删过）/ 权重文件被删，三种情况都拒启动并把原因写进面板，绝不悄悄改跑一小时的重训。
+  - **验证集是标尺**：增量沿用上一轮那份 eval 划分（`splitIncrementalEval`），新录的句子只进 train——否则 loss 没法跟前一轮横着比。
 - **自定义录制（2026-11-09 记，用户提出）**：现在数据只能来自面板里那几组固定稿子（`asr-ft/Gxx/Gxx-Lnn.wav` + `resources/asr-ft-script.md` 的句子），用户想用自己的素材。三种来源都要接：
   - **自带 wav + 文本**：导入时校验 16k 单声道 PCM（`readWav16k` 那条口径），不符合的重采样或拒收并点名；文本缺了就不能进训练集（只能当识别测试）。
   - **自由说无稿**：`mode: 'free'` 组已经存在（G21 一类），但账本里它是「有什么说什么」；要给这类录一条「事后补文本」的口子，否则永远训不了。

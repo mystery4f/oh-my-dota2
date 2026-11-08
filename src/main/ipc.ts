@@ -60,6 +60,7 @@ import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-inst
 import { closeGvWebui, openGvWebui, registerGvWeights, resolveGvTrainRequest, scanGvDatasets } from './services/train/gv'
 import { discoverSovitsHome } from './services/voice/sovits-server'
 import { normalizeTrainKind } from '@shared/train/task'
+import { normalizeAsrFtMode } from '@shared/train/asr-ft'
 import { gsiStatus } from './services/gsi'
 
 
@@ -241,7 +242,8 @@ const handlers: MainHandlers = {
     }
     if (kind !== 'asr-ft') return getTrainManager().start(request)
     // asr-ft：先把环境/数据/目录备齐，再带着「训练完接导出」的链子交给 manager。
-    const resolved = await resolveAsrFtTrainRequest(Boolean(request.resume))
+    // 开训方式（从底模重训 / 接着上次权重）原样落到 run 记录；增量接不上就拒启动，不静默落回重训。
+    const resolved = await resolveAsrFtTrainRequest(normalizeAsrFtMode(request.mode))
     if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
     const exportRequest = resolved.request
     return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest), resolved.warning)

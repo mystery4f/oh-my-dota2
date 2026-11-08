@@ -17,6 +17,7 @@ import {
   buildFtDatasetEntries,
   buildFtGroupProgress,
   buildFtJsonlLine,
+  splitIncrementalEval,
   splitTrainEval,
   type FtDatasetGroupView
 } from '@shared/train/dataset'
@@ -35,6 +36,7 @@ import {
   asrFtSwapSteps,
   deriveAsrFtEnvGaps,
   deriveFtEpochs,
+  deriveFtIncrementalEpochs,
   deriveFtResumeEpochs,
   ftLedgerMatchedOnDisk,
   ftTrainCoverage,
@@ -44,10 +46,13 @@ import {
   missingFtExportFiles,
   missingFtSlotFiles,
   ftAppliedNote,
+  incrementalWeightFile,
   parseNvidiaComputeApps,
   pickLastCheckpointName,
   planAsrFtExportArgv,
   planAsrFtTrainArgv,
+  planFtTuning,
+  normalizeAsrFtMode,
   type AsrFtPaths,
   type FtLedgerEntry
 } from '@shared/train/asr-ft'
@@ -72,6 +77,7 @@ import {
 } from '@shared/train/run'
 import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
+import { findIncrementalSource, stageIncrementalSource } from '../services/train/asr-ft'
 import {
   closeTrainStore,
   packedLedgerForRun,
@@ -240,6 +246,89 @@ export async function runTrainProbe(): Promise<void> {
     tuned.join(' ')
   )
   push('默认 argv 不带 --resume_from（新开跑）', !ftPlan.args.includes('--resume_from'), ftPlan.args.join(' '))
+  // —— 开训方式（T63）：从底模重训 / 接着上次权重 ——
+  push(
+    '开训方式归一：只认 incremental，其余（undefined / 乱值 / fresh）全部落回 fresh',
+    normalizeAsrFtMode('incremental') === 'incremental' &&
+      normalizeAsrFtMode('fresh') === 'fresh' &&
+      normalizeAsrFtMode(undefined) === 'fresh' &&
+      normalizeAsrFtMode('bogus') === 'fresh',
+    ['incremental', 'fresh', String(normalizeAsrFtMode(undefined)), String(normalizeAsrFtMode(42))].join('/')
+  )
+  const funasrPaths: AsrFtPaths = { ...ftPaths, trainer: 'funasr-paraformer' }
+  const incFunasr = planFtTuning({ mode: 'incremental', trainer: 'funasr-paraformer', trainCount: 40, initFrom: 'S/asr-models/paraformer-zh.next/model.pt.avg1' })
+  const incQwen = planFtTuning({ mode: 'incremental', trainer: 'qwen3-sft', trainCount: 20, lastStep: 660, resumeFrom: 'S/asr-models/qwen3-asr.next/checkpoint-660' })
+  const funasrArgv = planAsrFtTrainArgv(funasrPaths, ftData, incFunasr)
+  const qwenArgv = planAsrFtTrainArgv(ftPaths, ftData, incQwen)
+  const funasrInit = '++init_param=S/asr-models/paraformer-zh.next/model.pt.avg1'
+  push(
+    '增量 argv：funasr 拼 ++init_param=<副本权重>（紧跟 ++model）、qwen3 拼 --resume_from <副本 checkpoint>',
+    funasrArgv.includes(funasrInit) &&
+      funasrArgv.indexOf(funasrInit) === funasrArgv.findIndex((arg) => arg.startsWith('++model=')) + 1 &&
+      flagValue(qwenArgv, '--resume_from') === 'S/asr-models/qwen3-asr.next/checkpoint-660' &&
+      !qwenArgv.includes('++init_param') &&
+      !funasrArgv.includes('--resume_from'),
+    `${funasrInit} | ${flagValue(qwenArgv, '--resume_from')}`
+  )
+  push(
+    '增量超参：funasr 轮数走 deriveFtIncrementalEpochs、lr 1e-5；qwen3 从 checkpoint 步数续算、lr 1e-5',
+    incFunasr.epochs === deriveFtIncrementalEpochs(40) &&
+      incFunasr.epochs === 8 &&
+      incFunasr.lr === '1e-5' &&
+      incFunasr.initFrom !== null &&
+      incFunasr.resumeFrom === undefined &&
+      incQwen.epochs === deriveFtResumeEpochs(20, 660) &&
+      incQwen.lr === '1e-5' &&
+      incQwen.resumeFrom !== null,
+    `funasr:${incFunasr.epochs}轮/${incFunasr.lr} qwen:${incQwen.epochs}轮/${incQwen.lr}`
+  )
+  const freshQwen = planFtTuning({ mode: 'fresh', trainer: 'qwen3-sft', trainCount: 20, resumeFrom: '不应生效', initFrom: '不应生效' })
+  const freshFunasr = planFtTuning({ mode: 'fresh', trainer: 'funasr-paraformer', trainCount: 20, resumeFrom: '不应生效', initFrom: '不应生效' })
+  push(
+    '重训与今天逐字相同：tuning 不接续点、argv 无 --resume_from / ++init_param、轮数与 lr 走默认',
+    freshQwen.resumeFrom === undefined &&
+      freshQwen.initFrom === undefined &&
+      freshFunasr.resumeFrom === undefined &&
+      freshFunasr.initFrom === undefined &&
+      freshQwen.epochs === deriveFtEpochs(20) &&
+      freshFunasr.lr === '0.0002' &&
+      !planAsrFtTrainArgv(ftPaths, ftData, freshQwen).includes('--resume_from') &&
+      !planAsrFtTrainArgv(funasrPaths, ftData, freshFunasr).includes('++init_param') &&
+      !planAsrFtTrainArgv(ftPaths, ftData, {}).includes('--resume_from'),
+    `qwen:${freshQwen.epochs}轮/${freshQwen.lr} funasr:${freshFunasr.epochs}轮/${freshFunasr.lr}`
+  )
+  push(
+    '增量找权重：avg1 > best > model.pt；都没有就是 null（上层据此拒启动）',
+    incrementalWeightFile(['model.pt.best', 'model.pt.avg1']) === 'model.pt.avg1' &&
+      incrementalWeightFile(['model.pt', 'model.pt.best']) === 'model.pt.best' &&
+      incrementalWeightFile(['model.pt']) === 'model.pt' &&
+      incrementalWeightFile(['model.int8.onnx', 'tokens.txt']) === null,
+    incrementalWeightFile(['model.int8.onnx', 'tokens.txt']) === null ? 'null' : 'wrong'
+  )
+  // 验证集作为标尺不能动：上一轮是 eval 的仍是 eval（同一个分数可以横着比），新录的句子只进训练集。
+  const incSplit = splitIncrementalEval(
+    [
+      { key: 'G14-L01', wavPath: 'X:/1.wav', text: '一' },
+      { key: 'G14-L02', wavPath: 'X:/2.wav', text: '二' },
+      { key: 'G14-L05', wavPath: 'X:/5.wav', text: '五' }
+    ],
+    ['G14-L01']
+  )
+  const incSplitFresh = splitIncrementalEval(
+    [
+      { key: 'G14-L01', wavPath: 'X:/1.wav', text: '一' },
+      { key: 'G14-L02', wavPath: 'X:/2.wav', text: '二' }
+    ],
+    []
+  )
+  push(
+    '增量验证集沿用上一轮：旧 eval 留在 eval、新录的只进 train；没有上一轮 eval 就全进 train',
+    incSplit.eval.map((entry) => entry.key).join(',') === 'G14-L01' &&
+      incSplit.train.map((entry) => entry.key).join(',') === 'G14-L02,G14-L05' &&
+      incSplitFresh.eval.length === 0 &&
+      incSplitFresh.train.length === 2,
+    `${incSplit.train.length}/${incSplit.eval.length} | ${incSplitFresh.train.length}/${incSplitFresh.eval.length}`
+  )
   const fp = (key: string, bytes: number, mtime: number): FtLedgerEntry => ({ key, wavPath: `X:/${key}.wav`, bytes, mtimeMs: mtime, text: '', split: 'train' })
   const coverage = ftTrainCoverage([fp('G14-L01', 100, 1), fp('G14-L02', 200, 2)], [
     { key: 'G14-L01', bytes: 100, mtimeMs: 1 },
@@ -668,13 +757,14 @@ export async function runTrainProbe(): Promise<void> {
     [started, newer].sort(compareRunsDesc)[0].id === newer.id,
     `${started.id} vs ${newer.id}`,
   )
-  // 开训体检：缺环境/没录音必须 block；录音太少只 warn；没有续训点不算问题。
+  // 开训体检：缺环境/没录音必须 block；录音太少只 warn；增量接不上也必须 block（绝不静默重训）。
   const blocked = judgeAsrPreflight({
     env: { ok: false, gaps: ['torch'] },
     recordedLines: 0,
     packed: null,
     activeModel: false,
-    resumeAvailable: false,
+    mode: 'fresh',
+    incrementalAvailable: false,
     vramNote: null
   })
   push(
@@ -687,13 +777,50 @@ export async function runTrainProbe(): Promise<void> {
     recordedLines: 4,
     packed: { train: 3, eval: 1 },
     activeModel: true,
-    resumeAvailable: false,
+    mode: 'fresh',
+    incrementalAvailable: false,
     vramNote: '6GB 显卡建议批大小 1'
   })
   push(
     '体检：数据少只告警',
     preflightBlocks(healthy).length === 0 && healthy.some((item) => item.id === 'rec' && item.level === 'warn'),
     healthy.map((item) => `${item.id}:${item.level}`).join(' ')
+  )
+  const incReady = judgeAsrPreflight({
+    env: { ok: true, gaps: [] },
+    recordedLines: 4,
+    packed: { train: 3, eval: 1 },
+    activeModel: true,
+    mode: 'incremental',
+    incrementalAvailable: true,
+    vramNote: null
+  })
+  const incMissing = judgeAsrPreflight({
+    env: { ok: true, gaps: [] },
+    recordedLines: 4,
+    packed: { train: 3, eval: 1 },
+    activeModel: true,
+    mode: 'incremental',
+    incrementalAvailable: false,
+    vramNote: null
+  })
+  const freshAvailable = judgeAsrPreflight({
+    env: { ok: true, gaps: [] },
+    recordedLines: 4,
+    packed: { train: 3, eval: 1 },
+    activeModel: true,
+    mode: 'fresh',
+    incrementalAvailable: true,
+    vramNote: null
+  })
+  push(
+    '体检：增量可接=ok、接不上=block（点名没有可接的上一轮权重）；选了重训但有上一轮只提示可走增量',
+    preflightBlocks(incReady).length === 0 &&
+      preflightBlocks(incMissing).map((item) => item.id).join(',') === 'incremental' &&
+      (incMissing.find((item) => item.id === 'incremental')?.detail ?? '').includes('没有可接的上一轮权重') &&
+      preflightBlocks(freshAvailable).length === 0 &&
+      (freshAvailable.find((item) => item.id === 'incremental')?.detail ?? '').includes('接着上次权重'),
+    `${incReady.find((item) => item.id === 'incremental')?.level}/${incMissing.find((item) => item.id === 'incremental')?.level}/fresh+has:${freshAvailable.find((item) => item.id === 'incremental')?.level}`
   )
   const gv = judgeGvPreflight({ expName: 'mirana', missing: ['音素表 2-name2text.txt'], gptTrained: false, sovitsTrained: false })
   push('体检：GV 缺备料阻断', preflightBlocks(gv).map((item) => item.id).join(',') === 'data', gv.map((item) => `${item.id}:${item.level}`).join(' '))
@@ -916,6 +1043,105 @@ function storeCases(): void {
       '存储：关掉重新打开，记录还在（真落盘）',
       listTrainRuns().length === total && listDatasetEntries().length === totalEntries && loadTrainRun(legacyRun.id) !== null,
       `${listTrainRuns().length}/${total}`
+    )
+
+    // —— 增量起点（T63）：找上一轮权重、沿用验证集、落盘副本；任何一步接不上都必须拒启动 ——
+    useTrainDatabase(join(root, 'db-inc', 'runs.db'))
+    const incLedger = (bytes: number): FtLedgerEntry[] => [
+      wav('G14-L01', bytes, 1, '第一句', 'train'),
+      wav('G14-L02', 200, 2, '第二句', 'eval')
+    ]
+    const emptySrc = findIncrementalSource(incLedger(100), 'funasr-paraformer')
+    push(
+      '增量：库是空的 → 拒启动并点名先做一次「从底模重训」',
+      !emptySrc.ok && emptySrc.error.includes('还没有任何一轮训练记录'),
+      emptySrc.ok ? 'found' : emptySrc.error
+    )
+    const incRunDir = join(root, 'asr-ft-runs-inc', 'ft-1')
+    mkdirSync(incRunDir, { recursive: true })
+    writeFileSync(join(incRunDir, 'model.pt.avg1'), 'weights-avg1', 'utf8')
+    writeFileSync(join(incRunDir, 'model.pt'), 'weights-last', 'utf8')
+    const incRun = buildTrainRun({
+      kind: 'asr-ft',
+      experiment: 'ft-inc',
+      params: { batchSize: 1, epochs: 8, lr: '1e-5', resumeFrom: null, mode: 'incremental' },
+      data: { files: 2, durationMs: 4000, bytes: 2048 },
+      artifacts: { runDir: incRunDir, exportDir: join(root, 'onnx-inc') },
+      startedAt: base + 5000
+    })
+    saveTrainRun(incRun)
+    saveDatasetLedger(incLedger(100), incRun.id)
+    const found = findIncrementalSource(incLedger(100), 'funasr-paraformer')
+    push(
+      '增量：账本全等 + 有 avg1 → 接 avg1，验证集沿用上一轮那份 eval',
+      found.ok && found.source.artifact === 'model.pt.avg1' && found.source.evalKeys.join(',') === 'G14-L02',
+      found.ok ? `${found.source.artifact} eval=${found.source.evalKeys.join(',')}` : found.error
+    )
+    push(
+      '增量：开训口径落进 run 记录（params.mode）',
+      loadTrainRun(incRun.id)?.params.mode === 'incremental',
+      String(loadTrainRun(incRun.id)?.params.mode)
+    )
+    const stagedDir = join(root, 'asr-models', 'paraformer-zh.next')
+    const staged = found.ok ? stageIncrementalSource(found.source, stagedDir) : null
+    const stagedFile = join(stagedDir, 'model.pt.avg1')
+    push(
+      '增量：开训前先抄一份到 <引擎>.next，内容与原件逐字节相同（训练只读副本）',
+      staged !== null && staged.ok && existsSync(stagedFile) && readFileSync(stagedFile, 'utf8') === readFileSync(join(incRunDir, 'model.pt.avg1'), 'utf8'),
+      staged?.ok ? staged.stagedPath : staged?.error ?? 'no source'
+    )
+    const stagedArgv = planAsrFtTrainArgv(
+      { trainer: 'funasr-paraformer', pythonExe: 'P/python.exe', sftScript: 'S/ft.py', exportScript: 'E/export.py', baseModelDir: 'M/base', baseModelId: 'paraformer-zh' },
+      { trainJsonl: join(root, 'T.jsonl'), evalJsonl: join(root, 'V.jsonl'), runDir: join(root, 'asr-ft-runs-inc', 'ft-3') },
+      planFtTuning({ mode: 'incremental', trainer: 'funasr-paraformer', trainCount: 2, initFrom: staged?.ok ? staged.stagedPath : null })
+    )
+    push(
+      '增量：拼出的 argv 指的是那份副本，不是上一轮目录里的原件',
+      staged?.ok === true && stagedArgv.includes(`++init_param=${staged.stagedPath}`),
+      stagedArgv.find((arg) => arg.startsWith('++init_param=')) ?? 'no init_param'
+    )
+    const drifted = findIncrementalSource(incLedger(101), 'funasr-paraformer')
+    push(
+      '增量：重录过（指纹变了）→ 拒启动，绝不把旧错带进新权重',
+      !drifted.ok && drifted.error.includes('对不上'),
+      drifted.ok ? 'found' : drifted.error
+    )
+    rmSync(join(incRunDir, 'model.pt.avg1'), { force: true })
+    rmSync(join(incRunDir, 'model.pt'), { force: true })
+    const gone = findIncrementalSource(incLedger(100), 'funasr-paraformer')
+    push(
+      '增量：账本对得上但权重被删 → 拒启动，点名找过的文件名',
+      !gone.ok && gone.error.includes('权重文件不在了'),
+      gone.ok ? 'found' : gone.error
+    )
+    const missingCopy = stageIncrementalSource(
+      { runDir: incRunDir, artifact: 'model.pt.avg1', lastStep: 0, evalKeys: [] },
+      join(root, 'asr-models', 'paraformer-zh.bak')
+    )
+    push(
+      '增量：副本源头不在了 → 拒启动并给出路径（开训前就报，不会跑到一半才发现）',
+      !missingCopy.ok && missingCopy.error.includes('要接的权重不在了'),
+      missingCopy.ok ? 'copied' : missingCopy.error
+    )
+    // qwen3 那条腿：接的是 checkpoint 目录，步数从目录名读，轮数从步数续算。
+    const qRunDir = join(root, 'asr-ft-runs-inc', 'ft-2')
+    mkdirSync(join(qRunDir, 'checkpoint-660'), { recursive: true })
+    writeFileSync(join(qRunDir, 'checkpoint-660', 'trainer_state.json'), '{}', 'utf8')
+    const qRun = buildTrainRun({
+      kind: 'asr-ft',
+      experiment: 'ft-inc-q',
+      params: { batchSize: 1, epochs: 30, lr: '1e-5', resumeFrom: null, mode: 'incremental' },
+      data: { files: 2, durationMs: 4000, bytes: 2048 },
+      artifacts: { runDir: qRunDir, exportDir: join(root, 'onnx-inc-q') },
+      startedAt: base + 6000
+    })
+    saveTrainRun(qRun)
+    saveDatasetLedger(incLedger(100), qRun.id)
+    const qFound = findIncrementalSource(incLedger(100), 'qwen3-sft')
+    push(
+      '增量：qwen3 接最新 checkpoint 目录并读出步数（660），funasr 不会去认 checkpoint',
+      qFound.ok && qFound.source.artifact === 'checkpoint-660' && qFound.source.lastStep === 660,
+      qFound.ok ? `${qFound.source.artifact}@${qFound.source.lastStep}` : qFound.error
     )
   } finally {
     closeTrainStore()

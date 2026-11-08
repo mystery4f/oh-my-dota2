@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { FtRecInfo, FtScriptState } from '@shared/ipc'
-import type { AsrFtFacts, AsrFtStatusResult } from '@shared/train/asr-ft'
+import type { AsrFtFacts, AsrFtMode, AsrFtStatusResult } from '@shared/train/asr-ft'
 import type { TrainSnapshot } from '@shared/train/task'
 import { judgeAsrPreflight, preflightBlocks } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
@@ -14,6 +14,12 @@ import { useTrainConsole } from '../use-train-console'
 import { selectClass } from '../components/select-class'
 import { useRecorder, type RecorderTarget } from '../use-recorder'
 
+
+/** 开训方式的两档：从底模重训（最稳）与接着上一轮权重（只补新错）。 */
+const FT_MODE_OPTIONS: { id: AsrFtMode; label: string }[] = [
+  { id: 'fresh', label: '从底模重训' },
+  { id: 'incremental', label: '接着上次权重' }
+]
 
 /**
  * 识别训练：录读稿 → 打包数据集 → 微调现役引擎的模型 → 应用。
@@ -29,6 +35,8 @@ export function AsrTrainPage(): React.ReactElement {
   const [asrText, setAsrText] = React.useState('')
   const [packed, setPacked] = React.useState<{ train: number; eval: number } | null>(null)
   const [facts, setFacts] = React.useState<AsrFtFacts | null>(null)
+  // 开训方式：从底模重训 / 接着上次权重。默认重训（最稳的底），增量显式选。
+  const [mode, setMode] = React.useState<AsrFtMode>('fresh')
 
   const groups = script?.groups ?? []
   const group = groups.find((item) => item.id === groupId) ?? groups[0] ?? null
@@ -109,11 +117,12 @@ export function AsrTrainPage(): React.ReactElement {
       recordedLines: Object.keys(recs).length,
       packed,
       activeModel: Boolean(status?.swap.activeExists),
-      resumeAvailable: facts?.resumable ?? false,
+      mode,
+      incrementalAvailable: facts?.incremental ?? false,
       vramNote: facts?.vramNote ?? null
     })
     return { preflight: items, blocks: preflightBlocks(items) }
-  }, [status, recs, packed, facts])
+  }, [status, recs, packed, facts, mode])
 
 
   return (
@@ -298,11 +307,40 @@ export function AsrTrainPage(): React.ReactElement {
           <PreflightList items={preflight} />
 
           <Row
+            label="开训方式"
+            hint={
+              mode === 'incremental'
+                ? '接上一轮的权重：只补这批新录的错，约 300 步；验证集沿用上一轮，新录的句子只进训练集'
+                : '从底模重训：轮数按录音量自动算，够 800 步就停；换引擎或重录过就用它'
+            }
+          >
+            <div className="flex items-center gap-1">
+              {FT_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setMode(option.id)}
+                  aria-pressed={mode === option.id}
+                  className={
+                    mode === option.id
+                      ? 'rounded bg-muted px-2.5 py-1 text-xs font-medium text-foreground'
+                      : 'rounded px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground'
+                  }
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </Row>
+
+          <Row
             label="开训"
             hint={
               blocks.length > 0
                 ? `先解决：${blocks.map((item) => item.label).join('、')}`
-                : '轮数按录音量自动算，够 800 步就停'
+                : mode === 'incremental'
+                  ? '接上一轮的权重，跑满约 300 步就停'
+                  : '轮数按录音量自动算，够 800 步就停'
             }
           >
             <Button
@@ -310,7 +348,7 @@ export function AsrTrainPage(): React.ReactElement {
               disabled={taskRunning || blocks.length > 0}
               onClick={() =>
                 void runAction('开训', async () => {
-                  const result = await window.api.trainStart({ kind: 'asr-ft', dataset: group?.id ?? 'asr-ft' })
+                  const result = await window.api.trainStart({ kind: 'asr-ft', dataset: group?.id ?? 'asr-ft', mode })
                   return result.ok ? '已开训' : `开训失败：${result.error ?? '未知错误'}`
                 })
               }

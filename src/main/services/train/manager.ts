@@ -52,7 +52,9 @@ let trainLogSize = -1
 function runParamsOf(kind: TrainTaskKind, request: TrainStartRequest): TrainRunParams {
   if (kind === 'asr-ft') {
     const tuning = request.asrFt?.tuning
-    return { epochs: tuning?.epochs, lr: tuning?.lr, resumeFrom: tuning?.resumeFrom ?? null }
+    // 开训口径落账：从底模重训 / 接着上一轮权重。请求没标就看 tuning 里有没有接续点（老调用方兼容）。
+    const mode = request.mode ?? (tuning?.resumeFrom || tuning?.initFrom ? 'incremental' : 'fresh')
+    return { epochs: tuning?.epochs, lr: tuning?.lr, resumeFrom: tuning?.resumeFrom ?? tuning?.initFrom ?? null, mode }
   }
   if (kind === 'gv-gpt' || kind === 'gv-sovits') {
     return { version: request.gv?.version, batchSize: request.gv?.batchSize, epochs: request.gv?.epochs }

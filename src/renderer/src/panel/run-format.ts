@@ -27,6 +27,10 @@ export function formatDuration(ms: number): string {
 /** 一行能看完的摘要：数据量、步数、损失、耗时。 */
 export function runHint(run: TrainRunRecord): string {
   const parts: string[] = []
+  // ASR 微调的一行摘要先说开训口径：「接着上次权重」与「从底模重训」的字数差本身就是事后对账的线索。
+  if (run.kind === 'asr-ft' && run.params.mode) {
+    parts.push(run.params.mode === 'incremental' ? '接着上次权重' : '从底模重训')
+  }
   if (run.data.files > 0) parts.push(`${run.data.files} 条`)
   if (run.metrics) {
     if (run.metrics.steps > 0) parts.push(`${run.metrics.steps} steps`)

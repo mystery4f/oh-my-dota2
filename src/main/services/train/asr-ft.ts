@@ -1,29 +1,29 @@
 import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join } from 'node:path'
 import {
   asrFtRollbackSteps,
   asrFtSwapSteps,
   deriveAsrFtEnvGaps,
+  incrementalWeightFile,
   planAsrFtExportArgv,
+  planFtTuning,
   pickLastCheckpointName,
+  type AsrFtMode,
   type AsrFtPaths,
   type AsrFtFacts,
   type AsrFtStatusResult,
   type AsrFtSwapResult,
   type AsrFtTrainTuning,
+  type AsrFtTrainer,
 
   type FtLedgerEntry,
   type FtRunMeta,
-  deriveFtResumeEpochs,
   ftVramNote,
   judgeFtDataset,
   missingFtExportFiles,
-  trainerCanResume,
-  deriveFtEpochsFor,
-  ftDefaultLr,
   ftLedgerMatchedOnDisk,
   ftTrainCoverage,
   parseNvidiaComputeApps,
@@ -365,27 +365,90 @@ function markAppliedForExport(exportDir: string): void {
   }
 }
 
+/** 增量微调的接续点：上一轮 run 的目录、磁盘上真实存在的权重，以及它那份验证集。 */
+export interface IncrementalSource {
+  runDir: string
+  /** funasr：权重文件名（model.pt.avg1 / .best / model.pt）；qwen3：checkpoint 目录名。 */
+  artifact: string
+  /** qwen3 的 checkpoint 步数（funasr 走 init_param，用不到，给 0）。 */
+  lastStep: number
+  /** 上一轮打包时的验证集 key：增量沿用这份标尺，新录的句子只进训练集。 */
+  evalKeys: string[]
+}
+
 /**
- * 续训候选：最新的 run，其打包快照与当前账本逐条指纹全等（旧数据只增不改）且还留着 checkpoint。
- * 对不上（重录 / 删过）就 null——静默落回全新开跑，续训绝不接错底。
- * run 与它那份快照一起从库里读（列表本身就是最新在前），不再扫目录拼文件。
+ * 增量起点：最新一轮「账本对得上」的 run，且磁盘上真有能接的权重。
+ * 对不上就点名拒绝——增量静默落回全新训练，等于把「补训几分钟」变成「底模重训一小时」。
+ * 对账口径与 asrFtFacts 同一份：旧数据只增不改（重录/删掉就接不上）。
  */
-function latestResumableRun(currentLedger: FtLedgerEntry[]): { resumeFrom: string; lastStep: number } | null {
+export function findIncrementalSource(
+  currentLedger: readonly FtLedgerEntry[],
+  trainer: AsrFtTrainer
+): { ok: true; source: IncrementalSource } | { ok: false; error: string } {
+  let sawRun = false
+  let sawMatched = false
   for (const run of listTrainRuns()) {
     const runDir = run.artifacts.runDir
     if (typeof runDir !== 'string' || runDir.length === 0) continue
+    sawRun = true
     const packed = packedLedgerForRun(run.id)
     if (packed === null || !ftLedgerMatchedOnDisk(packed, currentLedger)) continue
-    const checkpoint = pickLastCheckpointName(safeReaddir(runDir))
+    sawMatched = true
+    const names = safeReaddir(runDir)
+    const evalKeys = packed.filter((entry) => entry.split === 'eval').map((entry) => entry.key)
+    if (trainer === 'funasr-paraformer') {
+      const weight = incrementalWeightFile(names)
+      if (!weight) continue
+      return { ok: true, source: { runDir, artifact: weight, lastStep: 0, evalKeys } }
+    }
+    const checkpoint = pickLastCheckpointName(names)
     if (!checkpoint) continue
-    return { resumeFrom: join(runDir, checkpoint), lastStep: Number(checkpoint.slice('checkpoint-'.length)) }
+    return {
+      ok: true,
+      source: { runDir, artifact: checkpoint, lastStep: Number(checkpoint.slice('checkpoint-'.length)), evalKeys }
+    }
   }
-  return null
+  if (!sawRun) {
+    return { ok: false, error: '增量微调要从上一轮的权重接着跑，但还没有任何一轮训练记录——先做一次「从底模重训」' }
+  }
+  if (!sawMatched) {
+    return { ok: false, error: '上一轮的录音和现在对不上（有重录或删除）：增量会把旧错带进新权重——先做一次「从底模重训」' }
+  }
+  return {
+    ok: false,
+    error:
+      trainer === 'funasr-paraformer'
+        ? '上一轮的权重文件不在了（找过 model.pt.avg1 / model.pt.best / model.pt）：没法接着训，先做一次「从底模重训」'
+        : '上一轮的 checkpoint 不在了（训练目录里没有 checkpoint-<步数>）：没法接着训，先做一次「从底模重训」'
+  }
 }
 
-/** 开训闸门看到的两件事实：显存提示，以及上一份账本是否真的能续训（与 resolveAsrFtTrainRequest 同一判据）。 */
+/**
+ * 接续点落盘：把上一轮的权重抄进 `<asr-models>/<engine>.next` 再拼训练命令。
+ * 训练只读这份副本（funasr 的 init_param 会按它重建优化器，qwen3 的 resume_from 会读 trainer_state）——
+ * 副本烂了、训练失败了，都碰不到现役权重和上一轮的产物。
+ */
+export function stageIncrementalSource(
+  source: IncrementalSource,
+  staging: string
+): { ok: true; stagedPath: string } | { ok: false; error: string } {
+  const from = join(source.runDir, source.artifact)
+  const to = join(staging, source.artifact)
+  try {
+    if (!existsSync(from)) return { ok: false, error: `要接的权重不在了：${from}` }
+    rmSync(to, { recursive: true, force: true })
+    mkdirSync(staging, { recursive: true })
+    cpSync(from, to, { recursive: statSync(from).isDirectory() })
+    return { ok: true, stagedPath: to }
+  } catch (err) {
+    return { ok: false, error: `复制接续权重失败：${errorMessage(err)}` }
+  }
+}
+
+/** 开训闸门看到的两件事实：显存提示，以及上一轮的权重是否真的能接（与 resolveAsrFtTrainRequest 同一判据）。 */
 export async function asrFtFacts(): Promise<AsrFtFacts> {
-  return { vramNote: ftVramGuard(), resumable: latestResumableRun(await currentFtLedger()) !== null }
+  const found = findIncrementalSource(await currentFtLedger(), finetuneSpec().trainer)
+  return { vramNote: ftVramGuard(), incremental: found.ok }
 }
 
 /**
@@ -424,7 +487,7 @@ export function rollbackAsrFtModel(): AsrFtSwapResult {
 }
 
 /** 训练启动前把环境、数据、目录备齐：缺一样就拒启动；显存只给提示（warning），不拦。 */
-export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
+export async function resolveAsrFtTrainRequest(mode: AsrFtMode): Promise<{
   ok: boolean
   request?: TrainStartRequest
   error?: string
@@ -439,19 +502,37 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
     return { ok: false, error: `训练环境缺 python 包：${missingPkgs.join('、')}（在 ${env.envRoot} 里 pip install）` }
   }
   const vramNote = ftVramGuard()
-  const pack = await prepareFtDataset()
+  // 先按现有录音打包：数据本身不可训（不足两条 / 文件丢了）时先报那个错，别拿「没有上一轮」掩盖它。
+  let pack = await prepareFtDataset()
   // 两个 JSONL 都得有（官方脚本的 eval_strategy 是无条件 steps），判据在共享缝里，好让探针盯住。
   const ready = judgeFtDataset(pack)
   if (!ready.ok) {
     return { ok: false, error: ready.error }
   }
-  // 续训：窗口开关 + 上次账本对得上才接旧 checkpoint（lr 降一档防把权重带飞）；接不上静默新开。
   const trainer = env.paths.trainer ?? 'qwen3-sft'
-  // funasr 的续训只认自己 output_dir 里的 checkpoint（跨 run 目录接不上），只有 qwen3 那条腿接旧点。
-  const prior = resume && trainerCanResume(trainer) ? latestResumableRun(pack.ledger) : null
-  const tuning: AsrFtTrainTuning = prior
-    ? { epochs: deriveFtResumeEpochs(pack.trainCount, prior.lastStep), lr: '1e-5', resumeFrom: prior.resumeFrom }
-    : { epochs: deriveFtEpochsFor(trainer, pack.trainCount), lr: ftDefaultLr(trainer) }
+  // 增量：找上一轮权重 → 沿用上一轮验证集 → 把权重抄进 <engine>.next。
+  // 任何一步接不上都拒启动并点名缺什么：静默落回「从底模重训」是外行人看不出的一小时白跑。
+  let source: IncrementalSource | null = null
+  let stagedPath: string | null = null
+  if (mode === 'incremental') {
+    const found = findIncrementalSource(pack.ledger, trainer)
+    if (!found.ok) return { ok: false, error: found.error }
+    source = found.source
+    pack = await prepareFtDataset({ evalKeys: source.evalKeys })
+    const repacked = judgeFtDataset(pack)
+    if (!repacked.ok) return { ok: false, error: repacked.error }
+    const staged = stageIncrementalSource(source, stagingDir())
+    if (!staged.ok) return { ok: false, error: staged.error }
+    stagedPath = staged.stagedPath
+  }
+  const tuning: AsrFtTrainTuning = planFtTuning({
+    mode,
+    trainer,
+    trainCount: pack.trainCount,
+    lastStep: source?.lastStep ?? 0,
+    resumeFrom: stagedPath,
+    initFrom: stagedPath
+  })
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')
   // 目录名固定 ASCII（ft-<时间戳>）：decoder 的 fp32 中间产物超过 2 GB，torch 的 external-data
   // 写入在 Windows 上用窄字符路径开文件，路径里带中文（曾用数据集名当目录名「地图」）会
@@ -466,9 +547,11 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
   writeRunMeta(runDir, {
     runId: stem,
     startedAt: Date.now(),
+    mode,
     epochs: tuning.epochs ?? 66,
     lr: tuning.lr ?? '2e-5',
-    resumeFrom: tuning.resumeFrom ?? null,
+    // 接续起点：qwen3 是 checkpoint，funasr 是那份抄进 .next 的权重（同一字段，事后一眼看得出接的哪份）。
+    resumeFrom: tuning.resumeFrom ?? tuning.initFrom ?? null,
     status: 'running',
     finishedAt: null,
     exportDir,
@@ -481,6 +564,7 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
       kind: 'asr-ft',
       // ASR 微调没有「数据集名」这个概念：目录名固定 ft-<时间戳>，字段留空只为满足请求契约。
       dataset: '',
+      mode,
       asrFt: {
         paths: env.paths as AsrFtPaths,
         data: { trainJsonl: pack.trainPath, evalJsonl: pack.evalPath, runDir },

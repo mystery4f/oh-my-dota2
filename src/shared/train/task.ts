@@ -6,6 +6,7 @@
 import {
   planAsrFtTrainArgv,
   type AsrFtDatasetPlan,
+  type AsrFtMode,
   type AsrFtPaths,
   type AsrFtTrainTuning,
   type FtLedgerEntry
@@ -76,8 +77,10 @@ export interface TrainStartRequest {
     /** 自适应轮数 / 续训点 / lr（备料服务算好填进来）；没填 = 冻结默认 66 轮 2e-5 新开。 */
     tuning?: AsrFtTrainTuning
   }
-  /** asr-ft 专用：窗口上的「续训」开关；主进程备料时据此挑上次 checkpoint，失败自动落回新开。 */
-  resume?: boolean
+  /** asr-ft 专用：本次是「从底模重训」还是「接着上一轮的权重」（默认 fresh）。
+   * 主进程备料时据此找上一轮的权重；增量接不上（没上一轮 / 权重没了 / 数据对不上）就拒启动，
+   * 绝不悄悄落回全新训练。 */
+  mode?: AsrFtMode
   /** gv-* 专用：窗口表单里的意图；主进程校验模板/底模/数据集后才转成 gvResolved。 */
   gv?: GvTrainOptions
   /** gv-* 专用：主进程写好训练配置后填（argv/cwd 全从这里来）；没填按环境没就绪拒启动。 */

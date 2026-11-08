@@ -1,3 +1,5 @@
+import type { AsrFtMode } from './asr-ft'
+
 /**
  * 开训体检：把「环境、数据、打包、模型槽、显存」四类事实收成一张清单。
  * 只有 block 阻止开训；warn 是「能做但会白跑」的提醒，比如数据太少、还没打包。
@@ -19,8 +21,10 @@ export interface AsrPreflightInput {
   packed: { train: number; eval: number } | null
   /** 生效模型在不在（不在就没法「应用」，也没法回滚）。 */
   activeModel: boolean
-  /** 训练用的 checkpoint 槽里有没有上一次的产物（续训要它）。 */
-  resumeAvailable: boolean
+  /** 本次开训口径：从底模重训 / 接着上一轮权重（增量）。 */
+  mode: AsrFtMode
+  /** 上一轮的权重还在不在：增量要靠它，缺了就不能增量。 */
+  incrementalAvailable: boolean
   /** 显存提示：非空就是一条件告警。 */
   vramNote: string | null
 }
@@ -64,14 +68,30 @@ export function judgeAsrPreflight(input: AsrPreflightInput): PreflightItem[] {
       : { id: 'model', level: 'block', label: '生效模型', detail: '缺 active 模型：先装一次环境或找到模型文件' }
   )
 
-  items.push(
-    input.resumeAvailable
-      ? { id: 'resume', level: 'ok', label: '续训点', detail: '有上次的 checkpoint，勾「续训」可以接着训' }
-      : { id: 'resume', level: 'ok', label: '续训点', detail: '没有上次的 checkpoint，按新开训练' }
-  )
+  items.push(incrementalItemOf(input))
 
   if (input.vramNote) items.push({ id: 'vram', level: 'warn', label: '显存', detail: input.vramNote })
   return items
+}
+
+/**
+ * 增量起点一行：选了增量却没有上一轮权重就是阻断（点下去只会白跑），
+ * 没选增量时只当信息（有上一轮 = 可以省一半时间）。
+ */
+function incrementalItemOf(input: AsrPreflightInput): PreflightItem {
+  if (input.mode === 'incremental') {
+    return input.incrementalAvailable
+      ? { id: 'incremental', level: 'ok', label: '增量起点', detail: '上一轮的权重在，接着训只纠这批新错（约 300 步）' }
+      : {
+          id: 'incremental',
+          level: 'block',
+          label: '增量起点',
+          detail: '没有可接的上一轮权重：先从底模重训一次，或把开训方式改回「从底模重训」'
+        }
+  }
+  return input.incrementalAvailable
+    ? { id: 'incremental', level: 'ok', label: '增量起点', detail: '上一轮的权重还在：想省时间可以改成「接着上次权重」' }
+    : { id: 'incremental', level: 'ok', label: '增量起点', detail: '还没有上一轮：第一次从底模训' }
 }
 
 export interface GvPreflightInput {

@@ -66,6 +66,11 @@ export function deriveFtIncrementalEpochs(trainCount: number): number {
 /** 开训口径：两条腿的轮数与学习率**只能**从这里出，别在调用点各拼一套。 */
 export type AsrFtMode = 'fresh' | 'incremental'
 
+/** IPC/面板传来的模式是 unknown：垃圾值一律按「从底模重训」，增量必须是显式选择。 */
+export function normalizeAsrFtMode(value: unknown): AsrFtMode {
+  return value === 'incremental' ? 'incremental' : 'fresh'
+}
+
 export function planFtTuning(input: {
   mode: AsrFtMode
   trainer: AsrFtTrainer
@@ -294,12 +299,12 @@ export interface AsrFtStatusResult {
   install: AsrFtInstallState | null
 }
 
-/** 开训闸门看到的两件事实：显存提示，以及上一份账本是否真的能续训。panel 只显示，不自己推。 */
+/** 开训闸门看到的两件事实：显存提示，以及上一轮的权重是否真的能接（增量）。panel 只显示，不自己推。 */
 export interface AsrFtFacts {
   /** 非空就是一条件显存告警；查不到 nvidia-smi 时是 null。 */
   vramNote: string | null
-  /** 与开训闸门同一判据：最新账本对得上且还留着 checkpoint。 */
-  resumable: boolean
+  /** 与开训闸门同一判据：最新账本对得上，且上一轮的 pytorch 权重/checkpoint 还躺在磁盘上。 */
+  incremental: boolean
 }
 
 /** M-B 一键安装的进行时状态：窗口轮询这块渲染进度。 */
@@ -353,6 +358,8 @@ export interface FtLedgerEntry {
 export interface FtRunMeta {
   runId: string
   startedAt: number
+  /** 这一轮是从底模重训（fresh）还是接着上一轮权重（incremental）；老 run.json 没有这个字段。 */
+  mode?: AsrFtMode
   epochs: number
   lr: string
   resumeFrom: string | null

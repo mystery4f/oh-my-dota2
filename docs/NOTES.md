@@ -343,7 +343,7 @@
 - **中文路径导出炸**：decoder 的 fp32 中间产物 >2 GB 时 torch 走 external-data 分片写入，Windows 上用窄字符路径开文件——run 目录名带中文（曾拿数据集名当目录名「地图」）报 `Could not open file or directory: <dir>/thinker.model.embed_tokens.weight`；encoder 701 MB 走另一条路反而能过，看起来像「随机失败」。修法：run/导出目录名固定 ASCII `ft-<时间戳>`。
 - **备料附件丢失秒退**：`TrainManager.start()` 原来只把 kind/dataset 传给 `deriveTrainPlan`，丢掉备料挂上的 `asrFt`/`gvResolved` 附件 → 必报「环境没就绪」，且发生在写日志之前，现场全丢。修法：整份 request 透传 + `appendTrainLog()` 把训练状态机落盘 `logs/train.log`（4 MB 滚动）。
 - **续训 max_steps 陷阱**：HF Trainer 拿 `--resume_from` 恢复 global_step 后，若本轮 `--epochs` 折算的 max_steps ≤ 已到步数，**整轮跳过不训练直接退场**（一行 `epoch` 都不跑）。续训轮数必须保证总步数 > 上次 checkpoint（应用按「上次步数 + 200」重算）。
-- **账本与续训对账**：每次开跑把逐条 key+bytes+mtimeMs 指纹写进 `train/runs.db` 的 `dataset_entries`（外加 run 目录里的 `run.json`）；续训前逐条对账，重录/删除过就静默新开，绝不接错底；「应用新模型」按 exportDir 对上回写 applied——账本只前进不回退，缺文件静默跳过，记账不能反过来挡训练。
+- **账本与续训对账**：每次开跑把逐条 key+bytes+mtimeMs 指纹写进 `train/runs.db` 的 `dataset_entries`（外加 run 目录里的 `run.json`）；开训前逐条对账，重录/删除过就**拒启动并点名**（#63 起：增量模式拒绝并把原因给到面板，绝不静默落回全新训练——旧文案「静默新开」已不成立）；「应用新模型」按 exportDir 对上回写 applied——账本只前进不回退，缺文件静默跳过，记账不能反过来挡训练。
 ## GV 微调（GPT-SoVITS v2pro 包）
 
 ### 训练命令真相源（读自上游 webui.py，2026-11-04）
