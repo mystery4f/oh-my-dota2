@@ -76,7 +76,7 @@ export interface AsrEngineSpec {
   label: string
   sherpaKind: AsrSherpaKind
   /** 模型目录候选（userData 相对路径，按优先级；`*` 为前缀匹配） */
-  dirCandidates: readonly string[]
+  dirPatterns: readonly string[]
   /** 判 ready 的必备文件（相对模型目录） */
   requiredPaths: readonly string[]
   /** 下载清单；null = 只能手动放置或微调产出 */
@@ -109,7 +109,7 @@ export interface AsrFinetuneSpec {
 
 | 引擎 | requiredPaths | hotwords | punctuation | finetune |
 | --- | --- | --- | --- | --- |
-| qwen3 | `conv_frontend.onnx`、`encoder.int8.onnx`、`decoder.int8.onnx`、`tokenizer/vocab.json`、`tokenizer/merges.txt`、`tokenizer/tokenizer_config.json` | prompt | builtin | qwen3-sft |
+| qwen3 | `conv_frontend.onnx`、`encoder.int8.onnx`、`decoder.int8.onnx`、`tokenizer/vocab.json`、`tokenizer/merges.txt` | prompt | builtin | qwen3-sft |
 | paraformer | `model.int8.onnx`、`tokens.txt` | none | none | funasr-paraformer |
 
 ### 第二层 模型注册表（事实）
@@ -133,7 +133,7 @@ export function collectAsrModels(dirs: readonly AsrDirFact[]): AsrModel[]
 export function pickActiveAsrModel(models: readonly AsrModel[], activeId: string): AsrModel | null
 ```
 
-归属判定：目录名先按 `dirCandidates` 前缀匹配到引擎，匹配不上就忽略（`sense-voice` 这类退役目录自然消失，不用专门删）。`ready` = `requiredPaths` 全在。`origin` 由目录名后缀决定：`.bak` → backup，`.next` → finetuned，否则看是否等于 `dirCandidates[0]`。
+归属判定：目录名先按 `dirPatterns` 前缀匹配到引擎，匹配不上就忽略（`sense-voice` 这类退役目录自然消失，不用专门删）。`ready` = `requiredPaths` 全在。`origin` 由目录名后缀决定：`.bak` → backup，`.next` → finetuned，否则看是否等于 `canonicalRel`。
 
 `pickActiveAsrModel` 的回落规则写在这里，不写在 ipc 里：`activeId` 命中就返回它；没命中就返回第一条 `ready` 的；一条都没有返回 null。
 
@@ -194,7 +194,7 @@ flowchart TD
 
 新增 `src/main/probes/asr-engines.ts`（`--asr-engines-probe`），`docs/PROBES.md` 登记一行。断言：
 
-- 表里 `id` 与 `Record` 的键一致；每个 spec 的 `dirCandidates`、`requiredPaths` 非空。
+- 表里 `id` 与 `Record` 的键一致；每个 spec 的 `dirPatterns`、`requiredPaths` 非空。
 - `download !== null` 的每个文件都有 `bytes` 与 64 位 `sha256`。
 - `Object.keys(require('resources/asr-sherpa-worker.cjs').KINDS)` 与表里 `sherpaKind` 集合完全相等（漏一个引擎就是红）。
 - 每个 `finetune !== null` 的 spec：`artifactFiles`、`trainScripts`、`baseModelDirs` 非空，`dataset` 在枚举内。
