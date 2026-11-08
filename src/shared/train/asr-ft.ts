@@ -1,5 +1,6 @@
 /** ASR 微调（T5）纯缝：训练/导出命令拼装、checkpoint 挑选、换模/回滚步骤、环境缺口点名。 */
-import { ASR_ENGINES, type AsrEngineId } from '../asr/engines'
+import { ASR_ENGINE_LIST, ASR_ENGINES, type AsrEngineId } from '../asr/engines'
+import { holdoutTakes } from './dataset'
 
 /** 训练入口的形状：qwen3 用官方 sft 脚本 + 本地底模目录；funasr 用 `python -m funasr.bin.train` + hub 模型 id。 */
 export type AsrFtTrainer = 'qwen3-sft' | 'funasr-paraformer'
@@ -96,6 +97,82 @@ export function ftDefaultLr(trainer: AsrFtTrainer): string {
 /** 续训每轮步数（batch 1 × grad_acc 4）。 */
 function ftStepsPerEpoch(trainCount: number): number {
   return Math.max(1, Math.ceil(trainCount / FT_SAMPLES_PER_STEP))
+}
+
+/**
+ * 开训前的时长估算（#65）：显示用，既不排程也不拦截。
+ * 只做乘法——轮数直接复用 planFtTuning（与真开跑同一份推导），每步耗时取引擎表的微调段。
+ * 量级依据（docs/BENCH.md）：G14 38 训 + 2 验 660 步实测 65 分钟、20 条 Paraformer 600 步约 6 分钟；
+ * 同一份数据按这里算出来正好是 65 / 6 分钟。机器、显存、校验密度不同会差几成到倍数，所以一律写「估算」。
+ */
+export interface FtCostEstimate {
+  /** 这次要跑的步数：增量已扣掉 checkpoint 里已有的步数。 */
+  steps: number
+  /** 折成分钟（四舍五入，至少 1；没数据时 0）。 */
+  minutes: number
+  /** 面板直接显示的那一句：约 N 步 / 约 X 分钟。 */
+  label: string
+  /** 数字从哪来（哪条腿、多少秒/步），估偏了能追到来源。 */
+  basis: string
+}
+
+/** 这条训练腿的每步实测耗时（秒）与引擎名，全部来自引擎表；表里没声明就 null（别编数字）。 */
+export function ftCostBasis(trainer: AsrFtTrainer): { secPerStep: number; engineLabel: string } | null {
+  for (const spec of ASR_ENGINE_LIST) {
+    if (spec.finetune?.trainer === trainer) return { secPerStep: spec.finetune.secPerStep, engineLabel: spec.label }
+  }
+  return null
+}
+
+/** 每轮几步：qwen3 一步 4 条（batch 1 × grad_acc 4），funasr 一步 1 条。与 argv 里的参数同源。 */
+function ftStepsPerEpochFor(trainer: AsrFtTrainer, trainCount: number): number {
+  return trainer === 'funasr-paraformer' ? Math.max(1, trainCount) : ftStepsPerEpoch(trainCount)
+}
+
+/**
+ * 「大概多少步 / 大概几分钟」：输入的条数与总时长来自当前录音账本，轮数走 planFtTuning。
+ * 0 条、1 条、几百条都返回同一形状（不抛）；takes 只算能进训练的逐句录音，自由说组不在内。
+ */
+export function estimateFtCost(input: {
+  mode: AsrFtMode
+  trainer: AsrFtTrainer
+  /** 能进训练的录音条数（逐句组的已录句；自由说组不进训）。 */
+  takes: number
+  /** 这些录音的总时长（毫秒）：只进文案，不影响步数。 */
+  audioMs?: number
+  /** 续训起点已到第几步（qwen3 增量用它算「这次还要跑多少」）。 */
+  lastStep?: number
+}): FtCostEstimate {
+  const takes = Math.max(0, Math.floor(input.takes))
+  const cost = ftCostBasis(input.trainer)
+  if (cost === null) {
+    return { steps: 0, minutes: 0, label: '这条训练腿没有每步耗时基准，估算不了', basis: '引擎表的微调段里没写 secPerStep' }
+  }
+  const basis = `按 ${cost.engineLabel} ${cost.secPerStep} 秒/步（4060 实测基准，见 docs/BENCH.md）估算：含校验与存盘，机器 / 显存 / 数据量一变就会差几成到倍数`
+  if (takes === 0) return { steps: 0, minutes: 0, label: '还没录训练集：先录几条再估', basis }
+  const trainCount = takes - holdoutTakes(takes)
+  // 轮数必须带 lastStep：qwen3 续训的轮数是「(lastStep + 200) / 每轮步数」向上取整，不带就少算。
+  const epochs = planFtTuning({ mode: input.mode, trainer: input.trainer, trainCount, lastStep: input.lastStep }).epochs ?? 1
+  const budget = epochs * ftStepsPerEpochFor(input.trainer, trainCount)
+  // 增量 qwen3 的 checkpoint 里已经有 lastStep 步：这次要等的只是超出那部分，别把已跑的要一遍。
+  const done =
+    input.mode === 'incremental' && input.trainer !== 'funasr-paraformer' ? Math.max(0, Math.floor(input.lastStep ?? 0)) : 0
+  const steps = Math.max(0, budget - done)
+  const minutes = steps === 0 ? 0 : Math.max(1, Math.round((steps * cost.secPerStep) / 60))
+  const audio = ftAudioLabel(input.audioMs ?? 0)
+  return {
+    steps,
+    minutes,
+    label: `约 ${steps} 步 / 约 ${minutes} 分钟（${takes} 条${audio === '' ? '' : ` / ${audio}音频`}，估算）`,
+    basis
+  }
+}
+
+/** 录音总时长的人话（不足一分钟按秒说）：只用于估算文案。 */
+function ftAudioLabel(ms: number): string {
+  if (ms <= 0) return ''
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))} 秒`
+  return `${Math.round(ms / 60_000)} 分钟`
 }
 
 /** 续训在旧 checkpoint 之上固定补训的步数（4060 实测 3.6s/步 ≈ 12 分钟）。 */
@@ -299,6 +376,10 @@ export interface AsrFtStatusResult {
   pending: FtPendingTakes
   /** 一键安装的即时状态：null = 这次会话还没跑过安装。 */
   install: AsrFtInstallState | null
+  /** 开训前的估时（#65）：两种开训方式各一份，面板切换模式不必再问主进程。 */
+  estimate: Record<AsrFtMode, FtCostEstimate>
+  /** 估算依据的一句话（面板提示用；与 estimate.label 同源，避免面板自己拼）。 */
+  estimateBasis: string
 }
 
 /** 开训闸门看到的两件事实：显存提示，以及上一轮的权重是否真的能接（增量）。panel 只显示，不自己推。 */

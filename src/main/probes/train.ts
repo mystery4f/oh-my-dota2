@@ -57,6 +57,8 @@ import {
   planAsrFtTrainArgv,
   planFtTuning,
   normalizeAsrFtMode,
+  estimateFtCost,
+  ftCostBasis,
   type AsrFtPaths,
   type FtLedgerEntry
 } from '@shared/train/asr-ft'
@@ -318,6 +320,58 @@ export async function runTrainProbe(): Promise<void> {
       !planAsrFtTrainArgv(funasrPaths, ftData, freshFunasr).includes('++init_param') &&
       !planAsrFtTrainArgv(ftPaths, ftData, {}).includes('--resume_from'),
     `qwen:${freshQwen.epochs}轮/${freshQwen.lr} funasr:${freshFunasr.epochs}轮/${freshFunasr.lr}`
+  )
+  // —— 开训估时（T65）：条数 × 轮数 × 每步耗时，全程纯乘法；量级必须对得上 docs/BENCH.md ——
+  const estZero = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 0 })
+  const estZeroFunasr = estimateFtCost({ mode: 'fresh', trainer: 'funasr-paraformer', takes: 0 })
+  push(
+    '开训估时：0 条不抛、步数与分钟都是 0，文案让人先录几条',
+    estZero.steps === 0 &&
+      estZero.minutes === 0 &&
+      estZero.label.includes('先录几条') &&
+      estZeroFunasr.steps === 0 &&
+      estZeroFunasr.minutes === 0,
+    `${estZero.label} | ${estZeroFunasr.label}`
+  )
+  const estOne = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 1 })
+  const estOneFunasr = estimateFtCost({ mode: 'fresh', trainer: 'funasr-paraformer', takes: 1 })
+  push(
+    '开训估时：1 条也是有限量级（qwen3 66 步 / 6 分钟、paraformer 40 步 / 1 分钟），谁都不许除零',
+    estOne.steps === 66 && estOne.minutes === 6 && estOneFunasr.steps === 40 && estOneFunasr.minutes === 1,
+    `qwen3: ${estOne.label} | funasr: ${estOneFunasr.label}`
+  )
+  const estG14 = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 40, audioMs: 76_000 })
+  const estG14Funasr = estimateFtCost({ mode: 'fresh', trainer: 'funasr-paraformer', takes: 40, audioMs: 76_000 })
+  push(
+    '开训估时对得上实测：G14 40 条 → qwen3 660 步 65 分钟（BENCH 实测 1:05:18）、paraformer 608 步 6 分钟（BENCH 约 6 分钟）',
+    estG14.steps === 660 && Math.abs(estG14.minutes - 65) <= 1 && estG14Funasr.steps === 608 && estG14Funasr.minutes === 6,
+    `qwen3: ${estG14.steps}步/${estG14.minutes}分 paraformer: ${estG14Funasr.steps}步/${estG14Funasr.minutes}分`
+  )
+  const estMany = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 400 })
+  push(
+    '开训估时：几百条不炸（400 条 → 1000 步 / 98 分钟），没有 NaN / Infinity',
+    estMany.steps === 1000 && estMany.minutes === 98 && Number.isFinite(estMany.steps + estMany.minutes),
+    estMany.label
+  )
+  const estIncQwen = estimateFtCost({ mode: 'incremental', trainer: 'qwen3-sft', takes: 40, lastStep: 660 })
+  const estIncFunasr = estimateFtCost({ mode: 'incremental', trainer: 'funasr-paraformer', takes: 40, lastStep: 660 })
+  push(
+    '增量估时只报「这次还要跑多少」：qwen3 从 checkpoint-660 接着算 200 步 / 20 分钟；funasr 优化器重建，报整段 304 步 / 3 分钟',
+    estIncQwen.steps === 200 && estIncQwen.minutes === 20 && estIncFunasr.steps === 304 && estIncFunasr.minutes === 3,
+    `qwen3: ${estIncQwen.label} | funasr: ${estIncFunasr.label}`
+  )
+  const qwenCost = ftCostBasis('qwen3-sft')
+  const funasrCost = ftCostBasis('funasr-paraformer')
+  push(
+    '每步耗时只有引擎表一份（qwen3 5.9 / paraformer 0.6 秒），估时文案自称「估算」并指向 docs/BENCH.md',
+    qwenCost !== null &&
+      qwenCost.secPerStep === 5.9 &&
+      funasrCost !== null &&
+      funasrCost.secPerStep === 0.6 &&
+      estG14.label.includes('估算') &&
+      estG14.basis.includes('docs/BENCH.md') &&
+      estG14.label.includes('76 秒音频'),
+    `qwen3:${qwenCost?.secPerStep} funasr:${funasrCost?.secPerStep} ｜ ${estG14.basis}`
   )
   push(
     '增量找权重：avg1 > best > model.pt；都没有就是 null（上层据此拒启动）',

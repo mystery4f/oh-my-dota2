@@ -349,6 +349,10 @@ export function AsrTrainPage(): React.ReactElement {
             </div>
           </Row>
 
+          {/* 预计耗时（#65）：纯显示，不排程也不拦人；数字来自 shared/train/asr-ft 的 estimateFtCost，面板不自己算。 */}
+          <Row label="预计耗时" hint={status?.estimateBasis ?? '正在读状态…'}>
+            <span className="text-sm">{status?.estimate[mode].label ?? '…'}</span>
+          </Row>
           <Row
             label="开训"
             hint={

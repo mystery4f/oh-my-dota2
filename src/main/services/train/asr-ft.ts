@@ -30,6 +30,8 @@ import {
   ftArtifactTargets,
   missingFtSlotFiles,
   summarizePendingTakes,
+  estimateFtCost,
+  ftWavDurationMs,
 } from '@shared/train/asr-ft'
 import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
 import { loadSettings } from '../settings'
@@ -230,12 +232,26 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
   const missing = missingPythonPackages(env.paths.pythonExe ?? '', finetuneSpec().pythonExtra)
   const gaps = missing.length > 0 ? [...env.gaps, `python 包缺 ${missing.join('、')}（在 ${env.envRoot} 里 pip install）`] : env.gaps
   const engine = finetuneEngine()
+  const trainer = env.paths.trainer ?? 'qwen3-sft'
+  // 估时（#65）：条数 / 时长取当前账本，续训起点取与开训闸门同一判据（接不上的那轮不算）。
+  const ledger = await currentFtLedger()
+  const source = findIncrementalSource(ledger, trainer)
+  const costInput = {
+    trainer,
+    takes: ledger.length,
+    audioMs: ledger.reduce((sum, entry) => sum + ftWavDurationMs(entry.bytes), 0),
+    lastStep: source.ok ? source.source.lastStep : 0
+  }
+  const estimate = {
+    fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),
+    incremental: estimateFtCost({ ...costInput, mode: 'incremental' })
+  }
   return {
     env: { ok: gaps.length === 0, gaps, envRoot: env.envRoot },
     target: {
       engineId: engine.id,
       label: engine.label,
-      trainer: env.paths.trainer ?? 'qwen3-sft',
+      trainer,
       modelDir: join(app.getPath('userData'), engine.canonicalRel),
       baseModel: env.paths.baseModelId || env.paths.baseModelDir || ''
     },
@@ -245,8 +261,10 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
     // 待训数据：账本里最新修订但 run_id 为空的那些（录了还没训），条数与时长都从账本推。
     pending: summarizePendingTakes({
       entries: listDatasetEntries(),
-      hasRun: listTrainRuns().some((run) => run.kind === 'asr-ft'),
-    })
+      hasRun: listTrainRuns().some((run) => run.kind === 'asr-ft')
+    }),
+    estimate,
+    estimateBasis: estimate.fresh.basis
   }
 }
 

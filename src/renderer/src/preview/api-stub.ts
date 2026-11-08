@@ -19,7 +19,7 @@
  */
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type WindowApi } from '@shared/ipc'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
-import { summarizePendingTakes } from '@shared/train/asr-ft'
+import { estimateFtCost, summarizePendingTakes } from '@shared/train/asr-ft'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
@@ -387,6 +387,20 @@ const implemented = {
       })),
       hasRun: true
     }),
+    // 估时同样跟着预览里的录音集走：录/删一条，步数与分钟都会动（与真实现共用 estimateFtCost）。
+    ...(() => {
+      const costInput = {
+        trainer: 'funasr-paraformer' as const,
+        takes: stubRecs.length,
+        audioMs: stubRecs.reduce((sum, rec) => sum + rec.durationMs, 0),
+        lastStep: 0
+      }
+      const estimate = {
+        fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),
+        incremental: estimateFtCost({ ...costInput, mode: 'incremental' })
+      }
+      return { estimate, estimateBasis: estimate.fresh.basis }
+    })(),
     install: null
   }),
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
