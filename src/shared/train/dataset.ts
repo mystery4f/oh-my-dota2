@@ -1,6 +1,7 @@
 /** 备料打包纯缝（一键数据集）：录音 × 稿子 → 训练条目、JSONL 拼装、组进度。零 IO，磁盘真值由调用方注入。 */
 import { recordingKey } from './recording'
 import type { FtLedgerEntry } from './asr-ft'
+import { correctionTakeNo, isCorrectionTakeKey } from './corrections'
 export interface FtDatasetEntry {
   /** 完整录音键（组-句，如 G14-L03）：账本/续训判定按它对账。 */
   key: string
@@ -50,6 +51,28 @@ export function buildFtDatasetEntries(
     }
   }
   return { entries, notRecorded }
+}
+
+/**
+ * 纠错样本（#66）→ 打包条目：账本里每个键取最新修订，只留 `G01-Tnn`（自由说组的纠错样本）。
+ *
+ * 正文就是用户亲手改对的那句，所以自由说也能当监督数据用——这正是自由说手工录音做不到的。
+ * 编号排序 = 录制顺序；调用方把它们接在逐句录音后面，尾部 holdout 于是仍是最晚的句子。
+ * 只认账本（recordDatasetTake）里有的：手工录的自由说没有标签，混进来只会污染训练。
+ */
+export function buildCorrectionEntries(
+  rows: readonly { key: string; revision: number; wavPath: string; text: string }[],
+): FtDatasetEntry[] {
+  const latest = new Map<string, { key: string; revision: number; wavPath: string; text: string }>()
+  for (const row of rows) {
+    const seen = latest.get(row.key)
+    if (!seen || row.revision > seen.revision) latest.set(row.key, row)
+  }
+  return [...latest.values()]
+    .filter((row) => isCorrectionTakeKey(row.key) && row.text.trim() !== '')
+    // 按序号排，不按字符串：T100 必须排在 T99 后面（字符串序会把 T100 排到 T10 前）。
+    .sort((a, b) => (correctionTakeNo(a.key) ?? 0) - (correctionTakeNo(b.key) ?? 0))
+    .map((row) => ({ key: row.key, wavPath: row.wavPath, text: row.text }))
 }
 
 /**

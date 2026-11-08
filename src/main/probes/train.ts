@@ -15,6 +15,21 @@ import {
   takeLineId
 } from '@shared/train/recording'
 import {
+  CORRECTION_GROUP,
+  CORRECTION_LIMITS,
+  correctionTakeKey,
+  isCorrectionTakeKey,
+  judgeCorrectionSamples,
+  nextCorrectionTakeNo
+} from '@shared/train/corrections'
+import {
+  listCorrectionTakes,
+  saveVoiceCorrection,
+  stashUtterance,
+  writeCorrectionSample
+} from '../services/voice/corrections'
+import {
+  buildCorrectionEntries,
   buildFtDatasetEntries,
   buildFtGroupProgress,
   buildFtJsonlLine,
@@ -138,6 +153,172 @@ function recordLedgerWiring(): { readable: boolean; wired: boolean } {
   if (!existsSync(file)) return { readable: false, wired: false }
   const source = readFileSync(file, 'utf8')
   return { readable: true, wired: /recordDatasetTake\(/.test(source) && /forgetDatasetTake\(/.test(source) }
+}
+
+/**
+ * 纠错样本（#66）：命名与配额是纯的；写盘那一组对着临时目录 + 临时库跑（不碰 data/）。
+ * 票面三条验收都在这里：一次纠错 = 一条 wav + 一行带标签的账本；到顶只停写、旧样本一条不删；
+ * 开关关掉一个文件都不写。
+ */
+async function correctionsCases(): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), 'omd2-train-corr-'))
+  try {
+    useTrainDatabase(join(root, 'db', 'runs.db'))
+
+    // —— 命名与配额（纯） ——
+    push(
+      '纠错：第 1 条叫 G01-T01，第 100 条是三位的 G01-T100',
+      correctionTakeKey(1) === 'G01-T01' && correctionTakeKey(100) === 'G01-T100',
+      `${correctionTakeKey(1)}/${correctionTakeKey(100)}`
+    )
+    push(
+      '纠错：只认 G01 的 T 键（L 键与别的组都不算）',
+      isCorrectionTakeKey('G01-T01') && !isCorrectionTakeKey('G01-L01') && !isCorrectionTakeKey('G21-T01'),
+      `G01-T01=${isCorrectionTakeKey('G01-T01')} G01-L01=${isCorrectionTakeKey('G01-L01')} G21-T01=${isCorrectionTakeKey('G21-T01')}`
+    )
+    push(
+      '纠错：新号 = 最大号 + 1，空位不回填（一个号只对一句话）',
+      nextCorrectionTakeNo(['G01-T01', 'G01-L05', 'G01-T03']) === 4 && nextCorrectionTakeNo([]) === 1,
+      `${nextCorrectionTakeNo(['G01-T01', 'G01-L05', 'G01-T03'])}/${nextCorrectionTakeNo([])}`
+    )
+    const sortedTakes = buildCorrectionEntries([
+      { key: 'G01-T10', revision: 1, wavPath: 'a1', text: '十' },
+      { key: 'G01-T02', revision: 1, wavPath: 'b1', text: '二' },
+      { key: 'G01-T100', revision: 1, wavPath: 'c1', text: '一百' },
+      { key: 'G01-T10', revision: 2, wavPath: 'a2', text: '十（改）' },
+      { key: 'G01-L01', revision: 1, wavPath: 'd1', text: '逐句' }
+    ])
+    push(
+      '纠错：打包条目按序号排（T100 在 T10 后面），每个键只留最新修订',
+      sortedTakes.map((take) => take.key).join(',') === 'G01-T02,G01-T10,G01-T100' &&
+        sortedTakes[1]?.text === '十（改）' &&
+        sortedTakes[1]?.wavPath === 'a2',
+      sortedTakes.map((take) => `${take.key}=${take.text}`).join(' ')
+    )
+    const empty = judgeCorrectionSamples([])
+    push(
+      '纠错：0 条不算到顶',
+      !empty.atCap && empty.notice === null && empty.maxCount === CORRECTION_LIMITS.maxTakes && empty.maxBytes === CORRECTION_LIMITS.maxBytes,
+      `${empty.count}/${empty.maxCount} · ${empty.atCap}`
+    )
+    const full = judgeCorrectionSamples(Array.from({ length: CORRECTION_LIMITS.maxTakes }, () => ({ bytes: 1024 })))
+    push('纠错：满 200 条 → 到顶，提示点名条数', full.atCap && (full.notice ?? '').includes('200 条'), full.notice ?? '')
+    const heavy = judgeCorrectionSamples([{ bytes: CORRECTION_LIMITS.maxBytes - 1024 }], 4096)
+    push(
+      '纠错：再加一句就超 200MB → 到顶，提示点名 MB',
+      heavy.atCap && !judgeCorrectionSamples([{ bytes: CORRECTION_LIMITS.maxBytes - 8192 }], 4096).atCap && (heavy.notice ?? '').includes('MB'),
+      heavy.notice ?? ''
+    )
+
+    // —— 一次纠错 = 一条 wav + 一行带标签的账本 ——
+    const wavBytes = (size: number): Uint8Array => new Uint8Array(size)
+    stashUtterance('你好开雾', wavBytes(6400))
+    const first = await saveVoiceCorrection({ transcript: '你好开雾', corrected: '你好，开雾了' }, { enabled: true, root })
+    const wavPath = join(root, CORRECTION_GROUP, 'G01-T01.wav')
+    const entry = findDatasetEntry('G01-T01')
+    push(
+      '纠错：存成一条 G01-T01.wav，账本标签 = 改对的那句（待训）',
+      first.saved &&
+        first.key === 'G01-T01' &&
+        first.notice === null &&
+        existsSync(wavPath) &&
+        entry?.text === '你好，开雾了' &&
+        entry.split === 'train' &&
+        entry.runId === null,
+      `${first.key} ${entry?.text ?? 'no-entry'}`
+    )
+    const packedOnce = buildCorrectionEntries(listDatasetEntries())
+    push(
+      '纠错：打包认它（自由说组不进脚本，纠错样本单独收）',
+      packedOnce.length === 1 && packedOnce[0]?.key === 'G01-T01' && packedOnce[0]?.text === '你好，开雾了',
+      JSON.stringify(packedOnce)
+    )
+    const pendingAfter = summarizePendingTakes({ entries: listDatasetEntries(), hasRun: false })
+    push(
+      '纠错：纠错样本也算一条待训数据（面板的新录音数字会涨）',
+      pendingAfter.count === 1 && pendingAfter.label.includes('1'),
+      pendingAfter.label
+    )
+    const again = await saveVoiceCorrection({ transcript: '你好开雾', corrected: '你好，开雾' }, { enabled: true, root })
+    const revisions = listDatasetEntries().filter((row) => row.key === 'G01-T01')
+    const packedTwice = buildCorrectionEntries(listDatasetEntries())
+    push(
+      '纠错：同一句再改一次 = 换标签，不新增第二条',
+      again.saved &&
+        again.key === 'G01-T01' &&
+        readdirSync(join(root, CORRECTION_GROUP)).length === 1 &&
+        revisions.length === 2 &&
+        packedTwice.length === 1 &&
+        packedTwice[0]?.text === '你好，开雾',
+      `files=${readdirSync(join(root, CORRECTION_GROUP)).length} revs=${revisions.length} packed=${packedTwice[0]?.text ?? 'none'}`
+    )
+
+    // —— 到顶只停写：旧样本一条不删、给一句能看懂的提示 ——
+    const capRoot = join(root, 'cap')
+    const countLimits = { maxTakes: 2, maxBytes: CORRECTION_LIMITS.maxBytes }
+    const small = wavBytes(1024)
+    const save1 = await writeCorrectionSample({ root: capRoot, wav: small, corrected: '第一条', limits: countLimits })
+    const save2 = await writeCorrectionSample({ root: capRoot, wav: small, corrected: '第二条', limits: countLimits })
+    const save3 = await writeCorrectionSample({ root: capRoot, wav: small, corrected: '第三条', limits: countLimits })
+    const capKept = await listCorrectionTakes(capRoot)
+    push(
+      '纠错：到条数上限就停写，旧样本一条不删',
+      save1.saved &&
+        save2.saved &&
+        !save3.saved &&
+        save3.key === null &&
+        (save3.notice ?? '').includes('已满') &&
+        capKept.length === 2 &&
+        capKept.every((take) => existsSync(join(capRoot, CORRECTION_GROUP, `${take.key}.wav`))),
+      `saved=${save1.saved}/${save2.saved}/${save3.saved} left=${capKept.length} notice=${save3.notice ?? 'none'}`
+    )
+    const byteRoot = join(root, 'bytes')
+    const byteLimits = { maxTakes: CORRECTION_LIMITS.maxTakes, maxBytes: 1024 * 1024 }
+    const big = wavBytes(600 * 1024)
+    const big1 = await writeCorrectionSample({ root: byteRoot, wav: big, corrected: '大样本一', limits: byteLimits })
+    const big2 = await writeCorrectionSample({ root: byteRoot, wav: big, corrected: '大样本二', limits: byteLimits })
+    push(
+      '纠错：字节上限也会停写（提示点名 MB）',
+      big1.saved && !big2.saved && (big2.notice ?? '').includes('MB') && (await listCorrectionTakes(byteRoot)).length === 1,
+      `saved=${big1.saved}/${big2.saved} notice=${big2.notice ?? 'none'}`
+    )
+
+    // —— 开关关掉 / 原音没留：都不写，而且说人话 ——
+    const offRoot = join(root, 'off')
+    stashUtterance('这句关掉', wavBytes(3200))
+    const off = await saveVoiceCorrection({ transcript: '这句关掉', corrected: '这句关掉了' }, { enabled: false, root: offRoot })
+    push(
+      '纠错：开关关掉 = 一个文件都不写，也不打扰',
+      !off.saved && off.notice === null && !existsSync(join(offRoot, CORRECTION_GROUP)),
+      `saved=${off.saved} notice=${off.notice ?? 'none'}`
+    )
+    const missed = await saveVoiceCorrection({ transcript: '没识别过的一句', corrected: '随便' }, { enabled: true, root: offRoot })
+    push(
+      '纠错：原音不在内存里就说清（不假装存了）',
+      !missed.saved && (missed.notice ?? '').includes('内存') && !existsSync(join(offRoot, CORRECTION_GROUP)),
+      missed.notice ?? 'none'
+    )
+
+    // —— 接线钉：识别完留原音、打包收纠错样本（读不到源码的安装版跳过） ——
+    const sourceOf = (rel: string): string | null => {
+      const file = join(process.cwd(), rel)
+      return existsSync(file) ? readFileSync(file, 'utf8') : null
+    }
+    const ipcSource = sourceOf('src/main/ipc.ts')
+    const datasetSource = sourceOf('src/main/services/train/ft-dataset.ts')
+    push(
+      '纠错：识别结束就把原音留在内存里（ipc 接线钉）',
+      ipcSource === null || /stashUtterance\(/.test(ipcSource),
+      ipcSource === null ? '安装版没有 src/，跳过' : 'stashUtterance 在'
+    )
+    push(
+      '纠错：打包真的收了纠错样本（ft-dataset 接线钉）',
+      datasetSource === null || /buildCorrectionEntries\(/.test(datasetSource),
+      datasetSource === null ? '安装版没有 src/，跳过' : 'buildCorrectionEntries 在'
+    )
+  } finally {
+    closeTrainStore()
+  }
 }
 
 interface Row {
@@ -847,6 +1028,7 @@ export async function runTrainProbe(): Promise<void> {
   const gv = judgeGvPreflight({ expName: 'mirana', missing: ['音素表 2-name2text.txt'], gptTrained: false, sovitsTrained: false })
   push('体检：GV 缺备料阻断', preflightBlocks(gv).map((item) => item.id).join(',') === 'data', gv.map((item) => `${item.id}:${item.level}`).join(' '))
   storeCases()
+  await correctionsCases()
 
   // —— 读稿来源（#61）：数据目录的自定义稿优先，缺失/坏了才回落到随包自带的 ——
   const bundledMd = '## G01 日常\n1. 今天天气不错。\n2. 我中午吃了碗面。\n'

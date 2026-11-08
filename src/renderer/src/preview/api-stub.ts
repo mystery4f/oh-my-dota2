@@ -20,6 +20,7 @@
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type WindowApi } from '@shared/ipc'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 import { summarizePendingTakes } from '@shared/train/asr-ft'
+import { judgeCorrectionSamples } from '@shared/train/corrections'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
@@ -233,6 +234,8 @@ const stubRecs: FtRecInfo[] = [
   ...[1, 2, 3].map((no) => stubTake(`G14-L${String(no).padStart(2, '0')}`, 62_000 + no * 4000, 1900 + no * 120, stubNow - no * 86_400_000)),
   ...[1, 2, 3].map((no) => stubTake(`G19-L${String(no).padStart(2, '0')}`, 58_000 + no * 3000, 1600 + no * 90, stubNow - no * 43_200_000))
 ]
+/** 预览里的纠错样本（#66）：只记字节数，够 judgeCorrectionSamples 算出条数/字节/到顶。 */
+const stubCorrections: { bytes: number }[] = [{ bytes: 96_000 }, { bytes: 88_000 }]
 const stubGvDatasets = [
   { expName: 'mirana', ready: true, missing: [] },
   { expName: 'windranger', ready: false, missing: ['语义表 6-name2semantic.tsv'] }
@@ -363,6 +366,12 @@ const implemented = {
   },
   ftRecRead: async () => new Uint8Array(0),
   ftRecAsr: async () => ({ ok: true, text: '预览里没有真识别引擎' }),
+  // 纠错样本（#66）：预览里没有真录音可存，点「存」只让上面那一行涨一条。
+  voiceCorrection: async ({ corrected }: { corrected: string }) => {
+    if (!corrected.trim()) return { saved: false, key: null, notice: '改对的那句是空的：这次没存纠错样本' }
+    stubCorrections.push({ bytes: 96_000 })
+    return { saved: true, key: `G01-T${String(stubCorrections.length).padStart(2, '0')}`, notice: null }
+  },
   ftDatasetPrepare: async () => ({
     ok: true,
     trainCount: 38,
@@ -387,6 +396,8 @@ const implemented = {
       })),
       hasRun: true
     }),
+    // 纠错样本（#66）：预览里点「存」假存一条，这一行跟着涨（真的写盘只有 Electron 里才有）。
+    corrections: judgeCorrectionSamples(stubCorrections),
     install: null
   }),
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),

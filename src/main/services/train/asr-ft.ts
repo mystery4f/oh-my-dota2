@@ -38,6 +38,7 @@ import { locateWorkerScript } from '../voice/runtime'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList } from './ft-record'
+import { correctionSamplesStatus } from '../voice/corrections'
 import { asrRunDirsRoot, listDatasetEntries, listTrainRuns, packedLedgerForRun, trainedDatasetEntries } from './run-store'
 import { sovitsChildPid } from '../voice/sovits-server'
 import { ASR_ENGINE_LIST, type AsrEngineId, type AsrEngineSpec } from '@shared/asr/engines'
@@ -241,7 +242,14 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
     },
     swap: swapView(),
     // 覆盖标记只认「被某次 run 真正吃过」的条目：库里 run_id 非空的就是。（打包过但没训的不算。）
-    coverage: ftTrainCoverage(trainedDatasetEntries(), await ftRecList()),
+    // 逐句覆盖只数 L 键：纠错样本/自由说（T 键，G01 里也有）没有稿子行，
+    // 混进来会让 G01 的「已训 x/20」凭空多出分母。
+    coverage: ftTrainCoverage(
+      trainedDatasetEntries(),
+      (await ftRecList()).filter((info) => /-L\d{2}$/.test(info.key))
+    ),
+    // 纠错样本（#66）：同一份事实既给面板的状态行，也给到顶提示。
+    corrections: await correctionSamplesStatus(),
     // 待训数据：账本里最新修订但 run_id 为空的那些（录了还没训），条数与时长都从账本推。
     pending: summarizePendingTakes({
       entries: listDatasetEntries(),

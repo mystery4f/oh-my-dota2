@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import {
+  buildCorrectionEntries,
   buildFtDatasetEntries,
   buildFtJsonlText,
   buildFtFunasrJsonlText,
@@ -15,6 +16,7 @@ import { activeAsrModel } from '../voice/asr-model'
 import type { FtLedgerEntry } from '@shared/train/asr-ft'
 import type { FtDatasetEntry } from '@shared/train/dataset'
 import { ftRecList, ftRecPath, readFtScript } from './ft-record'
+import { listDatasetEntries } from './run-store'
 
 /**
  * 一键打包（#14）：把已录的句子×稿子文字合成官方 qwen3_asr_sft.py 要的 JSONL。
@@ -39,6 +41,9 @@ async function collectFtEntries(): Promise<{ entries: FtDatasetEntry[]; error: s
     (group, line) => recorded.has(`${group}-${line}`),
     (group, line) => ftRecPath(group, line)
   )
+  // #66：纠错样本接在逐句录音后面——正文是用户亲手改对的那句，自由说也能监督训练；
+  // 只认账本里的（手工录的自由说没有标签，不能进）。
+  entries.push(...buildCorrectionEntries(listDatasetEntries()))
   if (entries.length === 0) return { entries, error: '还没有已录的句子——先在上方录几条再打包' }
   if (entries.length < 2) return { entries, error: '只有一条录音不够——官方脚本必须带验证集，至少再录一条再打包' }
   if (!entries.every((entry) => existsSync(entry.wavPath))) {

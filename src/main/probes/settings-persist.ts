@@ -28,6 +28,7 @@ const PERSISTED_FIELDS = [
   'asrEngine',
   'asrActiveModel',
   'asrHotwords',
+  'asrCorrectionsToDataset',
   'trainKind',
   'trainDataset',
 ] as const
@@ -109,6 +110,9 @@ function sentinelFor(
     case 'asrHotwords':
       // 热词表：带中文逗号与顿号的串原样落盘原样读回（分隔符归一化只在读取热词时做）。
       return (current.asrHotwords.includes('肉山') ? '买活,高地、风暴之灵' : '肉山，买活') as AppSettings[typeof key]
+    case 'asrCorrectionsToDataset':
+      // 纠错样本回喂开关：布尔，非当前值落盘原样读回（缺省 true，归一化在 loadSettings）。
+      return !current.asrCorrectionsToDataset as AppSettings[typeof key]
     case 'trainKind':
       // 训练任务类型：非当前值落盘原样读回（枚举归一化在 loadSettings，探针喂合法值）。
       return (current.trainKind === 'demo' ? 'gv-sovits' : 'demo') as AppSettings[typeof key]

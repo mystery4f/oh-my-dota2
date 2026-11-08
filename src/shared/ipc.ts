@@ -11,6 +11,7 @@ import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared
 import type { TrainRunRecord } from '@shared/train/run'
 import type { AsrState } from '@shared/asr/models'
 import type { FtScriptState } from '@shared/train/recording'
+import type { FtCorrectionInput, FtCorrectionSaveResult } from '@shared/train/corrections'
 
 // 读稿的类型归纯缝（解析与来源选择都在那里），契约只把它们带出来给渲染端。
 export type { FtScriptGroup, FtScriptLine, FtScriptState } from '@shared/train/recording'
@@ -173,6 +174,11 @@ export interface AppSettings {
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
   asrHotwords: string
+  /**
+   * 纠错样本回喂（#66）：语音页把一句改对时，原始录音落成自由说样本（G01-Tnn），标签 = 改对的那句。
+   * 关掉 = 纠错只并热词，不写任何文件。
+   */
+  asrCorrectionsToDataset: boolean
   /** 训练窗口记住的任务类型：demo 演示任务；gv-gpt/gv-sovits/asr-ft 在 T3/T5 接入。 */
   trainKind: 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
   /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
@@ -327,6 +333,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   trainDataset: '',
   asrFtEnvDir: '',
   asrHotwords: '',
+  /** 纠错样本默认开：它只是把用户已经改对的句子留成训练数据，不改变任何现有行为。 */
+  asrCorrectionsToDataset: true,
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
   autoStartCapture: true,
@@ -678,6 +686,8 @@ export const IPC = {
   CAPTURE_UPDATE: 'capture:update',
   SESSION_STATUS: 'session:status',
   VOICE_TRANSCRIBE: 'voice:transcribe',
+  /** 语音页纠错落库（#66）：把刚才那句的原始录音留成自由说样本，标签是改对的那句。 */
+  VOICE_CORRECTION: 'voice:correction',
   // 语音链状态回显：overlay 起录/停录/出结果时报给主进程，主进程广播给面板。
   OVERLAY_VOICE_STATE: 'overlay:voice-record-state',
   OVERLAY_VOICE_RESULT: 'overlay:voice-chain-result',
@@ -972,6 +982,7 @@ export const ipcContract = {
   onVoiceChainResult: listen<VoiceChainSummary>(IPC.VOICE_CHAIN_RESULT),
   onVoiceRuntimeState: listen<VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATE),
   transcribeAudio: invoke<[string, string?], VoiceTranscribeResult>(IPC.VOICE_TRANSCRIBE),
+  voiceCorrection: invoke<[FtCorrectionInput], FtCorrectionSaveResult>(IPC.VOICE_CORRECTION),
   ttsPreview: invoke<[string], VoicePreviewResult>(IPC.VOICE_TTS_PREVIEW),
   voiceOutTest: invoke<[], VoiceOutTestResult>(IPC.VOICE_OUT_TEST),
   ttsOfflineState: invoke<[], OfflineStatus>(IPC.TTS_OFFLINE_STATE),
