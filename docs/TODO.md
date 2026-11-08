@@ -76,7 +76,7 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
 | 翻译门槛 ≥3 字符（原 `#6`） | `4600e7d` | `worthTranslating()` 要求「≥3 个码点且含字母或汉字」：`gg`/`ok`/`嗯` 不再进模型队列，照常上屏与朗读；早先的「长度 1 不翻」是同一函数的旧门槛，已被这一档取代 |
 | 朗读前缀三级化 | `feafdd2` | 英雄名 → [关系]（队友说/敌方说）→ 光念内容；allplayers 真对局一帧不推的补救 |
 | 朗读可观测日志 | `48c940b` | `TTS_SPEAK_PICK`/`TTS_SPEAK_SKIP` + `gsi-chat.jsonl` 加 `hero`/`relation` 字段 |
-| 训练记录 + 数据集账本进 SQLite | `fda114a`（ticket 59） | `train/runs.db`：一轮训练一行，一条录音一行带 `run_id`；老的 `train-runs/` 与 `asr-ft/runs` 首次打开导入一次，重跑幂等 |
+| 训练记录 + 数据集账本进 SQLite | `fda114a`（ticket 59） | `train/runs.db`：`runs` 一轮训练一行（含 `metrics`），`dataset_entries` 一段录音的一个修订一行，主键 `(key, revision)`、`run_id` 指向吃过它的那轮；老的 `<userData>/train-runs/*.json` 与 `<userData>/asr-ft-runs/<目录>/dataset.jsonl` 首次打开导入一次，重跑幂等 |
 | 录音推进到下一句未录行 | `83b6cbe`（ticket 60） | 录完自动落到下一条未录；逐句组与自由说组同一套行为 |
 | 录音脚本优先读数据目录 | `0a05983`（ticket 61） | `<userData>/asr-ft-script.md` 覆盖内置脚本；坏文件回落内置并在面板给警告，绝不白屏 |
 | 训练期推理互斥探针 | `4d62aa1`（ticket 62） | 钉住置位/清除真的发生；外部服务报 `kept-off` 不动它 |
@@ -229,9 +229,9 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
 
 ### 训练管理与识别个性化（#28 / #29 已落地，剩 #30–#32）
 
-- ~~#29~~ **已完成（2026-11-09）**：最终形态是面板的两页——音色训练 / 识别训练，**没有独立训练窗口**（`docs/adr/train-run-model-and-panel-pages.md`）。两页同一个形状：数据 → 运行 → 产物。一轮训练 = `train/runs.db` 一行，一条录音 = `dataset_entries` 一行；指标从产物里读回，不存第二份。
+- ~~#29~~ **已完成（2026-11-09）**：最终形态是面板的两页——音色训练 / 识别训练，**没有独立训练窗口**（`docs/adr/train-run-model-and-panel-pages.md`）。两页同一个形状：数据 → 运行 → 产物。一轮训练 = `runs` 一行，一段录音的一个修订 = `dataset_entries` 一行（主键 `(key, revision)`：改稿才加修订，重录不加）；指标在收场时从产物读回（ASR `checkpoint-*/trainer_state.json`、GV `logs/<exp>/train.log`）并写进 `runs.metrics`，产物那份仍是训练器自己的记录。
 - ~~#28~~ **已完成**：识别训练页能录音（录完自动落到下一句未录）、组数据集（`asr-ft-datasets`）、开训（「从底模重训」/「接着上次权重」）、导出并转正（`.next` → 回滚槽）、顺手就应用、不顺手就回滚。开训前给步数 + 分钟估算，并显示「待训多少条 / 覆盖多少」；训练跑起来自动暂停 GV 推理（推理互斥），结束恢复。
-- `#30` **Paraformer 的标点模型**：这条腿的识别结果没有标点（引擎表里 `punctuation: false`），上屏和朗读都是连读。候选是 sherpa-onnx 的标点模型，接在 worker 输出之后；触发条件是用户觉得没句读不能读。Qwen3 自带标点，不受影响。
+- `#30` **Paraformer 的标点模型**：这条腿的识别结果没有标点（引擎表里 `punctuation: 'none'`），上屏和朗读都是连读。候选是 sherpa-onnx 的标点模型，接在 worker 输出之后；触发条件是用户觉得没句读不能读。Qwen3 自带标点，不受影响。
 - `#31` **攒够待训后自动开训**：现在只报告待训条数与覆盖比例，开训要人点。先定策略（多少条 / 隔多久）再写代码，否则跑一轮几分钟、抢卡还打扰对局。
 - `#32` **盲测协议与真 holdout**：现有 CER（Qwen3 6.27% → 0.63%，Paraformer 17.79% → 11.66%）不是盲测——G15 被用来挑 checkpoint，等于参与过选型。要真验收得另录一批从没参与训练和选型的数据，并固定评审口径。
 - **刻意不做（别当待办捡回来）**：加第三引擎 / 恢复 whisper（引擎表两行就够，换引擎是重下几十 GB 的事，收益已被微调覆盖）；多任务排队与 GPU 调度（一次只跑一轮，抢显存没有收益）；把 settings / 翻译会话 / 音色包迁进 SQLite（各自已有文件与迁移，迁了不解决任何已报问题）。理由在 `docs/adr/asr-finetune-leg.md`「仍然不做」。

@@ -46,7 +46,7 @@ tags: [设计, ASR, 引擎表, 微调]
 非目标
 
 - 不改识别算法本身；paraformer 只是第一个要验的第二行。
-- 不做标点外挂（`OfflinePunctuation`）：paraformer 无标点在表里声明 `punctuation: 'external'`，实现留到后面。
+- 不做标点外挂（`OfflinePunctuation`）：paraformer 无标点在表里声明 `punctuation: 'none'`，实现留到后面。
 - 不改热词机制：仍是 Qwen3 文本提示；不支持的引擎写 `hotwords: 'none'`。
 
 ## 设计：四层
@@ -110,7 +110,7 @@ export interface AsrFinetuneSpec {
 | 引擎 | requiredPaths | hotwords | punctuation | finetune |
 | --- | --- | --- | --- | --- |
 | qwen3 | `conv_frontend.onnx`、`encoder.int8.onnx`、`decoder.int8.onnx`、`tokenizer/vocab.json`、`tokenizer/merges.txt`、`tokenizer/tokenizer_config.json` | prompt | builtin | qwen3-sft |
-| paraformer | `model.int8.onnx`、`tokens.txt` | none | external | funasr-paraformer |
+| paraformer | `model.int8.onnx`、`tokens.txt` | none | none | funasr-paraformer |
 
 ### 第二层 模型注册表（事实）
 
@@ -225,7 +225,7 @@ flowchart TD
 - paraformer 微调要不要进这次范围？提案：这次只做「结构 + 能识别」，微调的 argv 规划进第四步但先不跑训练。
 - **两种训练形态（#63 已落地）**：面板「开训方式」两档，默认「从底模重训」，另一档「接着上次权重」。
   - **从底模重训**：今天的路径，一步没改（`funasr-paraformer` 走 `++model=<底模 hub id>`，qwen3 走 `--model_path <底模目录>`，轮数/lr/argv 逐字不变）。
-  - **接着上次权重（增量）**：起点是**上一轮 run 目录里的 pytorch 权重**（`model.pt.avg1` > `model.pt.best` > `model.pt`；qwen3 是最后一次 `checkpoint-<步数>`）——不是现役 `asr-models/<engine>`，因为现役是导出后的 int8 onnx，torch 接不上。决定后先把权重抄进 `asr-models/<engine>.next`（`stageIncrementalSource`），argv 只认这份副本：funasr `++init_param=<副本>`、qwen3 `--resume_from <副本>`，lr 1e-5，目标 ≈300 步（clamp 2–12 轮）。训练只写自己的 run 目录，失败也碰不到现役权重。
+  - **接着上次权重（增量）**：起点是**上一轮 run 目录里的 pytorch 权重**（`model.pt.avg1` > `model.pt.best` > `model.pt`；qwen3 是编号最大的 `checkpoint-<步数>` 目录）——不是现役 `asr-models/<现役目录名>`，因为现役是导出后的 int8 onnx，torch 接不上。决定后先把权重抄进 `asr-models/<现役目录名>.next`（`qwen3-asr.next` / `paraformer-zh.next`，`stageIncrementalSource`），argv 只认这份副本：funasr `++init_param=<副本>`、qwen3 `--resume_from <副本>`，lr 1e-5，目标 ≈300 步（funasr 钳 2–12 轮；qwen3 从 checkpoint 步数再补 200 步）。训练只写自己的 run 目录，失败也碰不到现役权重。
   - **拒启动而非 fallback**：没有上一轮 / 账本对不上（重录过、删过）/ 权重文件被删，三种情况都拒启动并把原因写进面板，绝不悄悄改跑一小时的重训。
   - **验证集是标尺**：增量沿用上一轮那份 eval 划分（`splitIncrementalEval`），新录的句子只进 train——否则 loss 没法跟前一轮横着比。
 - **自定义录制（2026-11-09 记，用户提出）**：现在数据只能来自面板里那几组固定稿子（`asr-ft/Gxx/Gxx-Lnn.wav` + `resources/asr-ft-script.md` 的句子），用户想用自己的素材。三种来源都要接：

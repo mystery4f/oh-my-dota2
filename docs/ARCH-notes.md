@@ -65,7 +65,8 @@ Two sections, one shape: 数据 → 运行 → 产物. There is no training wind
   legacy ledger doubles as that run's `packed_ledger`, so resume keeps working after the migration.
   A corrupt database is renamed to `.corrupt-<stamp>` and rebuilt from those archives.
 - Metrics are read back from the artifacts (ASR `checkpoint-*/trainer_state.json`,
-  GV `logs/<exp>/train.log`), not duplicated into the record.
+  GV `logs/<exp>/train.log`) and copied onto the run row (`runs.metrics`) minus the step series
+  (that is trimmed by `compactMetricSeries`); the artifact remains the trainer's own record.
 - `src/shared/train/preflight.ts` is the gate: `judgeAsrPreflight` / `judgeGvPreflight`
   return `PreflightItem[]` where only `block` disables 开始训练; `warn` explains risk.
   Add a new gate there, never inline in a page.

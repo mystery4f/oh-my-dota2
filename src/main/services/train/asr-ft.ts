@@ -460,7 +460,7 @@ export function findIncrementalSource(
 }
 
 /**
- * 接续点落盘：把上一轮的权重抄进 `<asr-models>/<engine>.next` 再拼训练命令。
+ * 接续点落盘：把上一轮的权重抄进 `<asr-models>/<现役目录名>.next`（`qwen3-asr.next` / `paraformer-zh.next`）再拼训练命令。
  * 训练只读这份副本（funasr 的 init_param 会按它重建优化器，qwen3 的 resume_from 会读 trainer_state）——
  * 副本烂了、训练失败了，都碰不到现役权重和上一轮的产物。
  */
@@ -546,7 +546,7 @@ export async function resolveAsrFtTrainRequest(mode: AsrFtMode): Promise<{
     return { ok: false, error: ready.error }
   }
   const trainer = env.paths.trainer ?? 'qwen3-sft'
-  // 增量：找上一轮权重 → 沿用上一轮验证集 → 把权重抄进 <engine>.next。
+  // 增量：找上一轮权重 → 沿用上一轮验证集 → 把权重抄进 <现役目录名>.next。
   // 任何一步接不上都拒启动并点名缺什么：静默落回「从底模重训」是外行人看不出的一小时白跑。
   let source: IncrementalSource | null = null
   let stagedPath: string | null = null

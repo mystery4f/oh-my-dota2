@@ -180,7 +180,7 @@ spec #10（GitHub issue）：两条微调产线（GV 音色 / ASR 口音）从 a
 
 spec #58（GitHub issue）：把「识别个性化」从热词一条路扩成两条训练腿，并把训练记录与数据集账本收进一个库。八张票全部合并（`fda114a` → `7711a20`，文档与字段退役为 `#67`）：
 
-- #59 训练记录 + 数据集账本进 SQLite（`<userData>/train/runs.db`；老的 `train-runs/` 与 `asr-ft/runs` 首开导入一次，重跑幂等）
+- #59 训练记录 + 数据集账本进 SQLite（`<userData>/train/runs.db`；老的 `<userData>/train-runs/` 与 `<userData>/asr-ft-runs/` 首开导入一次，重跑幂等）
 - #60 录音推进到下一句未录；#61 `<userData>/asr-ft-script.md` 覆盖内置脚本（坏文件回落并给面板警告）
 - #62 推理互斥探针；#63 增量微调（接上一轮权重，账本指纹逐条对账）；#64 待训统计；#65 开训前估时；#66 纠错样本回喂
 - #67 文档与字段：根 `GLOSSARY.md` 补识别/训练词汇并合并重复的「推理互斥」；新 ADR `docs/adr/asr-finetune-leg.md` 取代「只走热词、不做微调」；`settings.asrEngine` 退役（判据见下）
@@ -192,7 +192,7 @@ spec #58（GitHub issue）：把「识别个性化」从热词一条路扩成两
 ## 候选方案（未排期）
 ### ASR 微调的自适应轮数与续训（✅ 已落地 9f40d4f）
 
-落地形态（9f40d4f）：`deriveFtEpochs`（目标 ≈800 步，clamp 10–66）经 `planAsrFtTrainArgv` 的 tuning 参数生效；续训开关（勾选 → 主进程按数据集账本指纹逐条对账后接 `--resume_from`，lr 1e-5）；显存闸 `ftVramGuard` 开跑前查 nvidia-smi（排除应用自家 GV 子进程，外部占卡点名拒启）。后续演进：#63 把续训做成「接着上次权重」的正式一档（起点是上一轮 run 的 PyTorch 权重、轮数 2–12），#65 补上「预计 N 步 / 约 X 分钟」，#67 起训练记录与账本都在 `train/runs.db`；仍有「训练窗口」字样的段落是当时的形态，窗口已退休。
+落地形态（9f40d4f）：`deriveFtEpochs`（目标 ≈800 步，clamp 10–66）经 `planAsrFtTrainArgv` 的 tuning 参数生效；续训开关（勾选 → 主进程按数据集账本指纹逐条对账后接 `--resume_from`，lr 1e-5）；显存闸 `ftVramGuard` 开跑前查 nvidia-smi（排除应用自家 GV 子进程，外部占卡点名拒启）。后续演进：#63 把续训做成「接着上次权重」的正式一档（起点是上一轮 run 的 PyTorch 权重、funasr 钳 2–12 轮，qwen3 从 checkpoint 步数再补 200 步），#65 补上「预计 N 步 / 约 X 分钟」，#59 起训练记录与账本都在 `train/runs.db`；仍有「训练窗口」字样的段落是当时的形态，窗口已退休。
 现状：`planAsrFtTrainArgv` 里的 `--epochs 66` 是给「20 条录音」实测冻下来的（G15 试点参数，勿随手改）。数据一涨代价就线性放大，而且明显过拟合：
 
 ```

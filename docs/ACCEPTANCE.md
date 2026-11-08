@@ -191,7 +191,7 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 - [ ] 热词只给能提示的引擎：现役是 Qwen3 时面板出现「热词」输入框（现役是 Paraformer 时不显示，填了也不生效）→ 填 `肉山,买活,风暴之灵`（失焦即存，重启还在）→ 说一句带这些词的话 → 错词随词表变对
 - [ ] 纠错回路：识别记录里某条原文有错词 → 点「纠错」→ 输入框预填原文，改成对的（至少补/改一个 ≥2 字的词）→ 点「存」→ 该条标记 ✏️，差异词自动出现在热词输入框里；`asrCorrectionsToDataset` 开着时，这条录音还会被记成一条纠错样本（`G01-Tnn`），下次训练能吃到
 - [ ] 引擎只剩两条：下拉里只有 Qwen3 与 Paraformer（whisper 与 SenseVoice 均已移除）；老 `settings.json` 里残留的 `asrEngine` 不影响当前选中的模型——读入即丢弃，保存一次后文件里不再有这个键
-- [ ] Paraformer 无标点属预期：切到 Paraformer 说一句 → 识别结果连读、没有标点（引擎表里 `punctuation: false`）；要句读得等 `#30` 的标点外挂
+- [ ] Paraformer 无标点属预期：切到 Paraformer 说一句 → 识别结果连读、没有标点（引擎表里 `punctuation: 'none'`）；要句读得等 `#30` 的标点外挂
 - [ ] 识别失败静默：不说话直接按第二次「语音对讲」热键 → 提示「🎤 没有检测到语音（音量 RMS …）」，不进翻译、不声出
 - [ ] 翻译失败静默：provider 不可用时 → 该行红色「✕ 翻译失败」（悬停见具体原因），不出声、也不退文出
 

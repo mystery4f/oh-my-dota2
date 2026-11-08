@@ -55,7 +55,7 @@ _Avoid_: 回复框（已移除的旧形态）、快捷面板
 _Avoid_: 识别模型（那是磁盘上的一套权重文件，见下）、ASR 类型
 
 **引擎表（engine table）**：
-`ASR_ENGINES` 那张表，一个引擎一行：sherpa 适配器键、模型目录模式、必需文件、下载来源、能否吃热词/出标点、微调腿、每步训练耗时与采样率。加一个引擎 = 加一行 + worker 里一个适配器，绝不在调用点加 if。
+`ASR_ENGINES` 那张表，一个引擎一行：sherpa 适配器键、模型目录模式、必需文件、下载来源、能否吃热词/出标点、微调腿、每步耗时 `secPerStep` 与一步吃几条 `samplesPerStep`（开训估时只读这两项，别处不另存数字）。加一个引擎 = 加一行 + worker 里一个适配器，绝不在调用点加 if。
 _Avoid_: 引擎列表、配置
 
 **识别模型（model）**：
@@ -75,11 +75,11 @@ _Avoid_: 预训练模型、原始模型
 _Avoid_: 训练腿（口语，正式用微调腿）、训练后端、框架
 
 **增量微调（incremental fine-tune）**：
-接着上一轮的 PyTorch 权重继续训练（funasr `++init_param`、qwen3 `--resume_from`），轮数（2–12）与学习率（1e-5）按「补一点」算；上一轮的录音指纹必须与当前录音逐条一致，否则拒绝并提示重训。导出的 int8 ONNX 不能续训，接续点永远是导出前的权重文件。
+接着上一轮的 PyTorch 权重继续训练（funasr `++init_param`、qwen3 `--resume_from`），学习率 1e-5 按「补一点」算，轮数分腿：funasr 钳 2–12（目标约 300 步，`deriveFtIncrementalEpochs`），qwen3 从上个 checkpoint 的步数再补 200 步再折算（`deriveFtResumeEpochs`）；上一轮的录音指纹必须与当前录音逐条一致，否则拒绝并提示重训。导出的 int8 ONNX 不能续训，接续点永远是导出前的权重文件。
 _Avoid_: 继续训练（口语）、续训（正式用全称）
 
 **转正（promote）**：
-把一轮训练的产物换到现役位置的动作：导出到 `<engine>.next` → 现役进回滚槽 → 换上新模型。识别训练页的「应用」就是它，只有转正后才影响识别。
+把一轮训练的产物换到现役位置的动作：导出到现役目录名加 `.next`（`qwen3-asr.next` / `paraformer-zh.next`）→ 现役进回滚槽 → 换上新模型。识别训练页的「应用」就是它，只有转正后才影响识别。
 _Avoid_: 应用（面板按钮文案，正式用转正）、部署
 
 **回滚槽（rollback slot）**：
@@ -87,7 +87,7 @@ _Avoid_: 应用（面板按钮文案，正式用转正）、部署
 _Avoid_: 备份（口语）、上一版
 
 **待训（pending takes）**：
-已录、但还没被任何一轮训练用过的录音段与纠错样本。训练页按它算「新数据多少条」和覆盖比例；它只是报告，不会自动开训。
+已录、但还没被任何一轮训练用过的录音段与纠错样本。训练页按它算「新数据多少条」；覆盖比例不看它——那是账本里 `run_id` 非空的逐句录音（`Gxx-Lnn`，`ftTrainCoverage`）。它只是报告，不会自动开训。
 _Avoid_: 新数据（口语）
 
 **纠错样本（correction sample）**：
@@ -124,7 +124,7 @@ _Avoid_: 安装（安装专指音色包下载动作）
 _Avoid_: 训练窗口（旧版独立窗口，已退休）
 
 **推理互斥（inference hold）**：
-训练任务占卡期间应用托管（app-managed）的 GV 推理服务自动暂停、任务退场自动恢复的互斥机制；端口上的外部服务不受影响。状态叫推理互斥状态（inference hold state），由 `training-inference-hold` 的标志位对外播报。
+训练任务占卡期间应用托管（app-managed）的 GV 推理服务自动暂停、任务退场自动恢复的互斥机制；端口上的外部服务不受影响。状态叫推理互斥状态（`InferenceHoldState`：held / kept-off / released / release-failed），挂在 `TrainTaskInfo.inference` 上；管理器用 `setInferenceHold` 翻开关，`sovitsInferenceHeld` 是探针读的只读镜像，面板文案由 `inferenceHoldLabel` 出。
 _Avoid_: 显存管理、推理抢占（inference preemption）
 
 **实验（experiment）**：

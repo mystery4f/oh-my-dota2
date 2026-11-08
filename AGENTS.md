@@ -136,7 +136,8 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `dataset_entries` = one row per recorded take revision with `run_id` NULL until a run trained
   it, capped at `TRAIN_RUN_KEEP` 200 newest runs — the only history of what was trained, with what
   data, and where the artifacts went; metrics are read back from the run's own
-  `checkpoint-*/trainer_state.json` or GV `logs/<exp>/train.log`, never stored twice),
+  `checkpoint-*/trainer_state.json` or GV `logs/<exp>/train.log`, copied onto the run row as
+  `runs.metrics` for the panel while the artifact stays the trainer's own record),
   `train-runs/` (legacy archive: the pre-SQLite one-JSON-per-run files, imported once on first
   open of the database and never written again),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB
