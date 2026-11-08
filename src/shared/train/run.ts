@@ -5,7 +5,8 @@
  */
 import type { TrainTaskKind } from './task'
 
-export type TrainRunStatus = 'running' | 'trained' | 'applied' | 'failed' | 'stopped'
+export const TRAIN_RUN_STATUSES = ['running', 'trained', 'applied', 'failed', 'stopped'] as const
+export type TrainRunStatus = (typeof TRAIN_RUN_STATUSES)[number]
 
 export interface TrainRunParams {
   /** GV 引擎版本（v2ProPlus 等）；ASR 为空。 */

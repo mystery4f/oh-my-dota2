@@ -1,4 +1,4 @@
-import { BrowserWindow, app, clipboard, ipcMain } from 'electron'
+import { app, clipboard, ipcMain } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { errorMessage } from '@shared/errors'
@@ -38,6 +38,7 @@ import {
   sovitsVoicePacks
 } from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
+import { broadcastToWindows as broadcast } from './windows/broadcast'
 import { listTrainRuns, loadTrainRun } from './services/train/run-store'
 import { getTrainManager } from './services/train/manager'
 import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
@@ -57,10 +58,6 @@ import { normalizeTrainKind } from '@shared/train/task'
 import { gsiStatus } from './services/gsi'
 
 
-/** 主进程 → 所有窗口的广播（面板按钮状态、语音链回显都靠它活着）。 */
-const broadcast = (channel: string, payload: unknown): void => {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
-}
 
 /** 明确的 GV 动作之后立刻重算就绪：3 秒 tick 只是兜底，点了按钮必须当场翻牌。 */
 function refreshReadinessAfter<T>(job: Promise<T>): Promise<T> {

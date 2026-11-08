@@ -20,6 +20,7 @@ import {
 import type { TrainStartRequest } from '@shared/train/task'
 import { discoverSovitsHome } from '../voice/sovits-server'
 import { readRefsRaw, sovitsRefsRoot, sovitsWeightsRoot, writeRefsRaw } from '../voice/sovits-refs'
+import { listTrainRuns, patchTrainRun } from './run-store'
 
 /**
  * GV（GPT-SoVITS）微调编排（T3）：备料验收 → 写训练配置 → 交给 TrainManager 跑真训练；
@@ -261,6 +262,16 @@ export function registerGvWeights(payload: GvRegisterPayload): GvRegisterResult 
       entry
     ]
     writeRefsRaw(refsRoot, next)
+    // 记录层的「已转正」跟着这次注册翻牌：训练记录里能看到音色包名，不用再翻 refs.json。
+    const run = listTrainRuns().find((item) => isGvLegKind(item.kind) && item.experiment === expName)
+    if (run) {
+      patchTrainRun(run.id, (current) => ({
+        ...current,
+        artifacts: { ...current.artifacts, voicePack: name },
+        applied: true,
+        status: 'applied'
+      }))
+    }
   } catch (err) {
     return { ok: false, error: `refs.json 写盘失败：${errorMessage(err)}` }
   }

@@ -779,6 +779,9 @@ export const IPC = {
   OVERLAY_STATE: 'overlay:state'
 } as const
 
+/** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
+export type IpcChannelValue = (typeof IPC)[keyof typeof IPC]
+
 /** Contract exposed on window.api by the preload bridge. */
 /** 离线朗读引擎（sherpa-onnx + Matcha）的安装状态。 */
 export interface OfflineStatus {

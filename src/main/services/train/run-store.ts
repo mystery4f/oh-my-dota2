@@ -5,12 +5,11 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { compareRunsDesc, type TrainRunRecord, type TrainRunStatus } from '@shared/train/run'
+import { TRAIN_RUN_STATUSES, compareRunsDesc, type TrainRunRecord, type TrainRunStatus } from '@shared/train/run'
 
 /** 只留最近这么多条：一条 JSON 几百字节到几十 KB，多到上千条才会明显占盘。 */
 export const TRAIN_RUN_KEEP = 200
 
-const STATUSES: readonly TrainRunStatus[] = ['running', 'trained', 'applied', 'failed', 'stopped']
 
 export function trainRunsDir(): string {
   return join(app.getPath('userData'), 'train-runs')
@@ -27,7 +26,7 @@ function normalizeRun(value: unknown): TrainRunRecord | null {
   const kind = typeof value.kind === 'string' ? value.kind : ''
   const status = value.status
   if (!id || !kind) return null
-  if (typeof status !== 'string' || !STATUSES.includes(status as TrainRunStatus)) return null
+  if (typeof status !== 'string' || !TRAIN_RUN_STATUSES.includes(status as TrainRunStatus)) return null
   const data = isRecord(value.data) ? value.data : {}
   return {
     id,

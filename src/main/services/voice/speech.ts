@@ -1,5 +1,5 @@
-import { BrowserWindow } from 'electron'
 import { IPC, type CaptureEntry, type SpeakPayload } from '@shared/ipc'
+import { broadcastToWindows } from '../../windows/broadcast'
 import { loadSettings } from '../settings'
 import { heroChinese } from '../hero-names'
 import { warmEdge } from './edge'
@@ -244,5 +244,5 @@ function broadcast(payload: SpeakPayload, segment: SpeechSegment): void {
     segment.audio && segment.audioMime
       ? { ...payload, text: segment.text, audio: segment.audio.toString('base64'), audioMime: segment.audioMime }
       : { ...payload, text: segment.text }
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IPC.VOICE_SPEAK, packet)
+  broadcastToWindows(IPC.VOICE_SPEAK, packet)
 }

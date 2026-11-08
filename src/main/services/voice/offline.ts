@@ -2,9 +2,9 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
 import { app } from 'electron'
 import type { OfflineStatus } from '../../../shared/ipc'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { GITHUB_MIRRORS } from '../net/download'
+import { GITHUB_MIRRORS, downloadResumable, tryMirrors } from '../net/download'
 import { locateWorkerScript, voiceRuntimeNodeBinary, voiceWorkerEnv } from './runtime'
 import { offlineVoicePreset, type OfflineVoiceId } from '../../../shared/ipc'
 import { join } from 'node:path'
@@ -139,67 +139,41 @@ export function offlineStatus(voice: OfflineVoiceId = 'baker'): OfflineStatus {
 }
 
 /**
- * GitHub release 在国内经常「连得上、没有字节」——fetch 会一直挂着不报错，
- * 界面就一直停在 0%，看起来像点了没反应。所以这里做三件事：
- *   1. 每个镜像都有停滞超时：15 秒没有新数据就判死，换下一个源；
- *   2. 依次尝试直连与几个已知的 GitHub 加速前缀；
- *   3. 每 2 MB 打一行日志，下载卡在哪一目了然。
+ * GitHub release 在国内经常「连得上、没有字节」——以前 fetch 会一直挂着不报错，界面停在 0%。
+ * 现在这里只决定「试哪些源、进度怎么报」；断流判定、续传、分段并发统一走 net/download.ts：
+ * 15 秒没有新字节就掐断换下一个镜像，已落盘的字节留在 .part 里等下次接着下。
  */
-const MIRRORS = GITHUB_MIRRORS
 const STALL_MS = 15_000
 
-async function downloadOnce(url: string, target: string, onProgress: (ratio: number) => void): Promise<void> {
-  const controller = new AbortController()
-  let stall = setTimeout(() => controller.abort(), STALL_MS)
-  const started = Date.now()
-  try {
-    const response = await fetch(url, { signal: controller.signal })
-    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
-    const total = Number(response.headers.get('content-length') ?? 0)
-    const chunks: Uint8Array[] = []
-    let received = 0
-    let reported = 0
-    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-      chunks.push(chunk)
-      received += chunk.length
-      clearTimeout(stall)
-      stall = setTimeout(() => controller.abort(), STALL_MS)
-      if (total > 0) onProgress(received / total)
-      if (received - reported >= 2 * 1024 * 1024) {
-        reported = received
-        console.log(
-          'TTS_OFFLINE_DOWNLOAD_PROGRESS',
-          JSON.stringify({ mb: Math.round(received / 1024 / 1024), totalMb: Math.round(total / 1024 / 1024) })
-        )
-      }
-    }
-    if (received === 0) throw new Error('no bytes')
-    writeFileSync(target, Buffer.concat(chunks.map((c) => Buffer.from(c))))
-    console.log(
-      'TTS_OFFLINE_DOWNLOAD_DONE',
-      JSON.stringify({ bytes: received, ms: Date.now() - started })
-    )
-  } finally {
-    clearTimeout(stall)
-  }
-}
-
-/** 依次试直连与镜像；全失败时抛出最后一个原因。 */
 async function download(url: string, target: string, onProgress: (ratio: number) => void): Promise<void> {
-  let lastError = 'unknown'
-  for (const prefix of MIRRORS) {
-    const candidate = prefix === '' ? url : `${prefix}${url}`
-    try {
+  await tryMirrors(
+    url,
+    async (candidate, prefix) => {
       console.log('TTS_OFFLINE_DOWNLOAD_TRY', JSON.stringify({ url: candidate }))
-      await downloadOnce(candidate, target, onProgress)
+      const bytes = await downloadResumable({
+        url: candidate,
+        dest: target,
+        stallMs: STALL_MS,
+        progressLogEvery: 2 * 1024 * 1024,
+        onProgress: (done, total) => {
+          if (total > 0) onProgress(done / total)
+        },
+        onProgressLog: (done, total) => {
+          console.log(
+            'TTS_OFFLINE_DOWNLOAD_PROGRESS',
+            JSON.stringify({ mb: Math.round(done / 1024 / 1024), totalMb: Math.round(total / 1024 / 1024) })
+          )
+        }
+      })
       if (prefix !== '') console.log('TTS_OFFLINE_DOWNLOAD_MIRROR', JSON.stringify({ prefix }))
-      return
-    } catch (err) {
-      lastError = errorMessage(err)
-      console.log('TTS_OFFLINE_DOWNLOAD_RETRY', JSON.stringify({ url: candidate, err: lastError }))
+      console.log('TTS_OFFLINE_DOWNLOAD_DONE', JSON.stringify({ bytes }))
+      return bytes
+    },
+    {
+      onError: (candidate, error) =>
+        console.log('TTS_OFFLINE_DOWNLOAD_RETRY', JSON.stringify({ url: candidate, err: error }))
     }
-  }
-  throw new Error(`下载失败：${lastError}`)
+  )
 }
 
 function untar(archive: string, into: string): Promise<void> {
@@ -225,7 +199,7 @@ export async function ensureOfflineModel(voice: OfflineVoiceId = 'baker'): Promi
   try {
     mkdirSync(staging, { recursive: true })
     const archive = join(staging, 'model.tar.bz2')
-    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archives[0], mirrors: MIRRORS.length - 1 }))
+    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archives[0], mirrors: GITHUB_MIRRORS.length - 1 }))
     await download(files.archives[0], archive, (ratio) => {
       state = { ...state, progress: ratio * 0.9 }
     })
