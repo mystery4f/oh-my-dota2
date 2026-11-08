@@ -250,4 +250,22 @@ flowchart TD
 - 环境：`asr-ft-install.ts` 的 pip 清单 = 冻结清单 + 各引擎 `pips` 的并集（paraformer 追加 `funasr==1.0.27`），装一次两条腿都能训；面板体检会 import 一遍 `pythonExtra`，缺包直接在「开训体检」里点名。
 - 实测证据（2026-11-08）：`.tmp/funasr-run4` 用 38 条真人录音跑完，产出 `model.pt / model.pt.best / model.pt.avg1`；`resources/asr-ft-export-funasr.py` 用同一份 checkpoint 导出后，worker 以 `kind=paraformer` 加载并解出「我没到还在冷却」「中路河道差个甲野」（G14-L01 / G15-L18），整链 `训练 → 导出 → int8+metadata → sherpa 推理` 打通；`ASR_ENGINES_PROBE 47/47 PASS`、`TRAIN_PROBE 91/91 PASS`、两套 tsc 干净、eslint 0 error。
 
-仍未做：G14 训一遍 paraformer 后拿 G15 当测试集量上限；paraformer 的标点外挂（`OfflinePunctuation`）。
+### 真跑一遍之后又补的四件事（2026-11-08 深夜）
+
+- 依赖：funasr 运行时 `import torchaudio` 却没在 setup 里声明，缺了 paraformer 训练腿一开就炸 → 冻结清单加 `torchaudio==2.4.1+cu121`，paraformer 的 `pythonExtra` 补 `torchaudio`。
+- 底模来源：funasr 的 hub 下载**只走 modelscope**（`funasr/download/download_from_hub.py`），只装 `huggingface-hub` 时 `AutoModel` 拿到 `model_class=None`，报 `TypeError: 'NoneType' object is not callable` → paraformer 的 `pips` 加 `modelscope`，`pythonExtra` 也补上。
+- 缓存位置：modelscope 默认把底模落进 `~/.cache/modelscope`，跑出应用数据目录 → `TrainPlan` 新增 `env`，funasr 的训练腿与导出腿都带 `MODELSCOPE_CACHE=<envRoot>/modelscope-cache`（`manager.spawnChild` 合并进子进程环境）。
+- 导出权重：trainer 收尾会把「验证最好的那份」平均成 `model.pt.avg1`，而 `model.pt` 是最后一个 epoch → 导出按 `model.pt.avg1 → model.pt.best → model.pt` 挑，`planAsrFtExportArgv` 多一个 `weightsFile` 参数。
+
+### G14 训一遍的实测结论（交叉验证：G14 训练 / G15 报数）
+
+| 模型 | G14 CER | G15 CER |
+| --- | --- | --- |
+| paraformer 底模 | 17.79% | 10.39% |
+| paraformer G14 微调（30 epoch） | 11.66% | 6.49% |
+| qwen3 底模 | — | 0.65% |
+| qwen3 G14 微调 | — | 1.30% |
+
+微调方向正确（G14 的「真脸」修成「真眼」），但训练集自身只降到 11.66% = 欠拟合，20 条素材的信息量是瓶颈；paraformer 侧最好 6.49%，与 qwen3 的 0.65% 仍差一个数量级。数字入 `docs/BENCH.md`，G15 参与过 checkpoint 选择因而非盲测。
+
+仍未做：paraformer 的标点外挂（`OfflinePunctuation`）；再录一批新句子做真盲测；把 30 轮往上加看 G14 能不能收敛。

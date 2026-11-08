@@ -160,8 +160,10 @@ export const ASR_ENGINES: Record<AsrEngineId, AsrEngineSpec> = {
       borrow: [{ path: 'tokens.txt' }],
       dataset: 'funasr-jsonl',
       datasetDir: 'asr-ft-datasets',
-      pythonExtra: ['funasr', 'onnxruntime', 'onnx'],
-      pips: ['funasr==1.0.27']
+      // funasr 的 hub 下载只走 modelscope（download_from_hub.py），缺了底模就拉不到；
+      // torchaudio 是它 import 时才暴露的隐式依赖，缺了一训练就炸。
+      pythonExtra: ['funasr', 'torchaudio', 'modelscope', 'onnxruntime', 'onnx'],
+      pips: ['funasr==1.0.27', 'modelscope']
     },
     note: '非自回归：约 0.07 秒/句、无标点、不吃热词；同批 40 条错字率 13.7%（Qwen3 底模 6.27%）'
   },

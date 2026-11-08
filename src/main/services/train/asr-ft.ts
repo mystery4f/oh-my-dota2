@@ -499,14 +499,21 @@ export function buildAsrFtExportPlan(request: TrainStartRequest): TrainPlan | nu
   if (asr.paths.trainer === 'funasr-paraformer' && !exportTool) return null
   // 走到这里 = 训练腿 exit 0（manager 的链回调）：账本标 trained；导出腿接着跑，转正再标 applied。
   markRunStatus(asr.data.runDir, 'trained')
-  // funasr 的 run 目录本身就是 checkpoint 目录（config.yaml + model.pt 同层，没有 checkpoint-<n> 子目录）。
+  // funasr 的 run 目录本身就是 checkpoint 目录（config.yaml + 权重同层，没有 checkpoint-<n> 子目录）。
+  // 权重优先取 trainer 收尾平均出来的 model.pt.avg1（= 验证最好的那个），再退 best，最后才是最后一个 epoch。
   const checkpointDir =
     asr.paths.trainer === 'funasr-paraformer' ? asr.data.runDir : pickLastCheckpointName(safeReaddir(asr.data.runDir))
+  // ranking 只看最后一个 epoch 会跳过验证最好的那份：训完 trainer 会把最好的权重平均成 model.pt.avg1。
+  const weightsFile =
+    ['model.pt.avg1', 'model.pt.best', 'model.pt'].find((name) => existsSync(join(asr.data.runDir, name))) ??
+    'model.pt'
   if (!checkpointDir) return null
   return {
     exe: asr.paths.pythonExe,
-    args: planAsrFtExportArgv(asr.paths, checkpointDir, asr.exportDir, exportTool),
+    args: planAsrFtExportArgv(asr.paths, checkpointDir, asr.exportDir, exportTool, weightsFile),
     // cwd 钉在导出目录：hydra 会在 cwd 里建 outputs/，不能让它在安装目录里落垃圾。
-    cwd: asr.paths.exportScript ? dirname(asr.paths.exportScript) : asr.exportDir
+    cwd: asr.paths.exportScript ? dirname(asr.paths.exportScript) : asr.exportDir,
+    // 导出也读底模：hub id 只走 modelscope，缓存钉进应用数据目录（<envRoot>/modelscope-cache）。
+    env: { MODELSCOPE_CACHE: join(dirname(dirname(dirname(asr.paths.pythonExe))), 'modelscope-cache') }
   }
 }

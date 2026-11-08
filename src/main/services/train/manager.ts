@@ -234,6 +234,7 @@ class TrainManager {
   private spawnChild(exe: string, plan: TrainPlan): void {
     const child = spawn(exe, plan.args, {
       cwd: plan.cwd ?? undefined,
+      env: plan.env ? { ...process.env, ...plan.env } : process.env,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     })

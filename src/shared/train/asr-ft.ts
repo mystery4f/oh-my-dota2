@@ -149,18 +149,20 @@ export function planAsrFtExportArgv(
   paths: AsrFtPaths,
   checkpointDir: string,
   exportDir: string,
-  exportTool = ''
+  exportTool = '',
+  // funasr：权重文件名，调用方按「avg1 → best → 最后一轮」挑；别的 trainer 用不到。
+  weightsFile = 'model.pt'
 ): string[] {
   if (paths.trainer === 'funasr-paraformer') {
     const base = paths.baseModelId || paths.baseModelDir
     if (exportTool) {
-      return [exportTool, '--base', base, '--init-param', `${checkpointDir}/model.pt`, '--output-dir', exportDir]
+      return [exportTool, '--base', base, '--init-param', `${checkpointDir}/${weightsFile}`, '--output-dir', exportDir]
     }
     return [
       '-m', 'funasr.bin.export',
       `++model=${base}`,
       // init_param 必须是权重文件：AutoModel 只判 os.path.exists，目录会送进 torch.load 直接炸。
-      `++init_param=${checkpointDir}/model.pt`,
+      `++init_param=${checkpointDir}/${weightsFile}`,
       `++output_dir=${exportDir}`,
       '++type=onnx',
       '++quantize=true',

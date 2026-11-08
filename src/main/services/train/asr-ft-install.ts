@@ -33,6 +33,8 @@ const PYTHON_MIRROR = 'https://registry.npmmirror.com/-/binary/python-build-stan
 /** 试点环境的冻结版本（uv pip freeze 实测可跑通训练+导出的组合）。 */
 export const ASR_FT_PIP_SPEC: string[] = [
   'torch==2.4.1+cu121',
+  // funasr 运行时导入它，但它的 setup 没声明；缺了 paraformer 训练腿一 import 就炸。
+  'torchaudio==2.4.1+cu121',
   'transformers==4.57.6',
   'huggingface-hub==0.34.4',
   'datasets==4.0.0',

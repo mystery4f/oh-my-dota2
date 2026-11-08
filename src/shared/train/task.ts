@@ -4,6 +4,7 @@
  * asr-ft / gv 两个子缝往 deriveTrainPlan 的 switch 里补真命令即可，结构不动。
  */
 import { planAsrFtTrainArgv, type AsrFtDatasetPlan, type AsrFtPaths, type AsrFtTrainTuning } from './asr-ft'
+import { dirname, join } from 'node:path'
 import { GV_LEGS, type GvResolvedPaths, type GvTrainOptions } from './gv'
 export type TrainTaskKind = 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
 
@@ -87,6 +88,8 @@ export interface TrainPlan {
   cwd: string | null
   /** 非空 = 这个 kind 还没接真训练栈，启动会被拒绝。 */
   unavailable?: string
+  /** 追加到子进程的环境变量（如把 funasr 的底模缓存钉进数据目录）。 */
+  env?: Record<string, string>
 }
 
 const TRAIN_KINDS: readonly TrainTaskKind[] = ['demo', 'asr-ft', 'gv-gpt', 'gv-sovits']
@@ -141,7 +144,17 @@ export function deriveTrainPlan(req: TrainStartRequest): TrainPlan {
       // hydra 会在 cwd 下建 outputs/<日期>/<时间>/.hydra：funasr 那条腿必须把 cwd 钉在这次 run 目录，
       // 否则安装目录里多一堆垃圾（qwen3 的 sft 脚本不写 cwd，保持 null 走默认）。
       const cwd = asr.paths.trainer === 'funasr-paraformer' ? asr.data.runDir : null
-      return { exe: asr.paths.pythonExe, args: planAsrFtTrainArgv(asr.paths, asr.data, asr.tuning), cwd }
+      // funasr 拉底模只走 modelscope；不钉缓存目录它就落到 ~/.cache，跑出应用数据目录。
+      const env =
+        asr.paths.trainer === 'funasr-paraformer'
+          ? { MODELSCOPE_CACHE: join(dirname(dirname(dirname(asr.paths.pythonExe))), 'modelscope-cache') }
+          : undefined
+      return {
+        exe: asr.paths.pythonExe,
+        args: planAsrFtTrainArgv(asr.paths, asr.data, asr.tuning),
+        cwd,
+        env
+      }
     }
     case 'gv-gpt':
     case 'gv-sovits': {
