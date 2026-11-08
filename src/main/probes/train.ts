@@ -1,4 +1,7 @@
 import { app } from 'electron'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   advanceRecording,
   initialRecordingState,
@@ -62,14 +65,33 @@ import {
   finishTrainRun,
   METRIC_SERIES_MAX,
   parseAsrTrainerState,
-  parseGvTrainLog
+  parseGvTrainLog,
+  type TrainRunRecord
 } from '@shared/train/run'
 import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
+import {
+  closeTrainStore,
+  packedLedgerForRun,
+  findDatasetEntry,
+  importLegacyTrainData,
+  listDatasetEntries,
+  listTrainRuns,
+  loadTrainRun,
+  markDatasetEntryTrained,
+  patchTrainRun,
+  pruneTrainRuns,
+  saveDatasetLedger,
+  saveTrainRun,
+  trainDbPath,
+  trainedDatasetEntries,
+  useTrainDatabase
+} from '../services/train/run-store'
 
 /**
- * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度/录音判定/GV 微调配置）。
- * 纯函数零进程零网络；进程生命周期（spawn/停/树杀）进 docs/ACCEPTANCE.md 人工验收。
+ * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度/录音判定/GV 微调配置/存储层）。
+ * 纯函数零进程零网络；存储层那一组对着临时库跑（不碰 data/ 里的真库）；
+ * 进程生命周期（spawn/停/树杀）进 docs/ACCEPTANCE.md 人工验收。
  */
 
 interface Row {
@@ -572,6 +594,7 @@ export function runTrainProbe(): void {
   )
   const gv = judgeGvPreflight({ expName: 'mirana', missing: ['音素表 2-name2text.txt'], gptTrained: false, sovitsTrained: false })
   push('体检：GV 缺备料阻断', preflightBlocks(gv).map((item) => item.id).join(',') === 'data', gv.map((item) => `${item.id}:${item.level}`).join(' '))
+  storeCases()
   let failed = 0
   for (const item of cases) {
     if (!item.ok) failed++
@@ -579,4 +602,167 @@ export function runTrainProbe(): void {
   }
   console.log(`TRAIN_PROBE ${cases.length - failed}/${cases.length} PASS`)
   app.exit(failed > 0 ? 1 : 0)
+}
+
+/**
+ * #59 存储层：训练记录 + 数据集账本对着一个临时库跑，data/ 里的真库一个字节都不碰。
+ * 迁移用例现造旧目录（train-runs/*.json + asr-ft-runs/<目录>/dataset.jsonl），导两次验幂等。
+ */
+function storeCases(): void {
+  const root = mkdtempSync(join(tmpdir(), 'omd2-train-store-'))
+  try {
+    useTrainDatabase(join(root, 'db', 'runs.db'))
+    push(
+      '存储：一份库文件在 userData/train/runs.db',
+      trainDbPath().replace(/\\/g, '/').endsWith('/train/runs.db'),
+      trainDbPath()
+    )
+    push('存储：空库没有记录', listTrainRuns().length === 0 && listDatasetEntries().length === 0, `${listTrainRuns().length}/${listDatasetEntries().length}`)
+
+    const base = Date.UTC(2026, 0, 1, 0, 0, 0)
+    const runAt = (offsetMs: number): TrainRunRecord =>
+      buildTrainRun({
+        kind: 'asr-ft',
+        experiment: `ft-${offsetMs}`,
+        params: { batchSize: 1, epochs: 3, lr: '2e-5', resumeFrom: null },
+        data: { files: 2, durationMs: 5000, bytes: 2048 },
+        artifacts: { runDir: join(root, 'asr-ft-runs', `ft-${offsetMs}`), exportDir: join(root, 'onnx', `ft-${offsetMs}`) },
+        startedAt: base + offsetMs
+      })
+    // 三条：收场成功（带指标）、失败（带原因）、还在跑。
+    const oldest = finishTrainRun(runAt(0), {
+      status: 'trained',
+      endedAt: base + 1000,
+      metrics: { steps: 12, epochs: 3, bestLoss: 0.5, lastLoss: 0.7, series: [{ step: 4, epoch: 1, loss: 0.9 }, { step: 12, epoch: 3, loss: 0.7 }] }
+    })
+    const middle = finishTrainRun(runAt(1000), { status: 'failed', error: 'exit 1', endedAt: base + 2000 })
+    const newest = runAt(2000)
+    for (const run of [oldest, middle, newest]) saveTrainRun(run)
+    push(
+      '存储：列表最新在前',
+      listTrainRuns().map((run) => run.id).join('|') === [newest.id, middle.id, oldest.id].join('|'),
+      listTrainRuns().map((run) => run.id).join(' ')
+    )
+    const back = loadTrainRun(oldest.id)
+    const sameShape = back !== null && JSON.stringify(back) === JSON.stringify(oldest)
+    push(
+      '存储：读一条 = 写进去的形状（参数/指标/产物全在）',
+      sameShape && back.metrics?.series.length === 2,
+      sameShape ? `${back.id} ${back.status} steps=${back.metrics?.steps}` : `read=${JSON.stringify(back).slice(0, 300)}`
+    )
+    const patched = patchTrainRun(middle.id, (run) => ({ ...run, applied: true }))
+    push('存储：改一条（转正标记）', patched?.applied === true && loadTrainRun(middle.id)?.applied === true, `applied=${patched?.applied}`)
+
+    const pruned = pruneTrainRuns(2)
+    push(
+      '存储：超上限裁掉最旧的',
+      pruned === 1 && listTrainRuns().length === 2 && loadTrainRun(oldest.id) === null,
+      `pruned=${pruned} left=${listTrainRuns().length}`
+    )
+
+    const wav = (key: string, bytes: number, mtimeMs: number, text: string, split: 'train' | 'eval'): FtLedgerEntry => ({
+      key,
+      wavPath: join(root, 'asr-ft', `${key}.wav`),
+      bytes,
+      mtimeMs,
+      text,
+      split
+    })
+    saveDatasetLedger([wav('G14-L01', 100, 1, '第一句', 'train'), wav('G14-L02', 200, 2, '第二句', 'eval')])
+    push('账本：打包记账写入两条', listDatasetEntries().length === 2, listDatasetEntries().map((entry) => entry.key).join(' '))
+    saveDatasetLedger([wav('G14-L01', 120, 5, '第一句', 'train'), wav('G14-L02', 200, 2, '第二句', 'train')])
+    const reRecorded = findDatasetEntry('G14-L01')
+    const evalKept = findDatasetEntry('G14-L02')
+    push(
+      '账本：重录同一句还是同一个修订，验证集划分不被重打包挪走',
+      reRecorded?.revision === 1 && reRecorded.bytes === 120 && evalKept?.split === 'eval',
+      `rev=${reRecorded?.revision} bytes=${reRecorded?.bytes} split=${evalKept?.split}`
+    )
+    saveDatasetLedger([wav('G14-L01', 120, 5, '第一句（改稿）', 'train')])
+    const corrected = findDatasetEntry('G14-L01')
+    push(
+      '账本：改过稿件 = 新修订（旧修订留着）',
+      corrected?.revision === 2 && corrected.runId === null && listDatasetEntries().length === 3,
+      `rev=${corrected?.revision} rows=${listDatasetEntries().length}`
+    )
+    push('账本：没训过的条目 run_id 为空', trainedDatasetEntries().length === 0, `${trainedDatasetEntries().length}`)
+    const marked = markDatasetEntryTrained('G14-L02', 1, newest.id)
+    push(
+      '账本：标记已训（run_id 落行）',
+      marked && findDatasetEntry('G14-L02')?.runId === newest.id && trainedDatasetEntries().length === 1,
+      `runId=${findDatasetEntry('G14-L02')?.runId} trained=${trainedDatasetEntries().length}`
+    )
+    saveDatasetLedger([wav('G14-L01', 120, 5, '第一句（改稿）', 'train')], newest.id)
+    const snapshot = packedLedgerForRun(newest.id)
+    push(
+      '账本：开训留打包快照，失败的 run 也能续训对账',
+      snapshot?.map((entry) => `${entry.key}/${entry.bytes}`).join(',') === 'G14-L01/120' &&
+        findDatasetEntry('G14-L01')?.runId === null,
+      `snapshot=${snapshot?.length ?? 'null'} runId=${findDatasetEntry('G14-L01')?.runId}`
+    )
+
+    // —— 迁移：旧版散文件（只读归档）——
+    const legacyRunsDir = join(root, 'legacy', 'train-runs')
+    const legacyAsrRoot = join(root, 'legacy', 'asr-ft-runs')
+    const legacyRunDir = join(legacyAsrRoot, 'ft-20260101000000')
+    mkdirSync(legacyRunsDir, { recursive: true })
+    mkdirSync(legacyRunDir, { recursive: true })
+    const legacyRun = finishTrainRun(
+      buildTrainRun({
+        kind: 'asr-ft',
+        experiment: '',
+        data: { files: 1, durationMs: 1000, bytes: 10 },
+        artifacts: { runDir: legacyRunDir },
+        startedAt: base - 60000
+      }),
+      { status: 'trained' }
+    )
+    writeFileSync(join(legacyRunsDir, `${legacyRun.id}.json`), JSON.stringify(legacyRun), 'utf8')
+    writeFileSync(
+      join(legacyRunDir, 'dataset.jsonl'),
+      `${JSON.stringify({ key: 'G01-L01', wavPath: join(legacyRunDir, 'G01-L01.wav'), bytes: 10, mtimeMs: 1, text: '旧句', split: 'train' })}\n`,
+      'utf8'
+    )
+    const runsBefore = listTrainRuns().length
+    const entriesBefore = listDatasetEntries().length
+    const firstImport = importLegacyTrainData({ runsDir: legacyRunsDir, asrRunsDir: legacyAsrRoot })
+    const imported = findDatasetEntry('G01-L01')
+    const importedSnapshot = packedLedgerForRun(legacyRun.id)
+    push(
+      '迁移：旧 run 与账本进库，条目挂到那次 run',
+      !firstImport.skipped &&
+        listTrainRuns().length === runsBefore + 1 &&
+        listDatasetEntries().length === entriesBefore + 1 &&
+        imported?.runId === legacyRun.id &&
+        importedSnapshot?.map((entry) => entry.key).join(',') === 'G01-L01' &&
+        loadTrainRun(legacyRun.id) !== null,
+      `runs=${firstImport.runs} entries=${firstImport.entries} runId=${imported?.runId} snap=${importedSnapshot?.length ?? 'null'}`
+    )
+    const secondImport = importLegacyTrainData({ runsDir: legacyRunsDir, asrRunsDir: legacyAsrRoot })
+    push(
+      '迁移：同一批旧文件再导一次，一行都不多',
+      secondImport.runs === 0 &&
+        secondImport.entries === 0 &&
+        listTrainRuns().length === runsBefore + 1 &&
+        listDatasetEntries().length === entriesBefore + 1,
+      `runs=${secondImport.runs} entries=${secondImport.entries} total=${listTrainRuns().length}/${listDatasetEntries().length}`
+    )
+    push(
+      '迁移：旧文件原样留着（只读归档）',
+      readdirSync(legacyRunDir).join(',') === 'dataset.jsonl' && existsSync(join(legacyRunsDir, `${legacyRun.id}.json`)),
+      readdirSync(legacyRunDir).join(',')
+    )
+
+    const total = listTrainRuns().length
+    const totalEntries = listDatasetEntries().length
+    closeTrainStore()
+    push(
+      '存储：关掉重新打开，记录还在（真落盘）',
+      listTrainRuns().length === total && listDatasetEntries().length === totalEntries && loadTrainRun(legacyRun.id) !== null,
+      `${listTrainRuns().length}/${total}`
+    )
+  } finally {
+    closeTrainStore()
+    rmSync(root, { recursive: true, force: true })
+  }
 }

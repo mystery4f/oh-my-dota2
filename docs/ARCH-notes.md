@@ -52,9 +52,18 @@ Two sections, one shape: 数据 → 运行 → 产物. There is no training wind
 
 - `src/shared/train/run.ts` is the run model: `TrainRunRecord` plus the builders
   (`buildTrainRun`, `finishTrainRun`) and metric parsers (`parseAsrTrainerState`,
-  `parseGvTrainLog`, `compactMetricSeries`). One run = one JSON under
-  `userData/train-runs/`, written atomically by `services/train/run-store.ts`; a run is
-  history, the training process is `TrainTaskInfo` — never conflate them.
+  `parseGvTrainLog`, `compactMetricSeries`). One run = one row in
+  `userData/train/runs.db` (`services/train/run-store.ts`, built-in `node:sqlite`); the same
+  module owns the dataset ledger (`dataset_entries`, PK `(key, revision)`, `run_id` NULL = never
+  trained by a run). The ledger rows are the current worklist and are updated in place when a clip is
+  re-recorded; each run also keeps a frozen `packed_ledger` snapshot of what it packed, which is what
+  the resume check compares against (a failed run stays resumable). A clip's `revision` only bumps when
+  its label text changes. A run is history, the training process is `TrainTaskInfo` — never conflate
+  them.
+- Legacy `userData/train-runs/*.json` and `<asrRun>/dataset.jsonl` are imported once, on the first
+  open of the database (idempotent, marker in the `meta` table), and stay as read-only archives; the
+  legacy ledger doubles as that run's `packed_ledger`, so resume keeps working after the migration.
+  A corrupt database is renamed to `.corrupt-<stamp>` and rebuilt from those archives.
 - Metrics are read back from the artifacts (ASR `checkpoint-*/trainer_state.json`,
   GV `logs/<exp>/train.log`), not duplicated into the record.
 - `src/shared/train/preflight.ts` is the gate: `judgeAsrPreflight` / `judgeGvPreflight`

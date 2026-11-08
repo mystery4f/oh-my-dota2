@@ -209,7 +209,7 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 训练记录：
 - [ ] 开一次训后，运行段出现一条记录：种类 · 实验、状态胶囊、数据/步数/损失/耗时一行；关掉面板重开还在
 - [ ] ASR 跑完后记录里有 loss 曲线（来自 checkpoint 的 trainer_state.json），最低/最新/点数在曲线下方
-- [ ] 记录文件落在应用数据目录 train-runs/ 下，一条一个 json；删掉记录不删磁盘上的训练产物
+- [ ] 记录落在应用数据目录 `train/runs.db`（一次开训一行，SQLite；旧 `train-runs/*.json` 只读归档、首次打开时导入一次）；删掉记录不删磁盘上的训练产物
 识别训练：
 - [ ] 数据段：组下拉列出读稿组，句号条灰（未录）/绿（已录）/蓝（当前）；大字区显示当前句
 - [ ] 点「录制」→ 念一句 → 停顿约 1 秒自动停 → 提示「已存 Gxx-Lnn（x.xs）」；短于 0.4 秒被丢弃并说明原因
