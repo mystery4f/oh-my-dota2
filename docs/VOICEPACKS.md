@@ -5,7 +5,7 @@
 
 ## 版本管理规则
 
-- **文件名就是版本号**：`windranger-e15.ckpt` 的 `e15` = GPT 训了 15 轮，`windranger_e8_s192.pth`
+- **文件名就是版本号**：`mirana-e15.ckpt` 的 `e15` = GPT 训了 15 轮，`mirana_e8_s336.pth`
   的 `e8` / `s192` = SoVITS 第 8 轮第 192 步。重训出来的文件名必然不同，天然防串版。
 - **分发目录 = 魔搭仓清单**：`a1078185271/oh-my-dota2-voicepacks` 仓库根放一份
   `voicepacks.json`（schema 见下），app 优先拉它（5 分钟缓存），拉不到才用编译进包的
@@ -14,6 +14,11 @@
   里对应包的 `version` 和文件名/字节数即可。用户端下一次拉清单就看到新版，点下载即换版。
 - **换版清理**：装新版时旧权重文件（`gpt-sovits/weights/<id>/` 下不在新版清单里的）和
   本包目录下的旧参考音频自动删掉；其他音色/用户自建的参考永不触碰。
+- **下线一个音色包**：先传一份不含该包的 `voicepacks.json`（客户端只认它，老用户刷新后即看不到），
+  再去网页端删残留权重文件 —— 令牌删不了文件：`HubApi.delete_files` 恒定返回
+  `401 {"Code":10010101003,"Message":"the current token no longer supports deletion operations"}`，
+  `scripts/ms-voicepack-upload.py --delete` 会如实报 `deleted=0 failed=N` 并以退出码 1 结束。
+  删除地址：https://www.modelscope.cn/models/a1078185271/oh-my-dota2-voicepacks/files
 - **面板操作**：音色包下拉选包看详情（状态/版本/大小/说明），下载、重新下载（幂等补齐）、
   删除（正在使用的包会被拒绝，先切别的音色）。
 
@@ -24,16 +29,16 @@
   "schemaVersion": 1,
   "packs": [
     {
-      "id": "windranger",
-      "name": "风行者",
+      "id": "mirana",
+      "name": "米拉娜",
       "version": "e15",
       "note": "默认音色，引擎装完自动下载（约 230MB）",
       "default": true,
-      "promptText": "谁能预测到这一幕？哦，等一下。是我。",
+      "promptText": "从银夜森林到太阳帝权人们都是怀着敬畏和尊重说出我的名字",
       "promptLang": "zh",
-      "refAudio":   { "path": "windranger/windranger-arcana-ref-zh.wav", "bytes": 284666 },
-      "gptWeights": { "path": "windranger/windranger-e15.ckpt", "bytes": 155312333 },
-      "sovitsWeights": { "path": "windranger/windranger_e8_s192.pth", "bytes": 85007488 }
+      "refAudio":   { "path": "mirana/mira_per_spawn_13.mp3", "bytes": 73551 },
+      "gptWeights": { "path": "mirana/mirana-e15.ckpt", "bytes": 155312566 },
+      "sovitsWeights": { "path": "mirana/mirana_e8_s336.pth", "bytes": 85006749 }
     }
   ]
 }
@@ -55,15 +60,15 @@
 
 | 音色 id | 名字 | 训练日期 | GPT 轮次 | SoVITS | 参考音频 | 参考转写 |
 |---|---|---|---|---|---|---|
-| 音色 id | 名字 | 训练日期 | GPT 轮次 | SoVITS | 参考音频 | 参考转写 |
-|---|---|---|---|---|---|---|
-| windranger | 风行者 | 2026-10 | e15 | e8/s192 | `windranger-arcana-ref-zh.wav`（至宝语音提取） | 谁能预测到这一幕？哦，等一下。是我。 |
+| dark_willow | 邪影芳灵 | 2026-11-08 | e15 | e8/s1608 | `dark_willow/sylph_move_13.mp3`（移动语音，原生 44.1kHz，3.31 秒） | 我会证明我才是最厉害的 |
+| windranger | 风行者 | 2026-10 | e15 | e8/s192 | `windranger-arcana-ref-zh.wav`（至宝语音提取） | 谁能预测到这一幕？哦，等一下。是我。（已下线 2026-11-08，权重与素材全量删除） |
 | mirana | 米拉娜 | 2026-10 | e15 | e8/s336 | `mira_per_spawn_13.mp3`（复活语音） | 从银夜森林到太阳帝权人们都是怀着敬畏和尊重说出我的名字 |
-| windranger | 风行者 | 2026-11-02 | e15-854 | e8/s1384 | `windranger-arcana-ref-zh.wav`（至宝语音提取） | 谁能预测到这一幕？哦，等一下。是我。 |
+| windranger | 风行者 | 2026-11-02 | e15-854 | e8/s1384 | `windranger-arcana-ref-zh.wav`（至宝语音提取） | 谁能预测到这一幕？哦，等一下。是我。（已下线 2026-11-08，权重与素材全量删除） |
 | mirana | 米拉娜 | 2026-11-02 | e15-s3520 | e8/s3520 | `mira_per_spawn_13.mp3`（复活语音） | 从银夜森林到太阳帝权人们都是怀着敬畏和尊重说出我的名字 |
 
 - 训练底座：GPT-SoVITS v2Pro（`gsv-v2final-pretrained` 三件套，随 8.2GB 引擎包分发）
 - 2026-11-02 重训数据量：风行者 854 条（436 至宝 + 461 本体 + 58 旧），米拉娜 2218 条（ZH 1104 + EN 1114，龙之血人格套 mira_per 占 79%）
+- 2026-11-08 重训数据量：邪影芳灵 1001 条（中文包 3–10 秒片段；Qwen3-ASR 主文本 + paraformer 二票 + whisper 交叉校验 + 官方英文字幕纠错，31 条同音字修正、11 条乱码丢弃）
 - 增加零样本音色（如晓晓/晓伊）：不用训练，参考音频进 `tts/sovits-refs/` 的 refs.json 即可
   （不带 `gptWeights`/`sovitsWeights` 字段，走底座零样本推理）
 - 新英雄音色流程：训练 → 传魔搭仓 → `voicepacks.json` 加一条 → 完事，不需要发 app
@@ -77,7 +82,7 @@
 
 | 资产 | 位置 | 大小 | 说明 |
 |---|---|---|---|
-| 原始数据集（vpk 提取 + ASR 转写） | `D:\AI\windranger-finetune\` | 137MB | 风行者 854 条数据集的源头（raw2/ 为 vpk 全量提取） |
+| 原始数据集（vpk 提取 + ASR 转写） | `D:\AI\windranger-finetune\` | ~~137MB~~ | 风行者 854 条数据集的源头（raw2/ 为 vpk 全量提取）；**已随风行者一起删除**，只剩 `D:\AI\mirana-finetune\`（173MB） |
 | 同上 | `D:\AI\mirana-finetune\` | 173MB | 米拉娜 2218 条（audio/ 全量 vpk 提取；旧 raw/ 是 209 条时代） |
 | 训练配置 | `D:\AI\GPT-SoVITS-v2pro-20250604\logs\<hero>\config.json` | 2KB | 实验参数（语义/批次/轮次） |
 | 中间轮与上一代权重 | `{GPT,SoVITS}_weights_v2\` | ~1.5GB | 中间轮（wr e4/e5/e10、s692；mira e5/e10、s1760）仅本地；上一代在用版（wr s192、mira s336）魔搭有，作回滚 |

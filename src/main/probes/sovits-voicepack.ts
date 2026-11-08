@@ -122,12 +122,13 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
     push('没人当默认时保住内置默认包', keptDefault.find((item) => item.id === builtinDefaultId)?.default === true)
 
     // —— 纯函数：包条目合并（同名/同音频去重）与孤儿清理 ——
+    const oldDir = VOICE_PACKS[0].refAudio.relPath.split('/')[0]
     const oldRefs = [
-      { name: '风行者', audio: 'windranger/old-ref.wav', promptText: '旧', promptLang: 'zh', gptWeights: 'windranger/old.ckpt', sovitsWeights: 'windranger/old.pth' },
+      { name: VOICE_PACKS[0].name, audio: `${oldDir}/old-ref.wav`, promptText: '旧', promptLang: 'zh', gptWeights: `${oldDir}/old.ckpt`, sovitsWeights: `${oldDir}/old.pth` },
       { name: '别的', audio: 'other/keep.wav', promptText: '留', promptLang: 'zh' }
     ]
     const packMerged = packRefsMerge(oldRefs, VOICE_PACKS[0])
-    push('同名旧条目剔掉且报出旧音频', packMerged.list.length === 2 && packMerged.staleAudio.includes('windranger/old-ref.wav'))
+    push('同名旧条目剔掉且报出旧音频', packMerged.list.length === 2 && packMerged.staleAudio.includes(`${oldDir}/old-ref.wav`))
     push('新条目带权重路径落位', (packMerged.list.at(-1) as { gptWeights?: string }).gptWeights === VOICE_PACKS[0].gptWeights.relPath)
     const sameAudioMerged = packRefsMerge([{ name: '别名', audio: VOICE_PACKS[0].refAudio.relPath, promptText: 'x', promptLang: 'zh' }], VOICE_PACKS[0])
     push('同音频不同名也替换', sameAudioMerged.list.length === 1 && sameAudioMerged.staleAudio.length === 0)
@@ -145,16 +146,19 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
     push('同版本不算升级', !packUpgradable('e30', 'e30'))
     push('没记录版本不乱报升级', !packUpgradable(null, 'e30'))
 
-    const packV2 = { ...VOICE_PACKS[0], gptWeights: { ...VOICE_PACKS[0].gptWeights, relPath: 'windranger/windranger-e30.ckpt' } }
-    const wDir = join(weightsRoot, 'windranger')
+    const basePack = VOICE_PACKS[0]
+    const baseId = basePack.id
+    const baseSovitsName = basePack.sovitsWeights.relPath.split('/').pop() ?? ''
+    const packV2 = { ...basePack, gptWeights: { ...basePack.gptWeights, relPath: `${baseId}/${baseId}-e30.ckpt` } }
+    const wDir = join(weightsRoot, baseId)
     mkdirSync(wDir, { recursive: true })
-    writeFileSync(join(wDir, 'windranger-e30.ckpt'), Buffer.alloc(4, 1))
-    writeFileSync(join(wDir, VOICE_PACKS[0].sovitsWeights.relPath.split('/').pop() ?? ''), Buffer.alloc(4, 1))
-    writeFileSync(join(wDir, 'windranger-e15.ckpt.part'), Buffer.alloc(4, 1))
-    const cleaned = cleanupStalePackFiles(packV2, ['windranger/old-ref.wav', 'other/keep.wav'], refsRoot, weightsRoot)
+    writeFileSync(join(wDir, `${baseId}-e30.ckpt`), Buffer.alloc(4, 1))
+    writeFileSync(join(wDir, baseSovitsName), Buffer.alloc(4, 1))
+    writeFileSync(join(wDir, `${baseId}-e15.ckpt.part`), Buffer.alloc(4, 1))
+    const cleaned = cleanupStalePackFiles(packV2, [`${baseId}/old-ref.wav`, 'other/keep.wav'], refsRoot, weightsRoot)
     push(
       '换版清理只删旧权重与旧参考',
-      cleaned.includes('weights/windranger/windranger-e15.ckpt.part') && !cleaned.some((f) => f.includes('windranger_e8_s192.pth')) && !cleaned.includes('other/keep.wav'),
+      cleaned.includes(`weights/${baseId}/${baseId}-e15.ckpt.part`) && !cleaned.some((f) => f.includes(baseSovitsName)) && !cleaned.includes('other/keep.wav'),
       cleaned.join('|')
     )
     // —— 集成：远端清单经本地 HTTP 生效（resolveVoicePacks 可注入 URL） ——
@@ -182,7 +186,7 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
       const fallbackPacks = await resolveVoicePacks({ url: `http://127.0.0.1:${manifestServer.port}/missing.json` })
       push(
         '清单 404 落回内置兜底',
-        fallbackPacks.length === VOICE_PACKS.length && fallbackPacks.find((item) => item.id === 'windranger')?.version === 'e15',
+        fallbackPacks.length === VOICE_PACKS.length && fallbackPacks.find((item) => item.id === VOICE_PACKS[0].id)?.version === VOICE_PACKS[0].version,
         fallbackPacks.map((item) => `${item.id}:${item.version}`).join('|')
       )
     } finally {

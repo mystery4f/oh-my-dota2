@@ -57,20 +57,8 @@ function modelscopeUrl(path: string): string {
   return `https://www.modelscope.cn/models/${VOICEPACK_REPO}/resolve/master/${path}`
 }
 
-/** 内置目录：两个英雄音色 = 训练对（ckpt + pth 成对切），字节数取自训练产物实测。 */
+/** 内置目录：离线兜底音色，远端清单可用时以远端为准；字节数取自训练产物实测。 */
 export const VOICE_PACKS: VoicePackDef[] = [
-  {
-    id: 'windranger',
-    name: '风行者',
-    version: 'e15',
-    note: '与米拉娜同批训练（约 230MB）',
-    default: false,
-    promptText: '谁能预测到这一幕？哦，等一下。是我。',
-    promptLang: 'zh',
-    refAudio: { url: modelscopeUrl('windranger/windranger-arcana-ref-zh.wav'), relPath: 'windranger/windranger-arcana-ref-zh.wav', bytes: 284_666 },
-    gptWeights: { url: modelscopeUrl('windranger/windranger-e15.ckpt'), relPath: 'windranger/windranger-e15.ckpt', bytes: 155_312_333 },
-    sovitsWeights: { url: modelscopeUrl('windranger/windranger_e8_s192.pth'), relPath: 'windranger/windranger_e8_s192.pth', bytes: 85_007_488 }
-  },
   {
     id: 'mirana',
     name: '米拉娜',

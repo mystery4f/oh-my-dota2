@@ -14,10 +14,10 @@ description: oh-my-dota2 训练音色包的发布与版本管理。当用户说�
 
 | 资产 | 位置 | 独一份？ |
 |---|---|---|
-| 微调权重（在用 wr e15-854/s1384、mira e15-s3520） | `D:\AI\GPT-SoVITS-v2pro-20250604\{GPT,SoVITS}_weights_v2\` | 否，魔搭有 |
-| 中间轮权重（wr e4/e5/e10+s692、mira e5/e10+s1760） | 同上 | **是，仅本地** |
-| 上一代在用权重（wr s192、mira s336，回滚用） | 同上 + 魔搭旧路径 | 否，魔搭有 |
-| 原始数据集（vpk 提取+ASR） | `D:\AI\windranger-finetune\`（137MB）、`D:\AI\mirana-finetune\`（173MB） | **是，仅本地，丢了无法重训** |
+| 微调权重（在用 mira e15-s3520；wr 已于 2026-11-08 全量删除） | `D:\AI\GPT-SoVITS-v2pro-20250604\{GPT,SoVITS}_weights_v2\` | 否，魔搭有 |
+| 中间轮权重（mira e5/e10+s1760） | 同上 | **是，仅本地** |
+| 上一代在用权重（mira s336，回滚用） | 同上 + 魔搭旧路径 | 否，魔搭有 |
+| 原始数据集（vpk 提取+ASR） | `D:\AI\mirana-finetune\`（173MB）；`D:\AI\dark-willow-finetune\`（121MB，1001 条 wav + ASR/清洗产物在仓内 `.tmp/dw/`）；`D:\AI\windranger-finetune\` **已于 2026-11-08 删除** | **是，仅本地，丢了无法重训** |
 | 训练配置 | `D:\AI\GPT-SoVITS-v2pro-20250604\logs\<hero>\config.json` | **是，仅本地** |
 | 分发仓 | 魔搭 `a1078185271/oh-my-dota2-voicepacks`（10 权重 2 代并存 + voicepacks.json + README.md） | 云端 |
 | 引擎 8.2GB | 魔搭 FlowerCry 镜像（可重下）+ `G:\oh-my-dota2-data\gpt-sovits\` | 云端 |
@@ -55,6 +55,8 @@ D:/AI/GPT-SoVITS-v2pro-20250604/runtime/python.exe scripts/ms-voicepack-upload.p
 
 先 `--dry-run` 看计划再真传。`--manifest` / `--readme` 是清单和模型卡的快捷方式。
 
+令牌别手写进命令行：`set MS_TOKEN=ms-08` 这种截断值是上一次真实踩坑——脚本照样去打登录接口，返回 400 Bad Request（`modelscope/hub/api.py` 的 `login`）而不是「令牌无效」。用继承来的环境变量，先 `echo %MS_TOKEN%` 只确认长度是不是 39。
+
 ### 改清单
 
 仓库根 `voicepacks.json`（本地编辑源：`.tmp/voicepack-upload/voicepacks.json`，或先匿名拉最新再改）：
@@ -77,3 +79,7 @@ D:/AI/GPT-SoVITS-v2pro-20250604/runtime/python.exe scripts/ms-voicepack-upload.p
 - 魔搭直链首次响应可能 302 跳 CDN，跟随重定向才是真 200/206；Range 断点续传真实可用（206 + Content-Range）
 - 清单里 `promptText` 必须与参考音频严格对应，抄错一个字 = 合成质量劣化但不报错
 - 删除正在使用的音色包会被应用拒绝（active 判定看 `settings.ttsSovitsRefAudio`），这是设计不是 bug
+- **令牌删不了文件**：`HubApi.delete_files` 只吃登录 cookie（没有 token 参数），后端恒定 401
+  `{"Code":10010101003,"Message":"the current token no longer supports deletion operations"}`；
+  下线流程 = 先传一份不含该包的 `voicepacks.json`（客户端唯一数据源），残留权重只能在网页端删。
+  脚本 `--delete` 会报 `deleted=0 failed=N` 并以退出码 1 结束，别把 `DELETE_OK` 当删除成功。

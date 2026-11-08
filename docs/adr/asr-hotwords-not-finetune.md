@@ -1,6 +1,6 @@
 ---
 created: 2026-11-01
-updated: 2026-11-01
+updated: 2026-11-08
 tags: [asr, qwen3, hotwords, finetune, decision]
 ---
 
@@ -52,3 +52,21 @@ tags: [asr, qwen3, hotwords, finetune, decision]
 - 带热词：`谁买活了？我先守肉山，你们推上路高地，风暴之灵别送。`（1312ms）
 
 标点更贴词表意图；选词差异出现在真实口音上（待真声验收）。sherpa 侧注意：`qwen3Asr.tokenizer` 必须指 `tokenizer/` 子目录（校验 vocab.json 落在该路径）。
+
+## 更正（2026-11-08）：后续切 FunASR paraformer，微调目标改 paraformer
+
+上面的「微调目标改为 Qwen3-ASR-0.6B」被本轮实测与维护度评估推翻，理由是用户 2026-11-08 明确的口径：**内存不作依据（64GB），只看还在不在维护、微调快不快、issue 有没有人处理**。
+
+- **维护**：`modelscope/FunASR` 20,963★ / 2,112 fork，最后推送 2026-11-08；`QwenLM/Qwen3-ASR` 3,853★ / 370 fork，最后推送 2026-06-26（四个月无更新）。
+- **issue 是否有人处理**：FunASR 抽样 8 个 issue 有 7 个拿到维护者回复（`LauraGPT` COLLABORATOR、`carey-bk` CONTRIBUTOR）；Qwen3-ASR 抽样 7 个 issue 是 **0 条维护者回复**，`#163` 自 2026-04-27 挂到现在只有用户互答和 `github-actions` 机器人。
+- **微调更快**：paraformer 非自回归、单次前向，220M 参数可直接在 8GB 卡上全量微调，`init_param` 能从 paraformer-large 热启动；Qwen3-ASR 官方 `qwen3_asr_sft.py` 是全量 SFT（无 LoRA/peft）、建议 flash-attn，8GB 只能 batch 1 + 梯度累积。
+- **环境复杂 = 专业度**：kaldi 四件套（`wav.scp`/`text`/`utt2spk`/`spk2utt`）+ yaml + hydra 是通用数据协议，不作为减分项。
+- **准确率没有差距可依**：邪影芳灵 1,014 条三方对照，Qwen3 与 paraformer 平均字符相似度 97.6%、三方完全一致 53%，两引擎在同一处错成一样（Mireska→米瑞斯家、horn→脚），说明是共同听感盲区而非引擎能力差。
+- **GPU 不是障碍**：paraformer 在 4060 Laptop 上 `device="cuda:0"` 加载 1.1 秒、0.399 秒/条、显存峰值约 1GB；但四进程 CPU 折合约 0.4 秒/条，所以 ASR 仍跑 CPU，把显存留给 GV 训练。
+
+**后果**：
+
+- 行动顺序改为**先换 `contextual_paraformer` 上原生热词（零训练成本）**，专名仍有系统性错法再考虑 paraformer 微调；`FunASR` 的 `contextual_paraformer` 原生读 `hotword_pad`/`hotword_lengths`（`models/contextual_paraformer/model.py:104`）。
+- Qwen3-ASR 在切换完成前保持现状（app 现役引擎），whisper 只做交叉校验，任何引擎都不再作为微调首选。
+- 「热词注入而非微调」这条主线不变；变的是**微调的候选模型从 Qwen3-ASR 换成 paraformer**，以及引擎切换计划。
+- 数据与脚本留在 `.tmp/`（清理可复现）：`paraformer-batch.py`（4 分片续跑）、`dw-clean.py`（TEXT_FIX/DROP）——迁移到 `scripts/` 时按 `docs/STANDARDS.md` 只保留一份实现。

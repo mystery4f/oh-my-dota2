@@ -16,13 +16,13 @@ flowchart LR
 
 ## 一、音色听感验收（最高优先，阻塞发版）
 
-### 风行者 854 条版
+### 风行者 854 条版 — 已撤下（2026-11-08）
 
-- [ ] 试听 `D:\AI\windranger-finetune\test-new-voice.wav`
-- [ ] 应用内试听（refs.json 已挂 `windranger-e15-854.ckpt` + `windranger_e8_s1384.pth`，盘上已核对）
-- [ ] 判定：听感是否可发布（854 = 436 至宝 + 461 本体 + 58 旧）
-- 证据状态：权重与 refs 指向为本次落盘核对；训练结论来自交接文档。
+用户判定样本太少、稳定出错，不再发布：`refs.json` 条目已删（现 6 条），参考音频、训练素材（`D:\AI\windranger-finetune\`）、GV 包与 app 侧权重全部删除（约 2.2 GB）。本节清单不再需要执行，保留仅作历史。
 
+- ~~试听 `D:\AI\windranger-finetune\test-new-voice.wav`~~
+- ~~应用内试听（refs.json 已挂 `windranger-e15-854.ckpt` + `windranger_e8_s1384.pth`）~~
+- ~~判定：听感是否可发布（854 = 436 至宝 + 461 本体 + 58 旧）~~
 ### 米拉娜 2218 条中英版
 
 - [ ] 中文试听 `D:\AI\mirana-finetune\test-mira-v2.wav`
