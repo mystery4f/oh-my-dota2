@@ -6,6 +6,7 @@ import {
   type OverlayStatus,
   type OverlayTextMode
 } from '@shared/ipc'
+import { broadcastToWindows } from './broadcast'
 import { loadSettings, saveSettings } from '../services/settings'
 import { clampGeometry, miniGeometry, shouldIgnoreMouse, snapToEdges } from '@shared/overlay-geometry'
 import { overlayStateFromSettings, reduceOverlay, type OverlayEvent, type OverlayState } from '@shared/overlay-state'
@@ -372,7 +373,7 @@ class OverlayManager {
 
   private broadcast(): void {
     const state = this.status()
-    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IPC.OVERLAY_STATE, state)
+    broadcastToWindows(IPC.OVERLAY_STATE, state)
     for (const callback of this.statusListeners) callback(state)
   }
 }

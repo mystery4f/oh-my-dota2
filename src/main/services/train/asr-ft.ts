@@ -10,6 +10,7 @@ import {
   planAsrFtExportArgv,
   pickLastCheckpointName,
   type AsrFtPaths,
+  type AsrFtFacts,
   type AsrFtStatusResult,
   type AsrFtSwapResult,
   type AsrFtTrainTuning,
@@ -29,7 +30,7 @@ import {
 import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
 import { loadSettings } from '../settings'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
-import { prepareFtDataset } from './ft-dataset'
+import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList } from './ft-record'
 import { sovitsChildPid } from '../voice/sovits-server'
 
@@ -289,6 +290,11 @@ function latestResumableRun(currentLedger: FtLedgerEntry[]): { resumeFrom: strin
     return { resumeFrom: join(runDir, checkpoint), lastStep: Number(checkpoint.slice('checkpoint-'.length)) }
   }
   return null
+}
+
+/** 开训闸门看到的两件事实：显存提示，以及上一份账本是否真的能续训（与 resolveAsrFtTrainRequest 同一判据）。 */
+export async function asrFtFacts(): Promise<AsrFtFacts> {
+  return { vramNote: ftVramGuard(), resumable: latestResumableRun(await currentFtLedger()) !== null }
 }
 
 /**

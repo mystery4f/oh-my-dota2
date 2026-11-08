@@ -449,12 +449,10 @@ export function TalkPage({
 
       <CollapsibleGroup id="talk.train" label="训练">
         <Row
-          label="训练窗口"
-          hint="GV 音色微调与 ASR 口音微调：录制、打包数据集、训练、换模都在里面"
+          label="音色训练 / 识别训练"
+          hint="GV 音色微调与 ASR 口音微调都在侧边栏「系统」组下，训练记录会留在磁盘上"
         >
-          <Button size="sm" variant="outline" onClick={() => window.api.trainOpen()}>
-            打开训练管理
-          </Button>
+          <StatusPill tone="idle">侧边栏</StatusPill>
         </Row>
       </CollapsibleGroup>
     </>

@@ -4,7 +4,7 @@
  * asr-ft / gv 两个子缝往 deriveTrainPlan 的 switch 里补真命令即可，结构不动。
  */
 import { planAsrFtTrainArgv, type AsrFtDatasetPlan, type AsrFtPaths, type AsrFtTrainTuning } from './asr-ft'
-import type { GvResolvedPaths, GvTrainOptions } from './gv'
+import { GV_LEGS, type GvResolvedPaths, type GvTrainOptions } from './gv'
 export type TrainTaskKind = 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
 
 export type TrainTaskStatus = 'idle' | 'preparing' | 'running' | 'stopping' | 'done' | 'failed' | 'stopped'
@@ -153,7 +153,7 @@ export function deriveTrainPlan(req: TrainStartRequest): TrainPlan {
       }
       return {
         exe: gv.pythonExe,
-        args: ['-s', gv.script, req.kind === 'gv-gpt' ? '--config_file' : '--config', gv.configFile],
+        args: ['-s', GV_LEGS[req.kind].script, GV_LEGS[req.kind].configFlag, gv.configFile],
         cwd: gv.home
       }
     }

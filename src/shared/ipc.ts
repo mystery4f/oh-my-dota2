@@ -2,12 +2,13 @@ import type { VoiceReplyStage } from './voice-out'
 import type { HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import { DEFAULT_HOTKEYS } from './hotkeys'
 
-import type { AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
+import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
 import type { VoiceOutReadiness } from '@shared/voice-out-readiness'
 import type { FtDatasetPrepareResult } from '@shared/train/dataset'
 import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@shared/train/gv'
 import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
+import type { TrainRunRecord } from '@shared/train/run'
 
 
 /** ASR 微调读稿：一句原文。 */
@@ -725,13 +726,15 @@ export const IPC = {
   VOICE_MODEL_REMOVE: 'voice:model-remove',
   /** 主进程广播运行时状态（安装各阶段/结束时），面板据此翻状态牌。 */
   VOICE_RUNTIME_STATE: 'voice:runtime-state',
-  // 训练管理（T1：窗口骨架 + 任务模型；真实训练栈 T3/T5 接入）。
-  TRAIN_OPEN: 'train:open',
+  // 训练管理（v3：并入面板；记录落盘，见 shared/train/run.ts）。
   TRAIN_START: 'train:start',
   TRAIN_STOP: 'train:stop',
   TRAIN_SNAPSHOT: 'train:snapshot',
   /** 主进程广播训练快照（任务状态 + 日志尾），训练窗口订阅。 */
   TRAIN_STATE: 'train:state',
+  /** 训练记录（run）列表与单条详情：面板两页从磁盘读，重启后仍在。 */
+  TRAIN_RUNS: 'train:runs',
+  TRAIN_RUN: 'train:run',
   // GV（GPT-SoVITS）微调（T3）：备料清单 / webui 开关 / 产物登记。
   TRAIN_GV_DATASETS: 'train:gv-datasets',
   TRAIN_GV_WEBUI: 'train:gv-webui',
@@ -746,6 +749,7 @@ export const IPC = {
   FT_DATASET_PREPARE: 'ft:dataset-prepare',
   // ASR 微调闭环（T5）：环境状态 / 换模 / 回滚，训练+导出走 TRAIN_START/STOP。
   FT_ASRFT_STATUS: 'ft:asrft-status',
+  FT_ASRFT_FACTS: 'ft:asrft-facts',
   FT_ASRFT_APPLY: 'ft:asrft-apply',
   FT_ASRFT_ROLLBACK: 'ft:asrft-rollback',
   FT_ASRFT_INSTALL: 'ft:asrft-install',
@@ -774,6 +778,9 @@ export const IPC = {
   OVERLAY_OPACITY: 'overlay:opacity',
   OVERLAY_STATE: 'overlay:state'
 } as const
+
+/** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
+export type IpcChannelValue = (typeof IPC)[keyof typeof IPC]
 
 /** Contract exposed on window.api by the preload bridge. */
 /** 离线朗读引擎（sherpa-onnx + Matcha）的安装状态。 */
@@ -1000,10 +1007,11 @@ export const ipcContract = {
   voiceOutReadiness: invoke<[], VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS),
   onVoiceOutReadiness: listen<VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS_STATE),
   // 训练管理与 ASR 微调
-  trainOpen: send<[]>(IPC.TRAIN_OPEN),
   trainStart: invoke<[TrainStartRequest], TrainStartResult>(IPC.TRAIN_START),
   trainStop: invoke<[], TrainStartResult>(IPC.TRAIN_STOP),
   trainSnapshot: invoke<[], TrainSnapshot>(IPC.TRAIN_SNAPSHOT),
+  trainRuns: invoke<[], TrainRunRecord[]>(IPC.TRAIN_RUNS),
+  trainRun: invoke<[string], TrainRunRecord | null>(IPC.TRAIN_RUN),
   onTrainState: listen<TrainSnapshot>(IPC.TRAIN_STATE),
   trainGvDatasets: invoke<[], GvDatasetJudgement[]>(IPC.TRAIN_GV_DATASETS),
   trainGvWebui: invoke<[{ open: boolean }], { ok: boolean; running: boolean; error?: string }>(IPC.TRAIN_GV_WEBUI),
@@ -1016,6 +1024,7 @@ export const ipcContract = {
   ftRecAsr: invoke<[string, string], VoiceTranscribeResult>(IPC.FT_REC_ASR),
   ftDatasetPrepare: invoke<[], FtDatasetPrepareResult>(IPC.FT_DATASET_PREPARE),
   ftAsrftStatus: invoke<[], AsrFtStatusResult>(IPC.FT_ASRFT_STATUS),
+  ftAsrftFacts: invoke<[], AsrFtFacts>(IPC.FT_ASRFT_FACTS),
   ftAsrftInstall: invoke<[], AsrFtInstallState>(IPC.FT_ASRFT_INSTALL),
   ftAsrftApply: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_APPLY),
   ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK)

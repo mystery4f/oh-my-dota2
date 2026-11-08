@@ -1,39 +1,25 @@
+import type { VoiceOutTestResult } from '@shared/ipc'
 import {
-  type VoiceOutEndedReport,
-  type VoiceOutReadyReport,
-  type VoiceOutTestResult
-} from '@shared/ipc'
-import {
-  MIN_SPEAK_MS,
-  PTT_MARGIN_MS,
   VOICE_OUT_TEST_LINE,
   VOICE_OUT_VOICES,
   decideVoiceOutTest,
   normalizeVoiceOutEngine,
-  pttWatchdogMs,
-  pttWindow,
   resolveVoiceOutSynth,
-  speakKeyVk,
+  speakKeyVk
 } from '@shared/voice-out'
 import { speakPipeline } from './speech-pipeline'
+import { SegmentPlayer } from './segment-player'
 import { errorMessage } from '@shared/errors'
 import { speechFailHint } from '@shared/speech-plan'
 import { currentVoiceOutReadiness } from './voice-out-readiness'
 import { loadSettings } from '../settings'
-import { getPttKeySender } from '../input/ptt-key'
-import { getVoiceOutWindow } from '../../windows/voice-out'
 import { getOverlayManager } from '../../windows/overlay'
 
-/** 窗口侧枚举设备 + setSinkId + 解码读时长的总预算：必须盖过最坏路径——页面加载 8 s（PAGE_LOAD_TIMEOUT_MS）+ 页面内读音频时长 8 s = 16 s。 */
-const READY_TIMEOUT_MS = 17_000
 
 /** 顺序递增的请求号：窗口只认当前这一单，旧单的 READY/ENDED 一律忽略。 */
 let nextRequestId = 1
 
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 /** 失败要有去处：浮层上给一行提示（2 秒后被捕获状态覆盖，本来就是一次性提醒）。 */
 function showHint(text: string): void {
@@ -44,44 +30,6 @@ function showHint(text: string): void {
   }
 }
 
-function waitReady(requestId: number, timeoutMs: number): Promise<VoiceOutReadyReport | null> {
-  const window = getVoiceOutWindow()
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      offReady()
-      offEnded()
-      resolve(null)
-    }, timeoutMs)
-    const offReady = window.onReady((report) => {
-      if (report.requestId !== requestId) return
-      clearTimeout(timer)
-      offEnded()
-      resolve(report)
-    })
-    const offEnded = window.onEnded((report) => {
-      // 页面在 READY 之后立刻翻车（解码/播放被拒）：当成 ready=false 处理，别傻等。
-      if (report.requestId !== requestId) return
-      clearTimeout(timer)
-      offReady()
-      resolve({ requestId, ok: false, durationMs: report.durationMs, sinkId: '', sinkLabel: '', fallback: false, hint: null, error: report.error })
-    })
-  })
-}
-
-function waitEnded(requestId: number, timeoutMs: number): Promise<VoiceOutEndedReport | null> {
-  const window = getVoiceOutWindow()
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      offEnded()
-      resolve(null)
-    }, timeoutMs)
-    const offEnded = window.onEnded((report) => {
-      if (report.requestId !== requestId) return
-      clearTimeout(timer)
-      resolve(report)
-    })
-  })
-}
 
 /** 一键到底声出腿的结果：整句话到底进没进频道（音频播了但键没按上也算没进）。 */
 export interface VoiceOutSpeakOutcome {
@@ -158,91 +106,53 @@ class VoiceOutService {
 
     const requestId = nextRequestId
     nextRequestId += 1
-    const window = getVoiceOutWindow()
-    const readyPromise = waitReady(requestId, READY_TIMEOUT_MS)
-    await window.play({
-      requestId,
-      audioBase64: audio.toString('base64'),
-      audioMime: plan.audioMime,
-      requestedDevice: settings.ttsOutputDevice
+
+    const player = new SegmentPlayer({
+      device: settings.ttsOutputDevice,
+      testMode: settings.voiceOutTestMode,
+      keyVk: speakKeyVk(settings.ttsSpeakKey),
+      onHint: showHint,
+      onSpeak: ({ bytes, durationMs, sinkLabel, keyHeld, holdMs }) => {
+        console.log(
+          'VOICE_OUT_SPEAK',
+          JSON.stringify({
+            requestId,
+            engine: plan.engine,
+            voice: plan.voice,
+            bytes,
+            durationMs,
+            sink: sinkLabel || 'default',
+            keyHeld,
+            holdMs
+          })
+        )
+      },
+      onKeyError: (error) => console.log('VOICE_OUT_KEY_ERROR', JSON.stringify({ requestId, error }))
     })
-
-    const ready = await readyPromise
-    if (!ready || !ready.ok) {
-      const error = ready?.error ?? '声出窗口没有就绪（超时）'
-      console.log('VOICE_OUT_NOT_READY', JSON.stringify({ requestId, error }))
-      showHint(`声出失败：${error}`)
-      return { ok: false, durationMs: null, hint: ready?.hint ?? null, error }
-    }
-
-    const durationMs = ready.durationMs
-    const hold = pttWindow(durationMs ?? MIN_SPEAK_MS)
-    if (ready.fallback && ready.hint) showHint(ready.hint)
-
-    // 声出已经成功（音频在手、窗口就绪），从这一刻起说话键才允许动。
-    // 测试模式（voiceOutTestMode）：只放音频、不模拟按键——游戏没开也能试听，
-    // F5 不会落到焦点窗口上（编辑器收到 F5 之类的误触发）。
-    const vk = speakKeyVk(settings.ttsSpeakKey)
-    let keyError: string | undefined
-    let keyHeld = false
     if (settings.voiceOutTestMode) {
+      // 测试模式（voiceOutTestMode）：只放音频、不模拟按键——游戏没开也能试听，
+      // F5 不会落到焦点窗口上（编辑器收到 F5 之类的误触发）。
       console.log('VOICE_OUT_TEST_MODE', JSON.stringify({ requestId, leg: 'test', keySuppressed: true }))
-    } else if (vk === null) {
-      keyError = '说话键无法识别（检查设置里的说话键）'
-    } else {
-      const down = await getPttKeySender().down(vk)
-      if (down.ok) keyHeld = true
-      else keyError = down.error
-    }
-    if (keyError) {
-      console.log('VOICE_OUT_KEY_ERROR', JSON.stringify({ requestId, error: keyError }))
-      // 键没按上也要把话播完：默认输出时用户至少能听见，频道没开是另一回事。
     }
 
-    console.log(
-      'VOICE_OUT_SPEAK',
-      JSON.stringify({
-        requestId,
-        engine: plan.engine,
-        voice: plan.voice,
-        bytes: audio.length,
-        durationMs,
-        sink: ready.sinkLabel || 'default',
-        keyHeld,
-        holdMs: hold.holdMs
-      })
-    )
+    // 任何一条提前 return / 抛错的路径都必须松键——说话键卡死比测试失败严重得多。
+    const outcome = await player.play(requestId, audio, plan.audioMime).finally(() => player.finish())
+    const keyError = player.error ?? undefined
 
-    const releaseKey = async (): Promise<void> => {
-      if (!keyHeld) return
-      keyHeld = false
-      if (vk === null) return
-      const up = await getPttKeySender().up(vk)
-      if (!up.ok && !keyError) keyError = up.error
+    if (outcome.kind === 'not-ready') {
+      console.log('VOICE_OUT_NOT_READY', JSON.stringify({ requestId, error: outcome.error }))
+      showHint(`声出失败：${outcome.error}`)
+      return { ok: false, durationMs: null, hint: outcome.hint, error: outcome.error }
     }
-
-    try {
-      await delay(hold.leadMs)
-      window.start(requestId)
-      const ended = await waitEnded(requestId, pttWatchdogMs(hold))
-      if (!ended) {
-        console.log('VOICE_OUT_ENDED_TIMEOUT', JSON.stringify({ requestId }))
-        return { ok: false, durationMs, hint: ready.hint, keyError, error: '播放结束事件超时（说话键已松开）' }
-      }
-      if (!ended.ok) {
-        return { ok: false, durationMs: ended.durationMs ?? durationMs, hint: ready.hint, keyError, error: ended.error ?? '播放失败' }
-      }
-      // 正常结束：再按住 releaseMs 的尾巴，保证游戏把最后一截音频收进频道。
-      await delay(hold.releaseMs)
-      await releaseKey()
-      if (keyError) {
-        return { ok: false, durationMs: ended.durationMs ?? durationMs, hint: ready.hint, keyError }
-      }
-      return { ok: true, durationMs: ended.durationMs ?? durationMs, hint: ready.hint }
-    } finally {
-      // 任何一条提前 return / 抛错的路径都必须松键——说话键卡死比测试失败严重得多。
-      await releaseKey()
+    if (outcome.kind === 'timeout') {
+      console.log('VOICE_OUT_ENDED_TIMEOUT', JSON.stringify({ requestId }))
+      return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, keyError, error: '播放结束事件超时（说话键已松开）' }
     }
+    if (outcome.kind === 'failed') {
+      return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, keyError, error: outcome.error ?? '播放失败' }
+    }
+    if (keyError) return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, keyError }
+    return { ok: true, durationMs: outcome.durationMs, hint: outcome.hint }
   }
 
   /** 错误绝不往外抛：链上还排着别的活，抛出去会污染后面每一单。 */
@@ -262,22 +172,16 @@ class VoiceOutService {
     // （ttsOutVoice）——测试声出验的就是对讲要用的这把嗓；GV 本就不选嗓（音色由参考音频决定），
     // 解析层自己打回各引擎默认。
     const plan = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, text)
+    const player = new SegmentPlayer({
+      device: settings.ttsOutputDevice,
+      testMode: settings.voiceOutTestMode,
+      keyVk: speakKeyVk(settings.ttsSpeakKey),
+      onHint: showHint,
+      onKeyError: (error, requestId) => console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, error }))
+    })
 
-    const window = getVoiceOutWindow()
-    const vk = speakKeyVk(settings.ttsSpeakKey)
-    let keyError: string | null = null
-    let keyHeld = false
-    const releaseKey = async (): Promise<void> => {
-      if (!keyHeld) return
-      keyHeld = false
-      if (vk === null) return
-      const up = await getPttKeySender().up(vk)
-      if (!up.ok && !keyError) keyError = up.error ?? null
-    }
-
-    let startedAny = false
-    let audioPlayed = false
     let synthOkAny = false
+    let audioPlayed = false
     let segmentCount = 0
     try {
       // 合成→按序投递收进 speech-pipeline：切段并行合成（GV 走它自带的懒队列），这里只管「一段怎么播」——
@@ -303,58 +207,28 @@ class VoiceOutService {
           synthOkAny = true
           const requestId = nextRequestId
           nextRequestId += 1
-          const readyPromise = waitReady(requestId, READY_TIMEOUT_MS)
-          await window.play({
-            requestId,
-            audioBase64: segment.audio.toString('base64'),
-            audioMime: segment.audioMime ?? 'audio/mpeg',
-            requestedDevice: settings.ttsOutputDevice
-          })
-          const ready = await readyPromise
-          if (!ready || !ready.ok) {
+          const outcome = await player.play(requestId, segment.audio, segment.audioMime ?? 'audio/mpeg')
+          if (outcome.kind === 'not-ready') {
             // 单段翻车不毁整句：跳过这段继续下一段，日志里数得清丢了几段。
-            const reason = ready?.error ?? '声出窗口没有就绪（超时）'
-            console.log('VOICE_REPLY_SEGMENT_SKIP', JSON.stringify({ requestId, index: segment.index, error: reason }))
-            if (ready?.hint) showHint(ready.hint)
+            console.log('VOICE_REPLY_SEGMENT_SKIP', JSON.stringify({ requestId, index: segment.index, error: outcome.error }))
+            if (outcome.hint) showHint(outcome.hint)
             return
           }
-          if (ready.fallback && ready.hint) showHint(ready.hint)
-
-          // 说话键从第一段就绪起按住，整句话期间绝不松——中途松键频道会露缝。
-          // 测试模式下整段按键逻辑跳过（keyHeld 恒 false，finally 的松键自然空转）。
-          if (!settings.voiceOutTestMode && !keyHeld && !keyError) {
-            if (vk === null) {
-              keyError = '说话键无法识别（检查设置里的说话键）'
-            } else {
-              const down = await getPttKeySender().down(vk)
-              if (down.ok) keyHeld = true
-              else keyError = down.error ?? null
-            }
-            if (keyError) console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, index: segment.index, error: keyError }))
-          }
-
-          const hold = pttWindow(ready.durationMs ?? MIN_SPEAK_MS)
-          // 头部余量只等一次（第一次起播前）；后续段接着上一段的尾巴连续播。
-          if (!startedAny) await delay(hold.leadMs)
-          startedAny = true
-          window.start(requestId)
-          const ended = await waitEnded(requestId, pttWatchdogMs(hold))
-          if (!ended) {
+          if (outcome.kind === 'timeout') {
             console.log('VOICE_REPLY_SEGMENT_TIMEOUT', JSON.stringify({ requestId, index: segment.index }))
             return
           }
-          if (!ended.ok) {
-            console.log('VOICE_REPLY_SEGMENT_FAIL', JSON.stringify({ requestId, index: segment.index, error: ended.error }))
+          if (outcome.kind === 'failed') {
+            console.log('VOICE_REPLY_SEGMENT_FAIL', JSON.stringify({ requestId, index: segment.index, error: outcome.error }))
             return
           }
           audioPlayed = true
-          console.log('VOICE_REPLY_SEGMENT_OK', JSON.stringify({ requestId, index: segment.index, durationMs: ended.durationMs ?? ready.durationMs }))
+          console.log('VOICE_REPLY_SEGMENT_OK', JSON.stringify({ requestId, index: segment.index, durationMs: outcome.durationMs }))
         }
       )
     } finally {
-      if (keyHeld) await delay(PTT_MARGIN_MS) // 尾巴：最后一截音频收进频道再松键。
-      // 任何一条提前 return / 抛错的路径都必须松键——说话键卡死比这句没播出严重得多。
-      await releaseKey()
+      // 尾巴：最后一截音频收进频道再松键；任何提前 return / 抛错的路径都必须松键。
+      await player.finish()
     }
 
     if (!synthOkAny) {
@@ -366,9 +240,9 @@ class VoiceOutService {
       return { spoken: false, error }
     }
     if (!audioPlayed) return { spoken: false, error: '声出播放失败' }
-    if (keyError) {
+    if (player.error) {
       // 音频播出去了（本地能听见），但频道没开——队友没听到，按失败算并说明原因。
-      return { spoken: false, error: keyError }
+      return { spoken: false, error: player.error }
     }
     return { spoken: true, error: null }
   }

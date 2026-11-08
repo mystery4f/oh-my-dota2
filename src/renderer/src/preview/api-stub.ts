@@ -149,6 +149,90 @@ const sovitsStatus: Awaited<ReturnType<WindowApi['sovitsStatus']>> = {
   logs: ['stub: api_v2 ready', 'stub: weights loaded']
 }
 
+/**
+ * 训练记录：一条正在跑的 ASR、一条已应用的 GV，覆盖列表、指标折线、产物行三种渲染。
+ * 时间用相对量，预览里永远像刚跑完。
+ */
+const stubNow = Date.now()
+const stubTrainRuns: Awaited<ReturnType<WindowApi['trainRuns']>> = [
+  {
+    id: 'asr-ft-stub-running',
+    kind: 'asr-ft',
+    experiment: '地图-20261108010000',
+    params: { epochs: 66, lr: '2e-5', resumeFrom: null },
+    data: { files: 38, durationMs: 0, bytes: 412_000 },
+    status: 'running',
+    startedAt: stubNow - 12 * 60 * 1000,
+    endedAt: null,
+    artifacts: { runDir: 'data/asr-ft-runs/地图-20261108010000', ckptDir: 'data/asr-ft-runs/地图-20261108010000' },
+    metrics: null,
+    applied: false,
+    error: null
+  },
+  {
+    id: 'gv-sovits-stub-done',
+    kind: 'gv-sovits',
+    experiment: 'mirana',
+    params: { version: 'v2ProPlus', batchSize: 1, epochs: 8, resumeFrom: null },
+    data: { files: 0, durationMs: 0, bytes: 0 },
+    status: 'applied',
+    startedAt: stubNow - 3 * 60 * 60 * 1000,
+    endedAt: stubNow - 2 * 60 * 60 * 1000,
+    artifacts: { runDir: 'data/gpt-sovits/GPT-SoVITS-v2pro/logs/mirana', voicePack: 'mirana' },
+    metrics: {
+      steps: 0,
+      epochs: 8,
+      bestLoss: null,
+      lastLoss: null,
+      series: Array.from({ length: 8 }, (_, i) => ({ step: i + 1, epoch: i + 1 }))
+    },
+    applied: true,
+    error: null
+  }
+]
+const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
+  task: {
+    id: 'train-stub',
+    kind: 'asr-ft',
+    dataset: '地图-20261108010000',
+    status: 'running',
+    progress: 34,
+    stage: 'epoch 22/66',
+    startedAt: stubNow - 12 * 60 * 1000,
+    endedAt: null,
+    inference: 'held'
+  },
+  logs: [
+    { at: stubNow - 60_000, text: 'stub: epoch 21/66 loss=0.412' },
+    { at: stubNow - 30_000, text: 'stub: epoch 22/66 loss=0.398' }
+  ]
+}
+
+/**
+ * 训练页的假数据：读稿只放 4 组（逐句 3 组 + 自由说 1 组），录音给 G14 三条，够看清
+ * 句号条三态、覆盖率与体检提示，又不至于把预览页撑成一屏滚不到底。
+ */
+const stubScript = {
+  groups: [
+    { id: 'G14', title: '对线', mode: 'lines' as const, note: '', lines: [1, 2, 3, 4, 5, 6].map((no) => ({ no, text: `这是 G14 的第 ${no} 句稿子` })) },
+    { id: 'G15', title: '团战', mode: 'lines' as const, note: '', lines: [1, 2, 3, 4].map((no) => ({ no, text: `这是 G15 的第 ${no} 句稿子` })) },
+    { id: 'G19', title: '报点', mode: 'lines' as const, note: '', lines: [1, 2, 3].map((no) => ({ no, text: `这是 G19 的第 ${no} 句稿子` })) },
+    { id: 'G21', title: '自由说', mode: 'free' as const, note: '想到什么说什么', lines: [] }
+  ],
+  error: null
+}
+const stubRecs = [1, 2, 3].map((no) => ({
+  key: `G14-L${String(no).padStart(2, '0')}`,
+  bytes: 62_000 + no * 4000,
+  durationMs: 1900 + no * 120,
+  mtimeMs: stubNow - no * 86_400_000
+}))
+const stubGvDatasets = [
+  { expName: 'mirana', ready: true, missing: [] },
+  { expName: 'windranger', ready: false, missing: ['语义表 6-name2semantic.tsv'] }
+]
+let stubWebuiRunning = false
+
 /** 面板真正调用的通道，逐个给出类型正确的假答复。 */
 const implemented = {
   getSettings: async () => settings,
@@ -230,7 +314,48 @@ const implemented = {
   onVoiceRecordState: () => () => {},
   voiceOutTest: async () => ({ ok: true, durationMs: 900, hint: 'stub 声出已播' }),
   overlayVoiceToggle: async () => ({ ok: true }),
-  trainOpen: () => {},
+  trainRuns: async () => stubTrainRuns,
+  trainRun: async (id) => stubTrainRuns.find((run) => run.id === id) ?? null,
+  trainSnapshot: async () => stubTrainSnapshot,
+  trainStart: async () => ({ ok: true, error: null }),
+  trainStop: async () => ({ ok: true, error: null }),
+  onTrainState: () => () => {},
+  trainGvDatasets: async () => stubGvDatasets,
+  trainGvWebui: async ({ open }) => {
+    stubWebuiRunning = open
+    return { ok: true, running: stubWebuiRunning }
+  },
+  trainGvRegister: async ({ name }) => ({ ok: true, entry: { name } }),
+  ftScriptRead: async () => stubScript,
+  ftRecList: async () => stubRecs,
+  ftRecSave: async (_group, _line, bytes) => ({
+    key: `${_group}-${_line}`,
+    bytes: bytes.length,
+    durationMs: Math.round((bytes.length / 32000) * 1000),
+    mtimeMs: Date.now()
+  }),
+  ftRecDelete: async () => {},
+  ftRecRead: async () => new Uint8Array(0),
+  ftRecAsr: async () => ({ ok: true, text: '预览里没有真识别引擎' }),
+  ftDatasetPrepare: async () => ({
+    ok: true,
+    trainCount: 38,
+    evalCount: 4,
+    trainPath: 'data/asr-ft-runs/stub/dataset/train.jsonl',
+    evalPath: 'data/asr-ft-runs/stub/dataset/eval.jsonl',
+    ledger: [],
+    error: null
+  }),
+  ftAsrftStatus: async () => ({
+    env: { ok: true, gaps: [], envRoot: 'data/asr-ft-env' },
+    swap: { activeExists: true, bakExists: true, nextExists: false, lastExportDir: 'ft-stub' },
+    coverage: { G14: { done: 3, total: 6, stale: 0 }, G15: { done: 1, total: 8, stale: 1 } },
+    install: null
+  }),
+  ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
+  ftAsrftApply: async () => ({ ok: true, error: null, model: 'ft-stub' }),
+  ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),
+  ftAsrftFacts: async () => ({ vramNote: null, resumable: true }),
   sovitsStatus: async () => sovitsStatus,
   sovitsInstall: async () => sovitsStatus,
   sovitsRefs: async () => sovitsRefs,

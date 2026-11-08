@@ -89,9 +89,81 @@ export interface GvTrainOptions {
   epochs: number
 }
 
-export const GV_DEFAULTS: Record<'gv-sovits' | 'gv-gpt', { batchSize: number; epochs: number }> = {
-  'gv-sovits': { batchSize: 8, epochs: 8 },
-  'gv-gpt': { batchSize: 8, epochs: 15 }
+export type GvLegKind = 'gv-sovits' | 'gv-gpt'
+
+export interface GvLegBuildContext {
+  train: GvTrainOptions
+  /** 已 trim 的实验名（也是 logs/ 下的目录名）。 */
+  expName: string
+  info: GvVersionInfo
+}
+
+/**
+ * GV 的一条训练腿。上游两个脚本的配置参数名、配置文件名和底模字段都不一样，
+ * 这些差异全部收在这张表里：加一条腿只加一行，别在 main / task / 面板里再写分支。
+ */
+export interface GvLeg {
+  kind: GvLegKind
+  /** 面板与错误文案里的腿名。 */
+  label: 'SoVITS' | 'GPT'
+  /** 引擎包内训练脚本；上游 s1/s2 两个脚本的配置参数名并不相同。 */
+  script: string
+  configFlag: '--config' | '--config_file'
+  /** 落盘配置文件名；扩展名即序列化格式。 */
+  configFile: string
+  format: 'json' | 'yaml'
+  /** 表单缺省值，照抄 webui 的保守值。 */
+  defaults: { batchSize: number; epochs: number }
+  /** 这一腿读的配置模板。 */
+  templateFile(info: GvVersionInfo): string
+  /** 缺了就跑不起来的引擎包文件（模板 + 底模），顺序即报错顺序。 */
+  requiredFiles(info: GvVersionInfo): string[]
+  /** 模板 → 本次训练配置；返回 null 说明模板缺关键节点（引擎包不完整，别硬写）。 */
+  build(base: unknown, ctx: GvLegBuildContext): Record<string, unknown> | null
+}
+
+export const GV_LEGS: Record<GvLegKind, GvLeg> = {
+  'gv-sovits': {
+    kind: 'gv-sovits',
+    label: 'SoVITS',
+    script: 'GPT_SoVITS/s2_train.py',
+    configFlag: '--config',
+    configFile: 'tmp_s2.json',
+    format: 'json',
+    defaults: { batchSize: 8, epochs: 8 },
+    templateFile: (info) => info.s2ConfigTemplate,
+    requiredFiles: (info) => [info.s2ConfigTemplate, info.s2PretrainedG, info.s2PretrainedD],
+    build: (base, ctx) =>
+      buildS2TrainConfigData(base, {
+        train: ctx.train,
+        expName: ctx.expName,
+        pretrainedG: ctx.info.s2PretrainedG,
+        pretrainedD: ctx.info.s2PretrainedD,
+        sovitsWeightsRoot: ctx.info.sovitsWeightsRoot
+      })
+  },
+  'gv-gpt': {
+    kind: 'gv-gpt',
+    label: 'GPT',
+    script: 'GPT_SoVITS/s1_train.py',
+    configFlag: '--config_file',
+    configFile: 'tmp_s1.yaml',
+    format: 'yaml',
+    defaults: { batchSize: 8, epochs: 15 },
+    templateFile: (info) => info.s1ConfigTemplate,
+    requiredFiles: (info) => [info.s1ConfigTemplate, info.s1Pretrained],
+    build: (base, ctx) =>
+      buildS1TrainConfigData(base, {
+        train: ctx.train,
+        expName: ctx.expName,
+        pretrainedS1: ctx.info.s1Pretrained,
+        gptWeightsRoot: ctx.info.gptWeightsRoot
+      })
+  }
+}
+
+export function isGvLegKind(value: unknown): value is GvLegKind {
+  return typeof value === 'string' && value in GV_LEGS
 }
 
 /** 主进程备好配置文件后回填；deriveTrainPlan 的 argv/cwd 全从这里来。 */
@@ -100,8 +172,8 @@ export interface GvResolvedPaths {
   pythonExe: string
   /** 写好的训练配置（tmp_s2.json / tmp_s1.yaml 绝对路径）。 */
   configFile: string
-  /** 引擎包内训练脚本相对路径（GPT_SoVITS/s2_train.py 或 s1_train.py）。 */
-  script: string
+  /** 已 trim 的实验名；训练记录与产物路径都以它为准，别再读 request.dataset。 */
+  expName: string
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

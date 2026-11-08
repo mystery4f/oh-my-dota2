@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { app } from 'electron'
-import { appendFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { app, Notification } from 'electron'
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   canStartTrain,
@@ -21,6 +21,16 @@ import {
 import { parseTrainProgress } from '@shared/train/progress'
 import { ensureSovitsServer, pauseSovitsForTraining } from '../voice/sovits-server'
 import { markRunStatus } from './asr-ft'
+import {
+  buildTrainRun,
+  finishTrainRun,
+  runKindLabel,
+  runStatusLabel,
+  type TrainRunParams,
+  type TrainRunRecord
+} from '@shared/train/run'
+import { saveTrainRun } from './run-store'
+import { readAsrMetrics, readGvMetrics } from './run-metrics'
 
 /**
  * 训练任务管理器：同一时刻只允许一个训练进程（编排器约定）。
@@ -37,6 +47,61 @@ const OOM_RE = /CUDA out of memory|OutOfMemoryError|out of memory/i
 /** 训练日志落盘上限：一圈环形日志挡不住崩溃现场，磁盘这份才是事后唯一证据。 */
 const TRAIN_LOG_MAX_BYTES = 4 * 1024 * 1024
 let trainLogSize = -1
+
+/** 请求 → run 参数：ASR 的轮数/lr/续训点与 GV 的版本/批大小/轮数都在这里定案。 */
+function runParamsOf(kind: TrainTaskKind, request: TrainStartRequest): TrainRunParams {
+  if (kind === 'asr-ft') {
+    const tuning = request.asrFt?.tuning
+    return { epochs: tuning?.epochs, lr: tuning?.lr, resumeFrom: tuning?.resumeFrom ?? null }
+  }
+  if (kind === 'gv-gpt' || kind === 'gv-sovits') {
+    return { version: request.gv?.version, batchSize: request.gv?.batchSize, epochs: request.gv?.epochs }
+  }
+  return {}
+}
+
+/** 数据指纹：只统计拿得到的东西（ASR 两个 jsonl 的行数与字节数），拿不到就留 0 不编。 */
+function runDataOf(request: TrainStartRequest): { files: number; bytes: number } {
+  let lines = 0
+  let bytes = 0
+  for (const file of [request.asrFt?.data.trainJsonl, request.asrFt?.data.evalJsonl]) {
+    if (!file) continue
+    try {
+      const text = readFileSync(file, 'utf8')
+      bytes += Buffer.byteLength(text, 'utf8')
+      lines += text.split('\n').filter((line) => line.trim().length > 0).length
+    } catch {
+      // 文件还没落盘就不算，别让指纹拦住开训
+    }
+  }
+  return { files: lines, bytes }
+}
+
+/** 产物路径：ASR 是 checkpoint 根 + 导出目录；GV 是实验目录（webui 的 logs/<exp>）。 */
+function runArtifactsOf(kind: TrainTaskKind, request: TrainStartRequest): TrainRunRecord['artifacts'] {
+  if (kind === 'asr-ft' && request.asrFt) {
+    return { runDir: request.asrFt.data.runDir, ckptDir: request.asrFt.data.runDir, exportDir: request.asrFt.exportDir }
+  }
+  if ((kind === 'gv-gpt' || kind === 'gv-sovits') && request.gvResolved) {
+    return { runDir: join(request.gvResolved.home, 'GPT_SoVITS', 'logs', request.gvResolved.expName) }
+  }
+  return {}
+}
+
+/** 长跑结束发一次系统通知：人可以去睡觉，收场不用守着窗口。手动停止不打扰。 */
+function notifyRunEnd(run: TrainRunRecord): void {
+  if (run.status === 'stopped') return
+  try {
+    if (!Notification.isSupported()) return
+    const ok = run.status === 'trained' || run.status === 'applied'
+    new Notification({
+      title: ok ? '训练完成' : '训练失败',
+      body: `${runKindLabel(run.kind)} · ${run.experiment} · ${runStatusLabel(run.status)}`
+    }).show()
+  } catch {
+    // 通知只是提醒，失败不影响训练结果
+  }
+}
 
 /**
  * 训练子进程输出落盘（logs/train.log）：窗口里的环形日志一关就没，
@@ -72,6 +137,8 @@ class TrainManager {
   private chained = false
   /** 本任务的启动请求：asr-ft 失败时回写 run.json（其他 kind 不碰账本）。 */
   private request: TrainStartRequest | null = null
+  /** 本次任务的训练记录：开训即落盘，收场补指标与产物（面板两页读它）。 */
+  private run: TrainRunRecord | null = null
   onState(listener: (snapshot: TrainSnapshot) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -141,6 +208,16 @@ class TrainManager {
     this.request = request
     this.chain = chain ?? null
     this.chained = false
+    // 开训即落记录：跑崩了也能在列表里看到「曾经跑过、失败在什么阶段」。
+    this.run = buildTrainRun({
+      kind,
+      experiment: String(request.dataset ?? ''),
+      params: runParamsOf(kind, request),
+      data: runDataOf(request),
+      artifacts: runArtifactsOf(kind, request),
+      startedAt: this.task?.startedAt
+    })
+    saveTrainRun(this.run)
     this.spawnChild(plan.exe === 'node' ? (node ?? 'node') : plan.exe, plan)
     return { ok: true, error: null }
   }
@@ -237,6 +314,22 @@ class TrainManager {
             ? '失败：显存不足（CUDA OOM），关掉占卡程序再点一次'
             : `失败 (exit ${code ?? '?'})`
     if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
+    // 记录收场：终态 + 失败原因 + 从磁盘取指标（训练框架自己写的文件，比 stdout 可靠）。
+    if (this.run) {
+      const run = this.run
+      const metrics =
+        run.kind === 'asr-ft'
+          ? readAsrMetrics(run.artifacts.runDir)
+          : readGvMetrics(this.request?.gvResolved?.home, run.experiment)
+      const next = finishTrainRun(run, {
+        status: status === 'done' ? 'trained' : status === 'stopped' ? 'stopped' : 'failed',
+        error: status === 'failed' ? stage : null,
+        metrics
+      })
+      saveTrainRun(next)
+      this.run = next
+      notifyRunEnd(next)
+    }
     this.child = null
     this.emit(true)
     // 任务退干净就该恢复推理（T2 接线）；没停过（kept-off）不演恢复。

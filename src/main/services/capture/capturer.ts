@@ -1,10 +1,10 @@
-import { BrowserWindow } from 'electron'
 import { errorMessage } from '@shared/errors'
-import { IPC, type CaptureEntry, type CaptureStatus } from '@shared/ipc'
+import { IPC, type CaptureEntry, type CaptureStatus, type IpcChannelValue } from '@shared/ipc'
 import { chatBody, hasHan, normalizeLine, splitChatLine, takeHero, worthTranslating } from '@shared/chat-line'
 import { translateLines } from '../session/durable-translator'
 import { announceEntries } from '../voice/speech'
 import { loadSettings } from '../settings'
+import { broadcastToWindows } from '../../windows/broadcast'
 
 import { HISTORY_MAX_ROWS } from '@shared/overlay-ledger'
 /**
@@ -182,9 +182,9 @@ export class ChatCaptureService {
     }
   }
 
-  private broadcast(channel: string, entries: CaptureEntry[]): void {
+  private broadcast(channel: IpcChannelValue, entries: CaptureEntry[]): void {
     this.rememberLedger(channel, entries)
-    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, entries)
+    broadcastToWindows(channel, entries)
     if (channel === IPC.CAPTURE_ENTRIES) {
       for (const callback of this.listeners) callback(entries)
     } else {

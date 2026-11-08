@@ -48,11 +48,22 @@ import {
 import {
   buildS1TrainConfigData,
   buildS2TrainConfigData,
+  GV_LEGS,
   GV_VERSION_DEFAULT,
   GV_VERSION_INFO,
   judgeGvDataset,
   normalizeGvVersion
 } from '@shared/train/gv'
+import {
+  buildTrainRun,
+  compactMetricSeries,
+  compareRunsDesc,
+  finishTrainRun,
+  METRIC_SERIES_MAX,
+  parseAsrTrainerState,
+  parseGvTrainLog
+} from '@shared/train/run'
+import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
 
 /**
@@ -423,7 +434,7 @@ export function runTrainProbe(): void {
   const gvWired = deriveTrainPlan({
     kind: 'gv-gpt',
     dataset: 'demo',
-    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', script: 'GPT_SoVITS/s1_train.py' }
+    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', expName: 'demo' }
   })
   push(
     'GV 计划：没备料拒启动；备好了 argv/cwd 全对（s1 用 --config_file）',
@@ -437,13 +448,113 @@ export function runTrainProbe(): void {
   const gvSovitsArgs = deriveTrainPlan({
     kind: 'gv-sovits',
     dataset: 'demo',
-    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', script: 'GPT_SoVITS/s2_train.py' }
+    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', expName: 'demo' }
   })
   push(
     'GV s2 计划用 --config（非 GET 别名，照抄 webui）',
     JSON.stringify(gvSovitsArgs.args) === JSON.stringify(['-s', 'GPT_SoVITS/s2_train.py', '--config', 'C']),
     gvSovitsArgs.args.join(' '),
   )
+  const sovitsLeg = GV_LEGS['gv-sovits']
+  const gptLeg = GV_LEGS['gv-gpt']
+  push(
+    'GV 腿表是唯一真相：脚本/参数名/配置文件名/默认值同源',
+    sovitsLeg.script === 'GPT_SoVITS/s2_train.py' &&
+      sovitsLeg.configFlag === '--config' &&
+      gptLeg.script === 'GPT_SoVITS/s1_train.py' &&
+      gptLeg.configFlag === '--config_file' &&
+      gptLeg.configFile === 'tmp_s1.yaml' &&
+      sovitsLeg.configFile === 'tmp_s2.json' &&
+      sovitsLeg.format === 'json' &&
+      gptLeg.defaults.epochs === 15 &&
+      sovitsLeg.templateFile(GV_VERSION_INFO.v2) === GV_VERSION_INFO.v2.s2ConfigTemplate &&
+      gptLeg.requiredFiles(GV_VERSION_INFO.v2).includes(GV_VERSION_INFO.v2.s1Pretrained),
+    `${sovitsLeg.script} | ${gptLeg.configFlag}`,
+  )
+  // —— 训练记录（run）：构建、收场、指标压缩 ——
+  const started = buildTrainRun({ kind: 'asr-ft', experiment: '地图', startedAt: 1_700_000_000_000, data: { files: 40 } })
+  push(
+    'run 构建：id 带 kind 与时间戳，初始 running 且无终态',
+    /^asr-ft-\d{14}$/.test(started.id) && started.status === 'running' && started.endedAt === null && started.data.files === 40 && started.data.bytes === 0,
+    started.id,
+  )
+  const finished = finishTrainRun(started, { status: 'trained', endedAt: started.startedAt + 60_000, error: null })
+  push(
+    'run 收场：终态与结束时间写入，开始时间与 data 不动',
+    finished.status === 'trained' && finished.endedAt === started.startedAt + 60_000 && finished.startedAt === started.startedAt && finished.data.files === 40,
+    `${finished.status} ${finished.endedAt}`,
+  )
+  const longSeries = Array.from({ length: 1400 }, (_, i) => ({ step: i + 1, loss: 1 / (i + 1) }))
+  const compacted = compactMetricSeries(longSeries)
+  push(
+    `指标压缩：1400 点压到 ${METRIC_SERIES_MAX}，首尾保住且单调不回头`,
+    compacted.length === METRIC_SERIES_MAX &&
+      compacted[0].step === 1 &&
+      compacted[compacted.length - 1].step === 1400 &&
+      compacted.every((p, i) => i === 0 || p.step > compacted[i - 1].step),
+    `${compacted.length} / ${compacted[Math.floor(compacted.length / 2)].step}`,
+  )
+  const asrMetrics = parseAsrTrainerState({
+    log_history: [
+      { step: 10, epoch: 1, loss: 1.5, learning_rate: 0.00002 },
+      { step: 20, epoch: 2, loss: 0.5, learning_rate: 0.00002 },
+      { step: 20, eval_loss: 0.4 },
+      { step: 30, epoch: 3, loss: 0.25, learning_rate: 0.00001 }
+    ]
+  })
+  push(
+    'ASR 指标：eval 行被忽略，best/last/steps/epochs 全对',
+    asrMetrics !== null &&
+      asrMetrics.steps === 30 &&
+      asrMetrics.epochs === 3 &&
+      asrMetrics.bestLoss === 0.25 &&
+      asrMetrics.lastLoss === 0.25 &&
+      asrMetrics.series.length === 3,
+    JSON.stringify(asrMetrics && { steps: asrMetrics.steps, best: asrMetrics.bestLoss, n: asrMetrics.series.length }),
+  )
+  push('ASR 指标：没有 log_history 返回 null（不编空曲线）', parseAsrTrainerState({}) === null, '{}')
+  const gvLog = ['====> Epoch: 1', 'saving ckpt mirana_e1:Success.', '====> Epoch: 2', 'saving ckpt mirana_e8:Success.'].join('\n')
+  const gvParsed = parseGvTrainLog(gvLog)
+  push(
+    'GV 日志：epoch 时间线与 checkpoint 名单都提取',
+    gvParsed.epochs === 2 && gvParsed.checkpoints.join(',') === 'mirana_e1,mirana_e8' && gvParsed.series.length === 2,
+    `${gvParsed.epochs} | ${gvParsed.checkpoints.join(',')}`,
+  )
+  const newer = buildTrainRun({ kind: 'gv-sovits', experiment: 'mirana', startedAt: started.startedAt + 60_000 })
+  push(
+    'run 排序：新的在前',
+    [started, newer].sort(compareRunsDesc)[0].id === newer.id,
+    `${started.id} vs ${newer.id}`,
+  )
+  // 开训体检：缺环境/没录音必须 block；录音太少只 warn；没有续训点不算问题。
+  const blocked = judgeAsrPreflight({
+    env: { ok: false, gaps: ['torch'] },
+    recordedLines: 0,
+    packed: null,
+    activeModel: false,
+    resumeAvailable: false,
+    vramNote: null
+  })
+  push(
+    '体检：缺环境阻断',
+    preflightBlocks(blocked).map((item) => item.id).join(',') === 'env,rec,model',
+    preflightBlocks(blocked).map((item) => item.id).join(',')
+  )
+  const healthy = judgeAsrPreflight({
+    env: { ok: true, gaps: [] },
+    recordedLines: 4,
+    packed: { train: 3, eval: 1 },
+    activeModel: true,
+    resumeAvailable: false,
+    vramNote: '6GB 显卡建议批大小 1'
+  })
+  push(
+    '体检：数据少只告警',
+    preflightBlocks(healthy).length === 0 && healthy.some((item) => item.id === 'rec' && item.level === 'warn'),
+    healthy.map((item) => `${item.id}:${item.level}`).join(' ')
+  )
+  const gv = judgeGvPreflight({ expName: 'mirana', missing: ['音素表 2-name2text.txt'], gptTrained: false, sovitsTrained: false })
+  push('体检：GV 缺备料阻断', preflightBlocks(gv).map((item) => item.id).join(',') === 'data', gv.map((item) => `${item.id}:${item.level}`).join(' '))
   let failed = 0
   for (const item of cases) {
     if (!item.ok) failed++

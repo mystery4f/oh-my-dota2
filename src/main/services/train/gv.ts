@@ -5,13 +5,13 @@ import { extname, join } from 'node:path'
 import { load as loadYaml, dump as dumpYaml } from 'js-yaml'
 import { app } from 'electron'
 import {
-  buildS1TrainConfigData,
-  buildS2TrainConfigData,
-  GV_DEFAULTS,
+  GV_LEGS,
   GV_VERSION_INFO,
+  isGvLegKind,
   judgeGvDataset,
   normalizeGvVersion,
   type GvDatasetJudgement,
+  type GvLeg,
   type GvRegisterPayload,
   type GvRegisterResult,
   type GvTrainOptions,
@@ -19,7 +19,8 @@ import {
 } from '@shared/train/gv'
 import type { TrainStartRequest } from '@shared/train/task'
 import { discoverSovitsHome } from '../voice/sovits-server'
-import { sovitsRefsRoot, sovitsWeightsRoot } from '../voice/sovits-refs'
+import { readRefsRaw, sovitsRefsRoot, sovitsWeightsRoot, writeRefsRaw } from '../voice/sovits-refs'
+import { listTrainRuns, patchTrainRun } from './run-store'
 
 /**
  * GV（GPT-SoVITS）微调编排（T3）：备料验收 → 写训练配置 → 交给 TrainManager 跑真训练；
@@ -29,10 +30,6 @@ import { sovitsRefsRoot, sovitsWeightsRoot } from '../voice/sovits-refs'
  * 参数全部来自窗口表单，缺什么就在 resolve 阶段报错，绝不带病启动。
  */
 
-const GV_SCRIPTS: Record<'gv-sovits' | 'gv-gpt', string> = {
-  'gv-sovits': 'GPT_SoVITS/s2_train.py',
-  'gv-gpt': 'GPT_SoVITS/s1_train.py'
-}
 
 export interface GvResolution {
   ok: boolean
@@ -42,14 +39,14 @@ export interface GvResolution {
 
 /** 一次 GV 训练启动前的全部检查 + 配置文件落盘；任何缺口都在这里拦住，不进 manager。 */
 export function resolveGvTrainRequest(request: TrainStartRequest): GvResolution {
-  const kind = normalizeGvKind(request.kind)
-  if (!kind) return { ok: false, error: 'GV 任务类型只有 gv-sovits（SoVITS 声学模型）和 gv-gpt（GPT 语义模型）' }
-  const script = GV_SCRIPTS[kind]
+  const kind = request.kind
+  if (!isGvLegKind(kind)) return { ok: false, error: 'GV 任务类型只有 gv-sovits（SoVITS 声学模型）和 gv-gpt（GPT 语义模型）' }
+  const leg = GV_LEGS[kind]
   const home = discoverSovitsHome()
   if (!home) return { ok: false, error: '没找到 GPT-SoVITS 引擎包：先到面板「TTS 服务」里安装或配置引擎包路径' }
   const pythonExe = join(home, 'runtime', 'python.exe')
   if (!existsSync(pythonExe)) return { ok: false, error: '引擎包不完整：runtime/python.exe 不存在' }
-  if (!existsSync(join(home, script))) return { ok: false, error: `引擎包不完整：${script} 不存在` }
+  if (!existsSync(join(home, leg.script))) return { ok: false, error: `引擎包不完整：${leg.script} 不存在` }
 
   const expName = String(request.dataset ?? '').trim()
   if (!expName || expName.includes('/') || expName.includes('\\') || expName.includes('..')) {
@@ -60,7 +57,7 @@ export function resolveGvTrainRequest(request: TrainStartRequest): GvResolution 
   const info = GV_VERSION_INFO[opts.version]
 
   // 底模/模板缺失早报错：训练跑到一半才缺文件是最贵的失败方式。
-  const envErrors = missingEnvFiles(home, info, kind)
+  const envErrors = missingEnvFiles(home, info, leg)
   if (envErrors) return { ok: false, error: envErrors }
 
   const judged = judgeDatasetAt(home, expName)
@@ -68,26 +65,20 @@ export function resolveGvTrainRequest(request: TrainStartRequest): GvResolution 
     return { ok: false, error: `数据集「${expName}」备料不齐（先在 GPT-SoVITS webui 里跑完 1abc 三步）：缺 ${judged.missing.join('、')}` }
   }
 
-  const configFile =
-    kind === 'gv-sovits'
-      ? writeS2Config(home, info, opts, expName)
-      : writeS1Config(home, info, opts, expName)
+  const configFile = writeGvConfig(home, info, leg, opts, expName)
   if (!configFile.ok) return { ok: false, error: configFile.error ?? '训练配置写盘失败' }
 
   return {
     ok: true,
-    request: { ...request, gv: opts, gvResolved: { home, pythonExe, configFile: configFile.path as string, script: script as string } }
+    request: { ...request, gv: opts, gvResolved: { home, pythonExe, configFile: configFile.path as string, expName } }
   }
 }
 
-function normalizeGvKind(kind: unknown): 'gv-sovits' | 'gv-gpt' | null {
-  return kind === 'gv-sovits' || kind === 'gv-gpt' ? kind : null
-}
 
 /** 表单缺省时按 kind 兜底（webui 同款保守值），version 乱值打回包默认版本。 */
 function resolveTrainOptions(raw: unknown, kind: 'gv-sovits' | 'gv-gpt'): GvTrainOptions {
   const rec = typeof raw === 'object' && raw !== null ? (raw as Partial<GvTrainOptions>) : {}
-  const fallback = GV_DEFAULTS[kind]
+  const fallback = GV_LEGS[kind].defaults
   return {
     version: normalizeGvVersion(rec.version),
     batchSize: Number.isFinite(rec.batchSize) && (rec.batchSize as number) >= 1 ? Math.floor(rec.batchSize as number) : fallback.batchSize,
@@ -95,15 +86,11 @@ function resolveTrainOptions(raw: unknown, kind: 'gv-sovits' | 'gv-gpt'): GvTrai
   }
 }
 
-/** 按任务腿检查模板 + 底模在不在；返回 null = 全齐。 */
-function missingEnvFiles(home: string, info: GvVersionInfo, kind: 'gv-sovits' | 'gv-gpt'): string | null {
-  const checks =
-    kind === 'gv-sovits'
-      ? [info.s2ConfigTemplate, info.s2PretrainedG, info.s2PretrainedD]
-      : [info.s1ConfigTemplate, info.s1Pretrained]
-  const missing = checks.filter((rel) => !existsSync(join(home, rel)))
+/** 按任务腿检查模板 + 底模在不在（清单在腿表里）；返回 null = 全齐。 */
+function missingEnvFiles(home: string, info: GvVersionInfo, leg: GvLeg): string | null {
+  const missing = leg.requiredFiles(info).filter((rel) => !existsSync(join(home, rel)))
   if (missing.length === 0) return null
-  return `引擎包缺 ${kind === 'gv-sovits' ? 'SoVITS' : 'GPT'} 训练所需文件：${missing.join('、')}（换底模齐的版本，或补装引擎包）`
+  return `引擎包缺 ${leg.label} 训练所需文件：${missing.join('、')}（换底模齐的版本，或补装引擎包）`
 }
 
 /** 数据集四件套验收（复用纯缝判定，主进程只探存在性）。 */
@@ -136,52 +123,31 @@ function ensureTmpDir(home: string): string {
   return dir
 }
 
-function writeS2Config(
+/** 按腿表写本次训练配置：模板读取、结构校验、序列化格式都来自这一腿自己的定义。 */
+function writeGvConfig(
   home: string,
   info: GvVersionInfo,
+  leg: GvLeg,
   opts: GvTrainOptions,
   expName: string
 ): { ok: boolean; path?: string; error?: string } {
+  const templateRel = leg.templateFile(info)
   try {
-    const template = readFileSync(join(home, info.s2ConfigTemplate), 'utf-8')
-    const data = buildS2TrainConfigData(JSON.parse(template), {
-      train: opts,
-      expName,
-      pretrainedG: info.s2PretrainedG,
-      pretrainedD: info.s2PretrainedD,
-      sovitsWeightsRoot: info.sovitsWeightsRoot
-    })
-    if (!data) return { ok: false, error: `配置模板 ${info.s2ConfigTemplate} 结构不对（train/data/model 节点缺失）` }
-    const path = join(ensureTmpDir(home), 'tmp_s2.json')
-    writeFileSync(path, JSON.stringify(data, null, 2), 'utf-8')
+    const raw = readFileSync(join(home, templateRel), 'utf-8')
+    const base: unknown = leg.format === 'yaml' ? loadYaml(raw) : JSON.parse(raw)
+    const data = leg.build(base, { train: opts, expName, info })
+    if (!data) {
+      const shape = leg.format === 'yaml' ? 'train 节点缺失' : 'train/data/model 节点缺失'
+      return { ok: false, error: `配置模板 ${templateRel} 结构不对（${shape}）` }
+    }
+    const path = join(ensureTmpDir(home), leg.configFile)
+    writeFileSync(path, leg.format === 'yaml' ? dumpYaml(data) : JSON.stringify(data, null, 2), 'utf-8')
     return { ok: true, path }
   } catch (err) {
-    return { ok: false, error: `写 SoVITS 训练配置失败：${errorMessage(err)}` }
+    return { ok: false, error: `写 ${leg.label} 训练配置失败：${errorMessage(err)}` }
   }
 }
 
-function writeS1Config(
-  home: string,
-  info: GvVersionInfo,
-  opts: GvTrainOptions,
-  expName: string
-): { ok: boolean; path?: string; error?: string } {
-  try {
-    const template = loadYaml(readFileSync(join(home, info.s1ConfigTemplate), 'utf-8'))
-    const data = buildS1TrainConfigData(template, {
-      train: opts,
-      expName,
-      pretrainedS1: info.s1Pretrained,
-      gptWeightsRoot: info.gptWeightsRoot
-    })
-    if (!data) return { ok: false, error: `配置模板 ${info.s1ConfigTemplate} 结构不对（train 节点缺失）` }
-    const path = join(ensureTmpDir(home), 'tmp_s1.yaml')
-    writeFileSync(path, dumpYaml(data), 'utf-8')
-    return { ok: true, path }
-  } catch (err) {
-    return { ok: false, error: `写 GPT 训练配置失败：${errorMessage(err)}` }
-  }
-}
 
 // —— 官方 webui 的开/关：备料（降噪/切分/标注）仍归它 ——
 
@@ -290,16 +256,22 @@ export function registerGvWeights(payload: GvRegisterPayload): GvRegisterResult 
   }
 
   try {
-    const refsFile = join(refsRoot, 'refs.json')
-    let current: unknown = []
-    try {
-      current = JSON.parse(readFileSync(refsFile, 'utf-8'))
-    } catch {
-      // 坏/缺清单按空处理，写回时整表重建。
+    // 配对键是音色名（一次训练一个音色一份权重）；写盘走参考库的唯一写入口，坏文件由它先备份。
+    const next = [
+      ...readRefsRaw(refsRoot).filter((item) => (item as Record<string, unknown>)?.name !== name),
+      entry
+    ]
+    writeRefsRaw(refsRoot, next)
+    // 记录层的「已转正」跟着这次注册翻牌：训练记录里能看到音色包名，不用再翻 refs.json。
+    const run = listTrainRuns().find((item) => isGvLegKind(item.kind) && item.experiment === expName)
+    if (run) {
+      patchTrainRun(run.id, (current) => ({
+        ...current,
+        artifacts: { ...current.artifacts, voicePack: name },
+        applied: true,
+        status: 'applied'
+      }))
     }
-    const list = Array.isArray(current) ? current : []
-    const next = [...list.filter((item) => (item as Record<string, unknown>)?.name !== name), entry]
-    writeFileSync(refsFile, `${JSON.stringify(next, null, 2)}\n`, 'utf-8')
   } catch (err) {
     return { ok: false, error: `refs.json 写盘失败：${errorMessage(err)}` }
   }

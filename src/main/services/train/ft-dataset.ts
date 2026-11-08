@@ -22,26 +22,38 @@ export function ftDatasetDir(): string {
   return join(app.getPath('userData'), 'asr-ft-datasets')
 }
 
-export async function prepareFtDataset(): Promise<FtDatasetPrepareResult> {
+/**
+ * 已录句子 × 稿子 → 待打包条目；缺件时带人话原因。
+ * 打包与「当前账本」都从这里取条目，别各自再建一次。
+ */
+async function collectFtEntries(): Promise<{ entries: FtDatasetEntry[]; error: string | null }> {
   const script = await readFtScript()
-  if (script.error || script.groups.length === 0) {
-    return fail(script.error ?? '内置读稿为空')
-  }
+  if (script.error || script.groups.length === 0) return { entries: [], error: script.error ?? '内置读稿为空' }
   const recorded = new Set((await ftRecList()).map((info) => info.key))
   const { entries } = buildFtDatasetEntries(
     script.groups,
     (group, line) => recorded.has(`${group}-${line}`),
-    (group, line) => ftRecPath(group, line),
+    (group, line) => ftRecPath(group, line)
   )
-  if (entries.length === 0) {
-    return fail('还没有已录的句子——先在上方录几条再打包')
-  }
-  if (entries.length < 2) {
-    return fail('只有一条录音不够——官方脚本必须带验证集，至少再录一条再打包')
-  }
+  if (entries.length === 0) return { entries, error: '还没有已录的句子——先在上方录几条再打包' }
+  if (entries.length < 2) return { entries, error: '只有一条录音不够——官方脚本必须带验证集，至少再录一条再打包' }
   if (!entries.every((entry) => existsSync(entry.wavPath))) {
-    return fail('有录音文件丢失（列表和磁盘对不上），重录缺失的句子后再打包')
+    return { entries, error: '有录音文件丢失（列表和磁盘对不上），重录缺失的句子后再打包' }
   }
+  return { entries, error: null }
+}
+
+/** 当前录音的账本（不落盘）：续训对账、开训体检都读这一份，别各自重算。 */
+export async function currentFtLedger(): Promise<FtLedgerEntry[]> {
+  const { entries, error } = await collectFtEntries()
+  if (error) return []
+  const { train, eval: evalSet } = splitTrainEval(entries)
+  return buildLedger(train, evalSet)
+}
+
+export async function prepareFtDataset(): Promise<FtDatasetPrepareResult> {
+  const { entries, error } = await collectFtEntries()
+  if (error) return fail(error)
   const { train, eval: evalSet } = splitTrainEval(entries)
   const dir = ftDatasetDir()
   await mkdir(dir, { recursive: true })

@@ -1,4 +1,4 @@
-import { BrowserWindow, app, clipboard, ipcMain } from 'electron'
+import { app, clipboard, ipcMain } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { errorMessage } from '@shared/errors'
@@ -38,12 +38,14 @@ import {
   sovitsVoicePacks
 } from './services/voice/sovits-voicepack'
 import { getOverlayManager } from './windows/overlay'
-import { getTrainWindow } from './windows/train'
+import { broadcastToWindows as broadcast } from './windows/broadcast'
+import { listTrainRuns, loadTrainRun } from './services/train/run-store'
 import { getTrainManager } from './services/train/manager'
 import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
 import { prepareFtDataset } from './services/train/ft-dataset'
 import {
   applyAsrFtModel,
+  asrFtFacts,
   asrFtStatus,
   buildAsrFtExportPlan,
   resolveAsrFtTrainRequest,
@@ -56,10 +58,6 @@ import { normalizeTrainKind } from '@shared/train/task'
 import { gsiStatus } from './services/gsi'
 
 
-/** 主进程 → 所有窗口的广播（面板按钮状态、语音链回显都靠它活着）。 */
-const broadcast = (channel: string, payload: unknown): void => {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
-}
 
 /** 明确的 GV 动作之后立刻重算就绪：3 秒 tick 只是兜底，点了按钮必须当场翻牌。 */
 function refreshReadinessAfter<T>(job: Promise<T>): Promise<T> {
@@ -221,8 +219,9 @@ const handlers: MainHandlers = {
     void refreshVoiceOutReadiness()
     return sovitsStatusSnapshot()
   },
-  // 训练管理（T1）：窗口开关 + 任务启停 + 快照订阅；互斥与计划推导都在 manager/纯缝里。
-  trainOpen: () => getTrainWindow().open(),
+  // 训练管理（v3）：记录落盘，面板两页从磁盘读；互斥与计划推导都在 manager/纯缝里。
+  trainRuns: () => listTrainRuns(),
+  trainRun: (id) => loadTrainRun(id),
   trainStart: async (request) => {
     const kind = normalizeTrainKind(request.kind)
     // gv-*：先把引擎包/底模/数据集/配置文件备齐，缺口在这里就报出来，不进 manager。
@@ -264,6 +263,8 @@ const handlers: MainHandlers = {
   ftDatasetPrepare: () => prepareFtDataset(),
   // ASR 微调闭环（T5）：环境状态、应用新模型、回滚。
   ftAsrftStatus: async () => ({ ...(await asrFtStatus()), install: asrFtInstallState() }),
+  // 开训闸门看到的事实：显存提示与「上次能不能续训」，panel 只显示不自己推。
+  ftAsrftFacts: () => asrFtFacts(),
   // 启动即回，装到哪一步看 STATUS 轮询（整套装下来要十几分钟）。
   ftAsrftInstall: async () => {
     void installAsrFtEnv()

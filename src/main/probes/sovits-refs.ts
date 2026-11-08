@@ -1,8 +1,15 @@
 import { app } from 'electron'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listSovitsRefs, sovitsRefsRoot } from '../services/voice/sovits-refs'
+import {
+  isSafeRelPath,
+  listSovitsRefs,
+  readRefsRaw,
+  sovitsRefsFile,
+  sovitsRefsRoot,
+  writeRefsRaw
+} from '../services/voice/sovits-refs'
 
 /**
  * 参考音频库探针（--sovits-refs-probe）：纯读写临时目录，不碰真实数据根。
@@ -120,6 +127,41 @@ export async function runSovitsRefsProbe(): Promise<void> {
       ranger ? `${ranger.gptWeightsPath}/${ranger.sovitsWeightsPath}` : 'none'
     )
     push('不传权重根时带权重条目按无法核实剔除', listSovitsRefs(tunedRoot).length === 0)
+
+    // 写入口：所有 refs.json 写入走同一个函数，格式、缩进、尾换行、坏文件备份都只在这里定义。
+    const storeRoot = join(base, 'store')
+    const foreign = [
+      { name: '外来条目', audio: 'user/a.wav', promptText: 'x', promptLang: 'zh', custom: 1 },
+      { name: '第二条', audio: 'user/b.wav', promptText: 'y', promptLang: 'en' }
+    ]
+    writeRefsRaw(storeRoot, foreign)
+    const storeFile = sovitsRefsFile(storeRoot)
+    push('写入口末尾带换行', readFileSync(storeFile, 'utf-8').endsWith('\n'))
+    push(
+      '写入口不留临时文件',
+      readdirSync(storeRoot).every((name) => !name.endsWith('.tmp')),
+      readdirSync(storeRoot).join(',')
+    )
+    push('未知字段与顺序原样保留', JSON.stringify(readRefsRaw(storeRoot)) === JSON.stringify(foreign))
+
+    // 坏文件：写回前必须改名备份，内容一字不动，库按空表继续。
+    const brokenStore = join(base, 'broken-store')
+    mkdirSync(brokenStore, { recursive: true })
+    writeFileSync(join(brokenStore, 'refs.json'), '{ 半个对象', 'utf-8')
+    writeRefsRaw(brokenStore, [])
+    const brokenFiles = readdirSync(brokenStore)
+    const backup = brokenFiles.find((name) => name.includes('.broken-'))
+    push('坏文件写前改名备份', !!backup, brokenFiles.join(','))
+    push('备份内容与原文件一致', !!backup && readFileSync(join(brokenStore, backup), 'utf-8') === '{ 半个对象')
+    push('坏文件重建后是空表', readRefsRaw(brokenStore).length === 0)
+
+    // 相对路径规则：库内路径与清单路径共用一条，只在选项上分叉。
+    push('相对路径接受 目录/文件', isSafeRelPath('mirana/a.wav'))
+    push(
+      '相对路径拒绝空段/点段/绝对/盘符/反斜杠',
+      ['a//b', 'a/./b', '../x', 'a/../b', '/abs/c.wav', 'C:/x.wav', 'a\\b.wav'].every((p) => !isSafeRelPath(p))
+    )
+    push('清单规则要求至少两段', !isSafeRelPath('a.wav', { requireDir: true }))
   } finally {
     rmSync(base, { recursive: true, force: true })
   }

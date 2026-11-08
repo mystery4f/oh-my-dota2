@@ -1,9 +1,10 @@
-import { app, BrowserWindow } from 'electron'
+import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { autoUpdater } from 'electron-updater'
 import { IPC, type UpdateState } from '@shared/ipc'
+import { broadcastToWindows } from '../windows/broadcast'
 
 /**
  * 检查更新 / 下载 / 重启安装。
@@ -40,9 +41,7 @@ let state: UpdateState = { channel: CHANNEL, status: 'idle', version: app.getVer
 
 function broadcast(next: UpdateState): void {
   state = next
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(IPC.UPDATE_STATUS, next)
-  }
+  broadcastToWindows(IPC.UPDATE_STATUS, next)
 }
 
 export function updateState(): UpdateState {

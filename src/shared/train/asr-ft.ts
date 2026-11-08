@@ -148,6 +148,14 @@ export interface AsrFtStatusResult {
   install: AsrFtInstallState | null
 }
 
+/** 开训闸门看到的两件事实：显存提示，以及上一份账本是否真的能续训。panel 只显示，不自己推。 */
+export interface AsrFtFacts {
+  /** 非空就是一条件显存告警；查不到 nvidia-smi 时是 null。 */
+  vramNote: string | null
+  /** 与开训闸门同一判据：最新账本对得上且还留着 checkpoint。 */
+  resumable: boolean
+}
+
 /** M-B 一键安装的进行时状态：窗口轮询这块渲染进度。 */
 export interface AsrFtInstallState {
   running: boolean

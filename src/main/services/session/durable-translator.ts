@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
+import { normalizeLine } from '@shared/chat-line'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
@@ -547,12 +548,10 @@ async function translateWithSession(
   })
 }
 
-/** 归一化后比较：去掉空白/标点/大小写差异，判断模型是不是把原文原样吐回来了。 */
+/** 判断模型是不是把原文原样吐回来了：折叠规则与判重同一份（@shared/chat-line）。 */
 function isEcho(source: string, output: string): boolean {
-  const norm = (text: string): string => text.replace(/[\s\p{P}\p{S}]+/gu, '').toLowerCase()
-  const a = norm(source)
-  const b = norm(output)
-  return a.length > 0 && a === b
+  const a = normalizeLine(source)
+  return a.length > 0 && a === normalizeLine(output)
 }
 
 function noteFailure(reason: string): void {
@@ -808,10 +807,9 @@ export async function translateReply(
  * falling back to direct per-line translation when the session is unavailable.
  * 记账本里已经有的行不再发给模型，只翻没见过的；结果按原顺序拼回去。
  */
-/** 只比「字」：大小写、空白、标点、符号的差别不算两个意思。 */
+/** 只比「字」：大小写、空白、标点、符号的差别不算两个意思（折叠规则同 normalizeLine）。 */
 export function sameText(a: string, b: string): boolean {
-  const norm = (text: string): string => text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
-  return norm(a) === norm(b)
+  return normalizeLine(a) === normalizeLine(b)
 }
 
 export async function translateLines(

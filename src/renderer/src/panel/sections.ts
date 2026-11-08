@@ -5,6 +5,8 @@
 export const SECTIONS = [
   { id: 'overview', title: '总览', hint: '四种链路的当前状态' },
   { id: 'engine', title: '翻译引擎', hint: '模型服务与试验台' },
+  { id: 'voice', title: '音色训练', hint: '两腿各自开训，跑完注册成音色包' },
+  { id: 'asr', title: '识别训练', hint: '录音、打包、微调、换模，一条链路' },
   { id: 'talk', title: '对讲', hint: '我说给别人听' },
   { id: 'chatout', title: '直发', hint: '打字发进聊天框' },
   { id: 'read', title: '朗读', hint: '我听别人说：把对局里新来的聊天念出来，打团时眼睛不用离开战场' },
@@ -20,7 +22,7 @@ export const DEFAULT_SECTION: SectionId = 'overview'
 /** 侧边栏分组：对局三页在前，系统三页在后，总览与关于各占一头。 */
 export const SECTION_GROUPS: { label: string; ids: SectionId[] }[] = [
   { label: '对局', ids: ['talk', 'chatout', 'read', 'overlay'] },
-  { label: '系统', ids: ['engine', 'hotkeys'] }
+  { label: '系统', ids: ['engine', 'voice', 'asr', 'hotkeys'] }
 ]
 
 export function isSectionId(value: string | null): value is SectionId {
