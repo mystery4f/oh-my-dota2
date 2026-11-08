@@ -19,6 +19,7 @@
  */
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type WindowApi } from '@shared/ipc'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
+import { summarizePendingTakes } from '@shared/train/asr-ft'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
@@ -376,6 +377,16 @@ const implemented = {
     target: { engineId: 'paraformer', label: 'Paraformer（阿里 FunASR）', trainer: 'funasr-paraformer', modelDir: 'data/asr-models/paraformer-zh', baseModel: 'iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch' },
     swap: { activeExists: true, bakExists: true, nextExists: false, lastExportDir: 'ft-stub' },
     coverage: { G14: { done: 3, total: 6, stale: 0 }, G15: { done: 1, total: 8, stale: 1 } },
+    // 待训数字跟着预览里的录音集走：录一条（ftRecSave）这里就涨，删一条就掉。
+    pending: summarizePendingTakes({
+      entries: stubRecs.map((rec) => ({
+        key: rec.key,
+        revision: 1,
+        bytes: rec.bytes,
+        runId: null as string | null
+      })),
+      hasRun: true
+    }),
     install: null
   }),
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),

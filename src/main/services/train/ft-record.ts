@@ -3,8 +3,10 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { FtRecInfo } from '@shared/ipc'
-import { parseRecordingKeyParts, RECORDING_GROUP_SHAPE, resolveFtScript } from '@shared/train/recording'
+import { ftWavDurationMs } from '@shared/train/asr-ft'
+import { parseRecordingKeyParts, RECORDING_GROUP_SHAPE, resolveFtScript, scriptTextForKey } from '@shared/train/recording'
 import type { FtScriptCandidate, FtScriptState } from '@shared/train/recording'
+import { forgetDatasetTake, recordDatasetTake } from './run-store'
 
 /**
  * ASR 微调录音（T4a）：读稿定位 + 录音存取。
@@ -13,9 +15,7 @@ import type { FtScriptCandidate, FtScriptState } from '@shared/train/recording'
  * asr-ft/ 下（安装版是 <安装目录>-data，开发版是项目 data/），绝不引用外置盘路径。
  */
 
-/** 16k mono 16-bit wav：32000 字节/秒，头部 44 字节。 */
-const WAV_HEADER_BYTES = 44
-const BYTES_PER_MS = 32
+/** 16k mono 16-bit wav：32000 字节/秒，头部 44 字节（换算在共享纯缝里，面板与探针同一份）。 */
 
 /** 随包自带的读稿：打包后在 resources/ 下，开发时在仓库 resources/。 */
 export function ftScriptPath(): string {
@@ -52,7 +52,7 @@ function recPath(group: string, line: string): string {
 }
 
 function toInfo(bytes: number, key: string, mtimeMs: number): FtRecInfo {
-  return { key, bytes, durationMs: Math.max(0, Math.round((bytes - WAV_HEADER_BYTES) / BYTES_PER_MS)), mtimeMs }
+  return { key, bytes, durationMs: ftWavDurationMs(bytes), mtimeMs }
 }
 
 export async function ftRecList(): Promise<FtRecInfo[]> {
@@ -78,7 +78,13 @@ export async function ftRecSave(group: string, line: string, data: Uint8Array): 
   const target = join(dir, `${keys.group}-${keys.line}.wav`)
   await writeFile(target, data)
   const info = await stat(target)
-  return toInfo(info.size, `${keys.group}-${keys.line}`, Math.round(info.mtimeMs))
+  const key = `${keys.group}-${keys.line}`
+  // 存盘即落账：待训数字跟着涨。自由说（Tnn）/稿子上没有的行拿不到正文，不进账本。
+  const text = scriptTextForKey((await readFtScript()).groups, key)
+  if (text !== null) {
+    recordDatasetTake({ key, wavPath: target, bytes: info.size, mtimeMs: Math.round(info.mtimeMs), text, split: 'train' })
+  }
+  return toInfo(info.size, key, Math.round(info.mtimeMs))
 }
 
 export async function ftRecRead(group: string, line: string): Promise<Uint8Array> {
@@ -86,7 +92,10 @@ export async function ftRecRead(group: string, line: string): Promise<Uint8Array
 }
 
 export async function ftRecDelete(group: string, line: string): Promise<void> {
+  const keys = parseRecordingKeyParts(group, line)
   await unlink(recPath(group, line)).catch(() => undefined)
+  // 删了录音就不能还算待训；已训过的历史行留着（那是「训过什么」的唯一记录）。
+  forgetDatasetTake(`${keys.group}-${keys.line}`)
 }
 
 /** 训练窗口「识别测试」用：把已存录音的磁盘路径给 ASR 路由复用（键同样过白名单）。 */

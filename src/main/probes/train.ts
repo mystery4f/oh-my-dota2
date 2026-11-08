@@ -10,6 +10,7 @@ import {
   parseRecordingKeyParts,
   recordingKey,
   resolveFtScript,
+  scriptTextForKey,
   shouldKeepTake,
   takeLineId
 } from '@shared/train/recording'
@@ -36,8 +37,11 @@ import {
   deriveAsrFtEnvGaps,
   deriveFtEpochs,
   deriveFtResumeEpochs,
+  FT_PENDING_PROMPT_AT,
   ftLedgerMatchedOnDisk,
   ftTrainCoverage,
+  ftWavDurationMs,
+  summarizePendingTakes,
   judgeFtVram,
   ftVramNote,
   judgeFtDataset,
@@ -83,10 +87,11 @@ import {
   markDatasetEntryTrained,
   patchTrainRun,
   pruneTrainRuns,
+  recordDatasetTake,
+  forgetDatasetTake,
   saveDatasetLedger,
   saveTrainRun,
   trainDbPath,
-  trainedDatasetEntries,
   useTrainDatabase
 } from '../services/train/run-store'
 import {
@@ -116,6 +121,17 @@ function managerHoldWiring(): { readable: boolean; set: boolean; clear: boolean 
     set: /setInferenceHold\(\s*true\s*\)/.test(source),
     clear: /setInferenceHold\(\s*false\s*\)/.test(source)
   }
+}
+
+/**
+ * 接线钉：#64 录音存盘那条路要把这条录音落进账本（run_id 空），否则「录一条待训数字就涨」不成立。
+ * 同 managerHoldWiring：读不到源码（安装版）不判红。
+ */
+function recordLedgerWiring(): { readable: boolean; wired: boolean } {
+  const file = join(process.cwd(), 'src/main/services/train/ft-record.ts')
+  if (!existsSync(file)) return { readable: false, wired: false }
+  const source = readFileSync(file, 'utf8')
+  return { readable: true, wired: /recordDatasetTake\(/.test(source) && /forgetDatasetTake\(/.test(source) }
 }
 
 interface Row {
@@ -198,6 +214,12 @@ export async function runTrainProbe(): Promise<void> {
     '接线钉：manager 开跑置位、退场清除两句都还在',
     !wiring.readable || (wiring.set && wiring.clear),
     wiring.readable ? `set=${wiring.set} clear=${wiring.clear}` : '源码不在（非源码运行），跳过'
+  )
+  const ledgerWiring = recordLedgerWiring()
+  push(
+    '接线钉：录音存盘那条路把录音落进账本（待训数字才会跟着涨）',
+    !ledgerWiring.readable || ledgerWiring.wired,
+    ledgerWiring.readable ? `wired=${ledgerWiring.wired}` : '源码不在（非源码运行），跳过'
   )
 
   // —— 计划推导 ——
@@ -751,6 +773,15 @@ export async function runTrainProbe(): Promise<void> {
     noScript.groups.length === 0 && (noScript.error ?? '').includes(bundledPath),
     noScript.error ?? '(没有错误)',
   )
+  const keyScript = resolveFtScript({ path: dataPath, markdown: userMd }, { path: bundledPath, markdown: bundledMd })
+  push(
+    '录音键 → 稿子正文：G14-L01 取到第一句，自由说/不存在/别组的键返回 null',
+    scriptTextForKey(keyScript.groups, 'G14-L01') === '我没大，还在冷却。' &&
+      scriptTextForKey(keyScript.groups, 'G14-T01') === null &&
+      scriptTextForKey(keyScript.groups, 'G14-L09') === null &&
+      scriptTextForKey(keyScript.groups, 'G99-L01') === null,
+    `${scriptTextForKey(keyScript.groups, 'G14-L01')} / ${scriptTextForKey(keyScript.groups, 'G14-T01')}`,
+  )
   let failed = 0
   for (const item of cases) {
     if (!item.ok) failed++
@@ -824,8 +855,106 @@ function storeCases(): void {
       text,
       split
     })
+    // —— 待训数据（#64）：账本里 run_id 为空的最新修订 = 录了但没被任何一次 run 吃过的录音 ——
+    const take = (key: string, seconds: number, text: string): FtLedgerEntry => ({
+      key,
+      wavPath: join(root, 'asr-ft', `${key}.wav`),
+      bytes: 44 + seconds * 32000,
+      mtimeMs: seconds,
+      text,
+      split: 'train'
+    })
+    saveDatasetLedger([take('G20-L01', 1, '第一句'), take('G20-L02', 2, '第二句')])
+    const fresh = summarizePendingTakes({ entries: listDatasetEntries(), hasRun: false })
+    push(
+      '待训：没有历史 = 「从未训练过」，条数 = 最新修订里 run_id 为空的',
+      fresh.count === 2 && !fresh.trained && !fresh.prompt && fresh.label.includes('从未训练过') && fresh.label.includes('2'),
+      fresh.label
+    )
+    push(
+      '待训：时长按 wav 字节折算（16k/16bit：44 字节头 + 32 字节/毫秒）',
+      fresh.durationMs === 3000 && ftWavDurationMs(44 + 32000) === 1000,
+      `${fresh.durationMs}ms`
+    )
+    recordDatasetTake(take('G20-L03', 0.5, '第三句'))
+    const recorded = summarizePendingTakes({ entries: listDatasetEntries(), hasRun: false })
+    push(
+      '待训：录一条就落账（run_id 空）→ 条数和时长都涨',
+      recorded.count === 3 && recorded.durationMs === 3500,
+      `${recorded.count} 条 ${recorded.durationMs}ms`
+    )
+    markDatasetEntryTrained('G20-L01', 1, 'run-64')
+    markDatasetEntryTrained('G20-L02', 1, 'run-64')
+    const afterRun = summarizePendingTakes({ entries: listDatasetEntries(), hasRun: true })
+    push(
+      '待训：跑完一次 → 训过的清零，只剩没训的，文案换成「上次训练后」',
+      afterRun.count === 1 &&
+        afterRun.trained &&
+        afterRun.durationMs === 500 &&
+        afterRun.label.includes('上次训练后') &&
+        !afterRun.prompt,
+      afterRun.label
+    )
+    saveDatasetLedger([take('G20-L01', 1.2, '第一句')])
+    const redoTake = summarizePendingTakes({ entries: listDatasetEntries(), hasRun: true })
+    push(
+      '待训：重录已训的一行不算新（同 key 同稿 = 同修订，run_id 保留）',
+      redoTake.count === 1,
+      `${redoTake.count} 条`
+    )
+    saveDatasetLedger([take('G20-L01', 1.2, '第一句（改稿）')])
+    const relabeled = summarizePendingTakes({ entries: listDatasetEntries(), hasRun: true })
+    push(
+      '待训：同一行改过稿 = 新修订 → 算新',
+      relabeled.count === 2 && relabeled.durationMs === 1700,
+      `${relabeled.count} 条 ${relabeled.durationMs}ms`
+    )
+    // 三处同一个库：待训 + 已训（都只看最新修订）= 账本最新修订总数。
+    const latestRevision = new Map<string, number>()
+    for (const entry of listDatasetEntries()) latestRevision.set(entry.key, Math.max(latestRevision.get(entry.key) ?? 0, entry.revision))
+    const latestRows = listDatasetEntries().filter((entry) => latestRevision.get(entry.key) === entry.revision)
+    const trainedLatest = latestRows.filter((entry) => entry.runId !== null).length
+    push(
+      '待训：数字 = 最新修订 − 已训的最新修订（run 记录与账本同一个库，三处不会漂）',
+      relabeled.count + trainedLatest === latestRows.length && latestRows.length === latestRevision.size,
+      `待训 ${relabeled.count} + 已训 ${trainedLatest} = ${latestRows.length}`
+    )
+    const thresholdRow = (index: number) => ({ ...take(`G30-L${String(index).padStart(2, '0')}`, 0, '凑数'), revision: 1, runId: null })
+    const belowThreshold = summarizePendingTakes({
+      entries: Array.from({ length: FT_PENDING_PROMPT_AT - 1 }, (_, index) => thresholdRow(index + 1)),
+      hasRun: true
+    })
+    const atThreshold = summarizePendingTakes({
+      entries: Array.from({ length: FT_PENDING_PROMPT_AT }, (_, index) => thresholdRow(index + 1)),
+      hasRun: true
+    })
+    push(
+      `待训：够 ${FT_PENDING_PROMPT_AT} 条才变提示（${FT_PENDING_PROMPT_AT - 1} 条不算），而且只是提示不开训`,
+      !belowThreshold.prompt &&
+        atThreshold.prompt &&
+        atThreshold.count === FT_PENDING_PROMPT_AT &&
+        atThreshold.label.includes('再训'),
+      `${belowThreshold.count}/${atThreshold.count} ${atThreshold.label}`
+    )
+    push(
+      '待训：同一 key 的旧修订不重复计（只看最新修订）',
+      summarizePendingTakes({
+        entries: [1, 2, 3].map((revision) => ({ ...take('G40-L01', 1, '同一句'), revision, runId: null })),
+        hasRun: false
+      }).count === 1,
+      'rev1..3 → 1 条'
+    )
+    forgetDatasetTake('G20-L03')
+    const afterDelete = summarizePendingTakes({ entries: listDatasetEntries(), hasRun: true })
+    push(
+      '待训：删掉一条录音 → 未训的账本行一起删（数字不指着不存在的 wav），已训历史留着',
+      afterDelete.count === 1 && findDatasetEntry('G20-L03') === null && findDatasetEntry('G20-L01', 1)?.runId === 'run-64',
+      `${afterDelete.count} 条`
+    )
+
+    const g14Rows = (): ReturnType<typeof listDatasetEntries> => listDatasetEntries().filter((entry) => entry.key.startsWith('G14'))
     saveDatasetLedger([wav('G14-L01', 100, 1, '第一句', 'train'), wav('G14-L02', 200, 2, '第二句', 'eval')])
-    push('账本：打包记账写入两条', listDatasetEntries().length === 2, listDatasetEntries().map((entry) => entry.key).join(' '))
+    push('账本：打包记账写入两条', g14Rows().length === 2, g14Rows().map((entry) => entry.key).join(' '))
     saveDatasetLedger([wav('G14-L01', 120, 5, '第一句', 'train'), wav('G14-L02', 200, 2, '第二句', 'train')])
     const reRecorded = findDatasetEntry('G14-L01')
     const evalKept = findDatasetEntry('G14-L02')
@@ -838,15 +967,16 @@ function storeCases(): void {
     const corrected = findDatasetEntry('G14-L01')
     push(
       '账本：改过稿件 = 新修订（旧修订留着）',
-      corrected?.revision === 2 && corrected.runId === null && listDatasetEntries().length === 3,
-      `rev=${corrected?.revision} rows=${listDatasetEntries().length}`
+      corrected?.revision === 2 && corrected.runId === null && g14Rows().length === 3,
+      `rev=${corrected?.revision} rows=${g14Rows().length}`
     )
-    push('账本：没训过的条目 run_id 为空', trainedDatasetEntries().length === 0, `${trainedDatasetEntries().length}`)
+    const g14Trained = (): number => g14Rows().filter((entry) => entry.runId !== null).length
+    push('账本：没训过的条目 run_id 为空', g14Trained() === 0, `${g14Trained()}`)
     const marked = markDatasetEntryTrained('G14-L02', 1, newest.id)
     push(
       '账本：标记已训（run_id 落行）',
-      marked && findDatasetEntry('G14-L02')?.runId === newest.id && trainedDatasetEntries().length === 1,
-      `runId=${findDatasetEntry('G14-L02')?.runId} trained=${trainedDatasetEntries().length}`
+      marked && findDatasetEntry('G14-L02')?.runId === newest.id && g14Trained() === 1,
+      `runId=${findDatasetEntry('G14-L02')?.runId} trained=${g14Trained()}`
     )
     saveDatasetLedger([wav('G14-L01', 120, 5, '第一句（改稿）', 'train')], newest.id)
     const snapshot = packedLedgerForRun(newest.id)

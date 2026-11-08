@@ -290,6 +290,8 @@ export interface AsrFtStatusResult {
   swap: { activeExists: boolean; bakExists: boolean; nextExists: boolean; lastExportDir: string | null }
   /** 已训标记：最近一次微调的账本 vs 当前录音，按组算 done/total/stale（key = 组 id）。 */
   coverage: Record<string, FtCoverageGroup>
+  /** 待训数据：账本里还没被任何一次 run 吃过的最新录音。 */
+  pending: FtPendingTakes
   /** 一键安装的即时状态：null = 这次会话还没跑过安装。 */
   install: AsrFtInstallState | null
 }
@@ -405,6 +407,78 @@ export function ftLedgerMatchedOnDisk(
 
 /** 8G 卡实测训练净占 ~6.2G（峰值 7661 − 空闲基线 1488）+ 200 MiB 余量。这是「建议线」，不是硬闸。 */
 export const FT_TRAIN_NEED_MIB = 6400
+
+/** wav 头字节数（录音模块写的就是 44 字节标准头）。 */
+export const FT_WAV_HEADER_BYTES = 44
+
+/** 16k 单声道 16bit = 32000 字节/秒（录音模块 BYTES_PER_MS 的同一数字）。 */
+export const FT_WAV_BYTES_PER_MS = 32
+
+/** 待训条数到这条线就把提示语换成「够再训一次了」——只是提示，绝不自动开训。 */
+export const FT_PENDING_PROMPT_AT = 20
+
+/** wav 时长（毫秒）：44 字节头 + 32 字节/毫秒，与录音模块同一换算。 */
+export function ftWavDurationMs(bytes: number): number {
+  return Math.max(0, Math.round((bytes - FT_WAV_HEADER_BYTES) / FT_WAV_BYTES_PER_MS))
+}
+
+/** 待训摘要：条数、总时长，以及面板直接显示的那句人话。 */
+export interface FtPendingTakes {
+  /** 待训条数（每个 key 只算最新修订）。 */
+  count: number
+  /** 这些录音的总时长（毫秒）。 */
+  durationMs: number
+  /** 跑过 asr-ft 没有：没有历史时文案是「从未训练」而不是「上次训练后」。 */
+  trained: boolean
+  /** 够再训一次了（只是提示）。 */
+  prompt: boolean
+  label: string
+}
+
+/** 账本行里这个纯缝只需要这几个字段（主进程的 DatasetEntry 结构性满足）。 */
+export interface FtPendingLedgerRow {
+  key: string
+  revision: number
+  bytes: number
+  runId: string | null
+}
+
+/**
+ * 「还有多少新数据等着训练」：账本里每个 key 只看最新修订，run_id 为空的就是没被任何一次 run 吃过的。
+ * 重录一句（稿子没变）还是同一个修订、run_id 保留，所以不会算成新数据；改稿才是新修订。
+ * 条数、时长、已训/未训都从这一份账本推，不重走录音目录。
+ */
+export function summarizePendingTakes(input: {
+  entries: readonly FtPendingLedgerRow[]
+  hasRun: boolean
+  threshold?: number
+}): FtPendingTakes {
+  const limit = input.threshold ?? FT_PENDING_PROMPT_AT
+  const latest = new Map<string, FtPendingLedgerRow>()
+  for (const entry of input.entries) {
+    const seen = latest.get(entry.key)
+    if (!seen || entry.revision > seen.revision) latest.set(entry.key, entry)
+  }
+  const rows = [...latest.values()].filter((entry) => entry.runId === null)
+  const count = rows.length
+  const durationMs = rows.reduce((sum, entry) => sum + ftWavDurationMs(entry.bytes), 0)
+  const seconds = Math.round(durationMs / 1000)
+  const prompt = count >= limit
+  const base = !input.hasRun
+    ? count > 0
+      ? `从未训练过，已录 ${count} 条（约 ${seconds} 秒）`
+      : '从未训练过，还没录过音'
+    : count > 0
+      ? `上次训练后有 ${count} 条新录音（约 ${seconds} 秒）`
+      : '上次训练后还没有新录音'
+  return {
+    count,
+    durationMs,
+    trained: input.hasRun,
+    prompt,
+    label: prompt ? `${base}，够再训一次了` : base
+  }
+}
 
 export interface FtGpuApp {
   pid: number
