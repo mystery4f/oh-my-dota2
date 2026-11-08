@@ -128,7 +128,9 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `resources/asr-sherpa-worker.cjs`, never a new branch per call site),
   `asr-ft/` (ASR accent fine-tune recordings from 识别训练's recording panel:
   one wav per line, `Gxx/Gxx-Lnn.wav` (or `Gxx-Tnn.wav` for the free-speech group); the
-  recording script ships as a bundled resource, `resources/asr-ft-script.md`),
+  recording script ships as a bundled resource, `resources/asr-ft-script.md`, and a
+  `<userData>/asr-ft-script.md` copy overrides it in the same `## Gxx` shape; a broken
+  custom file falls back to the bundled one with a panel warning, never a blank page),
   `train-runs/` (训练记录: one JSON per training run, atomic temp+rename, capped at
   `TRAIN_RUN_KEEP` 200 newest — the only history of what was trained, with what data,
   and where the artifacts went; metrics are read back from the run's own

@@ -5,6 +5,7 @@ import {
   RECORDING_LIMITS,
   parseRecordingKeyParts,
   recordingKey,
+  resolveFtScript,
   shouldKeepTake,
   takeLineId
 } from '@shared/train/recording'
@@ -572,6 +573,59 @@ export function runTrainProbe(): void {
   )
   const gv = judgeGvPreflight({ expName: 'mirana', missing: ['音素表 2-name2text.txt'], gptTrained: false, sovitsTrained: false })
   push('体检：GV 缺备料阻断', preflightBlocks(gv).map((item) => item.id).join(',') === 'data', gv.map((item) => `${item.id}:${item.level}`).join(' '))
+
+  // —— 读稿来源（#61）：数据目录的自定义稿优先，缺失/坏了才回落到随包自带的 ——
+  const bundledMd = '## G01 日常\n1. 今天天气不错。\n2. 我中午吃了碗面。\n'
+  const userMd = '## G14 对线\n1. 我没大，还在冷却。\n'
+  const dataPath = 'data/asr-ft-script.md'
+  const bundledPath = 'resources/asr-ft-script.md'
+  const fromData = resolveFtScript({ path: dataPath, markdown: userMd }, { path: bundledPath, markdown: bundledMd })
+  push(
+    '读稿：数据目录有自定义稿就用它（组与句都跟着走）',
+    fromData.source === 'data' &&
+      fromData.groups.map((group) => group.id).join(',') === 'G14' &&
+      fromData.groups[0].lines[0]?.text === '我没大，还在冷却。' &&
+      fromData.warning === null &&
+      fromData.path === dataPath,
+    `${fromData.source} | ${fromData.groups.map((group) => group.id).join(',')} | ${fromData.path}`,
+  )
+  const noData = resolveFtScript({ path: dataPath, markdown: null }, { path: bundledPath, markdown: bundledMd })
+  push(
+    '读稿：数据目录没有自定义稿就回落自带，且不算告警',
+    noData.source === 'bundled' &&
+      noData.groups[0]?.id === 'G01' &&
+      noData.groups[0].lines.length === 2 &&
+      noData.warning === null &&
+      noData.error === null,
+    `${noData.source} | ${noData.groups.length} 组 | ${noData.path}`,
+  )
+  const brokenData = resolveFtScript(
+    { path: dataPath, markdown: '这是随手写的一行，没有组标题也没有编号句\n' },
+    { path: bundledPath, markdown: bundledMd },
+  )
+  push(
+    '读稿：数据目录的稿子解析不了 → 回落自带并给告警',
+    brokenData.source === 'bundled' &&
+      brokenData.groups[0]?.id === 'G01' &&
+      brokenData.warning !== null &&
+      brokenData.error === null,
+    brokenData.warning ?? '(没有告警)',
+  )
+  const mojibake = resolveFtScript(
+    { path: dataPath, markdown: '## G01 日常\n1. 我没\uFFFD\uFFFD，还在冷却。\n' },
+    { path: bundledPath, markdown: bundledMd },
+  )
+  push(
+    '读稿：非 UTF-8 的稿子也回落（别拿乱码去录）',
+    mojibake.source === 'bundled' && mojibake.groups[0]?.id === 'G01' && mojibake.warning !== null,
+    mojibake.warning ?? '(没有告警)',
+  )
+  const noScript = resolveFtScript({ path: dataPath, markdown: '## 空\n' }, { path: bundledPath, markdown: null })
+  push(
+    '读稿：两份都没有/都坏才 error，并点名缺失的自带稿路径',
+    noScript.groups.length === 0 && (noScript.error ?? '').includes(bundledPath),
+    noScript.error ?? '(没有错误)',
+  )
   let failed = 0
   for (const item of cases) {
     if (!item.ok) failed++

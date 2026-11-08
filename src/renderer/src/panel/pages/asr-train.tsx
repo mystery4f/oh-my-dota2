@@ -107,6 +107,21 @@ export function AsrTrainPage(): React.ReactElement {
           }
         >
           <Row
+            label="读稿"
+            hint={
+              script
+                ? `${script.source === 'data' ? '数据目录（自定义）' : '随包自带'} · ${script.path}`
+                : '读稿还没读出来'
+            }
+          >
+            {script ? (
+              <StatusPill tone={script.source === 'data' ? 'ready' : 'idle'}>
+                {script.source === 'data' ? '自定义' : '随包'}
+              </StatusPill>
+            ) : null}
+          </Row>
+          {script?.warning ? <p className="px-4 py-2 text-xs text-amber-300">{script.warning}</p> : null}
+          <Row
             label="录音"
             hint={
               group

@@ -14,7 +14,8 @@
  *
  * Knobs, all through the URL: `?s=<section>` deep-links a section (the shell reads it),
  * `?engine=<ttsEngine>` and `?outEngine=<ttsOutEngine>` force an engine so the voice-pack rows
- * can be inspected without clicking through the panel.
+ * can be inspected without clicking through the panel; `?script=bad` makes the read script fail
+ * so the fallback warning row on 识别训练 is visible.
  */
 import { DEFAULT_SETTINGS, type OverlayTextMode, type WindowApi } from '@shared/ipc'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
@@ -23,6 +24,7 @@ const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
 const engine = query.get('engine') as typeof settings.ttsEngine | null
 const outEngine = query.get('outEngine') as typeof settings.ttsOutEngine | null
+const scriptMode = query.get('script')
 if (engine) settings.ttsEngine = engine
 if (outEngine) settings.ttsOutEngine = outEngine
 
@@ -219,6 +221,9 @@ const stubScript = {
     { id: 'G19', title: '报点', mode: 'lines' as const, note: '', lines: [1, 2, 3].map((no) => ({ no, text: `这是 G19 的第 ${no} 句稿子` })) },
     { id: 'G21', title: '自由说', mode: 'free' as const, note: '想到什么说什么', lines: [] }
   ],
+  source: scriptMode === 'bad' ? ('bundled' as const) : ('data' as const),
+  path: scriptMode === 'bad' ? 'resources/asr-ft-script.md' : 'data/asr-ft-script.md',
+  warning: scriptMode === 'bad' ? '数据目录的读稿（data/asr-ft-script.md）格式不对（要 `## G14` 组标题 + 编号句），已回落到自带读稿' : null,
   error: null
 }
 const stubRecs = [1, 2, 3].map((no) => ({
