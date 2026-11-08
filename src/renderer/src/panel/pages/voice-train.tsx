@@ -3,7 +3,7 @@ import type { TrainSnapshot } from '@shared/train/task'
 import { judgeGvPreflight } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 import {
-  GV_DEFAULTS,
+  GV_LEGS,
   GV_VERSION_DEFAULT,
   GV_VERSION_INFO,
   type GvDatasetJudgement,
@@ -16,6 +16,8 @@ import { formatDuration } from '../run-format'
 import { selectClass } from '../components/select-class'
 
 const GV_KINDS = new Set(['gv-gpt', 'gv-sovits'])
+/** 面板按钮顺序：先语义后声学（权重成对，习惯上先训 GPT 腿）。 */
+const LEG_ORDER = ['gv-gpt', 'gv-sovits'] as const
 
 /**
  * 音色训练：GPT 语义腿与 SoVITS 声学腿各自开训，跑完注册成音色包。
@@ -135,40 +137,29 @@ export function VoiceTrainPage(): React.ReactElement {
                   <StatusPill tone={dataset.ready ? 'ready' : 'warn'}>
                     {dataset.ready ? '可开训' : '缺备料'}
                   </StatusPill>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!dataset.ready || taskRunning || Boolean(busy)}
-                    onClick={() =>
-                      void act('GPT 腿', async () => {
-                        const result = await window.api.trainStart({
-                          kind: 'gv-gpt',
-                          dataset: dataset.expName,
-                          gv: { version, ...GV_DEFAULTS['gv-gpt'] }
-                        })
-                        return result.ok ? '已开训 GPT 腿' : `开训失败：${result.error ?? '未知错误'}`
-                      })
-                    }
-                  >
-                    GPT 腿
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!dataset.ready || taskRunning || Boolean(busy)}
-                    onClick={() =>
-                      void act('SoVITS 腿', async () => {
-                        const result = await window.api.trainStart({
-                          kind: 'gv-sovits',
-                          dataset: dataset.expName,
-                          gv: { version, ...GV_DEFAULTS['gv-sovits'] }
-                        })
-                        return result.ok ? '已开训 SoVITS 腿' : `开训失败：${result.error ?? '未知错误'}`
-                      })
-                    }
-                  >
-                    SoVITS 腿
-                  </Button>
+                  {LEG_ORDER.map((kind) => {
+                    const leg = GV_LEGS[kind]
+                    return (
+                      <Button
+                        key={kind}
+                        size="sm"
+                        variant="outline"
+                        disabled={!dataset.ready || taskRunning || Boolean(busy)}
+                        onClick={() =>
+                          void act(`${leg.label} 腿`, async () => {
+                            const result = await window.api.trainStart({
+                              kind,
+                              dataset: dataset.expName,
+                              gv: { version, ...leg.defaults }
+                            })
+                            return result.ok ? `已开训 ${leg.label} 腿` : `开训失败：${result.error ?? '未知错误'}`
+                          })
+                        }
+                      >
+                        {leg.label} 腿
+                      </Button>
+                    )
+                  })}
                   <Button
                     size="sm"
                     variant="ghost"

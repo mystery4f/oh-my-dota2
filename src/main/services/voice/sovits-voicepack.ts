@@ -1,11 +1,19 @@
 import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { downloadResumable } from '../net/download'
 import { SOVITS_SEED_REF_DIR, type SovitsVoicePack } from '@shared/ipc'
 import { loadSettings } from '../settings'
-import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './sovits-refs'
+import {
+  isSafeRelPath,
+  listSovitsRefs,
+  readRefsRaw,
+  sovitsRefsFile,
+  sovitsRefsRoot,
+  sovitsWeightsRoot,
+  writeRefsRaw
+} from './sovits-refs'
 import { activateSovitsRef, recordSovitsLog } from './sovits-server'
 import { synthesizeEdge } from './edge'
 import { DEFAULT_EDGE_VOICE } from '@shared/tts-voices'
@@ -77,18 +85,9 @@ export const VOICE_PACKS: VoicePackDef[] = [
   }
 ]
 
-/** 清单里的相对路径规则（与 sovits-refs 的 parseEntry 同款）：POSIX、不绝对、无 ..，必须 a/b 两段起。 */
+/** 清单里的相对路径规则：与库内路径同源，另加长度上限与「必须两段」（远端文件一定落在子目录里）。 */
 export function safePackRelPath(p: unknown): p is string {
-  return (
-    typeof p === 'string' &&
-    p.length > 3 &&
-    p.length <= 200 &&
-    !p.includes('\\') &&
-    !p.includes(':') &&
-    !p.startsWith('/') &&
-    p.split('/').every((seg) => seg.length > 0 && seg !== '.' && seg !== '..') &&
-    p.includes('/')
-  )
+  return isSafeRelPath(p, { maxLength: 200, requireDir: true, forbidColon: true }) && p.length > 3
 }
 
 interface ManifestFileRaw {
@@ -185,25 +184,27 @@ export async function resolveVoicePacks(opts?: { force?: boolean; url?: string }
   return mergeVoicePacks(manifestCache?.remote ?? null, VOICE_PACKS)
 }
 
-/** refs.json 落包条目（纯函数）：同名（包拥有自己的名字）或同音频路径的旧条目先剔掉，顺带报出可删的旧音频。 */
+/** 音色包的条目归属规则：同名（包拥有自己的名字）或同音频路径，都算这个包的旧条目。 */
+function isPackEntry(item: unknown, pack: VoicePackDef): boolean {
+  if (typeof item !== 'object' || item === null) return false
+  const entry = item as Record<string, unknown>
+  return entry.name === pack.name || entry.audio === pack.refAudio.relPath
+}
+
+/** refs.json 落包条目（纯函数）：同名或同音频路径的旧条目先剔掉，顺带报出可删的旧音频。 */
 export function packRefsMerge(
   current: unknown,
   pack: VoicePackDef
 ): { list: unknown[]; staleAudio: string[] } {
-  const list = Array.isArray(current) ? [...current] : []
-  const keep: unknown[] = []
   const staleAudio: string[] = []
-  for (const item of list) {
-    if (typeof item === 'object' && item !== null) {
-      const entry = item as Record<string, unknown>
-      const sameName = entry.name === pack.name
-      const sameAudio = entry.audio === pack.refAudio.relPath
-      if (sameName || sameAudio) {
-        if (typeof entry.audio === 'string' && entry.audio !== pack.refAudio.relPath) staleAudio.push(entry.audio)
-        continue
-      }
+  const keep: unknown[] = []
+  for (const item of Array.isArray(current) ? current : []) {
+    if (!isPackEntry(item, pack)) {
+      keep.push(item)
+      continue
     }
-    keep.push(item)
+    const audio = (item as Record<string, unknown>).audio
+    if (typeof audio === 'string' && audio !== pack.refAudio.relPath) staleAudio.push(audio)
   }
   keep.push(refsEntryFor(pack))
   return { list: keep, staleAudio }
@@ -252,18 +253,8 @@ export async function deleteVoicePack(id: string): Promise<SovitsVoicePack[]> {
   rmSync(refPath, { force: true })
   rmSync(`${refPath}.part`, { force: true })
   rmSync(join(weightsRoot, pack.id), { recursive: true, force: true })
-  const refsFile = join(refsRoot, 'refs.json')
-  if (existsSync(refsFile)) {
-    let current: unknown = []
-    try {
-      current = JSON.parse(readFileSync(refsFile, 'utf-8'))
-    } catch {
-      current = []
-    }
-    const kept = (Array.isArray(current) ? current : []).filter(
-      (item) => !(typeof item === 'object' && item !== null && ((item as Record<string, unknown>).name === pack.name || (item as Record<string, unknown>).audio === pack.refAudio.relPath))
-    )
-    writeFileSync(refsFile, `${JSON.stringify(kept, null, 2)}\n`, 'utf-8')
+  if (existsSync(sovitsRefsFile(refsRoot))) {
+    writeRefsRaw(refsRoot, readRefsRaw(refsRoot).filter((item) => !isPackEntry(item, pack)))
   }
   packRuns.delete(pack.id)
   recordSovitsLog('TTS_SOVITS_PACK_DELETE', { id: pack.id })
@@ -355,15 +346,6 @@ function refsEntryFor(pack: VoicePackDef): Record<string, unknown> {
 
 const packRuns = new Map<string, { downloading: boolean; progress: number; error: string | null }>()
 
-/** 读 refs.json 原始内容：文件缺失/坏 JSON 都当空表（与安装/删除路径同一套宽容）。 */
-function readRawRefs(refsFile: string): unknown {
-  if (!existsSync(refsFile)) return []
-  try {
-    return JSON.parse(readFileSync(refsFile, 'utf-8'))
-  } catch {
-    return []
-  }
-}
 
 /** 面板视图：目录 + 本地状态（在不在、下没下、进度、错误）合成一张表。 */
 export async function sovitsVoicePacks(): Promise<SovitsVoicePack[]> {
@@ -371,7 +353,7 @@ export async function sovitsVoicePacks(): Promise<SovitsVoicePack[]> {
   const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
   const activeRef = loadSettings().ttsSovitsRefAudio.trim().toLowerCase()
   const packs = await resolveVoicePacks()
-  const rawRefs = readRawRefs(join(refsRoot, 'refs.json'))
+  const rawRefs = readRefsRaw(refsRoot)
   return packs.map((pack) => {
     const run = packRuns.get(pack.id)
     const plan = planVoicePackFiles(pack, refsRoot, weightsRoot)
@@ -445,19 +427,9 @@ export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
       run.progress = doneBytes / totalBytes
     }
     run.progress = 1
-    // refs.json 落条目：库文件可能不存在/被手编坏，都当空表起步（listSovitsRefs 同款宽容）。
-    const refsFile = join(refsRoot, 'refs.json')
-    let current: unknown = []
-    if (existsSync(refsFile)) {
-      try {
-        current = JSON.parse(readFileSync(refsFile, 'utf-8'))
-      } catch {
-        current = []
-      }
-    }
-    // 换版时同名/同路径的旧条目先剔掉（包拥有自己的名字），旧参考音频记下来给清理步骤。
-    const merged = packRefsMerge(current, pack)
-    writeFileSync(refsFile, `${JSON.stringify(merged.list, null, 2)}\n`, 'utf-8')
+    // refs.json 落条目：换版时同名/同路径的旧条目先剔掉（包拥有自己的名字），旧参考音频记下来给清理步骤。
+    const merged = packRefsMerge(readRefsRaw(refsRoot), pack)
+    writeRefsRaw(refsRoot, merged.list)
     const stale = cleanupStalePackFiles(pack, merged.staleAudio, refsRoot, weightsRoot)
     if (stale.length > 0) recordSovitsLog('TTS_SOVITS_PACK_CLEANUP', { id: pack.id, files: stale })
     recordSovitsLog('TTS_SOVITS_PACK_READY', { id: pack.id, name: pack.name })
@@ -516,22 +488,13 @@ export async function ensureSovitsSeedRef(force = false): Promise<boolean> {
   }
   mkdirSync(join(refsRoot, SEED_REF_DIR), { recursive: true })
   writeFileSync(audioPath, mp3)
-  const refsFile = join(refsRoot, 'refs.json')
-  let current: unknown = []
-  if (existsSync(refsFile)) {
-    try {
-      current = JSON.parse(readFileSync(refsFile, 'utf-8'))
-    } catch {
-      current = []
-    }
-  }
   const entry = {
     name: '晓晓（保底）',
     audio: `${SEED_REF_DIR}/seed.mp3`,
     promptText: SEED_REF_TEXT,
     promptLang: 'zh'
   }
-  writeFileSync(refsFile, `${JSON.stringify(mergeRefsJson(current, entry), null, 2)}\n`, 'utf-8')
+  writeRefsRaw(refsRoot, mergeRefsJson(readRefsRaw(refsRoot), entry))
   recordSovitsLog('TTS_SOVITS_SEED_READY', { bytes: mp3.length })
   return true
 }
@@ -549,7 +512,7 @@ export async function autoVoicePackSetup(): Promise<void> {
     await ensureSovitsSeedRef()
     return
   }
-  const everInstalled = findPackEntry(readRawRefs(join(refsRoot, 'refs.json')), fallback) !== null
+  const everInstalled = findPackEntry(readRefsRaw(refsRoot), fallback) !== null
   if (!voicePackInstalled(fallback, refsRoot, weightsRoot) && !everInstalled) {
     recordSovitsLog('TTS_SOVITS_PACK_AUTO_INSTALL', { id: fallback.id })
     await installVoicePack(fallback.id)

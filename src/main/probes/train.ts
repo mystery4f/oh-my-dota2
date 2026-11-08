@@ -48,6 +48,7 @@ import {
 import {
   buildS1TrainConfigData,
   buildS2TrainConfigData,
+  GV_LEGS,
   GV_VERSION_DEFAULT,
   GV_VERSION_INFO,
   judgeGvDataset,
@@ -433,7 +434,7 @@ export function runTrainProbe(): void {
   const gvWired = deriveTrainPlan({
     kind: 'gv-gpt',
     dataset: 'demo',
-    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', script: 'GPT_SoVITS/s1_train.py' }
+    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', expName: 'demo' }
   })
   push(
     'GV 计划：没备料拒启动；备好了 argv/cwd 全对（s1 用 --config_file）',
@@ -447,12 +448,28 @@ export function runTrainProbe(): void {
   const gvSovitsArgs = deriveTrainPlan({
     kind: 'gv-sovits',
     dataset: 'demo',
-    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', script: 'GPT_SoVITS/s2_train.py' }
+    gvResolved: { home: 'H', pythonExe: 'P', configFile: 'C', expName: 'demo' }
   })
   push(
     'GV s2 计划用 --config（非 GET 别名，照抄 webui）',
     JSON.stringify(gvSovitsArgs.args) === JSON.stringify(['-s', 'GPT_SoVITS/s2_train.py', '--config', 'C']),
     gvSovitsArgs.args.join(' '),
+  )
+  const sovitsLeg = GV_LEGS['gv-sovits']
+  const gptLeg = GV_LEGS['gv-gpt']
+  push(
+    'GV 腿表是唯一真相：脚本/参数名/配置文件名/默认值同源',
+    sovitsLeg.script === 'GPT_SoVITS/s2_train.py' &&
+      sovitsLeg.configFlag === '--config' &&
+      gptLeg.script === 'GPT_SoVITS/s1_train.py' &&
+      gptLeg.configFlag === '--config_file' &&
+      gptLeg.configFile === 'tmp_s1.yaml' &&
+      sovitsLeg.configFile === 'tmp_s2.json' &&
+      sovitsLeg.format === 'json' &&
+      gptLeg.defaults.epochs === 15 &&
+      sovitsLeg.templateFile(GV_VERSION_INFO.v2) === GV_VERSION_INFO.v2.s2ConfigTemplate &&
+      gptLeg.requiredFiles(GV_VERSION_INFO.v2).includes(GV_VERSION_INFO.v2.s1Pretrained),
+    `${sovitsLeg.script} | ${gptLeg.configFlag}`,
   )
   // —— 训练记录（run）：构建、收场、指标压缩 ——
   const started = buildTrainRun({ kind: 'asr-ft', experiment: '地图', startedAt: 1_700_000_000_000, data: { files: 40 } })

@@ -83,7 +83,7 @@ function runArtifactsOf(kind: TrainTaskKind, request: TrainStartRequest): TrainR
     return { runDir: request.asrFt.data.runDir, ckptDir: request.asrFt.data.runDir, exportDir: request.asrFt.exportDir }
   }
   if ((kind === 'gv-gpt' || kind === 'gv-sovits') && request.gvResolved) {
-    return { runDir: join(request.gvResolved.home, 'GPT_SoVITS', 'logs', String(request.dataset ?? '')) }
+    return { runDir: join(request.gvResolved.home, 'GPT_SoVITS', 'logs', request.gvResolved.expName) }
   }
   return {}
 }
