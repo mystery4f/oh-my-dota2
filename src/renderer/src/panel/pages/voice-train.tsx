@@ -12,7 +12,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 import { PreflightList, RunRow, Sparkline } from '../components/run-view'
-import { formatDuration } from '../run-format'
+import { TrainTaskRow } from '../components/train-task-row'
+import { useTrainConsole } from '../use-train-console'
 import { selectClass } from '../components/select-class'
 
 const GV_KINDS = new Set(['gv-gpt', 'gv-sovits'])
@@ -26,15 +27,12 @@ const LEG_ORDER = ['gv-gpt', 'gv-sovits'] as const
 export function VoiceTrainPage(): React.ReactElement {
   const [datasets, setDatasets] = React.useState<GvDatasetJudgement[]>([])
   const [runs, setRuns] = React.useState<TrainRunRecord[]>([])
-  const [snapshot, setSnapshot] = React.useState<TrainSnapshot | null>(null)
   const [version, setVersion] = React.useState<GvVersion>(GV_VERSION_DEFAULT)
   const [name, setName] = React.useState('')
   const [targetExp, setTargetExp] = React.useState('')
   const [webui, setWebui] = React.useState(false)
-  const [busy, setBusy] = React.useState('')
-  const [note, setNote] = React.useState('')
 
-  const refresh = React.useCallback(async (): Promise<void> => {
+  const load = React.useCallback(async (): Promise<TrainSnapshot> => {
     const [nextDatasets, nextRuns, nextSnapshot] = await Promise.all([
       window.api.trainGvDatasets(),
       window.api.trainRuns(),
@@ -42,25 +40,15 @@ export function VoiceTrainPage(): React.ReactElement {
     ])
     setDatasets(nextDatasets)
     setRuns(nextRuns.filter((run) => GV_KINDS.has(run.kind)))
-    setSnapshot(nextSnapshot)
     setTargetExp((current) => current || nextDatasets[0]?.expName || '')
+    return nextSnapshot
   }, [])
 
-  React.useEffect(() => {
-    void refresh()
-  }, [refresh])
+  // 状态订阅、动作单飞与「当前任务」都归运行台；这里只剩收场后要刷新哪些列表。
+  const { task, taskRunning, busy, note, reload, run: act } = useTrainConsole(load)
 
-  React.useEffect(
-    () =>
-      window.api.onTrainState((next) => {
-        setSnapshot(next)
-        if (next.task && next.task.status !== 'running' && next.task.status !== 'preparing') void refresh()
-      }),
-    [refresh]
-  )
 
-  const task = snapshot?.task ?? null
-  const taskRunning = task !== null && (task.status === 'running' || task.status === 'preparing' || task.status === 'stopping')
+
   const gvRuns = runs
 
   // 体检看的是「当前选中的实验」：换实验就在上面的数据行里选它，别让人猜在看谁。
@@ -77,19 +65,6 @@ export function VoiceTrainPage(): React.ReactElement {
     })
   }, [datasets, runs, targetExp])
 
-  const act = async (label: string, action: () => Promise<string>): Promise<void> => {
-    if (busy) return
-    setBusy(label)
-    setNote(`${label}…`)
-    try {
-      setNote(await action())
-    } catch (err) {
-      setNote(`${label}失败：${String(err)}`)
-    } finally {
-      setBusy('')
-      await refresh()
-    }
-  }
 
   return (
     <>
@@ -97,7 +72,7 @@ export function VoiceTrainPage(): React.ReactElement {
         <Group
           label="数据"
           action={
-            <Button size="sm" variant="ghost" onClick={() => void refresh()}>
+            <Button size="sm" variant="ghost" onClick={() => void reload()}>
               刷新
             </Button>
           }
@@ -196,25 +171,7 @@ export function VoiceTrainPage(): React.ReactElement {
       <Panel>
         <Group label="运行">
           <PreflightList items={preflight} />
-          <Row
-            label={task ? `当前任务 · ${task.kind}` : '当前任务'}
-            hint={
-              task
-                ? `${task.stage || '准备中'}｜${formatDuration((task.endedAt ?? Date.now()) - task.startedAt)}`
-                : '没有正在跑的训练'
-            }
-          >
-            {task ? (
-              <>
-                <StatusPill tone={task.status === 'failed' ? 'bad' : taskRunning ? 'warn' : 'ready'}>
-                  {task.status === 'running' ? `${task.progress}%` : task.status}
-                </StatusPill>
-                <Button size="sm" variant="outline" disabled={!taskRunning} onClick={() => void window.api.trainStop()}>
-                  停止
-                </Button>
-              </>
-            ) : null}
-          </Row>
+          <TrainTaskRow task={task} running={taskRunning} />
           {gvRuns.length === 0 ? (
             <Row label="训练记录" hint="还没有记录：开一次训就会在磁盘上留一条" />
           ) : (

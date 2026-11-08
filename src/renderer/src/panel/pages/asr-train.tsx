@@ -9,7 +9,8 @@ import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 import { PreflightList, RunRow, Sparkline } from '../components/run-view'
-import { formatDuration } from '../run-format'
+import { TrainTaskRow } from '../components/train-task-row'
+import { useTrainConsole } from '../use-train-console'
 import { selectClass } from '../components/select-class'
 import { useRecorder } from '../use-recorder'
 
@@ -23,11 +24,8 @@ export function AsrTrainPage(): React.ReactElement {
   const [recs, setRecs] = React.useState<Record<string, FtRecInfo>>({})
   const [status, setStatus] = React.useState<AsrFtStatusResult | null>(null)
   const [runs, setRuns] = React.useState<TrainRunRecord[]>([])
-  const [snapshot, setSnapshot] = React.useState<TrainSnapshot | null>(null)
   const [groupId, setGroupId] = React.useState('')
   const [lineNo, setLineNo] = React.useState(1)
-  const [busy, setBusy] = React.useState('')
-  const [note, setNote] = React.useState('')
   const [asrText, setAsrText] = React.useState('')
   const [packed, setPacked] = React.useState<{ train: number; eval: number } | null>(null)
 
@@ -49,29 +47,21 @@ export function AsrTrainPage(): React.ReactElement {
     setStatus(await window.api.ftAsrftStatus())
   }, [])
 
-  React.useEffect(() => {
-    void (async () => {
-      const [nextScript, nextSnapshot] = await Promise.all([
-        window.api.ftScriptRead(),
-        window.api.trainSnapshot()
-      ])
-      setScript(nextScript)
-      setSnapshot(nextSnapshot)
-      if (nextScript.groups.length > 0) setGroupId((current) => current || nextScript.groups[0].id)
-      await Promise.all([refreshRecs(), refreshStatus(), refreshRuns()])
-    })()
+  const refreshAll = React.useCallback(async (): Promise<void> => {
+    await Promise.all([refreshRecs(), refreshStatus(), refreshRuns()])
   }, [refreshRecs, refreshRuns, refreshStatus])
 
-  React.useEffect(() => {
-    return window.api.onTrainState((next) => {
-      setSnapshot(next)
-      if (next.task?.status === 'running' || next.task?.status === 'preparing') return
-      // 收场后记录与产物都变了：列表、环境、已训标记一起刷新。
-      void refreshRuns()
-      void refreshStatus()
-      void refreshRecs()
-    })
-  }, [refreshRecs, refreshRuns, refreshStatus])
+  const load = React.useCallback(async (): Promise<TrainSnapshot> => {
+    const [nextScript, nextSnapshot] = await Promise.all([window.api.ftScriptRead(), window.api.trainSnapshot()])
+    setScript(nextScript)
+    if (nextScript.groups.length > 0) setGroupId((current) => current || nextScript.groups[0].id)
+    await refreshAll()
+    return nextSnapshot
+  }, [refreshAll])
+
+  // 状态订阅、动作单飞与「当前任务」都归运行台；这里只剩收场后要刷新哪些列表。
+  const { task, taskRunning, busy, note, run: runAction } = useTrainConsole(load)
+
 
   const recorder = useRecorder(refreshRecs)
 
@@ -79,8 +69,6 @@ export function AsrTrainPage(): React.ReactElement {
     if (group && !group.lines.some((line) => line.no === lineNo)) setLineNo(group.lines[0]?.no ?? 1)
   }, [group, lineNo])
 
-  const task = snapshot?.task ?? null
-  const taskRunning = task !== null && (task.status === 'running' || task.status === 'preparing' || task.status === 'stopping')
 
   const recordedLines = group ? group.lines.filter((line) => recs[recordingKey(group.id, group.mode, line.no)]) : []
   const activeRec = group ? recs[recordingKey(group.id, group.mode, lineNo)] : undefined
@@ -100,19 +88,6 @@ export function AsrTrainPage(): React.ReactElement {
     return { preflight: items, blocks: preflightBlocks(items) }
   }, [status, recs, packed, runs])
 
-  const runAction = async (label: string, action: () => Promise<string>): Promise<void> => {
-    if (busy) return
-    setBusy(label)
-    setNote(`${label}…`)
-    try {
-      setNote(await action())
-    } catch (err) {
-      setNote(`${label}失败：${String(err)}`)
-    } finally {
-      setBusy('')
-      await Promise.all([refreshRecs(), refreshStatus(), refreshRuns()])
-    }
-  }
 
   return (
     <>
@@ -259,25 +234,7 @@ export function AsrTrainPage(): React.ReactElement {
 
       <Panel>
         <Group label="运行">
-          <Row
-            label={task ? `当前任务 · ${task.kind}` : '当前任务'}
-            hint={
-              task
-                ? `${task.stage || '准备中'}｜${formatDuration((task.endedAt ?? Date.now()) - task.startedAt)}`
-                : '没有正在跑的训练'
-            }
-          >
-            {task ? (
-              <>
-                <StatusPill tone={task.status === 'failed' ? 'bad' : taskRunning ? 'warn' : 'ready'}>
-                  {task.status === 'running' ? `${task.progress}%` : task.status}
-                </StatusPill>
-                <Button size="sm" variant="outline" disabled={!taskRunning} onClick={() => void window.api.trainStop()}>
-                  停止
-                </Button>
-              </>
-            ) : null}
-          </Row>
+          <TrainTaskRow task={task} running={taskRunning} />
 
           <PreflightList items={preflight} />
 
