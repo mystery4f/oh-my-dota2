@@ -6,6 +6,7 @@ import {
   buildFtDatasetEntries,
   buildFtJsonlText,
   buildFtFunasrJsonlText,
+  splitIncrementalEval,
   splitTrainEval,
   type FtDatasetPrepareResult
 } from '@shared/train/dataset'
@@ -68,10 +69,15 @@ function buildJsonlText(entries: FtDatasetEntry[]): string {
   return buildFtJsonlText(entries)
 }
 
-export async function prepareFtDataset(): Promise<FtDatasetPrepareResult> {
+/**
+ * 打包：默认尾部 holdout 切验证集；增量微调传入上一轮的验证集（evalKeys），
+ * 新录的句子只进训练集——验证集换了，loss 就没法跟前一轮比。
+ */
+export async function prepareFtDataset(options?: { evalKeys?: readonly string[] }): Promise<FtDatasetPrepareResult> {
   const { entries, error } = await collectFtEntries()
   if (error) return fail(error)
-  const { train, eval: evalSet } = splitTrainEval(entries)
+  const split = options?.evalKeys ? splitIncrementalEval(entries, options.evalKeys) : splitTrainEval(entries)
+  const { train, eval: evalSet } = split
   const dir = ftDatasetDir()
   await mkdir(dir, { recursive: true })
   const trainPath = join(dir, 'train.jsonl')

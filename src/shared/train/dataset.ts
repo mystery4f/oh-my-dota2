@@ -67,6 +67,21 @@ export function splitTrainEval(
   return { train: entries.slice(0, entries.length - tail), eval: entries.slice(entries.length - tail) }
 }
 
+/**
+ * 增量微调的切分：验证集沿用上一轮（`evalKeys`），新录的句子只进训练集。
+ * 验证集是指标的标尺——每轮换一批句子，loss 就没法跟前一轮比；只有旧验证句还在，这条基线才留得住。
+ */
+export function splitIncrementalEval(
+  entries: FtDatasetEntry[],
+  evalKeys: readonly string[],
+): { train: FtDatasetEntry[]; eval: FtDatasetEntry[] } {
+  const keep = new Set(evalKeys)
+  return {
+    train: entries.filter((entry) => !keep.has(entry.key)),
+    eval: entries.filter((entry) => keep.has(entry.key)),
+  }
+}
+
 /** 官方 qwen3_asr_sft.py 要的 JSONL 行：中文固定带 language 前缀（实测格式）。 */
 export function buildFtJsonlLine(entry: FtDatasetEntry): string {
   return JSON.stringify({ audio: entry.wavPath, text: `language Chinese<asr_text>${entry.text}` })

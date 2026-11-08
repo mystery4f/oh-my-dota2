@@ -4,6 +4,7 @@
  * 与 FtRunMeta 的分工：那是 ASR 训练目录里的账本（训练脚本的副产物），这里是指标层，两者互不替代。
  */
 import type { TrainTaskKind } from './task'
+import type { AsrFtMode } from './asr-ft'
 
 export const TRAIN_RUN_STATUSES = ['running', 'trained', 'applied', 'failed', 'stopped'] as const
 export type TrainRunStatus = (typeof TRAIN_RUN_STATUSES)[number]
@@ -16,6 +17,8 @@ export interface TrainRunParams {
   lr?: string
   /** 续训起点（checkpoint 名或 run id）；从头训为 null。 */
   resumeFrom?: string | null
+  /** ASR 开训口径：从底模重训 / 接着上一轮的权重（记录里留一笔，事后分得清这轮吃的哪份底）。 */
+  mode?: AsrFtMode
 }
 
 export interface TrainRunData {
