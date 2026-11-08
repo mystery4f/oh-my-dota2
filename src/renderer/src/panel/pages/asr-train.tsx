@@ -5,6 +5,7 @@ import type { TrainSnapshot } from '@shared/train/task'
 import { judgeAsrPreflight, preflightBlocks } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 import { nextUnrecordedLine, recordingKey, takeLineId } from '@shared/train/recording'
+import { CORRECTION_GROUP } from '@shared/train/corrections'
 import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
@@ -13,6 +14,7 @@ import { TrainTaskRow } from '../components/train-task-row'
 import { useTrainConsole } from '../use-train-console'
 import { selectClass } from '../components/select-class'
 import { useRecorder, type RecorderTarget } from '../use-recorder'
+import { useSaveFlash, useSettings } from '../use-settings'
 
 
 /** 开训方式的两档：从底模重训（最稳）与接着上一轮权重（只补新错）。 */
@@ -35,6 +37,9 @@ export function AsrTrainPage(): React.ReactElement {
   const [asrText, setAsrText] = React.useState('')
   const [packed, setPacked] = React.useState<{ train: number; eval: number } | null>(null)
   const [facts, setFacts] = React.useState<AsrFtFacts | null>(null)
+  // 纠错样本（#66）的开关归这个页面管（数据就长在这一页），落盘走统一设置入口。
+  const { settings, update } = useSettings()
+  const save = useSaveFlash()
   // 开训方式：从底模重训 / 接着上次权重。默认重训（最稳的底），增量显式选。
   const [mode, setMode] = React.useState<AsrFtMode>('fresh')
 
@@ -181,6 +186,36 @@ export function AsrTrainPage(): React.ReactElement {
             ) : null}
           </Row>
 
+          <Row
+            label="纠错样本"
+            hint={
+              status?.corrections
+                ? `语音页改对一句，就把它那句的原始录音存成 ${CORRECTION_GROUP} 的自由说样本（标签 = 改对的句子），打包时一起进训练集；到顶只停写，不删旧样本`
+                : '语音页改对一句，那句的原始录音会存成自由说样本（状态还没读到）'
+            }
+          >
+            {status?.corrections ? (
+              <StatusPill tone={status.corrections.atCap ? 'warn' : 'idle'}>
+                {status.corrections.count}/{status.corrections.maxCount} 条 ·{' '}
+                {(status.corrections.bytes / 1024 / 1024).toFixed(1)}/
+                {Math.round(status.corrections.maxBytes / 1024 / 1024)}MB
+              </StatusPill>
+            ) : null}
+            <Button
+              size="sm"
+              variant={settings?.asrCorrectionsToDataset ? 'secondary' : 'outline'}
+              title="关掉 = 纠错只并热词，不写任何文件"
+              onClick={() =>
+                void save.wrap(update({ asrCorrectionsToDataset: !(settings?.asrCorrectionsToDataset ?? true) }))
+              }
+            >
+              {settings?.asrCorrectionsToDataset ? '开' : '关'}
+            </Button>
+          </Row>
+          {status?.corrections.notice ? (
+            <p className="px-4 py-2 text-xs text-amber-300">{status.corrections.notice}</p>
+          ) : null}
+
           {group && group.mode === 'lines' ? (
             <Row label="句子" stacked hint={currentLine ? currentLine.text : '这一组没有稿子'}>
               <div className="flex flex-wrap items-center gap-1">
@@ -278,10 +313,14 @@ export function AsrTrainPage(): React.ReactElement {
               onClick={() =>
                 void runAction('打包', async () => {
                   const result = await window.api.ftDatasetPrepare()
+                  // 缺文件的纠错样本被跳过（打包照常）：把跳过的键说出来，别让人以为它们也训了。
+                  const skipped = result.skippedCorrections.length
+                    ? `；跳过 ${result.skippedCorrections.length} 条找不到录音的纠错样本（${result.skippedCorrections.join('、')}）`
+                    : ''
                   if (result.ok) setPacked({ train: result.trainCount, eval: result.evalCount })
                   return result.ok
-                    ? `已打包：训练 ${result.trainCount} 条 / 验证 ${result.evalCount} 条`
-                    : `打包失败：${result.error ?? '未知错误'}`
+                    ? `已打包：训练 ${result.trainCount} 条 / 验证 ${result.evalCount} 条${skipped}`
+                    : `打包失败：${result.error ?? '未知错误'}${skipped}`
                 })
               }
             >

@@ -1,5 +1,6 @@
 /** ASR 微调（T5）纯缝：训练/导出命令拼装、checkpoint 挑选、换模/回滚步骤、环境缺口点名。 */
 import { ASR_ENGINE_LIST, ASR_ENGINES, type AsrEngineId } from '../asr/engines'
+import type { FtCorrectionSamples } from './corrections'
 import { holdoutTakes } from './dataset'
 
 /** 训练入口的形状：qwen3 用官方 sft 脚本 + 本地底模目录；funasr 用 `python -m funasr.bin.train` + hub 模型 id。 */
@@ -384,6 +385,8 @@ export function asrFtRollbackSteps(state: { bakExists: boolean }): AsrFtSwapOp[]
 
 /** 窗口要的微调环境 + 换模状态（检测服务填，这里只定形状）。 */
 export interface AsrFtStatusResult {
+  /** 纠错样本（#66）：自由说组里由「改对一句」攒下的样本，条数/字节与到顶提示。 */
+  corrections: FtCorrectionSamples
   env: { ok: boolean; gaps: string[]; envRoot: string }
   /** 这次训练落在哪个引擎上：面板必须能说清「训的是谁」，不然用户只能猜。 */
   target: { engineId: string; label: string; trainer: AsrFtTrainer; modelDir: string; baseModel: string }

@@ -25,6 +25,10 @@ import { useSaveFlash, useSettings } from '../use-settings'
 import { useVoicePacks } from '../use-voice-packs'
 import { VoicePackDisplay } from '../components/voice-pack-display'
 
+/**
+ * 一行日志 = 一次语音链结果 + 面板本地字段。纠错不再自己保存「原话」：找原音靠的是
+ * `utteranceId`（识别那一刻主进程发下来的票），它在 `VoiceChainSummary` 里，改几次都不会变。
+ */
 type LogEntry = VoiceChainSummary & { at: number; corrected?: boolean }
 
 /** 断链时的唯一动作按钮文案：动作是给人看的，不是给代码看的。 */
@@ -62,6 +66,8 @@ export function TalkPage({
   const [log, setLog] = useState<LogEntry[]>([])
   const [editingAt, setEditingAt] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
+  // 纠错样本（#66）的即时回执：存上了说存到哪条，到顶了说为什么没存（这条提示就是唯一出口）。
+  const [correctionNote, setCorrectionNote] = useState<string | null>(null)
   const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([])
 
   // 识别模型状态：进面板问一次，下载/解压期间每秒刷——别让人对着假进度等。
@@ -99,9 +105,17 @@ export function TalkPage({
   hotwordsRef.current = settings?.asrHotwords ?? ''
   const saveCorrection = useCallback(
     (entry: LogEntry): void => {
-      const additions = extractHotwordDiff(entry.transcript, draft)
+      const corrected = draft.trim()
+      const additions = extractHotwordDiff(entry.transcript, corrected)
       if (additions.length > 0) void update({ asrHotwords: mergeHotwords(hotwordsRef.current, additions) })
-      setLog((l) => l.map((item) => (item.at === entry.at ? { ...item, transcript: draft.trim(), corrected: true } : item)))
+      // #66：热词管「下次少错」，样本管「这次已经改对」——原音 + 改对的那句进数据集。
+      // 主进程按 utteranceId 取原音（同一句说两遍也不串）；开关也在主进程判（关掉就什么都不写）；
+      // 到顶 / 原音已经过期 / 账本没记上时，notice 是唯一让人看见的出口。
+      void window.api
+        .voiceCorrection({ utteranceId: entry.utteranceId ?? '', corrected })
+        .then((result) => setCorrectionNote(result.notice ?? (result.saved ? `已存为纠错样本 ${result.key ?? ''}` : null)))
+        .catch((err: unknown) => setCorrectionNote(`纠错样本没存成：${errorMessage(err)}`))
+      setLog((l) => l.map((item) => (item.at === entry.at ? { ...item, transcript: corrected, corrected: true } : item)))
       setEditingAt(null)
       setDraft('')
     },
@@ -467,7 +481,7 @@ export function TalkPage({
                           size="sm"
                           variant="ghost"
                           className="h-5 px-1.5 text-xs text-muted-foreground"
-                          title={activeEngine?.hotwords === 'prompt' ? '改成对的，差异词自动并入热词表' : '改成对的，差异词不并入热词表（当前引擎不支持热词提示）'}
+                          title={`${activeEngine?.hotwords === 'prompt' ? '改成对的：差异词自动并入热词表。' : '改成对的：差异词不并入热词表（当前引擎不支持热词提示）。'}${settings?.asrCorrectionsToDataset ? '原始录音同时存成纠错样本（识别训练里可关）。' : ''}`}
                           onClick={() => {
                             setEditingAt(entry.at)
                             setDraft(entry.transcript)
@@ -481,6 +495,9 @@ export function TalkPage({
                 </li>
               ))}
             </ul>
+            {correctionNote ? (
+              <p className="border-t border-border/60 px-4 py-2 text-xs text-muted-foreground">{correctionNote}</p>
+            ) : null}
           </Group>
         ) : null}
       </Panel>

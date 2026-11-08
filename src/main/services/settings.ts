@@ -102,6 +102,10 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     }
     // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
     if (typeof merged.asrHotwords !== 'string') merged.asrHotwords = DEFAULT_SETTINGS.asrHotwords
+    // 纠错样本回喂：只认布尔；缺省/乱填都按默认开（关掉是显式动作，缺省不该悄悄少存数据）。
+    if (typeof merged.asrCorrectionsToDataset !== 'boolean') {
+      merged.asrCorrectionsToDataset = DEFAULT_SETTINGS.asrCorrectionsToDataset
+    }
     // 训练窗口记忆：kind 乱值打回 demo，dataset 只认字符串。
     merged.trainKind = normalizeTrainKind(merged.trainKind)
     if (typeof merged.trainDataset !== 'string') merged.trainDataset = DEFAULT_SETTINGS.trainDataset

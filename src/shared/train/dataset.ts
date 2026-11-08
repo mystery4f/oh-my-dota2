@@ -1,6 +1,7 @@
 /** 备料打包纯缝（一键数据集）：录音 × 稿子 → 训练条目、JSONL 拼装、组进度。零 IO，磁盘真值由调用方注入。 */
 import { recordingKey } from './recording'
 import type { FtLedgerEntry } from './asr-ft'
+import { correctionTakeNo, isCorrectionTakeKey } from './corrections'
 export interface FtDatasetEntry {
   /** 完整录音键（组-句，如 G14-L03）：账本/续训判定按它对账。 */
   key: string
@@ -17,6 +18,8 @@ export interface FtDatasetPrepareResult {
   evalPath: string
   /** 本次打包的账本（每条录音的 bytes/mtimeMs 指纹）：交给 manager 写进 `train/runs.db` 的 dataset_entries。 */
   ledger: FtLedgerEntry[]
+  /** 账本上有、磁盘上已经没有的纠错样本键：跳过它们继续打包，但这几个要让人看见。 */
+  skippedCorrections: string[]
   error: string | null
 }
 
@@ -59,6 +62,40 @@ export const FT_HOLDOUT_TAKES = 2
 export function holdoutTakes(total: number, holdout = FT_HOLDOUT_TAKES): number {
   if (total < 2) return 0
   return Math.max(1, Math.min(holdout, Math.floor(total / 2)))
+}
+
+/**
+ * 纠错样本（#66）→ 打包条目：账本里每个键取最新修订，只留 `G01-Tnn`（自由说组的纠错样本）。
+ *
+ * 正文就是用户亲手改对的那句，所以自由说也能当监督数据用——这正是自由说手工录音做不到的。
+ * 编号排序 = 录制顺序；调用方把它们接在逐句录音后面，尾部 holdout 于是仍是最晚的句子。
+ * 只认账本（recordDatasetTake）里有的：手工录的自由说没有标签，混进来只会污染训练。
+ *
+ * `wavExists` 是调用方注入的磁盘真值：账本可能比磁盘旧（用户在资源管理器里删了 wav）。
+ * 缺文件的那几条剔除并单独报出来——一条缺文件不能让整份账本失效（旧行为是全量返 []，
+ * 打包直接拒绝，用户还得自己猜是哪条没了）。纯缝：这里不做 IO。
+ */
+export function buildCorrectionEntries(
+  rows: readonly { key: string; revision: number; wavPath: string; text: string }[],
+  wavExists: (wavPath: string) => boolean = () => true
+): { entries: FtDatasetEntry[]; missing: string[] } {
+  const latest = new Map<string, { key: string; revision: number; wavPath: string; text: string }>()
+  for (const row of rows) {
+    const seen = latest.get(row.key)
+    if (!seen || row.revision > seen.revision) latest.set(row.key, row)
+  }
+  const missing: string[] = []
+  const entries = [...latest.values()]
+    .filter((row) => isCorrectionTakeKey(row.key) && row.text.trim() !== '')
+    // 按序号排，不按字符串：T100 必须排在 T99 后面（字符串序会把 T100 排到 T10 前）。
+    .sort((a, b) => (correctionTakeNo(a.key) ?? 0) - (correctionTakeNo(b.key) ?? 0))
+    .filter((row) => {
+      if (wavExists(row.wavPath)) return true
+      missing.push(row.key)
+      return false
+    })
+    .map((row) => ({ key: row.key, wavPath: row.wavPath, text: row.text }))
+  return { entries, missing }
 }
 
 /**

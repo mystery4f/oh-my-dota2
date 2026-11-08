@@ -40,6 +40,7 @@ import { locateWorkerScript } from '../voice/runtime'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList } from './ft-record'
+import { correctionSamplesStatus } from '../voice/corrections'
 import { asrRunDirsRoot, listDatasetEntries, listTrainRuns, packedLedgerForRun, trainedDatasetEntries } from './run-store'
 import { sovitsChildPid } from '../voice/sovits-server'
 import { ASR_ENGINE_LIST, type AsrEngineId, type AsrEngineSpec } from '@shared/asr/engines'
@@ -261,7 +262,14 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
     },
     swap: swapView(),
     // 覆盖标记只认「被某次 run 真正吃过」的条目：库里 run_id 非空的就是。（打包过但没训的不算。）
-    coverage: ftTrainCoverage(trainedDatasetEntries(), await ftRecList()),
+    // 逐句覆盖只数 L 键：纠错样本/自由说（T 键，G01 里也有）没有稿子行，
+    // 混进来会让 G01 的「已训 x/20」凭空多出分母。
+    coverage: ftTrainCoverage(
+      trainedDatasetEntries(),
+      (await ftRecList()).filter((info) => /-L\d{2}$/.test(info.key))
+    ),
+    // 纠错样本（#66）：同一份事实既给面板的状态行，也给到顶提示。
+    corrections: await correctionSamplesStatus(),
     // 待训数据：账本里最新修订但 run_id 为空的那些（录了还没训），条数与时长都从账本推。
     pending: summarizePendingTakes({
       entries: listDatasetEntries(),
@@ -585,9 +593,13 @@ export async function resolveAsrFtTrainRequest(mode: AsrFtMode): Promise<{
     exportDir,
     applied: false
   })
+  // 缺文件的纠错样本已被跳过（打包照常进行）：开训前必须说一次，否则用户以为那几句也训了。
+  const skippedNote = pack.skippedCorrections.length
+    ? `跳过 ${pack.skippedCorrections.length} 条找不到录音的纠错样本：${pack.skippedCorrections.join('、')}`
+    : null
   return {
     ok: true,
-    warning: vramNote,
+    warning: [vramNote, skippedNote].filter(Boolean).join('；') || null,
     request: {
       kind: 'asr-ft',
       // ASR 微调没有「数据集名」这个概念：目录名固定 ft-<时间戳>，字段留空只为满足请求契约。
