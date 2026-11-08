@@ -2,7 +2,7 @@ import type { VoiceReplyStage } from './voice-out'
 import type { HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import { DEFAULT_HOTKEYS } from './hotkeys'
 
-import type { AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
+import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
 import type { VoiceOutReadiness } from '@shared/voice-out-readiness'
 import type { FtDatasetPrepareResult } from '@shared/train/dataset'
@@ -749,6 +749,7 @@ export const IPC = {
   FT_DATASET_PREPARE: 'ft:dataset-prepare',
   // ASR 微调闭环（T5）：环境状态 / 换模 / 回滚，训练+导出走 TRAIN_START/STOP。
   FT_ASRFT_STATUS: 'ft:asrft-status',
+  FT_ASRFT_FACTS: 'ft:asrft-facts',
   FT_ASRFT_APPLY: 'ft:asrft-apply',
   FT_ASRFT_ROLLBACK: 'ft:asrft-rollback',
   FT_ASRFT_INSTALL: 'ft:asrft-install',
@@ -1020,6 +1021,7 @@ export const ipcContract = {
   ftRecAsr: invoke<[string, string], VoiceTranscribeResult>(IPC.FT_REC_ASR),
   ftDatasetPrepare: invoke<[], FtDatasetPrepareResult>(IPC.FT_DATASET_PREPARE),
   ftAsrftStatus: invoke<[], AsrFtStatusResult>(IPC.FT_ASRFT_STATUS),
+  ftAsrftFacts: invoke<[], AsrFtFacts>(IPC.FT_ASRFT_FACTS),
   ftAsrftInstall: invoke<[], AsrFtInstallState>(IPC.FT_ASRFT_INSTALL),
   ftAsrftApply: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_APPLY),
   ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK)

@@ -44,6 +44,7 @@ import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript }
 import { prepareFtDataset } from './services/train/ft-dataset'
 import {
   applyAsrFtModel,
+  asrFtFacts,
   asrFtStatus,
   buildAsrFtExportPlan,
   resolveAsrFtTrainRequest,
@@ -265,6 +266,8 @@ const handlers: MainHandlers = {
   ftDatasetPrepare: () => prepareFtDataset(),
   // ASR 微调闭环（T5）：环境状态、应用新模型、回滚。
   ftAsrftStatus: async () => ({ ...(await asrFtStatus()), install: asrFtInstallState() }),
+  // 开训闸门看到的事实：显存提示与「上次能不能续训」，panel 只显示不自己推。
+  ftAsrftFacts: () => asrFtFacts(),
   // 启动即回，装到哪一步看 STATUS 轮询（整套装下来要十几分钟）。
   ftAsrftInstall: async () => {
     void installAsrFtEnv()

@@ -355,6 +355,7 @@ const implemented = {
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
   ftAsrftApply: async () => ({ ok: true, error: null, model: 'ft-stub' }),
   ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),
+  ftAsrftFacts: async () => ({ vramNote: null, resumable: true }),
   sovitsStatus: async () => sovitsStatus,
   sovitsInstall: async () => sovitsStatus,
   sovitsRefs: async () => sovitsRefs,

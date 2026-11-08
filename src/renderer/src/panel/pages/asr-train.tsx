@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { FtRecInfo, FtScriptState } from '@shared/ipc'
-import type { AsrFtStatusResult } from '@shared/train/asr-ft'
+import type { AsrFtFacts, AsrFtStatusResult } from '@shared/train/asr-ft'
 import type { TrainSnapshot } from '@shared/train/task'
 import { judgeAsrPreflight, preflightBlocks } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
@@ -28,6 +28,7 @@ export function AsrTrainPage(): React.ReactElement {
   const [lineNo, setLineNo] = React.useState(1)
   const [asrText, setAsrText] = React.useState('')
   const [packed, setPacked] = React.useState<{ train: number; eval: number } | null>(null)
+  const [facts, setFacts] = React.useState<AsrFtFacts | null>(null)
 
   const groups = script?.groups ?? []
   const group = groups.find((item) => item.id === groupId) ?? groups[0] ?? null
@@ -52,7 +53,12 @@ export function AsrTrainPage(): React.ReactElement {
   }, [refreshRecs, refreshRuns, refreshStatus])
 
   const load = React.useCallback(async (): Promise<TrainSnapshot> => {
-    const [nextScript, nextSnapshot] = await Promise.all([window.api.ftScriptRead(), window.api.trainSnapshot()])
+    const [nextScript, nextSnapshot, nextFacts] = await Promise.all([
+      window.api.ftScriptRead(),
+      window.api.trainSnapshot(),
+      window.api.ftAsrftFacts()
+    ])
+    setFacts(nextFacts)
     setScript(nextScript)
     if (nextScript.groups.length > 0) setGroupId((current) => current || nextScript.groups[0].id)
     await refreshAll()
@@ -82,11 +88,11 @@ export function AsrTrainPage(): React.ReactElement {
       recordedLines: Object.keys(recs).length,
       packed,
       activeModel: Boolean(status?.swap.activeExists),
-      resumeAvailable: runs.some((run) => run.kind === 'asr-ft' && run.status === 'trained'),
-      vramNote: null
+      resumeAvailable: facts?.resumable ?? false,
+      vramNote: facts?.vramNote ?? null
     })
     return { preflight: items, blocks: preflightBlocks(items) }
-  }, [status, recs, packed, runs])
+  }, [status, recs, packed, facts])
 
 
   return (
