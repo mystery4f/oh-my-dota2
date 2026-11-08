@@ -42,3 +42,34 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  probes:
+    # The pure seams only: no window, no network, no game, no model. These are exactly the
+    # behaviours a shared-logic refactor breaks, and until now CI never ran a single probe.
+    # A probe exits non-zero when a check fails, so the step is the gate — no parsing needed.
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pure probes
+        run: |
+          npx electron out/main/index.js --train-probe
+          npx electron out/main/index.js --voice-out-probe
+          npx electron out/main/index.js --tts-pipeline-probe
+          npx electron out/main/index.js --sovits-refs-probe
+          npx electron out/main/index.js --sovits-voicepack-probe
+          npx electron out/main/index.js --chat-block-probe
+          npx electron out/main/index.js --translate-cache-probe
+          npx electron out/main/index.js --overlay-geometry-probe
