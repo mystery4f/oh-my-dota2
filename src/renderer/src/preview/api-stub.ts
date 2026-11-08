@@ -16,7 +16,7 @@
  * `?engine=<ttsEngine>` and `?outEngine=<ttsOutEngine>` force an engine so the voice-pack rows
  * can be inspected without clicking through the panel.
  */
-import { DEFAULT_SETTINGS, type OverlayTextMode, type WindowApi } from '@shared/ipc'
+import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type WindowApi } from '@shared/ipc'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
@@ -221,12 +221,12 @@ const stubScript = {
   ],
   error: null
 }
-const stubRecs = [1, 2, 3].map((no) => ({
-  key: `G14-L${String(no).padStart(2, '0')}`,
-  bytes: 62_000 + no * 4000,
-  durationMs: 1900 + no * 120,
-  mtimeMs: stubNow - no * 86_400_000
-}))
+const stubTake = (key: string, bytes: number, durationMs: number, mtimeMs: number): FtRecInfo => ({ key, bytes, durationMs, mtimeMs })
+/** 预览里的录音集：G14 开头三句已录（可看标记与自动前进），G19 整组录完（可看完成态）。 */
+const stubRecs: FtRecInfo[] = [
+  ...[1, 2, 3].map((no) => stubTake(`G14-L${String(no).padStart(2, '0')}`, 62_000 + no * 4000, 1900 + no * 120, stubNow - no * 86_400_000)),
+  ...[1, 2, 3].map((no) => stubTake(`G19-L${String(no).padStart(2, '0')}`, 58_000 + no * 3000, 1600 + no * 90, stubNow - no * 43_200_000))
+]
 const stubGvDatasets = [
   { expName: 'mirana', ready: true, missing: [] },
   { expName: 'windranger', ready: false, missing: ['语义表 6-name2semantic.tsv'] }
@@ -336,14 +336,25 @@ const implemented = {
   },
   trainGvRegister: async ({ name }) => ({ ok: true, entry: { name } }),
   ftScriptRead: async () => stubScript,
-  ftRecList: async () => stubRecs,
-  ftRecSave: async (_group, _line, bytes) => ({
-    key: `${_group}-${_line}`,
-    bytes: bytes.length,
-    durationMs: Math.round((bytes.length / 32000) * 1000),
-    mtimeMs: Date.now()
-  }),
-  ftRecDelete: async () => {},
+  ftRecList: async () => [...stubRecs],
+  ftRecSave: async (group, line, bytes) => {
+    // 预览里也真的「存下」：保存后列表带上新标记，自动前进才有东西可看。
+    const info = stubTake(
+      `${group}-${line}`,
+      bytes.length,
+      Math.max(400, Math.round((bytes.length / 32_000) * 1000)),
+      Date.now()
+    )
+    const index = stubRecs.findIndex((rec) => rec.key === info.key)
+    if (index >= 0) stubRecs[index] = info
+    else stubRecs.push(info)
+    return info
+  },
+  ftRecDelete: async (group, line) => {
+    const key = `${group}-${line}`
+    const index = stubRecs.findIndex((rec) => rec.key === key)
+    if (index >= 0) stubRecs.splice(index, 1)
+  },
   ftRecRead: async () => new Uint8Array(0),
   ftRecAsr: async () => ({ ok: true, text: '预览里没有真识别引擎' }),
   ftDatasetPrepare: async () => ({
