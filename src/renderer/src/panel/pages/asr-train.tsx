@@ -87,6 +87,8 @@ export function AsrTrainPage(): React.ReactElement {
     async (target: RecorderTarget): Promise<void> => {
       const next = await loadRecs()
       setRecs(next)
+      // 新录音已落账（ft-record → recordDatasetTake）：待训数字得跟着涨，不然存完看着没反应。
+      void refreshStatus()
       const savedGroup = script?.groups.find((item) => item.id === target.group) ?? null
       if (!savedGroup || target.mode !== 'lines') return
       const lines = savedGroup.lines.map((line) => line.no)
@@ -94,7 +96,7 @@ export function AsrTrainPage(): React.ReactElement {
       const nextLine = nextUnrecordedLine({ lines, recorded, current: target.line })
       if (nextLine !== null) setLineNo(nextLine)
     },
-    [loadRecs, script]
+    [loadRecs, refreshStatus, script]
   )
 
   const recorder = useRecorder(handleSaved)
@@ -305,6 +307,20 @@ export function AsrTrainPage(): React.ReactElement {
             <span className="text-sm">{status?.target.label ?? '…'}</span>
           </Row>
           <PreflightList items={preflight} />
+          {/* 待训数据（#64）：录了还没被任何一次 run 吃掉的条数与时长，从数据集账本推。够轮数只提示，不自动开训。 */}
+          <Row
+            label="待训数据"
+            hint={
+              status?.pending.prompt
+                ? '够再训一次了——开不开训由你点，不会自己跑'
+                : status
+                  ? '录音存进数据集账本这里就涨；跑完一次训练就清零'
+                  : '正在读状态…'
+            }
+          >
+            <span className="text-sm">{status?.pending.label ?? '…'}</span>
+            {status?.pending.prompt ? <StatusPill tone="warn">够再训一次</StatusPill> : null}
+          </Row>
 
           <Row
             label="开训方式"

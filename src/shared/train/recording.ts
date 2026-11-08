@@ -201,3 +201,15 @@ export function resolveFtScript(data: FtScriptCandidate, bundled: FtScriptCandid
     error: `内置读稿（${bundled.path}）${built.defect}——重装或检查应用资源`
   }
 }
+
+/**
+ * 录音键 → 稿子那一句的正文。存盘时用它把「录的是哪一句」落进账本，待训数字才对得上。
+ * 自由说（Tnn）和稿子上没有的行返回 null——没有标准答案的录音不进账本（也就不算待训）。
+ */
+export function scriptTextForKey(groups: readonly FtScriptGroup[], key: string): string | null {
+  const match = /^(G\d{2})-(L|T)(\d{2})$/.exec(key)
+  if (!match || match[2] !== 'L') return null
+  const group = groups.find((item) => item.id === match[1])
+  if (!group || group.mode !== 'lines') return null
+  return group.lines.find((line) => line.no === Number(match[3]))?.text ?? null
+}

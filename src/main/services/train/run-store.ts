@@ -467,6 +467,29 @@ export function saveDatasetLedger(entries: readonly FtLedgerEntry[], packedBy?: 
   })
 }
 
+/**
+ * 录一条音就落账（run_id 空 = 还没训过）：待训数字直接读这张表，不重走录音目录。
+ * 稿子没变的同 key 重录还是同一个修订（run_id 由 COALESCE 保留），所以不算新数据；
+ * 改稿才是新修订。split 这里只是占位（录音时还没分验证集），权威划分冻在 runs.packed_ledger。
+ */
+export function recordDatasetTake(entry: FtLedgerEntry): void {
+  const handle = open()
+  if (handle === null) return
+  transact(handle, () => writeEntry(handle, entry, null))
+}
+
+/**
+ * 删掉一条录音时把未训的行一起删：否则待训数字会指着一条已经不存在的 wav。
+ * 已训过的行（run_id 非空）是历史，留着。
+ */
+export function forgetDatasetTake(key: string): void {
+  const handle = open()
+  if (handle === null) return
+  transact(handle, () => {
+    handle.prepare('DELETE FROM dataset_entries WHERE key = ? AND run_id IS NULL').run(key)
+  })
+}
+
 /** 把一条录音标成「吃过」：run_id 落到行上，NULL 才算「从没训过」。 */
 export function markDatasetEntryTrained(key: string, revision: number, runId: string): boolean {
   return markDatasetEntriesTrained(runId, [{ key, revision }])
