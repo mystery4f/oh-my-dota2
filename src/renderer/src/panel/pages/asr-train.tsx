@@ -5,6 +5,7 @@ import type { TrainSnapshot } from '@shared/train/task'
 import { judgeAsrPreflight, preflightBlocks } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 import { recordingKey, takeLineId } from '@shared/train/recording'
+import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 import { PreflightList, RunRow, Sparkline } from '../components/run-view'
@@ -12,8 +13,6 @@ import { formatDuration } from '../run-format'
 import { selectClass } from '../components/select-class'
 import { useRecorder } from '../use-recorder'
 
-/** 稿子原文与识别结果比对用的归一化：标点、空白、换行都不算错。 */
-const normalizeForCompare = (text: string): string => text.replace(/[\s\p{P}]+/gu, '')
 
 /**
  * 识别训练：录读稿 → 打包数据集 → 微调 Qwen3-ASR → 应用。
@@ -222,7 +221,7 @@ export function AsrTrainPage(): React.ReactElement {
                   setAsrText(result.ok ? result.text : (result.error ?? '未知错误'))
                   if (!result.ok) return `识别失败：${result.error ?? '未知错误'}`
                   const expected = currentLine?.text ?? ''
-                  const match = expected !== '' && normalizeForCompare(expected) === normalizeForCompare(result.text)
+                  const match = expected !== '' && normalizeLine(expected) === normalizeLine(result.text)
                   return `${match ? '✓ 与稿子一致' : '✕ 与稿子不一致'}：${result.text}`
                 })
               }

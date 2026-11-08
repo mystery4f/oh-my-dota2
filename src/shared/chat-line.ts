@@ -30,7 +30,7 @@ const CHANNEL_RE = /^\s*(\[[^\]\n]{1,12}\])\s*/
  */
 const SPEAKER_RE = /^([^:：\n]{1,48}?)\s*[:：]\s*(?=\S)/
 
-/** 去空白、去标点、去符号后的小写串，用作精确判重键（OCR 的标点/大小写噪声不该算新消息）。 */
+/** 去空白、去标点、去符号后的小写串：判重、判回声、缓存键、识别稿比对共用这一份折叠规则（OCR 的标点/大小写噪声不该算新消息）。 */
 export function normalizeLine(text: string): string {
   return text.replace(/[\s\p{P}\p{S}]+/gu, '').toLowerCase()
 }
