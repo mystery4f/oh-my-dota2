@@ -16,10 +16,15 @@ import { getVoiceOutService } from './services/voice/voice-out'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { transcribeWav } from './services/voice/asr'
-import { ensureQwen3Model, qwen3Status } from './services/voice/qwen3-asr'
+import {
+  asrState,
+  asrStatus,
+  ensureActiveAsrModel,
+  removeActiveAsrModel,
+  setActiveAsrModel
+} from './services/voice/asr-model'
 import {
   installVoiceRuntime,
-  removeVoiceModel,
   voiceRuntimeInstallState,
   voiceRuntimeNodeBinary,
   voiceRuntimeState,
@@ -162,8 +167,11 @@ const handlers: MainHandlers = {
   voiceOutTest: () => getVoiceOutService().test(),
   ttsOfflineState: () => offlineStatus(),
   ttsOfflineDownload: () => ensureOfflineModel(),
-  asrStatus: () => qwen3Status(),
-  asrDownload: () => ensureQwen3Model(),
+  asrStatus: () => asrStatus(),
+  asrDownload: () => ensureActiveAsrModel(),
+  // 模型注册表：换模型只改一个 id；钉完顺带杀掉常驻 worker，下一次转写用新目录。
+  asrModels: () => asrState(),
+  asrActiveSet: (id) => setActiveAsrModel(String(id ?? '')),
   // 语音运行时（#45）：状态即时算；安装是长任务，结束后广播一次终态。
   voiceRuntimeStatus: () => runtimeStatusSnapshot(),
   voiceRuntimeInstall: async () => {
@@ -177,7 +185,7 @@ const handlers: MainHandlers = {
       return { ok: false, error: message }
     }
   },
-  voiceModelRemove: () => removeVoiceModel(),
+  voiceModelRemove: () => removeActiveAsrModel(),
   // GPT-SoVITS：面板每 3 秒问一次「包在不在、服务起没起、最近日志」，不再靠翻控制台猜。
   sovitsStatus: () => sovitsStatusSnapshot(),
   // 一键安装：.7z 已放数据目录就只解压；否则下 8GB 再解压。装完顺手把服务拉起来，

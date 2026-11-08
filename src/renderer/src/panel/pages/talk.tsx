@@ -9,6 +9,8 @@ import {
 } from '@shared/ipc'
 import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
+import { ASR_ENGINES } from '@shared/asr/engines'
+import type { AsrState } from '@shared/asr/models'
 import {
   voiceOutReadinessVisible,
   type VoiceOutAction,
@@ -49,6 +51,8 @@ export function TalkPage({
   const voicePacks = useVoicePacks(settings?.ttsOutEngine === 'sovits')
 
   const [asrStatus, setAsrStatus] = useState<OfflineStatus | null>(null)
+  // 模型注册表：换模型只是换一个 id，面板因此不需要知道有几种引擎存在。
+  const [asrModels, setAsrModels] = useState<AsrState | null>(null)
   const [runtime, setRuntime] = useState<VoiceRuntimeStatus | null>(null)
   const [outBusy, setOutBusy] = useState(false)
   const [outResult, setOutResult] = useState<VoiceOutTestResult | null>(null)
@@ -63,6 +67,7 @@ export function TalkPage({
   // Qwen3 模型状态：进面板问一次，解压期间每秒刷——别让人对着假进度等。
   useEffect(() => {
     void window.api.asrStatus().then(setAsrStatus)
+    void window.api.asrModels().then(setAsrModels)
   }, [])
   useEffect(() => {
     if (!asrStatus?.downloading) return
@@ -127,6 +132,12 @@ export function TalkPage({
     }
   }
 
+  // 钉一份现役模型：主进程顺手杀掉常驻 worker，下一次录音用新目录重新拉起。
+  const chooseModel = async (id: string): Promise<void> => {
+    if (!id) return
+    setAsrModels(await window.api.asrActiveSet(id))
+    setAsrStatus(await window.api.asrStatus())
+  }
   const removeModel = async (): Promise<void> => {
     await window.api.voiceModelRemove()
     setAsrStatus(await window.api.asrStatus())
@@ -177,12 +188,38 @@ export function TalkPage({
         ? settings.ttsOutVoice
         : DEFAULT_VOICE_OUT_VOICE
 
+  const activeModel =
+    asrModels === null ? null : (asrModels.models.find((model) => model.id === asrModels.activeId) ?? null)
+  const activeEngine = activeModel === null ? null : ASR_ENGINES[activeModel.engineId]
+  // 能力行全部从引擎表读：面板不写字面量，加引擎不会忘记改这里。
+  const engineHint =
+    activeEngine === null
+      ? '还没有可用的识别模型：下载一份，或把模型目录放进 asr-models/'
+      : [
+          activeEngine.note,
+          activeEngine.hotwords === 'prompt' ? '支持热词' : '不支持热词',
+          activeEngine.punctuation === 'builtin' ? '自带标点' : '无标点',
+          activeEngine.finetune === null ? '不可微调' : '可微调',
+        ].join('；')
+
   return (
     <>
       <Panel>
         <Group label="怎么听">
-          <Row label="识别引擎" hint="Qwen3-ASR（阿里开源 0.6B）：抗噪、自带标点、支持热词与口音微调；whisper.cpp 已退役">
-            <StatusPill tone="ready">Qwen3（唯一引擎）</StatusPill>
+          <Row label="识别引擎" stacked hint={engineHint}>
+            <select
+              className={selectClass}
+              value={asrModels?.activeId ?? ''}
+              onChange={(e) => void chooseModel(e.target.value)}
+            >
+              {(asrModels?.models ?? []).map((model) => (
+                <option key={model.id} value={model.id} disabled={!model.ready}>
+                  {model.label}
+                  {model.ready ? '' : '（未就绪）'}
+                </option>
+              ))}
+            </select>
+            {asrModels !== null && asrModels.pinned ? null : <StatusPill tone="idle">自动</StatusPill>}
           </Row>
           <Row label="语音运行时" hint="识别跑在独立的 node.exe + sherpa 插件里（sherpa 原生插件进不了 Electron）；一键装到数据目录，约 35 MB">
             {!runtime ? (
@@ -224,15 +261,17 @@ export function TalkPage({
               placeholder="肉山, 买活, 风暴之灵"
             />
           </Row>
-          <Row label="Qwen3 模型" hint="底模从 hf-mirror 按文件下载（约 940 MB，断点续传 + 校验）；微调转正的模型优先生效">
+          <Row label="识别模型" hint="现役模型的下载与删除：底模从 hf-mirror 按文件下载（断点续传 + 校验）；微调转正的模型优先生效">
             {!asrStatus ? (
               <StatusPill tone="idle">检查中…</StatusPill>
             ) : asrStatus.ready ? (
               <>
                 <StatusPill tone="ready">已就绪 {Math.round(asrStatus.bytes / 1024 / 1024)} MB</StatusPill>
-                <Button size="sm" variant="outline" onClick={() => void removeModel()}>
-                  删除下载
-                </Button>
+                {activeModel?.origin === 'download' || activeModel?.origin === 'manual' ? (
+                  <Button size="sm" variant="outline" onClick={() => void removeModel()}>
+                    删除模型
+                  </Button>
+                ) : null}
               </>
             ) : asrStatus.downloading ? (
               <StatusPill tone="warn">{asrStatus.verifying ? '校验中…' : `下载中 ${Math.round(asrStatus.progress * 100)}%`}</StatusPill>

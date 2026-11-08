@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
+import type { AsrSherpaKind } from '@shared/asr/engines'
 import { locateWorkerScript, voiceRuntimeNodeBinary, voiceWorkerEnv } from './runtime'
 
 /**
@@ -12,6 +13,8 @@ import { locateWorkerScript, voiceRuntimeNodeBinary, voiceWorkerEnv } from './ru
 
 /** 推理请求：dir 是模型目录，hotwords 是热词表串（仅 Qwen3 支持，可空）。 */
 export interface SherpaAsrRequest {
+  /** 引擎适配器键（worker 里 ASR_KINDS 的键），来自共享引擎表，别自己拼字符串。 */
+  kind: AsrSherpaKind
   dir: string
   wav: string
   hotwords?: string
@@ -82,7 +85,7 @@ export async function sherpaTranscribe(request: SherpaAsrRequest): Promise<{ tex
         clearTimeout(timer)
         resolve(value)
       })
-      child.stdin?.write(`${JSON.stringify({ id, wav: request.wav, dir: request.dir, hotwords: request.hotwords ?? '' })}\n`)
+      child.stdin?.write(`${JSON.stringify({ id, kind: request.kind, wav: request.wav, dir: request.dir, hotwords: request.hotwords ?? '' })}\n`)
     })
     if (!reply.ok || typeof reply.text !== 'string') {
       console.log('ASR_SHERPA_FAILED', JSON.stringify({ ms: Date.now() - started, err: reply.err ?? 'unknown' }))

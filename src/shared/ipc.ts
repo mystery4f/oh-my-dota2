@@ -9,6 +9,7 @@ import type { FtDatasetPrepareResult } from '@shared/train/dataset'
 import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@shared/train/gv'
 import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
 import type { TrainRunRecord } from '@shared/train/run'
+import type { AsrState } from '@shared/asr/models'
 
 
 /** ASR 微调读稿：一句原文。 */
@@ -185,6 +186,8 @@ export interface AppSettings {
    * 方言/抗噪更强、自带标点，模型 ~980MB；唯一支持热词的引擎）。
    */
   asrEngine: 'whisper' | 'qwen3'
+  /** 现役识别模型 id（`<engine>:<rel>`），来自 ASR_MODELS 的注册表；空 = 按可用性自动选。 */
+  asrActiveModel: string
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
   asrHotwords: string
@@ -337,6 +340,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voiceTranscribeOnly: false,
   /** 识别引擎默认 qwen3（#45 运行时可装）；'whisper' 只在旧设置里出现，读入时归一成 qwen3。 */
   asrEngine: 'qwen3',
+  asrActiveModel: '',
   trainKind: 'demo',
   trainDataset: '',
   asrFtEnvDir: '',
@@ -720,6 +724,9 @@ export const IPC = {
   // 识别模型（Qwen3）状态与解压：和离线朗读同一套「状态 + 获取」面板节奏。
   ASR_STATUS: 'asr:status',
   ASR_DOWNLOAD: 'asr:download',
+  // 模型注册表：列出磁盘上所有可用的识别模型、钉一份现役（换模型 = 换 id，不动代码）。
+  ASR_MODELS: 'asr:models',
+  ASR_ACTIVE_SET: 'asr:active-set',
   // 语音运行时（#45）：自带 node.exe + sherpa 插件的一键安装；模型下载复用 ASR_DOWNLOAD。
   VOICE_RUNTIME_STATUS: 'voice:runtime-status',
   VOICE_RUNTIME_INSTALL: 'voice:runtime-install',
@@ -989,6 +996,8 @@ export const ipcContract = {
   ttsOfflineDownload: invoke<[], OfflineStatus>(IPC.TTS_OFFLINE_DOWNLOAD),
   asrStatus: invoke<[], OfflineStatus>(IPC.ASR_STATUS),
   asrDownload: invoke<[], OfflineStatus>(IPC.ASR_DOWNLOAD),
+  asrModels: invoke<[], AsrState>(IPC.ASR_MODELS),
+  asrActiveSet: invoke<[string], AsrState>(IPC.ASR_ACTIVE_SET),
   voiceRuntimeStatus: invoke<[], VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATUS),
   voiceRuntimeInstall: invoke<[], VoiceOperationResult>(IPC.VOICE_RUNTIME_INSTALL),
   voiceModelRemove: invoke<[], VoiceOperationResult>(IPC.VOICE_MODEL_REMOVE),

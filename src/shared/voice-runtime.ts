@@ -44,7 +44,12 @@ export const QWEN3_MODEL_FILES: readonly RuntimeModelFile[] = [
 
 /** hf-mirror 直链：仓库文件按名取，GitHub 原链只作 tar.bz2 手动兜底（不在这条链上）。 */
 export function hfMirrorFileUrl(file: string): string {
-  return `https://hf-mirror.com/${QWEN3_MODEL_REPO}/resolve/main/${file}`
+  return hfMirrorRepoFileUrl(QWEN3_MODEL_REPO, file)
+}
+
+/** 任意仓库的 hf-mirror 直链：仓库由引擎表逐行声明，不在代码里拼字符串。 */
+export function hfMirrorRepoFileUrl(repo: string, file: string): string {
+  return `https://hf-mirror.com/${repo}/resolve/main/${file}`
 }
 
 /** 数据目录下运行时的两个子目录名（常量收口，别在字符串里散落）。 */

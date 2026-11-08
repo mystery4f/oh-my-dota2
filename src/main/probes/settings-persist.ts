@@ -26,6 +26,7 @@ const PERSISTED_FIELDS = [
   'voiceOutTestMode',
   'voiceTranscribeOnly',
   'asrEngine',
+  'asrActiveModel',
   'asrHotwords',
   'trainKind',
   'trainDataset',
@@ -102,6 +103,9 @@ function sentinelFor(
     case 'asrEngine':
       // 识别引擎：#45 后只剩 qwen3 一个合法值（whisper 读入即迁），字段只测原样读回。
       return 'qwen3' as AppSettings[typeof key]
+    case 'asrActiveModel':
+      // 现役模型 id：字符串原样读回即可，感知不到目录存在的校验不在读入侧做。
+      return 'qwen3:asr-models/qwen3-asr.bak' as AppSettings[typeof key]
     case 'asrHotwords':
       // 热词表：带中文逗号与顿号的串原样落盘原样读回（分隔符归一化只在读取热词时做）。
       return (current.asrHotwords.includes('肉山') ? '买活,高地、风暴之灵' : '肉山，买活') as AppSettings[typeof key]

@@ -42,6 +42,7 @@ import { runHotkeyProbe } from './probes/hotkeys'
 import { runVoiceOutProbe } from './probes/voice-out'
 import { runInPlaceGuardProbe } from './probes/inplace-guard'
 import { runAsrHotwordsProbe } from './probes/asr-hotwords'
+import { runAsrEnginesProbe } from './probes/asr-engines'
 import { runProviderReasoningProbe } from './probes/provider-reasoning'
 import { runZhipuLiveProbe } from './probes/zhipu-live'
 import { runTrainProbe } from './probes/train'
@@ -197,6 +198,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--zhipu-live-probe')) void runZhipuLiveProbe()
   if (process.argv.includes('--train-probe')) void runTrainProbe()
   if (process.argv.includes('--voice-runtime-probe')) void runVoiceRuntimeProbe()
+  if (process.argv.includes('--asr-engines-probe')) void runAsrEnginesProbe()
   if (process.argv.includes('--inplace-guard-probe')) void runInPlaceGuardProbe()
 
   const startup = loadSettings()

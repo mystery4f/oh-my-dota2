@@ -33,6 +33,7 @@ import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList } from './ft-record'
 import { sovitsChildPid } from '../voice/sovits-server'
+import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
 
 /**
  * ASR 微调闭环（T5）的环境与换模：
@@ -54,23 +55,33 @@ export function asrFtEnvRoot(): string {
   return loadSettings().asrFtEnvDir.trim() || join(app.getPath('userData'), 'asr-ft-env')
 }
 
+/** 微调腿挂在哪个引擎上：表里第一个声明了 finetune 的引擎（目前只有 Qwen3）。 */
+function finetuneSpec(): NonNullable<AsrEngineSpec['finetune']> {
+  const spec = ASR_ENGINE_LIST.find((item) => item.finetune !== null)
+  if (spec?.finetune == null) throw new Error('引擎表里没有任何引擎声明 finetune')
+  return spec.finetune
+}
+
+/**
+ * 脚本路径全部来自引擎表（应用内布局在前，手动开发布局在后）。
+ * 以前这里抄了一遍 `sft/qwen3_asr_sft.py` 之类的字面量，换引擎时两处会打架。
+ */
 function layoutCandidates(root: string): AsrFtLayout[] {
-  return [
-    {
-      // 应用内安装的规范布局
-      pythonExe: join(root, 'venv', 'Scripts', 'python.exe'),
-      sftScript: join(root, 'sft', 'qwen3_asr_sft.py'),
-      exportScript: join(root, 'export', 'export_qwen3_asr_onnx.py'),
-      baseModelDir: join(root, 'models', 'Qwen3-ASR-0.6B')
-    },
-    {
-      // 手动开发布局（试点环境：uv 环境 + 官方仓库 + 导出仓库克隆）
+  const finetune = finetuneSpec()
+  return finetune.trainScripts.map((trainScript, index) => ({
+    pythonExe: join(root, 'venv', 'Scripts', 'python.exe'),
+    sftScript: join(root, trainScript),
+    exportScript: join(root, finetune.exportScripts[index] ?? finetune.exportScripts[0]),
+    baseModelDir: join(root, finetune.baseModelDirs[0])
+  })).concat(
+    finetune.trainScripts.map((trainScript, index) => ({
+      // 手动开发布局：uv 环境 + 官方仓库 + 导出仓库克隆，python 在 env/ 而不是 venv/
       pythonExe: join(root, 'env', 'Scripts', 'python.exe'),
-      sftScript: join(root, 'Qwen3-ASR', 'finetuning', 'qwen3_asr_sft.py'),
-      exportScript: join(root, 'Qwen3-ASR-onnx', 'export_qwen3_asr_onnx.py'),
-      baseModelDir: join(root, 'models', 'Qwen3-ASR-0.6B')
-    }
-  ]
+      sftScript: join(root, trainScript),
+      exportScript: join(root, finetune.exportScripts[index] ?? finetune.exportScripts[0]),
+      baseModelDir: join(root, finetune.baseModelDirs[0])
+    }))
+  )
 }
 
 /** 按布局探环境：sft 脚本出现在哪套布局就认哪套；啥都没有就按规范布局报缺。 */
@@ -91,8 +102,15 @@ function asrModelsRoot(): string {
   return join(app.getPath('userData'), 'asr-models')
 }
 
+/** 微调腿的现役模型目录：引擎表里的 canonicalRel（userData 相对路径）。 */
+function activeRel(): string {
+  const spec = ASR_ENGINE_LIST.find((item) => item.finetune !== null)
+  if (spec === undefined) throw new Error('引擎表里没有任何引擎声明 finetune')
+  return spec.canonicalRel
+}
+
 function activeDir(): string {
-  return join(asrModelsRoot(), 'qwen3-asr')
+  return join(app.getPath('userData'), activeRel())
 }
 
 /**
@@ -100,15 +118,15 @@ function activeDir(): string {
  * 词表只能从这里借——微调不动词表，借来仍是同一份。
  */
 function shippedModelDir(): string {
-  return join(app.getPath('userData'), 'voice-runtime', 'models', 'qwen3-asr')
+  return join(app.getPath('userData'), 'voice-runtime', 'models', basename(activeRel()))
 }
 
 function backupDir(): string {
-  return join(asrModelsRoot(), 'qwen3-asr.bak')
+  return join(asrModelsRoot(), `${basename(activeRel())}.bak`)
 }
 
 function stagingDir(): string {
-  return join(asrModelsRoot(), 'qwen3-asr.next')
+  return join(asrModelsRoot(), `${basename(activeRel())}.next`)
 }
 
 function safeReaddir(dir: string): string[] {

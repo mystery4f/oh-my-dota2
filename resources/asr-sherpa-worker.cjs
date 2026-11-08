@@ -1,14 +1,16 @@
 /**
- * sherpa 识别（Qwen3-ASR）的推理进程（普通 Node 子进程，与 tts-offline-worker.cjs 同一套路）。
+ * sherpa 识别的推理进程（普通 Node 子进程，与 tts-offline-worker.cjs 同一套路）。
+ * 引擎由共享表 src/shared/asr/engines.ts 声明，这里只放各引擎的 modelConfig 适配器（ASR_KINDS）。
  *
  * 为什么单开进程：sherpa-onnx 的原生插件在 Electron 主进程里抛
  * `External buffers are not allowed`（N-API 外部缓冲被禁），纯 Node 下正常。
  *
- * 协议：stdin 每行一个请求 `{ id, wav, dir, language, hotwords }`，
- * wav 为 16k 单声道 PCM16 WAV 路径；hotwords 是热词表串（逗号分隔，可空）。
+ * 协议：stdin 每行一个请求 `{ id, kind, wav, dir, hotwords }`，kind 是 ASR_KINDS 的键
+ * （缺省 qwen3Asr，兼容老调用）；wav 为 16k 单声道 PCM16 WAV 路径；hotwords 是热词表串（可空）。
  * stdout 每行一个回答 `{ id, ok, text }` 或 `{ id, ok:false, err }`。引擎按 key 只加载一次。
  */
 const fs = require('node:fs')
+const path = require('node:path')
 
 let sherpa = null
 let recognizer = null
@@ -45,32 +47,46 @@ function readWav16k(file) {
   return samples
 }
 
-function loadRecognizer(request) {
-  // 缓存键带上热词：词表变了要重载引擎（sherpa 的 hotwords 是构造期配置）。
-  const key = `${request.dir}|${request.language ?? ''}|${request.hotwords ?? ''}`
-  if (recognizer && recognizerKey === key) return recognizer
-  if (!sherpa) sherpa = require('sherpa-onnx-node')
-  const path = require('node:path')
-  // Qwen3-ASR（方言/抗噪强，中文更准；自带动词级标点）。tokenizer 是目录不是单文件。
-  recognizer = new sherpa.OfflineRecognizer({
-    modelConfig: {
-      qwen3Asr: {
-        convFrontend: path.join(request.dir, 'conv_frontend.onnx'),
-        encoder: path.join(request.dir, 'encoder.int8.onnx'),
-        decoder: path.join(request.dir, 'decoder.int8.onnx'),
-        tokenizer: path.join(request.dir, 'tokenizer'),
-        hotwords: request.hotwords ?? '',
-        maxTotalLen: 512,
-        maxNewTokens: 512,
-        temperature: 1e-6,
-        topP: 0.8,
-        seed: 42
-      },
-      tokens: '',
-      numThreads: 2,
-      debug: 0,
-      provider: 'cpu'
+/**
+ * 引擎适配器表：一行一种 sherpa 识别模型，键与 sherpa modelConfig 的字段名同名。
+ * 加引擎 = 这里加一行 + 共享表加一行；`--asr-engines-probe` 双向比对两边的键，漏一个就红。
+ */
+const ASR_KINDS = {
+  qwen3Asr: (request) => ({
+    // Qwen3-ASR：方言与抗噪强，自带动词级标点。tokenizer 是目录不是单文件。
+    qwen3Asr: {
+      convFrontend: path.join(request.dir, 'conv_frontend.onnx'),
+      encoder: path.join(request.dir, 'encoder.int8.onnx'),
+      decoder: path.join(request.dir, 'decoder.int8.onnx'),
+      tokenizer: path.join(request.dir, 'tokenizer'),
+      hotwords: request.hotwords ?? '',
+      maxTotalLen: 512,
+      maxNewTokens: 512,
+      temperature: 1e-6,
+      topP: 0.8,
+      seed: 42
     },
+    tokens: ''
+  }),
+  paraformer: (request) => ({
+    // Paraformer（FunASR 非自回归）：单文件 int8 模型 + tokens；无热词、无标点。
+    paraformer: {
+      model: path.join(request.dir, 'model.int8.onnx')
+    },
+    tokens: path.join(request.dir, 'tokens.txt')
+  })
+}
+
+function loadRecognizer(request) {
+  const kind = request.kind || 'qwen3Asr'
+  // 缓存键带上引擎与热词：换引擎、换目录或词表变了都要重载（sherpa 的 hotwords 是构造期配置）。
+  const key = `${kind}|${request.dir}|${request.hotwords ?? ''}`
+  if (recognizer && recognizerKey === key) return recognizer
+  const build = ASR_KINDS[kind]
+  if (!build) throw new Error(`unknown asr kind: ${kind}`)
+  if (!sherpa) sherpa = require('sherpa-onnx-node')
+  recognizer = new sherpa.OfflineRecognizer({
+    modelConfig: { ...build(request), numThreads: 2, debug: 0, provider: 'cpu' },
     decodingMethod: 'greedy_search'
   })
   recognizerKey = key

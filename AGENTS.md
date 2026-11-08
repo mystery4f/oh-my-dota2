@@ -121,9 +121,11 @@ it and nothing happened". The overlay and the pause hint print key names from th
   the real history.
 - Logs: `logs/inplace.log` (input bridge stages),
   `chat-inplace/` (deployed ps1), `console-send/`, `whisper/{bin,models}`, `tts-preview/`.
-  `asr-models/` (Qwen3-ASR: the `sherpa-onnx-qwen3-asr-*.tar.bz2` the user drops here, extracted
-  by the panel with the system tar.exe into `sherpa-onnx-qwen3-asr-*/`; SenseVoice was removed —
-  engine is now whisper or qwen3 only),
+  `asr-models/` (every recognition model lives under here or `voice-runtime/models/`; which ones
+  exist and which is active comes from the engine table in `src/shared/asr/engines.ts` plus the
+  directory scan in `src/shared/asr/models.ts`, and `settings.asrActiveModel` pins one by id —
+  adding an engine is one table row + one `ASR_KINDS` adapter in
+  `resources/asr-sherpa-worker.cjs`, never a new branch per call site),
   `asr-ft/` (ASR accent fine-tune recordings from 识别训练's recording panel:
   one wav per line, `Gxx/Gxx-Lnn.wav` (or `Gxx-Tnn.wav` for the free-speech group); the
   recording script ships as a bundled resource, `resources/asr-ft-script.md`),

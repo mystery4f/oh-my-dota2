@@ -1,4 +1,5 @@
 /** ASR 微调（T5）纯缝：训练/导出命令拼装、checkpoint 挑选、换模/回滚步骤、环境缺口点名。 */
+import { ASR_ENGINES } from '../asr/engines'
 
 /** ASR 微调环境里跑真训练/导出要用的几条路径（检测服务负责填，纯缝只拼命令）。 */
 export interface AsrFtPaths {
@@ -121,7 +122,7 @@ export function asrFtSwapSteps(state: {
   return steps
 }
 /** sherpa 真正加载的三件 int8 文件：导出目录里除此之外还躺着 3–5 GB 的 fp32 外置数据。 */
-export const FT_MODEL_FILES = ['conv_frontend.onnx', 'encoder.int8.onnx', 'decoder.int8.onnx'] as const
+export const FT_MODEL_FILES: readonly string[] = ASR_ENGINES.qwen3.finetune?.artifactFiles ?? []
 
 /**
  * 导出产物齐全判据：sherpa 只认上面这三个 int8 文件（导出脚本默认量化）。

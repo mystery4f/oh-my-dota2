@@ -96,6 +96,9 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     const rawEngine = merged.asrEngine as string
     if (rawEngine !== 'qwen3') {
       merged.asrEngine = DEFAULT_SETTINGS.asrEngine
+    // 现役识别模型 id：只认字符串，空 = 按可用性自动选（注册表回落）。
+    // 不在读入时校验 id 是否还存在——模型目录是运行时可变的，校验放 asr-model 的钉选入口。
+    if (typeof merged.asrActiveModel !== 'string') merged.asrActiveModel = ''
     }
     // 热词表：只存字符串，格式约束交给 @shared/asr-hotwords 的解析（分分隔符/去重）。
     if (typeof merged.asrHotwords !== 'string') merged.asrHotwords = DEFAULT_SETTINGS.asrHotwords

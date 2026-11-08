@@ -306,6 +306,15 @@ const implemented = {
   }),
   asrStatus: async () => asrState(),
   asrDownload: async () => asrState(),
+  asrModels: async () => ({
+    activeId: 'qwen3:asr-models/qwen3-asr',
+    pinned: true,
+    models: [
+      { id: 'qwen3:asr-models/qwen3-asr', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B', rel: 'asr-models/qwen3-asr', ready: true, bytes: 986491745, origin: 'download' },
+      { id: 'qwen3:asr-models/qwen3-asr.bak', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B（备份）', rel: 'asr-models/qwen3-asr.bak', ready: true, bytes: 986491745, origin: 'backup' },
+    ],
+  }),
+  asrActiveSet: async (id) => ({ activeId: id, pinned: true, models: [] }),
   voiceRuntimeStatus: async () => ({ state: 'ready', nodePath: 'stub-node.exe', installing: false, installError: null }),
   voiceRuntimeInstall: async () => ({ ok: true, error: null }),
   voiceModelRemove: async () => ({ ok: true, error: null }),
