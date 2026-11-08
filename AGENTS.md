@@ -44,6 +44,10 @@ guessing the fields costs a rework round.
   look at. Nothing imports the stub, so it never reaches `out/`. Playwright element screenshots time out
   here more often than page screenshots do, and a repeated identical URL may not reload — bump a `&n=`
   parameter.
+  The section ids are the page names in `sections.ts`, not the file names: `?s=voice` is 音色训练 and
+  `?s=asr` is 识别训练 (`?s=voice-train` silently lands on 总览). A full-page screenshot needs a
+  1280x1700 viewport and `scale: 'css'`; without the resize playwright crops at its 720 px default
+  and the 预检 rows look missing.
 - `.githooks/pre-commit` runs `npm run typecheck` then `npm run lint` (the same two commands as CI).
   Enable once per clone: `git config core.hooksPath .githooks`; skip once with `git commit --no-verify`.
 - Probes: the catalogue (one line per probe, what it pins) lives in `docs/PROBES.md` — read the matching line before touching that seam.

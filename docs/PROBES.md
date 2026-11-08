@@ -1,4 +1,5 @@
 # Probes
+CI runs the pure subset — `train`, `voice-out`, `tts-pipeline`, `sovits-refs`, `sovits-voicepack`, `chat-block`, `translate-cache`, `overlay-geometry` — in the `probes` job of `.github/workflows/ci.yml`. A probe added to that list must need no window, no network and no model; anything that does stays manual.
 
 One probe per seam. Each runs as a plain Node program through Electron, needs no game, no window and no network unless the line says so; a probe prints PASS/FAIL lines and a summary count, exit code 0 only when every case passed.
 
