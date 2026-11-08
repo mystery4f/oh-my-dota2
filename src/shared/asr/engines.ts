@@ -55,6 +55,16 @@ export interface AsrFinetuneSpec {
   pythonExtra: readonly string[]
   /** 装环境时要 pip 的冻结版本（qwen 那几个已在安装器的冻结清单里，这里只补引擎特有的）。 */
   pips: readonly string[]
+  /**
+   * 每步实测耗时（秒）：只给开训前的时长估算用（`shared/train/asr-ft` 的 `estimateFtCost`），
+   * 既不排程也不拦截。数字来自 docs/BENCH.md 的实测（G14，RTX 4060 8G），换机器就换这里。
+   */
+  secPerStep: number
+  /**
+   * 一步吃几条：qwen3 = batch_size × grad_acc，funasr = DatasetConf.batch_size（example 批）。
+   * 轮数折算（每轮几步）与训练 argv 都读这一项，改批大小只需改这里。
+   */
+  samplesPerStep: number
 }
 
 export interface AsrEngineSpec {
@@ -117,7 +127,12 @@ export const ASR_ENGINES: Record<AsrEngineId, AsrEngineSpec> = {
       datasetDir: 'asr-ft-datasets',
       pythonExtra: [],
       // 这条腿要的包（qwen-asr 等）已经在 install 的冻结清单里，这里不重复。
-      pips: []
+      pips: [],
+      // 4060 8G 实测 G14 全链 660 步 1:05:18，全程均 5.9 秒/步（尾段纯训练 3.4 秒/步，
+      // 估时取全程均：校验与存盘也是用户要等的时间）。
+      secPerStep: 5.9,
+      // batch_size 1 × grad_acc 4：训练 argv 的 --grad_acc 就从这里取值（见 shared/train/asr-ft）。
+      samplesPerStep: 4
     },
     note: '逐字生成，短句约 0.7 秒；模型约 980MB'
   },
@@ -163,7 +178,11 @@ export const ASR_ENGINES: Record<AsrEngineId, AsrEngineSpec> = {
       // funasr 的 hub 下载只走 modelscope（download_from_hub.py），缺了底模就拉不到；
       // torchaudio 是它 import 时才暴露的隐式依赖，缺了一训练就炸。
       pythonExtra: ['funasr', 'torchaudio', 'modelscope', 'onnxruntime', 'onnx'],
-      pips: ['funasr==1.0.27', 'modelscope']
+      pips: ['funasr==1.0.27', 'modelscope'],
+      // 4060 Laptop 实测 G14：600 步（30 轮 × 20 条）约 6 分钟，均 0.6 秒/步，已含校验与存盘。
+      secPerStep: 0.6,
+      // DatasetConf.batch_size=1（example 批）：一条录音一步，训练 argv 也从这里取值。
+      samplesPerStep: 1
     },
     note: '非自回归：约 0.07 秒/句、无标点、不吃热词；同批 40 条错字率 13.7%（Qwen3 底模 6.27%）'
   },

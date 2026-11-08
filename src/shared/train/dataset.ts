@@ -52,6 +52,15 @@ export function buildFtDatasetEntries(
   return { entries, notRecorded }
 }
 
+/** 验证集默认 holdout 条数：尾部这几条只报数不训练。开训估算与真实切分共用这一处。 */
+export const FT_HOLDOUT_TAKES = 2
+
+/** 验证集条数：两条起至少 1 条、最多 holdout、且不超过一半；只有一条时留空（打包会先拒）。 */
+export function holdoutTakes(total: number, holdout = FT_HOLDOUT_TAKES): number {
+  if (total < 2) return 0
+  return Math.max(1, Math.min(holdout, Math.floor(total / 2)))
+}
+
 /**
  * 训练/验证切分：尾部 holdout 条进验证集（录音天然按组序落盘，尾部=最晚录的）。
  * 两条起就必须切出验证集：官方脚本 `eval_strategy="steps"` 是无条件的，没给 eval_dataset 会
@@ -60,10 +69,10 @@ export function buildFtDatasetEntries(
  */
 export function splitTrainEval(
   entries: FtDatasetEntry[],
-  holdout = 2,
+  holdout = FT_HOLDOUT_TAKES
 ): { train: FtDatasetEntry[]; eval: FtDatasetEntry[] } {
-  if (entries.length < 2) return { train: entries.slice(), eval: [] }
-  const tail = Math.max(1, Math.min(holdout, Math.floor(entries.length / 2)))
+  const tail = holdoutTakes(entries.length, holdout)
+  if (tail === 0) return { train: entries.slice(), eval: [] }
   return { train: entries.slice(0, entries.length - tail), eval: entries.slice(entries.length - tail) }
 }
 

@@ -14,12 +14,14 @@
  *
  * Knobs, all through the URL: `?s=<section>` deep-links a section (the shell reads it),
  * `?engine=<ttsEngine>` and `?outEngine=<ttsOutEngine>` force an engine so the voice-pack rows
- * can be inspected without clicking through the panel; `?script=bad` makes the read script fail
- * so the fallback warning row on 识别训练 is visible.
+ * can be inspected without clicking through the panel; `?asrEngine=paraformer` puts 识别训练 on the
+ * FunASR fine-tune leg (target row and estimate both follow it); `?script=bad` makes the read script
+ * fail so the fallback warning row on 识别训练 is visible.
  */
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type WindowApi } from '@shared/ipc'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
-import { summarizePendingTakes } from '@shared/train/asr-ft'
+import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
+import { estimateFtCost, summarizePendingTakes } from '@shared/train/asr-ft'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
@@ -239,6 +241,35 @@ const stubGvDatasets = [
 ]
 let stubWebuiRunning = false
 
+/** 预览里的 ASR 模型表：两条微调腿各一个，`?asrEngine=paraformer` 让识别训练直接落在 FunASR 腿上。 */
+const stubAsrModels = [
+  { id: 'qwen3:asr-models/qwen3-asr', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B', rel: 'asr-models/qwen3-asr', ready: true, bytes: 986491745, origin: 'download' },
+  { id: 'qwen3:asr-models/qwen3-asr.bak', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B（备份）', rel: 'asr-models/qwen3-asr.bak', ready: true, bytes: 986491745, origin: 'backup' },
+  { id: 'paraformer:asr-models/paraformer-zh', engineId: 'paraformer', label: 'Paraformer 中文', rel: 'asr-models/paraformer-zh', ready: true, bytes: 895000000, origin: 'download' }
+] as const
+let stubAsrActiveId = query.get('asrEngine') === 'paraformer' ? 'paraformer:asr-models/paraformer-zh' : 'qwen3:asr-models/qwen3-asr'
+/**
+ * 现役模型的微调腿：与主进程 finetuneEngine 同一判据（activeId 的引擎 → 引擎表 finetune），
+ * 目标行与估时都读它——换一条腿，预览里的 trainer / 步数 / 分钟跟着换。
+ */
+function stubFinetuneEngine(): AsrEngineSpec {
+  const picked = ASR_ENGINE_LIST.find((spec) => stubAsrActiveId.startsWith(`${spec.id}:`))
+  if (picked?.finetune != null) return picked
+  const fallback = ASR_ENGINE_LIST.find((spec) => spec.finetune !== null)
+  if (fallback === undefined) throw new Error('引擎表里没有任何引擎声明 finetune')
+  return fallback
+}
+
+/** 能进训练的逐句录音（自由说组没有标准答案）：账本 / 估时只数这些。 */
+function stubLineRecs(): FtRecInfo[] {
+  const lineKeys = new Set(
+    stubScript.groups.flatMap((group) =>
+      group.mode === 'lines' ? group.lines.map((line) => `${group.id}-L${String(line.no).padStart(2, '0')}`) : []
+    )
+  )
+  return stubRecs.filter((rec) => lineKeys.has(rec.key))
+}
+
 /** 面板真正调用的通道，逐个给出类型正确的假答复。 */
 const implemented = {
   getSettings: async () => settings,
@@ -312,15 +343,11 @@ const implemented = {
   }),
   asrStatus: async () => asrState(),
   asrDownload: async () => asrState(),
-  asrModels: async () => ({
-    activeId: 'qwen3:asr-models/qwen3-asr',
-    pinned: true,
-    models: [
-      { id: 'qwen3:asr-models/qwen3-asr', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B', rel: 'asr-models/qwen3-asr', ready: true, bytes: 986491745, origin: 'download' },
-      { id: 'qwen3:asr-models/qwen3-asr.bak', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B（备份）', rel: 'asr-models/qwen3-asr.bak', ready: true, bytes: 986491745, origin: 'backup' },
-    ],
-  }),
-  asrActiveSet: async (id) => ({ activeId: id, pinned: true, models: [] }),
+  asrModels: async () => ({ activeId: stubAsrActiveId, pinned: true, models: [...stubAsrModels] }),
+  asrActiveSet: async (id) => {
+    stubAsrActiveId = id
+    return { activeId: id, pinned: true, models: [...stubAsrModels] }
+  },
   voiceRuntimeStatus: async () => ({ state: 'ready', nodePath: 'stub-node.exe', installing: false, installError: null }),
   voiceRuntimeInstall: async () => ({ ok: true, error: null }),
   voiceModelRemove: async () => ({ ok: true, error: null }),
@@ -372,23 +399,49 @@ const implemented = {
     ledger: [],
     error: null
   }),
-  ftAsrftStatus: async () => ({
-    env: { ok: true, gaps: [], envRoot: 'data/asr-ft-env' },
-    target: { engineId: 'paraformer', label: 'Paraformer（阿里 FunASR）', trainer: 'funasr-paraformer', modelDir: 'data/asr-models/paraformer-zh', baseModel: 'iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch' },
-    swap: { activeExists: true, bakExists: true, nextExists: false, lastExportDir: 'ft-stub' },
-    coverage: { G14: { done: 3, total: 6, stale: 0 }, G15: { done: 1, total: 8, stale: 1 } },
-    // 待训数字跟着预览里的录音集走：录一条（ftRecSave）这里就涨，删一条就掉。
-    pending: summarizePendingTakes({
-      entries: stubRecs.map((rec) => ({
-        key: rec.key,
-        revision: 1,
-        bytes: rec.bytes,
-        runId: null as string | null
-      })),
-      hasRun: true
-    }),
-    install: null
-  }),
+  ftAsrftStatus: async () => {
+    const engine = stubFinetuneEngine()
+    const finetune = engine.finetune as NonNullable<AsrEngineSpec['finetune']>
+    // 账本只含逐句组录音：录/删一条，步数与分钟都动（与真实现共用 estimateFtCost）。
+    const lineRecs = stubLineRecs()
+    const costInput = {
+      trainer: finetune.trainer,
+      takes: lineRecs.length,
+      audioMs: lineRecs.reduce((sum, rec) => sum + rec.durationMs, 0),
+      lastStep: 0
+    }
+    const estimate = {
+      fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),
+      incremental: estimateFtCost({ ...costInput, mode: 'incremental' })
+    }
+    return {
+      env: { ok: true, gaps: [], envRoot: 'data/asr-ft-env' },
+      // 目标行跟着现役模型走：?asrEngine=paraformer 切腿时 trainer 一起换，估时不会对不上。
+      target: {
+        engineId: engine.id,
+        label: engine.label,
+        trainer: finetune.trainer,
+        modelDir: `data/${engine.canonicalRel}`,
+        baseModel: finetune.baseModelIds[0] ?? finetune.baseModelDirs[0] ?? ''
+      },
+      swap: { activeExists: true, bakExists: true, nextExists: false, lastExportDir: 'ft-stub' },
+      coverage: { G14: { done: 3, total: 6, stale: 0 }, G15: { done: 1, total: 8, stale: 1 } },
+      // 待训数字跟着预览里的录音集走：录一条（ftRecSave）这里就涨，删一条就掉。
+      pending: summarizePendingTakes({
+        // 与真账本同口径：自由说组没有标准答案，不进账本也不进待训。
+        entries: lineRecs.map((rec) => ({
+          key: rec.key,
+          revision: 1,
+          bytes: rec.bytes,
+          runId: null as string | null
+        })),
+        hasRun: true
+      }),
+      estimate,
+      estimateBasis: estimate.fresh.basis,
+      install: null
+    }
+  },
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
   ftAsrftApply: async () => ({ ok: true, error: null, model: 'ft-stub' }),
   ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),

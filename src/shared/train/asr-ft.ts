@@ -1,5 +1,6 @@
 /** ASR 微调（T5）纯缝：训练/导出命令拼装、checkpoint 挑选、换模/回滚步骤、环境缺口点名。 */
-import { ASR_ENGINES, type AsrEngineId } from '../asr/engines'
+import { ASR_ENGINE_LIST, ASR_ENGINES, type AsrEngineId } from '../asr/engines'
+import { holdoutTakes } from './dataset'
 
 /** 训练入口的形状：qwen3 用官方 sft 脚本 + 本地底模目录；funasr 用 `python -m funasr.bin.train` + hub 模型 id。 */
 export type AsrFtTrainer = 'qwen3-sft' | 'funasr-paraformer'
@@ -29,24 +30,39 @@ export interface AsrFtDatasetPlan {
 }
 /** 目标总步数≈800：G14 实测 38 条 × 66 轮 = 660 步 ≈ 65 分钟，步数与数据量线性；轮数按数据量自适应，封顶 66、保底 10。 */
 export const FT_TARGET_STEPS = 800
-/** 每步吃 4 条（batch_size 1 × grad_acc 4）；deriveFtEpochs 用它折算每轮步数。 */
-export const FT_SAMPLES_PER_STEP = 4
-
-/** 自适应轮数：步/轮 = ceil(训练条数/4)，轮 = clamp(round(目标步数/步每轮), 10, 66)。数据为 0 回 66（不会发生，防御）。 */
-export function deriveFtEpochs(trainCount: number): number {
-  if (trainCount <= 0) return 66
-  const stepsPerEpoch = Math.max(1, Math.ceil(trainCount / FT_SAMPLES_PER_STEP))
-  return Math.min(66, Math.max(10, Math.round(FT_TARGET_STEPS / stepsPerEpoch)))
+/**
+ * 一步吃几条：引擎表微调段的 `samplesPerStep` 是唯一一份（qwen3 batch 1 × grad_acc 4、funasr batch 1），
+ * 训练 argv 也读它——改批大小只改表，轮数折算与估算的步数自动跟上。
+ */
+export function ftSamplesPerStep(trainer: AsrFtTrainer): number {
+  for (const spec of ASR_ENGINE_LIST) {
+    if (spec.finetune?.trainer === trainer) return spec.finetune.samplesPerStep
+  }
+  return 1
 }
 
-/** funasr 每步只吃 1 条（batch_size 1，不折步），目标定 600 步：40 条数据下约 15 轮。 */
+/** 每轮几步：训练条数 / 一步吃几条，向上取整（最后一块不满也算一步）。 */
+function ftStepsPerEpoch(trainer: AsrFtTrainer, trainCount: number): number {
+  return Math.max(1, Math.ceil(trainCount / ftSamplesPerStep(trainer)))
+}
+
+/** 自适应轮数：步/轮 = ceil(训练条数 / 每步吃几条)，轮 = clamp(round(目标步数 / 步每轮), 10, 66)。数据为 0 回 66（不会发生，防御）。 */
+export function deriveFtEpochs(trainCount: number): number {
+  return deriveFtEpochsFor('qwen3-sft', trainCount)
+}
+
+/** funasr 目标定 600 步（比 qwen3 的 800 短）：一步 = 1 条（表里的 samplesPerStep）时，40 条约 15 轮。 */
 export const FT_FUNASR_TARGET_STEPS = 600
 
-/** 按 trainer 折算轮数：qwen3 走上面那套（一步 4 条），funasr 一步 1 条。 */
+/** 按 trainer 折算轮数：两条腿只有目标步数与上下限不同，每轮几步一律走 `ftStepsPerEpoch`。 */
 export function deriveFtEpochsFor(trainer: AsrFtTrainer, trainCount: number): number {
-  if (trainer !== 'funasr-paraformer') return deriveFtEpochs(trainCount)
-  if (trainCount <= 0) return 20
-  return Math.min(40, Math.max(4, Math.round(FT_FUNASR_TARGET_STEPS / trainCount)))
+  const funasr = trainer === 'funasr-paraformer'
+  if (trainCount <= 0) return funasr ? 20 : 66
+  const stepsPerEpoch = ftStepsPerEpoch(trainer, trainCount)
+  const target = funasr ? FT_FUNASR_TARGET_STEPS : FT_TARGET_STEPS
+  return funasr
+    ? Math.min(40, Math.max(4, Math.round(target / stepsPerEpoch)))
+    : Math.min(66, Math.max(10, Math.round(target / stepsPerEpoch)))
 }
 
 /** 增量起点：上一个 run 留下的 pytorch 权重（导出产物只有 int8 onnx，接不上）。优先平均权重。 */
@@ -60,7 +76,8 @@ export const FT_INCREMENTAL_TARGET_STEPS = 300
 /** 增量轮数：目标 ≈300 步，clamp 2–12；数据为 0 回 4（防御，实际到不了）。 */
 export function deriveFtIncrementalEpochs(trainCount: number): number {
   if (trainCount <= 0) return 4
-  return Math.min(12, Math.max(2, Math.round(FT_INCREMENTAL_TARGET_STEPS / trainCount)))
+  const stepsPerEpoch = ftStepsPerEpoch('funasr-paraformer', trainCount)
+  return Math.min(12, Math.max(2, Math.round(FT_INCREMENTAL_TARGET_STEPS / stepsPerEpoch)))
 }
 
 /** 开训口径：两条腿的轮数与学习率**只能**从这里出，别在调用点各拼一套。 */
@@ -93,9 +110,85 @@ export function ftDefaultLr(trainer: AsrFtTrainer): string {
   return trainer === 'funasr-paraformer' ? '0.0002' : '2e-5'
 }
 
-/** 续训每轮步数（batch 1 × grad_acc 4）。 */
-function ftStepsPerEpoch(trainCount: number): number {
-  return Math.max(1, Math.ceil(trainCount / FT_SAMPLES_PER_STEP))
+/**
+ * 开训前的时长估算（#65）：显示用，既不排程也不拦截。
+ * 只做乘法——轮数直接复用 planFtTuning（与真开跑同一份推导），每步耗时取引擎表的微调段。
+ * 量级依据（docs/BENCH.md）：G14 38 训 + 2 验 660 步实测 65 分钟、20 条 Paraformer 600 步约 6 分钟；
+ * 同一份数据按这里算出来正好是 65 / 6 分钟。机器、显存、校验密度不同会差几成到倍数，所以一律写「估算」。
+ * 总时长（audioMs）只进文案，不参与乘法：实测基准只有「秒/步」，没有随音频长度变化的第二项，
+ * 按音频折算等于编一个没测过的系数（理由与边界写进 docs/BENCH.md）。
+ */
+export interface FtCostEstimate {
+  /** 这次要跑的步数：增量已扣掉 checkpoint 里已有的步数。 */
+  steps: number
+  /** 折成分钟（四舍五入，至少 1；没数据时 0）。 */
+  minutes: number
+  /** 进训练的条数 = 总条数 − 这次真正留作验证的条数（增量按上一轮 evalKeys 算，不是默认 holdout）。 */
+  trainTakes: number
+  /** 面板直接显示的那一句：约 N 步 / 约 X 分钟。 */
+  label: string
+  /** 数字从哪来（哪条腿、多少秒/步），估偏了能追到来源。 */
+  basis: string
+}
+
+/** 这条训练腿的每步实测耗时（秒）与引擎名，全部来自引擎表；表里没声明就 null（别编数字）。 */
+export function ftCostBasis(trainer: AsrFtTrainer): { secPerStep: number; engineLabel: string } | null {
+  for (const spec of ASR_ENGINE_LIST) {
+    if (spec.finetune?.trainer === trainer) return { secPerStep: spec.finetune.secPerStep, engineLabel: spec.label }
+  }
+  return null
+}
+
+/**
+ * 「大概多少步 / 大概几分钟」：输入的条数与总时长来自当前录音账本，轮数走 planFtTuning。
+ * 0 条、1 条、几百条都返回同一形状（不抛）；takes 只算能进训练的逐句录音，自由说组不在内。
+ * 验证集条数默认取尾部 holdout（与开训打包 splitTrainEval 同一口径）；增量要传 evalTakes =
+ * 上一轮 evalKeys 里今天还在的条数——真开跑就是拿这些当验证集，不传就会多算一条训练数据。
+ */
+export function estimateFtCost(input: {
+  mode: AsrFtMode
+  trainer: AsrFtTrainer
+  /** 能进训练的录音条数（逐句组的已录句；自由说组不进训）。 */
+  takes: number
+  /** 这些录音的总时长（毫秒）：只进文案，不影响步数。 */
+  audioMs?: number
+  /** 这次真正留作验证的条数；不给就按默认尾部 holdout。 */
+  evalTakes?: number
+  /** 续训起点已到第几步（qwen3 增量用它算「这次还要跑多少」）。 */
+  lastStep?: number
+}): FtCostEstimate {
+  const takes = Math.max(0, Math.floor(input.takes))
+  const cost = ftCostBasis(input.trainer)
+  if (cost === null) {
+    return { steps: 0, minutes: 0, trainTakes: 0, label: '这条训练腿没有每步耗时基准，估算不了', basis: '引擎表的微调段里没写 secPerStep' }
+  }
+  const basis = `按 ${cost.engineLabel} ${cost.secPerStep} 秒/步（4060 实测基准，见 docs/BENCH.md）估算：含校验与存盘，机器 / 显存 / 数据量一变就会差几成到倍数`
+  if (takes === 0) return { steps: 0, minutes: 0, trainTakes: 0, label: '还没录训练集：先录几条再估', basis }
+  const evalTakes = Math.min(takes, Math.max(0, Math.floor(input.evalTakes ?? holdoutTakes(takes))))
+  const trainCount = takes - evalTakes
+  // 轮数必须带 lastStep：qwen3 续训的轮数是「(lastStep + 200) / 每轮步数」向上取整，不带就少算。
+  const epochs = planFtTuning({ mode: input.mode, trainer: input.trainer, trainCount, lastStep: input.lastStep }).epochs ?? 1
+  const budget = epochs * ftStepsPerEpoch(input.trainer, trainCount)
+  // 增量 qwen3 的 checkpoint 里已经有 lastStep 步：这次要等的只是超出那部分，别把已跑的要一遍。
+  const done =
+    input.mode === 'incremental' && input.trainer !== 'funasr-paraformer' ? Math.max(0, Math.floor(input.lastStep ?? 0)) : 0
+  const steps = Math.max(0, budget - done)
+  const minutes = steps === 0 ? 0 : Math.max(1, Math.round((steps * cost.secPerStep) / 60))
+  const audio = ftAudioLabel(input.audioMs ?? 0)
+  return {
+    steps,
+    minutes,
+    trainTakes: trainCount,
+    label: `约 ${steps} 步 / 约 ${minutes} 分钟（${takes} 条${audio === '' ? '' : ` / ${audio}音频`}，估算）`,
+    basis
+  }
+}
+
+/** 录音总时长的人话（不足一分钟按秒说）：只用于估算文案。 */
+function ftAudioLabel(ms: number): string {
+  if (ms <= 0) return ''
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))} 秒`
+  return `${Math.round(ms / 60_000)} 分钟`
 }
 
 /** 续训在旧 checkpoint 之上固定补训的步数（4060 实测 3.6s/步 ≈ 12 分钟）。 */
@@ -107,7 +200,7 @@ export const FT_RESUME_EXTRA_STEPS = 200
  * 总步数 > 上次 checkpoint 步数，这里固定再补 200 步（4060 实测约 12 分钟）再按新数据量折算。
  */
 export function deriveFtResumeEpochs(trainCount: number, lastStep: number): number {
-  return Math.ceil((lastStep + FT_RESUME_EXTRA_STEPS) / ftStepsPerEpoch(trainCount))
+  return Math.ceil((lastStep + FT_RESUME_EXTRA_STEPS) / ftStepsPerEpoch('qwen3-sft', trainCount))
 }
 
 /** 训练超参覆盖：不传 = 冻结的试点参数（lr 2e-5、66 轮、不续训）。 */
@@ -129,7 +222,8 @@ export function planAsrFtTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tu
     '--eval_file', data.evalJsonl,
     '--output_dir', data.runDir,
     '--batch_size', '1',
-    '--grad_acc', '4',
+    // 一步吃几条由引擎表的 samplesPerStep 定（batch_size 1 ⇒ grad_acc = samples/step）：轮数与估时都读同一项。
+    '--grad_acc', String(ftSamplesPerStep(paths.trainer)),
     '--lr', tuning?.lr ?? '2e-5',
     '--epochs', String(tuning?.epochs ?? 66),
     ...(tuning?.resumeFrom ? ['--resume_from', tuning.resumeFrom] : []),
@@ -145,7 +239,7 @@ export function planAsrFtTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tu
 /**
  * FunASR 训练 argv（hydra 风格 `++k=v`，与官方 finetune.sh 同参数名）。
  * 与官方脚本的差别只有三处，都是为了本机的 40 条小数据和 CPU：
- * batch_size 1（官方按 6000 token 一档）、num_workers 0（Windows 子进程不稳）、不跑 deepspeed。
+ * batch_size 取引擎表的 samplesPerStep（官方按 6000 token 一档，这里按条）、num_workers 0（Windows 子进程不稳）、不跑 deepspeed。
  */
 function planFunasrTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tuning?: AsrFtTrainTuning): string[] {
   return [
@@ -158,7 +252,8 @@ function planFunasrTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tuning?:
     '++dataset_conf.index_ds=IndexDSJsonl',
     '++dataset_conf.data_split_num=1',
     '++dataset_conf.batch_sampler=BatchSampler',
-    '++dataset_conf.batch_size=1',
+    // example 批：一条录音一步；数字取引擎表的 samplesPerStep，与轮数折算同源。
+    `++dataset_conf.batch_size=${ftSamplesPerStep(paths.trainer)}`,
     '++dataset_conf.batch_type=example',
     '++dataset_conf.sort_size=1024',
     '++dataset_conf.num_workers=0',
@@ -299,6 +394,10 @@ export interface AsrFtStatusResult {
   pending: FtPendingTakes
   /** 一键安装的即时状态：null = 这次会话还没跑过安装。 */
   install: AsrFtInstallState | null
+  /** 开训前的估时（#65）：两种开训方式各一份，面板切换模式不必再问主进程。 */
+  estimate: Record<AsrFtMode, FtCostEstimate>
+  /** 估算依据的一句话（面板提示用；与 estimate.label 同源，避免面板自己拼）。 */
+  estimateBasis: string
 }
 
 /** 开训闸门看到的两件事实：显存提示，以及上一轮的权重是否真的能接（增量）。panel 只显示，不自己推。 */
