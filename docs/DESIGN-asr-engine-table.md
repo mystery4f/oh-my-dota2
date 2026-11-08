@@ -16,7 +16,7 @@ tags: [设计, ASR, 引擎表, 微调]
 | `src/main/services/voice/qwen3-asr.ts` | 三条目录候选 `asr-models/qwen3-asr`、`sherpa-onnx-qwen3-asr-*`、`voice-runtime/models/qwen3-asr` |
 | `src/shared/voice-runtime.ts` | `QWEN3_MODEL_FILES`、`QWEN3_MODEL_TOTAL_BYTES`、`hfMirrorFileUrl()` 固定仓库 |
 | `src/main/services/voice/asr.ts` | 单腿，失败文案写死「Qwen3 模型未就绪」 |
-| `src/shared/ipc.ts:187` + `src/main/services/settings.ts:96-98` | `asrEngine: 'whisper' \| 'qwen3'`，读入时钳成 qwen3（废字段） |
+| `src/shared/ipc.ts` + `src/main/services/settings.ts` | `asrEngine: 'whisper' \| 'qwen3'` 这个字段（#67 已删；只剩读入时丢弃老值） |
 | `src/main/services/train/asr-ft.ts:56-73` | 训练脚本、导出脚本、base model、`qwen3-asr` / `.bak` / `.next` 三个目录 |
 | `src/renderer/src/panel/pages/talk.tsx:184` | 静态文案 |
 | `src/main/probes/settings-persist.ts` | 也要跟着改，否则探针红 |
@@ -46,7 +46,7 @@ tags: [设计, ASR, 引擎表, 微调]
 非目标
 
 - 不改识别算法本身；paraformer 只是第一个要验的第二行。
-- 不做标点外挂（`OfflinePunctuation`）：paraformer 无标点在表里声明 `punctuation: 'external'`，实现留到后面。
+- 不做标点外挂（`OfflinePunctuation`）：paraformer 无标点在表里声明 `punctuation: 'none'`，实现留到后面。
 - 不改热词机制：仍是 Qwen3 文本提示；不支持的引擎写 `hotwords: 'none'`。
 
 ## 设计：四层
@@ -110,7 +110,7 @@ export interface AsrFinetuneSpec {
 | 引擎 | requiredPaths | hotwords | punctuation | finetune |
 | --- | --- | --- | --- | --- |
 | qwen3 | `conv_frontend.onnx`、`encoder.int8.onnx`、`decoder.int8.onnx`、`tokenizer/vocab.json`、`tokenizer/merges.txt`、`tokenizer/tokenizer_config.json` | prompt | builtin | qwen3-sft |
-| paraformer | `model.int8.onnx`、`tokens.txt` | none | external | funasr-paraformer |
+| paraformer | `model.int8.onnx`、`tokens.txt` | none | none | funasr-paraformer |
 
 ### 第二层 模型注册表（事实）
 
@@ -141,7 +141,7 @@ export function pickActiveAsrModel(models: readonly AsrModel[], activeId: string
 
 `settings.json` 新增 `asrActiveModel: string`（例如 `qwen3:asr-models/qwen3-asr`），默认 `''`。
 
-迁移规则：`asrEngine` 保留为只读兼容字段（`settings.ts` 现有钳制逻辑不动，保证老配置读出来不崩），启动时若 `asrActiveModel` 为空则写入当前 Qwen3 现役目录的 id。行为跟今天一致。
+迁移规则：`asrEngine` 已退役（#67）——老 `settings.json` 里的值读入时直接 `delete`，不迁移也不写回；引擎由 `asrActiveModel` 指向的模型所属引擎决定。`settings-persist` 探针钉住三件事：老文件仍能加载、字段读后消失、保存后不复活。
 
 ### 第四层 worker 适配器
 
@@ -171,7 +171,7 @@ const KINDS = {
 | `src/main/services/voice/qwen3-asr.ts` | 改名 `asr-model.ts`：`asrDirFacts()` 扫目录，`asrStatus()`、`ensureAsrModel(id)`、`transcribeAsr({ modelId, wav, hotwords })`，下载走 `spec.download.files`（bytes + sha256 逻辑复用） |
 | `src/main/services/voice/asr.ts` | `transcribeWav(wav)` → 取 active 模型 → 取 `spec` → `sherpaTranscribe({ kind, dir, wav, hotwords })`，按 `spec.joinChars` 拼接；失败文案用 `spec.label` |
 | `src/main/services/voice/sherpa-asr.ts` | `SherpaAsrRequest` 加 `kind: AsrSherpaKind`，转发到 worker |
-| `src/shared/ipc.ts` | 新增 `ASR_MODELS: 'asr:models'`、`ASR_ACTIVE_SET: 'asr:active'`；`ASR_STATUS` / `ASR_DOWNLOAD` 参数改 `{ modelId }`；`asrEngine` 放宽成 `string`（兼容读） |
+| `src/shared/ipc.ts` | 新增 `ASR_MODELS: 'asr:models'`、`ASR_ACTIVE_SET: 'asr:active'`；`ASR_STATUS` / `ASR_DOWNLOAD` 参数改 `{ modelId }`；`asrEngine` 从 `AppSettings` / `DEFAULT_SETTINGS` 删除（#67） |
 | `src/main/services/train/asr-ft.ts` | `layoutCandidates`、`activeDir` / `backupDir` / `stagingDir`、`FT_MODEL_FILES` 全部从 `spec.finetune` 取；`planAsrFtTrainArgv` 按 `trainer` 分派（qwen3-sft 保持原样，funasr-paraformer 产出 `torchrun funasr/bin/train_ds.py ++...`） |
 | `src/renderer/src/panel/pages/talk.tsx` | 一行文案换成模型下拉（列表来自 `ASR_MODELS`）+ 能力行（热词 / 标点 / 可微调） |
 
@@ -199,7 +199,7 @@ flowchart TD
 - `Object.keys(require('resources/asr-sherpa-worker.cjs').KINDS)` 与表里 `sherpaKind` 集合完全相等（漏一个引擎就是红）。
 - 每个 `finetune !== null` 的 spec：`artifactFiles`、`trainScripts`、`baseModelDirs` 非空，`dataset` 在枚举内。
 - 注册表：同一 `rel` 只出一条；`id` 稳定（同输入同输出）；`pickActiveAsrModel` 在失配时回落第一条 ready，无 ready 时返回 null。
-- 迁移：legacy `asrEngine: 'whisper'` 的配置读出来仍指向 Qwen3 现役，`settings-persist` 探针保持绿。
+- 迁移：老配置里的 `asrEngine`（`whisper` / `qwen3` / `sensevoice`）读入即丢弃、保存后不写回，现役仍由 `asrActiveModel` 决定；`settings-persist` 的两条断言钉住「读入即丢弃」「不再被写回」。
 
 ## 工作量与顺序（每步单独可验收）
 
@@ -220,12 +220,12 @@ flowchart TD
 
 ## 未决问题
 
-- `asrEngine` 兼容字段保留多久？提案：保留读、写入只写 `asrActiveModel`，下一个版本删掉，删时同步 `settings-persist` 探针。
+- ~~`asrEngine` 兼容字段保留多久？~~ 已定（#67）：直接删。读入丢弃、保存不写回，`settings-persist` 两条断言钉住；`AppSettings` 里没有这个字段，漏改的调用点会编译失败而不是变成死按钮。
 - 标点外挂（`OfflinePunctuation`）排不排进这一步？提案：不排，等 paraformer 真的被选成主引擎再做。
 - paraformer 微调要不要进这次范围？提案：这次只做「结构 + 能识别」，微调的 argv 规划进第四步但先不跑训练。
 - **两种训练形态（#63 已落地）**：面板「开训方式」两档，默认「从底模重训」，另一档「接着上次权重」。
   - **从底模重训**：今天的路径，一步没改（`funasr-paraformer` 走 `++model=<底模 hub id>`，qwen3 走 `--model_path <底模目录>`，轮数/lr/argv 逐字不变）。
-  - **接着上次权重（增量）**：起点是**上一轮 run 目录里的 pytorch 权重**（`model.pt.avg1` > `model.pt.best` > `model.pt`；qwen3 是最后一次 `checkpoint-<步数>`）——不是现役 `asr-models/<engine>`，因为现役是导出后的 int8 onnx，torch 接不上。决定后先把权重抄进 `asr-models/<engine>.next`（`stageIncrementalSource`），argv 只认这份副本：funasr `++init_param=<副本>`、qwen3 `--resume_from <副本>`，lr 1e-5，目标 ≈300 步（clamp 2–12 轮）。训练只写自己的 run 目录，失败也碰不到现役权重。
+  - **接着上次权重（增量）**：起点是**上一轮 run 目录里的 pytorch 权重**（`model.pt.avg1` > `model.pt.best` > `model.pt`；qwen3 是编号最大的 `checkpoint-<步数>` 目录）——不是现役 `asr-models/<现役目录名>`，因为现役是导出后的 int8 onnx，torch 接不上。决定后先把权重抄进 `asr-models/<现役目录名>.next`（`qwen3-asr.next` / `paraformer-zh.next`，`stageIncrementalSource`），argv 只认这份副本：funasr `++init_param=<副本>`、qwen3 `--resume_from <副本>`，lr 1e-5，目标 ≈300 步（funasr 钳 2–12 轮；qwen3 从 checkpoint 步数再补 200 步）。训练只写自己的 run 目录，失败也碰不到现役权重。
   - **拒启动而非 fallback**：没有上一轮 / 账本对不上（重录过、删过）/ 权重文件被删，三种情况都拒启动并把原因写进面板，绝不悄悄改跑一小时的重训。
   - **验证集是标尺**：增量沿用上一轮那份 eval 划分（`splitIncrementalEval`），新录的句子只进 train——否则 loss 没法跟前一轮横着比。
 - **自定义录制（2026-11-09 记，用户提出）**：现在数据只能来自面板里那几组固定稿子（`asr-ft/Gxx/Gxx-Lnn.wav` + `resources/asr-ft-script.md` 的句子），用户想用自己的素材。三种来源都要接：
@@ -278,4 +278,15 @@ flowchart TD
 
 微调方向正确（G14 的「真脸」修成「真眼」），但训练集自身只降到 11.66% = 欠拟合，20 条素材的信息量是瓶颈；paraformer 侧最好 6.49%，与 qwen3 的 0.65% 仍差一个数量级。数字入 `docs/BENCH.md`，G15 参与过 checkpoint 选择因而非盲测。
 
-仍未做：paraformer 的标点外挂（`OfflinePunctuation`）；再录一批新句子做真盲测；把 30 轮往上加看 G14 能不能收敛。
+仍未做：paraformer 的标点外挂（`OfflinePunctuation`）；再录一批新句子做真盲测；把 30 轮往上加看 G14 能不能收敛。前两条已在 `docs/TODO.md` 立号为 `#30` / `#32`，别当临时想法丢掉。
+
+### #67：`asrEngine` 退役（2026-11-09）
+
+引擎由「现役模型属于哪个引擎」推导之后，`settings.asrEngine` 就没有读者了——留着只会让用户以为改它有用。处理方式：
+
+- `src/shared/ipc.ts`：从 `AppSettings` 与 `DEFAULT_SETTINGS` 删掉 `asrEngine`，`asrActiveModel` 旁边写明「引擎跟着这个 id 走」。
+- `src/main/services/settings.ts` 的 `normalizeSettings`：读入时 `delete` 老字段（`whisper` / `qwen3` / `sensevoice` 都收），不迁移、不写回；`asrActiveModel` 只做字符串校验，不检查模型是否还存在（目录运行时可删，校验放在钉选入口）。
+- `src/main/probes/settings-persist.ts`：去掉 `asrEngine` 的哨兵用例，改成两条反向断言——带 `asrEngine` 的旧 `settings.json` 仍能加载、字段读后为 `undefined`；`saveSettings()` 之后磁盘上也没有这个键。
+- `src/renderer/src/preview/api-stub.ts`：预览开关 `?asrEngine=` 改名 `?asrModel=`，退役字段的名字不再出现在 `src/` 里（`grep asrEngine src/` 只剩上面几处注释与断言）。
+
+结果：漏改的调用点不再是「读到 `undefined`、按钮没反应」，而是编译错误。

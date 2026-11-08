@@ -5,6 +5,7 @@ tags: [asr, qwen3, hotwords, finetune, decision]
 ---
 
 # ADR：识别个性化走热词注入，不做微调
+- 状态：已被 `docs/adr/asr-finetune-leg.md` 取代（2026-11-09）——微调已是正式训练腿，热词只留给支持提示的引擎。本文件保留为决策历史，后面的两节更正仍是当时的真实依据。
 
 ## 背景
 

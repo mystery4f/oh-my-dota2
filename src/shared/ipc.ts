@@ -165,11 +165,9 @@ export interface AppSettings {
   /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
   voiceTranscribeOnly: boolean
   /**
-   * 语音识别引擎：whisper（本地 whisper.cpp，ggml-small）或 qwen3（Qwen3-ASR 0.6B，
-   * 方言/抗噪更强、自带标点，模型 ~980MB；唯一支持热词的引擎）。
+   * 现役识别模型 id（`<engine>:<rel>`），来自 ASR_MODELS 的注册表；空 = 按可用性自动选。
+   * 引擎不再单独存（旧 `asrEngine` 字段已在 #67 退役）：模型属于哪个引擎由这个 id 的前缀决定。
    */
-  asrEngine: 'whisper' | 'qwen3'
-  /** 现役识别模型 id（`<engine>:<rel>`），来自 ASR_MODELS 的注册表；空 = 按可用性自动选。 */
   asrActiveModel: string
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
@@ -326,8 +324,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsSpeakKey: 'F5',
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
-  /** 识别引擎默认 qwen3（#45 运行时可装）；'whisper' 只在旧设置里出现，读入时归一成 qwen3。 */
-  asrEngine: 'qwen3',
+  /** 现役模型空 = 由注册表按可用性自动选（#67 起引擎跟着这个 id 走，不再单独存）。 */
   asrActiveModel: '',
   trainKind: 'demo',
   trainDataset: '',

@@ -25,7 +25,6 @@ const PERSISTED_FIELDS = [
   'ttsOutVoice',
   'voiceOutTestMode',
   'voiceTranscribeOnly',
-  'asrEngine',
   'asrActiveModel',
   'asrHotwords',
   'asrCorrectionsToDataset',
@@ -101,9 +100,6 @@ function sentinelFor(
     case 'voiceTranscribeOnly':
       // 布尔开关：非当前值落盘原样读回（无归一化，同 voiceOutTestMode 一档）。
       return !current.voiceTranscribeOnly as AppSettings[typeof key]
-    case 'asrEngine':
-      // 识别引擎：#45 后只剩 qwen3 一个合法值（whisper 读入即迁），字段只测原样读回。
-      return 'qwen3' as AppSettings[typeof key]
     case 'asrActiveModel':
       // 现役模型 id：字符串原样读回即可，感知不到目录存在的校验不在读入侧做。
       return 'qwen3:asr-models/qwen3-asr.bak' as AppSettings[typeof key]
@@ -121,7 +117,8 @@ function sentinelFor(
   }
 }
 
-function readFileSettings(): Partial<AppSettings> | null {
+/** 磁盘原样：带一处已退役的 asrEngine，只为验证它读入即丢、落盘不再出现（#67）。 */
+function readFileSettings(): (Partial<AppSettings> & { asrEngine?: unknown }) | null {
   try {
     const file = join(app.getPath('userData'), 'settings.json')
     if (!existsSync(file)) return null
@@ -246,6 +243,33 @@ export async function runSettingsPersistProbe(): Promise<void> {
     writeFileSync(file, JSON.stringify({ quickPhrases: ['sentinel-phrase'], retiredKey: { nested: 1 } }), 'utf-8')
     const withUnknown = loadSettings()
     push('未知字段被忽略', withUnknown.quickPhrases[0] === 'sentinel-phrase', withUnknown.quickPhrases.join(' | '))
+
+    // 退役字段 asrEngine（#67）：老 settings.json 里还躺着它（whisper / qwen3 / sensevoice），
+    // 读入必须原样能开、字段被丢掉，再落盘也不能把它写回去——否则死字段会永远活着。
+    writeFileSync(
+      file,
+      JSON.stringify({
+        asrEngine: 'whisper',
+        asrActiveModel: 'paraformer:asr-models/paraformer-zh',
+        quickPhrases: ['legacy-engine']
+      }),
+      'utf-8'
+    )
+    const legacyEngine = loadSettings() as AppSettings & { asrEngine?: unknown }
+    push(
+      '退役字段 asrEngine 读入即丢弃',
+      !('asrEngine' in legacyEngine) &&
+        legacyEngine.asrActiveModel === 'paraformer:asr-models/paraformer-zh' &&
+        legacyEngine.quickPhrases[0] === 'legacy-engine',
+      `asrEngine=${String(legacyEngine.asrEngine)} active=${legacyEngine.asrActiveModel}`
+    )
+    saveSettings({ quickPhrases: ['legacy-engine', 'after-save'] })
+    const legacyOnDisk = readFileSettings()
+    push(
+      '退役字段 asrEngine 不再被写回',
+      legacyOnDisk !== null && !('asrEngine' in legacyOnDisk) && legacyOnDisk.asrActiveModel === 'paraformer:asr-models/paraformer-zh',
+      `asrEngine=${String(legacyOnDisk?.asrEngine)}`
+    )
 
     // —— #42 漂移仲裁：key 表的三条裁决都走真实 loadSettings 路径（手写文件再读）。
     // 写的文件不带这些字段，'结束后原样还原' 那条在全新安装场景也能按默认值对上。

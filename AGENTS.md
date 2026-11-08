@@ -83,7 +83,7 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
 - `overlayCollapse` (default `Alt+Shift+B`) collapse / expand the overlay to its 132x34 icon
 - `inplaceSend` (default `Alt+Shift+T`) the only text out: reads the game chat draft (Chinese typed, not yet sent), translates, pastes back and presses Enter
 - `overlayPanel` (default `Alt+Shift+H`) summon panel: the overlay temporarily becomes an interactive sheet (history 200 rows / quick phrases / AI suggestions, click a row to copy); pressing again or Esc closes it and restores click-through
-- `voiceCapture` (default `Alt+Shift+V`) toggle record: speak Chinese → whisper.cpp transcribes → translate → the reply
+- `voiceCapture` (default `Alt+Shift+V`) toggle record: speak Chinese → the active recognition model (`asrActiveModel`: Qwen3 or Paraformer) transcribes → translate → the reply
   is spoken through voice-out (the panel 「说一句试试」 button runs the same chain; keyboard auto-repeat is debounced
   500ms in `toggleVoiceCapture`)
 
@@ -136,7 +136,8 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `dataset_entries` = one row per recorded take revision with `run_id` NULL until a run trained
   it, capped at `TRAIN_RUN_KEEP` 200 newest runs — the only history of what was trained, with what
   data, and where the artifacts went; metrics are read back from the run's own
-  `checkpoint-*/trainer_state.json` or GV `logs/<exp>/train.log`, never stored twice),
+  `checkpoint-*/trainer_state.json` or GV `logs/<exp>/train.log`, copied onto the run row as
+  `runs.metrics` for the panel while the artifact stays the trainer's own record),
   `train-runs/` (legacy archive: the pre-SQLite one-JSON-per-run files, imported once on first
   open of the database and never written again),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB

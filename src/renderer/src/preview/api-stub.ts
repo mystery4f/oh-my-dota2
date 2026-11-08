@@ -14,7 +14,7 @@
  *
  * Knobs, all through the URL: `?s=<section>` deep-links a section (the shell reads it),
  * `?engine=<ttsEngine>` and `?outEngine=<ttsOutEngine>` force an engine so the voice-pack rows
- * can be inspected without clicking through the panel; `?asrEngine=paraformer` puts 识别训练 on the
+ * can be inspected without clicking through the panel; `?asrModel=paraformer` puts 识别训练 on the
  * FunASR fine-tune leg (target row and estimate both follow it); `?script=bad` makes the read script
  * fail so the fallback warning row on 识别训练 is visible.
  */
@@ -244,13 +244,13 @@ const stubGvDatasets = [
 ]
 let stubWebuiRunning = false
 
-/** 预览里的 ASR 模型表：两条微调腿各一个，`?asrEngine=paraformer` 让识别训练直接落在 FunASR 腿上。 */
+/** 预览里的 ASR 模型表：两条微调腿各一个，`?asrModel=paraformer` 让识别训练直接落在 FunASR 腿上。 */
 const stubAsrModels = [
   { id: 'qwen3:asr-models/qwen3-asr', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B', rel: 'asr-models/qwen3-asr', ready: true, bytes: 986491745, origin: 'download' },
   { id: 'qwen3:asr-models/qwen3-asr.bak', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B（备份）', rel: 'asr-models/qwen3-asr.bak', ready: true, bytes: 986491745, origin: 'backup' },
   { id: 'paraformer:asr-models/paraformer-zh', engineId: 'paraformer', label: 'Paraformer 中文', rel: 'asr-models/paraformer-zh', ready: true, bytes: 895000000, origin: 'download' }
 ] as const
-let stubAsrActiveId = query.get('asrEngine') === 'paraformer' ? 'paraformer:asr-models/paraformer-zh' : 'qwen3:asr-models/qwen3-asr'
+let stubAsrActiveId = query.get('asrModel') === 'paraformer' ? 'paraformer:asr-models/paraformer-zh' : 'qwen3:asr-models/qwen3-asr'
 /**
  * 现役模型的微调腿：与主进程 finetuneEngine 同一判据（activeId 的引擎 → 引擎表 finetune），
  * 目标行与估时都读它——换一条腿，预览里的 trainer / 步数 / 分钟跟着换。
@@ -426,7 +426,7 @@ const implemented = {
     }
     return {
       env: { ok: true, gaps: [], envRoot: 'data/asr-ft-env' },
-      // 目标行跟着现役模型走：?asrEngine=paraformer 切腿时 trainer 一起换，估时不会对不上。
+      // 目标行跟着现役模型走：?asrModel=paraformer 切腿时 trainer 一起换，估时不会对不上。
       target: {
         engineId: engine.id,
         label: engine.label,
