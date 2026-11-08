@@ -31,7 +31,7 @@ export function ftDatasetDir(): string {
  */
 async function collectFtEntries(): Promise<{ entries: FtDatasetEntry[]; error: string | null }> {
   const script = await readFtScript()
-  if (script.error || script.groups.length === 0) return { entries: [], error: script.error ?? '内置读稿为空' }
+  if (script.error || script.groups.length === 0) return { entries: [], error: script.error ?? '读稿里没有句子' }
   const recorded = new Set((await ftRecList()).map((info) => info.key))
   const { entries } = buildFtDatasetEntries(
     script.groups,

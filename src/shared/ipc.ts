@@ -10,28 +10,10 @@ import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@s
 import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
 import type { TrainRunRecord } from '@shared/train/run'
 import type { AsrState } from '@shared/asr/models'
+import type { FtScriptState } from '@shared/train/recording'
 
-
-/** ASR 微调读稿：一句原文。 */
-export interface FtScriptLine {
-  no: number
-  text: string
-}
-
-/** ASR 微调读稿：一组（lines 模式逐句录，free 模式自由说）。 */
-export interface FtScriptGroup {
-  id: string
-  title: string
-  mode: 'lines' | 'free'
-  lines: FtScriptLine[]
-  note: string
-}
-
-/** 读稿解析结果：error 非空表示内置资源缺失/解析失败。 */
-export interface FtScriptState {
-  groups: FtScriptGroup[]
-  error: string | null
-}
+// 读稿的类型归纯缝（解析与来源选择都在那里），契约只把它们带出来给渲染端。
+export type { FtScriptGroup, FtScriptLine, FtScriptState } from '@shared/train/recording'
 
 /** 一条录音：key 形如 G01-L03（free 组是 G21-T01），durationMs 由 16k mono wav 字节数推算。 */
 export interface FtRecInfo {

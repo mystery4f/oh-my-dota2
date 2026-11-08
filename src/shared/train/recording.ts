@@ -1,4 +1,5 @@
-/** 录音判定纯缝（录音面板）：何时停（advanceRecording）、收不收（shouldKeepTake）、段叫什么（takeLineId/recordingKey）。 */
+/** 录音判定纯缝（录音面板）：读哪份稿（resolveFtScript）、何时停（advanceRecording）、收不收（shouldKeepTake）、
+ * 段叫什么（takeLineId/recordingKey）。 */
 /** 试点（G15，20 句）实测阈值；改任何一项之前先过 --train-probe，再真人试录一遍。 */
 export const RECORDING_LIMITS = {
   rmsThreshold: 0.012,
@@ -98,4 +99,105 @@ export function nextUnrecordedLine(input: {
   const pending = input.lines.filter((no) => no !== input.current && !done.has(no))
   if (pending.length === 0) return null
   return pending.find((no) => no > input.current) ?? pending[0]
+}
+
+/** 读稿一句：`1. 文本` 的序号与正文。 */
+export interface FtScriptLine {
+  no: number
+  text: string
+}
+
+/** 读稿一组：`## Gxx 标题` 开组，逐句组的 lines 逐条录，没有编号句的组是自由说。 */
+export interface FtScriptGroup {
+  id: string
+  title: string
+  mode: 'lines' | 'free'
+  lines: FtScriptLine[]
+  note: string
+}
+
+/** 这份读稿从哪来：数据目录的自定义稿，还是随包自带的那份。 */
+export type FtScriptSource = 'data' | 'bundled'
+
+/** 一份候选读稿：markdown 为 null 表示文件不存在或读不出来。 */
+export interface FtScriptCandidate {
+  path: string
+  markdown: string | null
+}
+
+/** 面板要用的一整份读稿：句子、生效来源、路径、以及回落/失效的说明。 */
+export interface FtScriptState {
+  groups: FtScriptGroup[]
+  source: FtScriptSource
+  /** 生效读稿的绝对路径：面板把它印出来，用户才找得到该改哪个文件。 */
+  path: string
+  /** 非空 = 自定义稿坏了、已回落自带稿：句子照常可录，但这条告警必须显示。 */
+  warning: string | null
+  /** 非空 = 连自带稿都不可用：页面没有句子可录，不是「还没读出来」。 */
+  error: string | null
+}
+
+/** 解析读稿 markdown：`## Gxx 标题` 开组，`1. 文本` 收句；一组没有编号句就是自由说组。 */
+export function parseFtScript(markdown: string): FtScriptGroup[] {
+  const groups: FtScriptGroup[] = []
+  let current: FtScriptGroup | null = null
+  const noteParts: string[] = []
+  for (const rawLine of markdown.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const groupMatch = /^##\s+(G\d+)\s*(.*)$/.exec(line)
+    if (groupMatch) {
+      if (current) current.note = noteParts.join(' ')
+      current = { id: groupMatch[1], title: groupMatch[2].trim(), mode: 'lines', lines: [], note: '' }
+      groups.push(current)
+      noteParts.length = 0
+      continue
+    }
+    if (!current) continue
+    const lineMatch = /^(\d{1,3})[.、]\s*(.+)$/.exec(line)
+    if (lineMatch) current.lines.push({ no: Number(lineMatch[1]), text: lineMatch[2].trim() })
+    else noteParts.push(line)
+  }
+  if (current) current.note = noteParts.join(' ')
+  for (const group of groups) if (group.lines.length === 0) group.mode = 'free'
+  return groups
+}
+
+/** 一份 markdown 能不能拿去录；defect 说人话，null = 能用。 */
+function assessScript(markdown: string | null): { groups: FtScriptGroup[]; defect: string | null } {
+  if (markdown === null) return { groups: [], defect: '缺失' }
+  // readFile('utf8') 把坏字节解成 U+FFFD：混进替换字符的稿子宁可回落，也不拿去录成脏样本。
+  if (markdown.includes('\uFFFD')) return { groups: [], defect: '编码不是 UTF-8' }
+  if (!markdown.trim()) return { groups: [], defect: '是空的' }
+  const groups = parseFtScript(markdown)
+  return { groups, defect: groups.length === 0 ? '格式不对（要 `## G14` 组标题 + 编号句）' : null }
+}
+
+/**
+ * 读稿选择：数据目录的自定义稿优先，不存在或坏了才回落随包自带的。
+ * 只有自带那份也不可用时才是 error——那时页面真的没句子可录；自定义稿坏了只是 warning，
+ * 因为「我改错了文件」不该把整个录音页变成空白。IO（读三个候选文件）留在主进程。
+ */
+export function resolveFtScript(data: FtScriptCandidate, bundled: FtScriptCandidate): FtScriptState {
+  const user = data.markdown === null ? null : assessScript(data.markdown)
+  if (user && user.defect === null) {
+    return { groups: user.groups, source: 'data', path: data.path, warning: null, error: null }
+  }
+  const built = assessScript(bundled.markdown)
+  if (built.defect === null) {
+    return {
+      groups: built.groups,
+      source: 'bundled',
+      path: bundled.path,
+      warning: user === null ? null : `数据目录的读稿（${data.path}）${user.defect}，已回落到自带读稿`,
+      error: null
+    }
+  }
+  return {
+    groups: [],
+    source: 'bundled',
+    path: bundled.path,
+    warning: null,
+    error: `内置读稿（${bundled.path}）${built.defect}——重装或检查应用资源`
+  }
 }

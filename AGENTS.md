@@ -128,7 +128,9 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `resources/asr-sherpa-worker.cjs`, never a new branch per call site),
   `asr-ft/` (ASR accent fine-tune recordings from 识别训练's recording panel:
   one wav per line, `Gxx/Gxx-Lnn.wav` (or `Gxx-Tnn.wav` for the free-speech group); the
-  recording script ships as a bundled resource, `resources/asr-ft-script.md`),
+  recording script ships as a bundled resource, `resources/asr-ft-script.md`, and a
+  `<userData>/asr-ft-script.md` copy overrides it in the same `## Gxx` shape; a broken
+  custom file falls back to the bundled one with a panel warning, never a blank page),
   `train/runs.db` (训练记录 + 数据集账本, one SQLite file opened with the same built-in
   `node:sqlite` driver as the translation ledger: `runs` = one row per training attempt,
   `dataset_entries` = one row per recorded take revision with `run_id` NULL until a run trained
