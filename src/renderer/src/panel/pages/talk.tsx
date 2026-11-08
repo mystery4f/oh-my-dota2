@@ -26,10 +26,10 @@ import { useVoicePacks } from '../use-voice-packs'
 import { VoicePackDisplay } from '../components/voice-pack-display'
 
 /**
- * `original` 是第一次识别出来的那句（改之前的原话）：纠错样本按它找回原音，
- * 同一句再改一次也认得出是同一条样本，不会又存一条。
+ * 一行日志 = 一次语音链结果 + 面板本地字段。纠错不再自己保存「原话」：找原音靠的是
+ * `utteranceId`（识别那一刻主进程发下来的票），它在 `VoiceChainSummary` 里，改几次都不会变。
  */
-type LogEntry = VoiceChainSummary & { at: number; corrected?: boolean; original?: string }
+type LogEntry = VoiceChainSummary & { at: number; corrected?: boolean }
 
 /** 断链时的唯一动作按钮文案：动作是给人看的，不是给代码看的。 */
 const READINESS_ACTION_LABEL: Record<VoiceOutAction, string> = {
@@ -106,19 +106,16 @@ export function TalkPage({
   const saveCorrection = useCallback(
     (entry: LogEntry): void => {
       const corrected = draft.trim()
-      // 原话只在第一次纠错时记下：再改一次还认得出是同一条样本（换标签、不新增）。
-      const original = entry.original ?? entry.transcript
       const additions = extractHotwordDiff(entry.transcript, corrected)
       if (additions.length > 0) void update({ asrHotwords: mergeHotwords(hotwordsRef.current, additions) })
       // #66：热词管「下次少错」，样本管「这次已经改对」——原音 + 改对的那句进数据集。
-      // 开关在主进程判（关掉就什么都不写）；到顶/原音过期时 notice 是唯一让人看见的出口。
+      // 主进程按 utteranceId 取原音（同一句说两遍也不串）；开关也在主进程判（关掉就什么都不写）；
+      // 到顶 / 原音已经过期 / 账本没记上时，notice 是唯一让人看见的出口。
       void window.api
-        .voiceCorrection({ transcript: original, corrected })
+        .voiceCorrection({ utteranceId: entry.utteranceId ?? '', corrected })
         .then((result) => setCorrectionNote(result.notice ?? (result.saved ? `已存为纠错样本 ${result.key ?? ''}` : null)))
         .catch((err: unknown) => setCorrectionNote(`纠错样本没存成：${errorMessage(err)}`))
-      setLog((l) =>
-        l.map((item) => (item.at === entry.at ? { ...item, transcript: corrected, corrected: true, original } : item))
-      )
+      setLog((l) => l.map((item) => (item.at === entry.at ? { ...item, transcript: corrected, corrected: true } : item)))
       setEditingAt(null)
       setDraft('')
     },

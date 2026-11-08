@@ -31,10 +31,18 @@ export function ftDatasetDir(): string {
 /**
  * 已录句子 × 稿子 → 待打包条目；缺件时带人话原因。
  * 打包与「当前账本」都从这里取条目，别各自再建一次。
+ *
+ * 两类条目的磁盘真值分开判：纠错样本由 `buildCorrectionEntries` 按 existsSync 滤掉缺文件的
+ * 那几条（键记在 `skipped` 里，打包照常进行）；逐句录音走下面的 every 门——它们由稿子枚举，
+ * 少一个 wav 说明录音目录被动过，让人重录比悄悄少一句强。
  */
-async function collectFtEntries(): Promise<{ entries: FtDatasetEntry[]; error: string | null }> {
+async function collectFtEntries(): Promise<{
+  entries: FtDatasetEntry[]
+  skipped: string[]
+  error: string | null
+}> {
   const script = await readFtScript()
-  if (script.error || script.groups.length === 0) return { entries: [], error: script.error ?? '读稿里没有句子' }
+  if (script.error || script.groups.length === 0) return { entries: [], skipped: [], error: script.error ?? '读稿里没有句子' }
   const recorded = new Set((await ftRecList()).map((info) => info.key))
   const { entries } = buildFtDatasetEntries(
     script.groups,
@@ -42,14 +50,17 @@ async function collectFtEntries(): Promise<{ entries: FtDatasetEntry[]; error: s
     (group, line) => ftRecPath(group, line)
   )
   // #66：纠错样本接在逐句录音后面——正文是用户亲手改对的那句，自由说也能监督训练；
-  // 只认账本里的（手工录的自由说没有标签，不能进）。
-  entries.push(...buildCorrectionEntries(listDatasetEntries()))
-  if (entries.length === 0) return { entries, error: '还没有已录的句子——先在上方录几条再打包' }
-  if (entries.length < 2) return { entries, error: '只有一条录音不够——官方脚本必须带验证集，至少再录一条再打包' }
-  if (!entries.every((entry) => existsSync(entry.wavPath))) {
-    return { entries, error: '有录音文件丢失（列表和磁盘对不上），重录缺失的句子后再打包' }
+  // 只认账本里的（手工录的自由说没有标签，不能进）。磁盘上已经删掉的跳过，不拖垮整份打包。
+  const corrections = buildCorrectionEntries(listDatasetEntries(), (wavPath) => existsSync(wavPath))
+  entries.push(...corrections.entries)
+  if (entries.length === 0) return { entries, skipped: corrections.missing, error: '还没有已录的句子——先在上方录几条再打包' }
+  if (entries.length < 2) {
+    return { entries, skipped: corrections.missing, error: '只有一条录音不够——官方脚本必须带验证集，至少再录一条再打包' }
   }
-  return { entries, error: null }
+  if (!entries.every((entry) => existsSync(entry.wavPath))) {
+    return { entries, skipped: corrections.missing, error: '有逐句录音的文件丢失（录音目录和列表对不上），重录缺失的句子后再打包' }
+  }
+  return { entries, skipped: corrections.missing, error: null }
 }
 
 /** 当前录音的账本（不落盘）：续训对账、开训体检都读这一份，别各自重算。 */
@@ -79,8 +90,8 @@ function buildJsonlText(entries: FtDatasetEntry[]): string {
  * 新录的句子只进训练集——验证集换了，loss 就没法跟前一轮比。
  */
 export async function prepareFtDataset(options?: { evalKeys?: readonly string[] }): Promise<FtDatasetPrepareResult> {
-  const { entries, error } = await collectFtEntries()
-  if (error) return fail(error)
+  const { entries, skipped, error } = await collectFtEntries()
+  if (error) return fail(error, skipped)
   const split = options?.evalKeys ? splitIncrementalEval(entries, options.evalKeys) : splitTrainEval(entries)
   const { train, eval: evalSet } = split
   const dir = ftDatasetDir()
@@ -97,12 +108,22 @@ export async function prepareFtDataset(options?: { evalKeys?: readonly string[] 
     trainPath,
     evalPath: evalSet.length > 0 ? evalPath : '',
     ledger: buildLedger(train, evalSet),
+    skippedCorrections: skipped,
     error: null,
   }
 }
 
-function fail(error: string): FtDatasetPrepareResult {
-  return { ok: false, trainCount: 0, evalCount: 0, trainPath: '', evalPath: '', ledger: [], error }
+function fail(error: string, skipped: string[] = []): FtDatasetPrepareResult {
+  return {
+    ok: false,
+    trainCount: 0,
+    evalCount: 0,
+    trainPath: '',
+    evalPath: '',
+    ledger: [],
+    skippedCorrections: skipped,
+    error
+  }
 }
 
 /** 账本 = 打包那一刻每条录音的磁盘指纹；续训对账、已训标记、重录检测全靠它。 */

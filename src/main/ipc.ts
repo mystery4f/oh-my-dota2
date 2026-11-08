@@ -165,12 +165,14 @@ const handlers: MainHandlers = {
     writeFileSync(wavPath, wav)
     // 引擎路由在这里只有一行：识别引擎的选择与「模型没就绪」的提示都由 transcribeWav 负责。
     const result = await transcribeWav(wavPath)
-    // #66：这句的原音按识别文本留在内存里——语音页纠错在另一个窗口、时间也更晚，
-    // 而 utterance.wav 下一句就被覆盖了；文本就是找回原音的票据。
-    if (result.ok && result.text.trim()) stashUtterance(result.text, wav)
-    return result
+    // #66：这句的原音留在内存里，并把票据（utteranceId）随结果交给渲染层——语音页纠错在
+    // 另一个窗口、时间也更晚，而 utterance.wav 下一句就被覆盖了。票据而不是文本：同一句说两遍
+    // 文本一样、录音不同，按文本找会把较新那段音配到较旧那一行上。
+    if (!result.ok || !result.text.trim()) return result
+    const utteranceId = stashUtterance(result.text, wav)
+    return utteranceId ? { ...result, utteranceId } : result
   },
-  // #66：纠错落库。开关（settings.asrCorrectionsToDataset）在主进程判，面板只报「改前 / 改后」。
+  // #66：纠错落库。开关（settings.asrCorrectionsToDataset）在主进程判；面板只报「票据 + 改对的那句」。
   voiceCorrection: (input) => saveVoiceCorrection(input),
   ttsPreview: (text) => getTtsAdapter().preview(String(text ?? '')),
   voiceOutTest: () => getVoiceOutService().test(),

@@ -571,9 +571,13 @@ export async function resolveAsrFtTrainRequest(mode: AsrFtMode): Promise<{
     exportDir,
     applied: false
   })
+  // 缺文件的纠错样本已被跳过（打包照常进行）：开训前必须说一次，否则用户以为那几句也训了。
+  const skippedNote = pack.skippedCorrections.length
+    ? `跳过 ${pack.skippedCorrections.length} 条找不到录音的纠错样本：${pack.skippedCorrections.join('、')}`
+    : null
   return {
     ok: true,
-    warning: vramNote,
+    warning: [vramNote, skippedNote].filter(Boolean).join('；') || null,
     request: {
       kind: 'asr-ft',
       // ASR 微调没有「数据集名」这个概念：目录名固定 ft-<时间戳>，字段留空只为满足请求契约。

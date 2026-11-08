@@ -6,7 +6,8 @@ import type { FtRecInfo } from '@shared/ipc'
 import { ftWavDurationMs } from '@shared/train/asr-ft'
 import { parseRecordingKeyParts, RECORDING_GROUP_SHAPE, resolveFtScript, scriptTextForKey } from '@shared/train/recording'
 import type { FtScriptCandidate, FtScriptState } from '@shared/train/recording'
-import { forgetDatasetTake, recordDatasetTake } from './run-store'
+import { isCorrectionTakeKey } from '@shared/train/corrections'
+import { findDatasetEntry, forgetDatasetTake, recordDatasetTake } from './run-store'
 
 /**
  * ASR 微调录音（T4a）：读稿定位 + 录音存取。
@@ -71,14 +72,26 @@ export async function ftRecList(): Promise<FtRecInfo[]> {
   return infos.sort((a, b) => a.key.localeCompare(b.key))
 }
 
+/**
+ * 这把钥匙能不能写进录音目录：纠错样本（#66）住的就是 G01/Tnn，账本里那条行占着同一个文件名。
+ * 这里再录一次手工自由说会把用户改对的那条样本的录音顶掉（账本还写着旧正文），所以直接拒绝。
+ * 单独拎出来是为了探针能对着它跑：拒绝发生在任何 IO 之前，不会往真实数据目录里试写。
+ */
+export function assertRecordingKeyFree(key: string): void {
+  if (isCorrectionTakeKey(key) && findDatasetEntry(key) !== null) {
+    throw new Error(`${key} 已经是纠错样本（训练账本里有这一行）：先删掉那条纠错样本，或换一组再录`)
+  }
+}
+
 export async function ftRecSave(group: string, line: string, data: Uint8Array): Promise<FtRecInfo> {
   const keys = parseRecordingKeyParts(group, line)
+  const key = `${keys.group}-${keys.line}`
+  assertRecordingKeyFree(key)
   const dir = join(recDir(), keys.group)
   await mkdir(dir, { recursive: true })
   const target = join(dir, `${keys.group}-${keys.line}.wav`)
   await writeFile(target, data)
   const info = await stat(target)
-  const key = `${keys.group}-${keys.line}`
   // 存盘即落账：待训数字跟着涨。自由说（Tnn）/稿子上没有的行拿不到正文，不进账本。
   const text = scriptTextForKey((await readFtScript()).groups, key)
   if (text !== null) {

@@ -379,6 +379,7 @@ const implemented = {
     trainPath: 'data/asr-ft-runs/stub/dataset/train.jsonl',
     evalPath: 'data/asr-ft-runs/stub/dataset/eval.jsonl',
     ledger: [],
+    skippedCorrections: [],
     error: null
   }),
   ftAsrftStatus: async () => ({

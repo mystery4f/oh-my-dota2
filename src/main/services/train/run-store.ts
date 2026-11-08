@@ -471,11 +471,13 @@ export function saveDatasetLedger(entries: readonly FtLedgerEntry[], packedBy?: 
  * 录一条音就落账（run_id 空 = 还没训过）：待训数字直接读这张表，不重走录音目录。
  * 稿子没变的同 key 重录还是同一个修订（run_id 由 COALESCE 保留），所以不算新数据；
  * 改稿才是新修订。split 这里只是占位（录音时还没分验证集），权威划分冻在 runs.packed_ledger。
+ * 返回 false = 账本没写成（数据库打不开或事务回滚）：wav 还在，但这句不会进打包，
+ * 调用方要把这句话说出来，不能让用户以为存上了。
  */
-export function recordDatasetTake(entry: FtLedgerEntry): void {
+export function recordDatasetTake(entry: FtLedgerEntry): boolean {
   const handle = open()
-  if (handle === null) return
-  transact(handle, () => writeEntry(handle, entry, null))
+  if (handle === null) return false
+  return transact(handle, () => writeEntry(handle, entry, null))
 }
 
 /**

@@ -313,10 +313,14 @@ export function AsrTrainPage(): React.ReactElement {
               onClick={() =>
                 void runAction('打包', async () => {
                   const result = await window.api.ftDatasetPrepare()
+                  // 缺文件的纠错样本被跳过（打包照常）：把跳过的键说出来，别让人以为它们也训了。
+                  const skipped = result.skippedCorrections.length
+                    ? `；跳过 ${result.skippedCorrections.length} 条找不到录音的纠错样本（${result.skippedCorrections.join('、')}）`
+                    : ''
                   if (result.ok) setPacked({ train: result.trainCount, eval: result.evalCount })
                   return result.ok
-                    ? `已打包：训练 ${result.trainCount} 条 / 验证 ${result.evalCount} 条`
-                    : `打包失败：${result.error ?? '未知错误'}`
+                    ? `已打包：训练 ${result.trainCount} 条 / 验证 ${result.evalCount} 条${skipped}`
+                    : `打包失败：${result.error ?? '未知错误'}${skipped}`
                 })
               }
             >

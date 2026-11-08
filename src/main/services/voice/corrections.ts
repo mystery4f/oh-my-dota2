@@ -3,7 +3,8 @@
  *
  * 为什么要在内存里存最近几句：识别发生在语音页（浮层），纠错发生在面板，两次点击之间那
  * 个 `voice/utterance.wav` 早被下一句覆盖了。`transcribeAudio` 交付结果时顺手把 wav 放进来，
- * 纠错时按「改之前的那句文本」找回原音——文本就是票据，不需要跨窗口传字节。
+ * 并给这一段发一张票（utteranceId）交给渲染层；纠错时票原样回来，按票找回原音。
+ * 不能按文本找：同一句说过两遍，文本一样、录音不同，按文本会拿到较新那段配到较旧那行上。
  *
  * 配额到顶只停写 + 提示，**绝不删旧样本**：那是已经录好、还没训的数据（spec 里「最旧先丢」的
  * 写法在这里被票面否决）。同一句再改一次换标签、原地覆盖（账本记新修订），不新增一条。
@@ -38,29 +39,33 @@ export interface CorrectionSample {
 const STASH_MAX = 8
 
 interface StashedUtterance {
-  transcript: string
+  /** 识别那一刻发下去的票：面板纠错时原样带回来，按它对录音，不看文本。 */
+  id: string
   wav: Uint8Array
-  /** 已经写过样本的键：同一句再改一次覆盖它，不新增一条。 */
+  /** 已经写过样本的键：同一条再改一次覆盖它，不新增一条。 */
   key: string | null
 }
 
 const stash: StashedUtterance[] = []
+let nextUtteranceId = 0
 
-/** `transcribeAudio` 交付结果时调用：原音按识别文本记下（空的文本/空的 wav 直接丢）。 */
-export function stashUtterance(transcript: string, wav: Uint8Array): void {
-  const text = transcript.trim()
-  if (!text || wav.byteLength === 0) return
-  stash.push({ transcript: text, wav, key: null })
+/**
+ * `transcribeAudio` 交付结果时调用：给这段原音发一张票并返回给渲染层。
+ * 空的文本 / 空的 wav 直接丢、返回 null——没有票的纠错会明说原音不在了，不猜。
+ */
+export function stashUtterance(transcript: string, wav: Uint8Array): string | null {
+  if (!transcript.trim() || wav.byteLength === 0) return null
+  nextUtteranceId += 1
+  const id = `u${nextUtteranceId}`
+  stash.push({ id, wav, key: null })
   while (stash.length > STASH_MAX) stash.shift()
+  return id
 }
 
-function stashedFor(transcript: string): StashedUtterance | null {
-  const text = transcript.trim()
-  if (!text) return null
-  for (let i = stash.length - 1; i >= 0; i--) {
-    if (stash[i].transcript === text) return stash[i]
-  }
-  return null
+function stashedFor(utteranceId: string): StashedUtterance | null {
+  const id = utteranceId.trim()
+  if (!id) return null
+  return stash.find((item) => item.id === id) ?? null
 }
 
 function defaultRoot(): string {
@@ -106,17 +111,17 @@ export async function writeCorrectionSample(input: {
   if (!label) return { saved: false, key: null, notice: '改对的那句是空的：这次没存纠错样本' }
   const takes = await listCorrectionTakes(input.root)
   const reuse = input.key && isCorrectionTakeKey(input.key) ? input.key : null
-  if (!reuse) {
-    const judged = judgeCorrectionSamples(takes, input.wav.byteLength, input.limits)
-    if (judged.atCap) return { saved: false, key: null, notice: judged.notice }
-  }
+  // 覆盖那一条也要过字节判定：换一段更大的音一样顶同一个 200 MB 上限（条数不增）。
+  const onDisk = reuse !== null && takes.some((take) => take.key === reuse)
+  const judged = judgeCorrectionSamples(takes, input.wav.byteLength, input.limits, onDisk ? reuse : null)
+  if (judged.atCap) return { saved: false, key: null, notice: judged.notice }
   const key = reuse ?? correctionTakeKey(nextCorrectionTakeNo(takes.map((take) => take.key)))
   const dir = join(input.root, CORRECTION_GROUP)
   await mkdir(dir, { recursive: true })
   const wavPath = join(dir, `${key}.wav`)
   await writeFile(wavPath, input.wav)
   const info = await stat(wavPath)
-  recordDatasetTake({
+  const recorded = recordDatasetTake({
     key,
     wavPath,
     bytes: info.size,
@@ -124,7 +129,12 @@ export async function writeCorrectionSample(input: {
     text: label,
     split: 'train'
   })
-  return { saved: true, key, notice: null }
+  // 账本没记上 = 这句不会进打包（P2-1）。文件留下来（删它才是丢数据），但话要说在前面。
+  return {
+    saved: true,
+    key,
+    notice: recorded ? null : `已写入 ${key}.wav，但训练账本没记上（数据库打不开）：这句不会进打包`
+  }
 }
 
 /**
@@ -137,7 +147,7 @@ export async function saveVoiceCorrection(
 ): Promise<CorrectionSaveResult> {
   const enabled = options?.enabled ?? loadSettings().asrCorrectionsToDataset
   if (!enabled) return { saved: false, key: null, notice: null }
-  const found = stashedFor(input.transcript)
+  const found = stashedFor(input.utteranceId)
   if (!found) {
     return {
       saved: false,

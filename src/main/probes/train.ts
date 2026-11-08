@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -115,6 +115,7 @@ import {
   trainDbPath,
   useTrainDatabase
 } from '../services/train/run-store'
+import { assertRecordingKeyFree } from '../services/train/ft-record'
 import {
   ensureSovitsServer,
   setInferenceHold,
@@ -158,7 +159,7 @@ function recordLedgerWiring(): { readable: boolean; wired: boolean } {
 /**
  * 纠错样本（#66）：命名与配额是纯的；写盘那一组对着临时目录 + 临时库跑（不碰 data/）。
  * 票面三条验收都在这里：一次纠错 = 一条 wav + 一行带标签的账本；到顶只停写、旧样本一条不删；
- * 开关关掉一个文件都不写。
+ * 开关关掉一个文件都不写。复审的两条 P1 各有一条：同文不同音按票据取音、删掉的 wav 不拖垮打包。
  */
 async function correctionsCases(): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'omd2-train-corr-'))
@@ -176,10 +177,14 @@ async function correctionsCases(): Promise<void> {
       isCorrectionTakeKey('G01-T01') && !isCorrectionTakeKey('G01-L01') && !isCorrectionTakeKey('G21-T01'),
       `G01-T01=${isCorrectionTakeKey('G01-T01')} G01-L01=${isCorrectionTakeKey('G01-L01')} G21-T01=${isCorrectionTakeKey('G21-T01')}`
     )
+    // 代码只保证「新号不撞上现有的号」：中段空洞不回填，但删掉末尾最大的号，新号会回头复用。
     push(
-      '纠错：新号 = 最大号 + 1，空位不回填（一个号只对一句话）',
-      nextCorrectionTakeNo(['G01-T01', 'G01-L05', 'G01-T03']) === 4 && nextCorrectionTakeNo([]) === 1,
-      `${nextCorrectionTakeNo(['G01-T01', 'G01-L05', 'G01-T03'])}/${nextCorrectionTakeNo([])}`
+      '纠错：新号 = 最大号 + 1（中段空洞不回填；删掉末尾的号会复用）',
+      nextCorrectionTakeNo(['G01-T01', 'G01-L05', 'G01-T03']) === 4 &&
+        nextCorrectionTakeNo(['G01-T01', 'G01-T03']) === 4 &&
+        nextCorrectionTakeNo(['G01-T01']) === 2 &&
+        nextCorrectionTakeNo([]) === 1,
+      `${nextCorrectionTakeNo(['G01-T01', 'G01-L05', 'G01-T03'])}/${nextCorrectionTakeNo(['G01-T01'])}/${nextCorrectionTakeNo([])}`
     )
     const sortedTakes = buildCorrectionEntries([
       { key: 'G01-T10', revision: 1, wavPath: 'a1', text: '十' },
@@ -190,10 +195,11 @@ async function correctionsCases(): Promise<void> {
     ])
     push(
       '纠错：打包条目按序号排（T100 在 T10 后面），每个键只留最新修订',
-      sortedTakes.map((take) => take.key).join(',') === 'G01-T02,G01-T10,G01-T100' &&
-        sortedTakes[1]?.text === '十（改）' &&
-        sortedTakes[1]?.wavPath === 'a2',
-      sortedTakes.map((take) => `${take.key}=${take.text}`).join(' ')
+      sortedTakes.missing.length === 0 &&
+        sortedTakes.entries.map((take) => take.key).join(',') === 'G01-T02,G01-T10,G01-T100' &&
+        sortedTakes.entries[1]?.text === '十（改）' &&
+        sortedTakes.entries[1]?.wavPath === 'a2',
+      sortedTakes.entries.map((take) => `${take.key}=${take.text}`).join(' ')
     )
     const empty = judgeCorrectionSamples([])
     push(
@@ -209,11 +215,29 @@ async function correctionsCases(): Promise<void> {
       heavy.atCap && !judgeCorrectionSamples([{ bytes: CORRECTION_LIMITS.maxBytes - 8192 }], 4096).atCap && (heavy.notice ?? '').includes('MB'),
       heavy.notice ?? ''
     )
+    // P2-2：覆盖同一条不新增条数（样本满了也改得动标签），但字节按「减旧 + 新」判，换更大的音照样撞上限。
+    const atCapTakes = Array.from({ length: CORRECTION_LIMITS.maxTakes }, (_, i) => ({ key: i === 0 ? 'G01-T01' : `G01-T${i + 1}`, bytes: 1024 }))
+    const reEditJudge = judgeCorrectionSamples(atCapTakes, 4096, CORRECTION_LIMITS, 'G01-T01')
+    const absentJudge = judgeCorrectionSamples(atCapTakes, 4096, CORRECTION_LIMITS, 'G01-T999')
+    const growJudge = judgeCorrectionSamples([{ key: 'G01-T01', bytes: 600 * 1024 }], 2 * 1024 * 1024, { maxTakes: 200, maxBytes: 1024 * 1024 }, 'G01-T01')
+    push(
+      '纠错：覆盖同一条不新增条数（键不在盘上仍算新开一条），字节按「减旧 + 新」判',
+      !reEditJudge.atCap && absentJudge.atCap && growJudge.atCap && (growJudge.notice ?? '').includes('MB'),
+      `reEdit=${reEditJudge.atCap} absent=${absentJudge.atCap} grow=${growJudge.atCap}`
+    )
 
-    // —— 一次纠错 = 一条 wav + 一行带标签的账本 ——
+    // —— 一次纠错 = 一条 wav + 一行带标签的账本（票据从识别那一刻带过来） ——
     const wavBytes = (size: number): Uint8Array => new Uint8Array(size)
-    stashUtterance('你好开雾', wavBytes(6400))
-    const first = await saveVoiceCorrection({ transcript: '你好开雾', corrected: '你好，开雾了' }, { enabled: true, root })
+    const firstId = stashUtterance('你好开雾', wavBytes(6400))
+    push(
+      '纠错：识别时发一张票，空文本 / 空 wav 没有票',
+      typeof firstId === 'string' &&
+        firstId !== '' &&
+        stashUtterance('', wavBytes(6400)) === null &&
+        stashUtterance('有文字', new Uint8Array(0)) === null,
+      firstId ?? 'null'
+    )
+    const first = await saveVoiceCorrection({ utteranceId: firstId ?? '', corrected: '你好，开雾了' }, { enabled: true, root })
     const wavPath = join(root, CORRECTION_GROUP, 'G01-T01.wav')
     const entry = findDatasetEntry('G01-T01')
     push(
@@ -227,7 +251,7 @@ async function correctionsCases(): Promise<void> {
         entry.runId === null,
       `${first.key} ${entry?.text ?? 'no-entry'}`
     )
-    const packedOnce = buildCorrectionEntries(listDatasetEntries())
+    const packedOnce = buildCorrectionEntries(listDatasetEntries()).entries
     push(
       '纠错：打包认它（自由说组不进脚本，纠错样本单独收）',
       packedOnce.length === 1 && packedOnce[0]?.key === 'G01-T01' && packedOnce[0]?.text === '你好，开雾了',
@@ -239,9 +263,9 @@ async function correctionsCases(): Promise<void> {
       pendingAfter.count === 1 && pendingAfter.label.includes('1'),
       pendingAfter.label
     )
-    const again = await saveVoiceCorrection({ transcript: '你好开雾', corrected: '你好，开雾' }, { enabled: true, root })
+    const again = await saveVoiceCorrection({ utteranceId: firstId ?? '', corrected: '你好，开雾' }, { enabled: true, root })
     const revisions = listDatasetEntries().filter((row) => row.key === 'G01-T01')
-    const packedTwice = buildCorrectionEntries(listDatasetEntries())
+    const packedTwice = buildCorrectionEntries(listDatasetEntries()).entries
     push(
       '纠错：同一句再改一次 = 换标签，不新增第二条',
       again.saved &&
@@ -251,6 +275,31 @@ async function correctionsCases(): Promise<void> {
         packedTwice.length === 1 &&
         packedTwice[0]?.text === '你好，开雾',
       `files=${readdirSync(join(root, CORRECTION_GROUP)).length} revs=${revisions.length} packed=${packedTwice[0]?.text ?? 'none'}`
+    )
+
+    // —— P1-1：同一句说两遍 = 同一份文本、两段录音；改较早那一行必须存较早那段音 ——
+    const dupRoot = join(root, 'dup')
+    useTrainDatabase(join(root, 'dup-db', 'runs.db'))
+    const olderId = stashUtterance('同一句话', wavBytes(4000))
+    const newerId = stashUtterance('同一句话', wavBytes(8000))
+    const older = await saveVoiceCorrection(
+      { utteranceId: olderId ?? '', corrected: '同一句话（先说的那句）' },
+      { enabled: true, root: dupRoot }
+    )
+    const dupKey = older.key ?? 'G01-T01'
+    const dupWav = join(dupRoot, CORRECTION_GROUP, `${dupKey}.wav`)
+    const dupEntry = findDatasetEntry(dupKey)
+    push(
+      '纠错：同一句说两遍，改较早那一行 → 存的是那一行自己的录音（按票取音，不按文本）',
+      olderId !== null &&
+        newerId !== null &&
+        olderId !== newerId &&
+        older.saved &&
+        older.key === 'G01-T01' &&
+        existsSync(dupWav) &&
+        statSync(dupWav).size === 4000 &&
+        dupEntry?.text === '同一句话（先说的那句）',
+      `ids=${olderId ?? 'null'}/${newerId ?? 'null'} size=${existsSync(dupWav) ? statSync(dupWav).size : 'missing'} text=${dupEntry?.text ?? 'none'}`
     )
 
     // —— 到顶只停写：旧样本一条不删、给一句能看懂的提示 ——
@@ -282,39 +331,123 @@ async function correctionsCases(): Promise<void> {
       big1.saved && !big2.saved && (big2.notice ?? '').includes('MB') && (await listCorrectionTakes(byteRoot)).length === 1,
       `saved=${big1.saved}/${big2.saved} notice=${big2.notice ?? 'none'}`
     )
+    // P2-2 走真实写盘：条数已满也改得动标签，但换成更大的音仍按「减旧 + 新」撞同一个上限。
+    const reeditRoot = join(root, 'reedit')
+    const reeditLimits = { maxTakes: 1, maxBytes: 1024 * 1024 }
+    const reedit1 = await writeCorrectionSample({ root: reeditRoot, wav: wavBytes(600 * 1024), corrected: '第一版', limits: reeditLimits })
+    const reeditSame = await writeCorrectionSample({
+      root: reeditRoot,
+      wav: wavBytes(700 * 1024),
+      corrected: '改标签',
+      key: reedit1.key,
+      limits: reeditLimits
+    })
+    const reeditTooBig = await writeCorrectionSample({
+      root: reeditRoot,
+      wav: wavBytes(2 * 1024 * 1024),
+      corrected: '换大音',
+      key: reedit1.key,
+      limits: reeditLimits
+    })
+    const reeditFiles = await listCorrectionTakes(reeditRoot)
+    push(
+      '纠错：再改一遍同一句——条数满了也改得动，换更大的音仍停写（旧文件不动）',
+      reedit1.saved &&
+        reeditSame.saved &&
+        reeditSame.key === reedit1.key &&
+        !reeditTooBig.saved &&
+        (reeditTooBig.notice ?? '').includes('MB') &&
+        reeditFiles.length === 1 &&
+        reeditFiles[0]?.bytes === 700 * 1024,
+      `same=${reeditSame.saved} big=${reeditTooBig.saved} files=${reeditFiles.length} bytes=${reeditFiles[0]?.bytes ?? 'none'}`
+    )
 
     // —— 开关关掉 / 原音没留：都不写，而且说人话 ——
     const offRoot = join(root, 'off')
-    stashUtterance('这句关掉', wavBytes(3200))
-    const off = await saveVoiceCorrection({ transcript: '这句关掉', corrected: '这句关掉了' }, { enabled: false, root: offRoot })
+    const offId = stashUtterance('这句关掉', wavBytes(3200))
+    const off = await saveVoiceCorrection({ utteranceId: offId ?? '', corrected: '这句关掉了' }, { enabled: false, root: offRoot })
     push(
       '纠错：开关关掉 = 一个文件都不写，也不打扰',
       !off.saved && off.notice === null && !existsSync(join(offRoot, CORRECTION_GROUP)),
       `saved=${off.saved} notice=${off.notice ?? 'none'}`
     )
-    const missed = await saveVoiceCorrection({ transcript: '没识别过的一句', corrected: '随便' }, { enabled: true, root: offRoot })
+    const missed = await saveVoiceCorrection({ utteranceId: 'u-never-issued', corrected: '随便' }, { enabled: true, root: offRoot })
     push(
       '纠错：原音不在内存里就说清（不假装存了）',
       !missed.saved && (missed.notice ?? '').includes('内存') && !existsSync(join(offRoot, CORRECTION_GROUP)),
       missed.notice ?? 'none'
     )
 
-    // —— 接线钉：识别完留原音、打包收纠错样本（读不到源码的安装版跳过） ——
+    // —— P1-2：账本上有、磁盘上没了的纠错样本 → 跳过并报出来，其余照收（旧行为是全量返 [] 让打包失败） ——
+    const goneRoot = join(root, 'gone')
+    useTrainDatabase(join(root, 'gone-db', 'runs.db'))
+    const goneKeep = await writeCorrectionSample({ root: goneRoot, wav: wavBytes(2048), corrected: '还在的那条' })
+    const goneLost = await writeCorrectionSample({ root: goneRoot, wav: wavBytes(2048), corrected: '会被删的那条' })
+    if (goneLost.key) unlinkSync(join(goneRoot, CORRECTION_GROUP, `${goneLost.key}.wav`))
+    const survivors = buildCorrectionEntries(listDatasetEntries(), (wavPathNow) => existsSync(wavPathNow))
+    const withoutDiskCheck = buildCorrectionEntries(listDatasetEntries()).entries.length
+    push(
+      '纠错：删掉一条 wav 不拖垮打包——活着的照收，缺文件的单独报出来',
+      goneKeep.saved &&
+        goneLost.saved &&
+        withoutDiskCheck === 2 &&
+        survivors.entries.length === 1 &&
+        survivors.entries[0]?.key === goneKeep.key &&
+        survivors.missing.length === 1 &&
+        survivors.missing[0] === goneLost.key,
+      `keep=${goneKeep.key ?? 'none'} lost=${goneLost.key ?? 'none'} entries=${survivors.entries.length} missing=${survivors.missing.join(',')}`
+    )
+
+    // —— P2-1：账本写不进去时 wav 留下，但提示必须说清「这句不会进打包」 ——
+    const brokenRoot = join(root, 'broken')
+    // 让 dirname(库文件) 是个普通文件：open() 里 mkdirSync 抛 EEXIST → 事务返回 false。
+    writeFileSync(join(root, 'broken-db'), 'not a directory')
+    useTrainDatabase(join(root, 'broken-db', 'runs.db'))
+    const broken = await writeCorrectionSample({ root: brokenRoot, wav: wavBytes(512), corrected: '账本坏掉的一条' })
+    push(
+      '纠错：账本写不进 → wav 留着，但提示说清「这句不会进打包」',
+      broken.saved &&
+        broken.key === 'G01-T01' &&
+        existsSync(join(brokenRoot, CORRECTION_GROUP, 'G01-T01.wav')) &&
+        (broken.notice ?? '').includes('不会进打包'),
+      `saved=${broken.saved} notice=${broken.notice ?? 'none'}`
+    )
+
+    // —— P2-3：手工录音不能写进纠错样本占着的 G01/Tnn ——
+    useTrainDatabase(join(root, 'guard-db', 'runs.db'))
+    const guarded = await writeCorrectionSample({ root: join(root, 'guard'), wav: wavBytes(512), corrected: '占着 T01' })
+    const guardRefuses = (key: string): boolean => {
+      try {
+        assertRecordingKeyFree(key)
+        return false
+      } catch {
+        return true
+      }
+    }
+    push(
+      '纠错：手工录音撞上纠错样本的号直接拒绝（别把样本的 wav 顶掉）',
+      guarded.saved && guardRefuses('G01-T01') && !guardRefuses('G01-T02') && !guardRefuses('G02-T01'),
+      `guarded=${guarded.key ?? 'none'} T01=${guardRefuses('G01-T01')} T02=${guardRefuses('G01-T02')}`
+    )
+
+    // —— 接线钉：识别完把票据交给渲染层、打包按磁盘真值收纠错样本（读不到源码的安装版跳过） ——
     const sourceOf = (rel: string): string | null => {
       const file = join(process.cwd(), rel)
       return existsSync(file) ? readFileSync(file, 'utf8') : null
     }
     const ipcSource = sourceOf('src/main/ipc.ts')
     const datasetSource = sourceOf('src/main/services/train/ft-dataset.ts')
+    const chainSource = sourceOf('src/renderer/src/overlay/voice-capture.ts')
     push(
-      '纠错：识别结束就把原音留在内存里（ipc 接线钉）',
-      ipcSource === null || /stashUtterance\(/.test(ipcSource),
-      ipcSource === null ? '安装版没有 src/，跳过' : 'stashUtterance 在'
+      '纠错：识别结束就把票据随结果交出去（ipc + 浮层接线钉）',
+      (ipcSource === null || /utteranceId/.test(ipcSource)) && (chainSource === null || /utteranceId/.test(chainSource)),
+      ipcSource === null ? '安装版没有 src/，跳过' : 'utteranceId 在'
     )
     push(
-      '纠错：打包真的收了纠错样本（ft-dataset 接线钉）',
-      datasetSource === null || /buildCorrectionEntries\(/.test(datasetSource),
-      datasetSource === null ? '安装版没有 src/，跳过' : 'buildCorrectionEntries 在'
+      '纠错：打包真的收了纠错样本、且按磁盘真值过滤（ft-dataset 接线钉）',
+      datasetSource === null ||
+        /buildCorrectionEntries\(listDatasetEntries\(\), \(wavPath\) => existsSync\(wavPath\)\)/.test(datasetSource),
+      datasetSource === null ? '安装版没有 src/，跳过' : 'buildCorrectionEntries + existsSync 在'
     )
   } finally {
     closeTrainStore()

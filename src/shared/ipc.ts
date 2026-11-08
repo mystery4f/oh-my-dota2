@@ -468,6 +468,11 @@ export interface VoiceChainSummary {
   stage: VoiceReplyStage | null
   /** 失败说明；成功为 null。 */
   error: string | null
+  /**
+   * 这一段原音的票据（主进程内存里那张 stash 的键）：面板纠错时原样送回去，
+   * 主进程按它取录音。同一句说过两遍时文本一样、录音不同，只有票据分得清是哪一段。
+   */
+  utteranceId?: string
 }
 
 /** One deduped chat line pushed to the overlay / dashboard stream. */
@@ -609,6 +614,8 @@ export interface VoiceTranscribeResult {
   ok: boolean
   text: string
   error?: string
+  /** 原音票据：纠错（`voice:correction`）凭它取回这段录音；没留录音时缺省。 */
+  utteranceId?: string
 }
 /** Result of a TTS preview; audio is base64 (edge=mp3, sovits=wav) for the renderer. */
 export interface VoicePreviewResult {

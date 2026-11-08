@@ -35,8 +35,9 @@ export function correctionTakeNo(key: string): number | null {
 }
 
 /**
- * 下一条样本的编号 = 本组已有样本序号的最大值 + 1。
- * 不复用空洞（删掉的号不回填）：号码复用会让账本历史把同一号记成两个不同的句子。
+ * 下一条样本的编号 = 本组现有样本序号的最大值 + 1。
+ * 只保证「新号不撞上现有的号」：中段空洞不回填；删掉的若是**末尾**最大的几条，
+ * 新号会回头复用那些号（账本按 key+revision 记，同一号的不同句子仍然分得清，最新修订进包）。
  */
 export function nextCorrectionTakeNo(keys: readonly string[]): number {
   let max = 0
@@ -48,9 +49,13 @@ export function nextCorrectionTakeNo(keys: readonly string[]): number {
   return max + 1
 }
 
-/** 一次纠错落库的请求（IPC `voice:correction`）：改之前的识别文本 + 改对的那句。 */
+/**
+ * 一次纠错落库的请求（IPC `voice:correction`）。
+ * 只认识别那一刻发下来的票据（utteranceId）：同一句说过两遍时文本一样、录音不同，
+ * 拿文本当钥匙会把较新的那段音配到较旧的那一行上。改对的那句就是标签。
+ */
 export interface FtCorrectionInput {
-  transcript: string
+  utteranceId: string
   corrected: string
 }
 
@@ -78,16 +83,21 @@ export interface FtCorrectionSamples {
 /**
  * 配额判定：条数到顶或「现有 + 下一句」超字节上限都算到顶。
  * `nextBytes` 让写盘前就能判断这一句放不放得下；状态行传 0 只看现状。
+ * `replacingKey` = 这次是原地覆盖那一条（再改一遍同一句）：不新增条数、字节也只算替换后的差，
+ * 所以样本满了照样改得动标签，而换一段更大的音仍然受同一个 200 MB 上限约束。
  */
 export function judgeCorrectionSamples(
-  takes: readonly { bytes: number }[],
+  takes: readonly { key?: string; bytes: number }[],
   nextBytes = 0,
-  limits: CorrectionLimits = CORRECTION_LIMITS
+  limits: CorrectionLimits = CORRECTION_LIMITS,
+  replacingKey?: string | null
 ): FtCorrectionSamples {
+  // 只认盘上真有的那条：文件已被删掉时写回去算新开一条，条数照样要判。
+  const replaced = replacingKey ? takes.find((take) => take.key === replacingKey) : undefined
   const count = takes.length
   const bytes = takes.reduce((sum, take) => sum + take.bytes, 0)
-  const overCount = count >= limits.maxTakes
-  const overBytes = bytes + nextBytes > limits.maxBytes
+  const overCount = replaced === undefined && count >= limits.maxTakes
+  const overBytes = bytes - (replaced?.bytes ?? 0) + nextBytes > limits.maxBytes
   const notice = overCount
     ? `自由说组的纠错样本已满 ${limits.maxTakes} 条：这次纠错只并了热词，没存样本（旧样本一条没删，先删几条再继续）`
     : overBytes

@@ -129,7 +129,9 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       translated: reply.translated,
       spoken: reply.spoken,
       stage: reply.stage,
-      error: reply.error
+      error: reply.error,
+      // 面板纠错凭这张票取原音：同一句说两遍时文本一样，只有票分得清是哪一段录音。
+      utteranceId: result.utteranceId
     })
     // 结果已经写进那一行里了；只有「播没播」还需要一句，说完就收。
     sink.stage(reply.spoken ? '已播' : reply.error ? '未播' : null, 2000)
