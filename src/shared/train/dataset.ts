@@ -15,7 +15,7 @@ export interface FtDatasetPrepareResult {
   evalCount: number
   trainPath: string
   evalPath: string
-  /** 本次打包的磁盘账本（每条录音的 bytes/mtimeMs 指纹）：run 目录里的 dataset.jsonl 由备料服务写。 */
+  /** 本次打包的账本（每条录音的 bytes/mtimeMs 指纹）：交给 manager 写进 `train/runs.db` 的 dataset_entries。 */
   ledger: FtLedgerEntry[]
   error: string | null
 }

@@ -67,10 +67,10 @@ deviations: `docs/DESIGN-panel-v2.md`, `docs/ARCH-notes.md`.
 ## Training (音色训练 / 识别训练)
 
 Two sections, one shape: 数据 → 运行 → 产物; no training window, no `train:open` channel. A run is
-`src/shared/train/run.ts` (one JSON under `userData/train-runs/`; metrics read back from the
-artifacts), the gate is `src/shared/train/preflight.ts` (only `block` disables 开始训练), and mic
-capture stays in `panel/use-recorder.ts`. File list, artifact paths and parser details:
-`docs/ARCH-notes.md`, `docs/PLAN-train-v3.md`.
+`src/shared/train/run.ts` (one row in `userData/train/runs.db`, plus one `dataset_entries` row per
+recorded take; metrics read back from the artifacts), the gate is `src/shared/train/preflight.ts`
+(only `block` disables 开始训练), and mic capture stays in `panel/use-recorder.ts`. File list,
+artifact paths and parser details: `docs/ARCH-notes.md`, `docs/PLAN-train-v3.md`.
 
 ## Hotkeys
 
@@ -129,10 +129,14 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `asr-ft/` (ASR accent fine-tune recordings from 识别训练's recording panel:
   one wav per line, `Gxx/Gxx-Lnn.wav` (or `Gxx-Tnn.wav` for the free-speech group); the
   recording script ships as a bundled resource, `resources/asr-ft-script.md`),
-  `train-runs/` (训练记录: one JSON per training run, atomic temp+rename, capped at
-  `TRAIN_RUN_KEEP` 200 newest — the only history of what was trained, with what data,
-  and where the artifacts went; metrics are read back from the run's own
+  `train/runs.db` (训练记录 + 数据集账本, one SQLite file opened with the same built-in
+  `node:sqlite` driver as the translation ledger: `runs` = one row per training attempt,
+  `dataset_entries` = one row per recorded take revision with `run_id` NULL until a run trained
+  it, capped at `TRAIN_RUN_KEEP` 200 newest runs — the only history of what was trained, with what
+  data, and where the artifacts went; metrics are read back from the run's own
   `checkpoint-*/trainer_state.json` or GV `logs/<exp>/train.log`, never stored twice),
+  `train-runs/` (legacy archive: the pre-SQLite one-JSON-per-run files, imported once on first
+  open of the database and never written again),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB
   (truncated and rewritten past that). Fields worth reading: `act` = `ocr|same|gap|idle|error|busy`,
   `src` = `stream|sources`, `brk`/`rst` = new-match streak and reset, plus `grabMs`/`ocrMs`/`chg`/`fresh`/`streak`. It is the only way to tell

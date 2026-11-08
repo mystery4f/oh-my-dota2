@@ -29,7 +29,7 @@ import {
   type TrainRunParams,
   type TrainRunRecord
 } from '@shared/train/run'
-import { saveTrainRun } from './run-store'
+import { markDatasetEntriesTrained, saveDatasetLedger, saveTrainRun } from './run-store'
 import { readAsrMetrics, readGvMetrics } from './run-metrics'
 
 /**
@@ -220,6 +220,9 @@ class TrainManager {
       startedAt: this.task?.startedAt
     })
     saveTrainRun(this.run)
+    // 这次打包吃进去的录音随开训一起记账（split + 指纹），run 行上留一份冻结快照给续训对账；
+    // 训练成功才标「已训」，见 finish。
+    if (this.run.kind === 'asr-ft' && request.asrFt?.ledger) saveDatasetLedger(request.asrFt.ledger, this.run.id)
     this.spawnChild(plan.exe === 'node' ? (node ?? 'node') : plan.exe, plan)
     return { ok: true, error: null }
   }
@@ -330,6 +333,9 @@ class TrainManager {
         metrics
       })
       saveTrainRun(next)
+      // 训练腿成功才算「这些录音训过了」：失败的 run 不动覆盖标记，下次还会进训练集。
+      const ledger = this.request?.asrFt?.ledger
+      if (status === 'done' && ledger) markDatasetEntriesTrained(next.id, ledger)
       this.run = next
       notifyRunEnd(next)
     }

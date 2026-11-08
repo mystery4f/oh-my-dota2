@@ -3,7 +3,13 @@
  * 只做决策不碰进程——spawn/停止/日志环在主进程 services/train/manager.ts。
  * asr-ft / gv 两个子缝往 deriveTrainPlan 的 switch 里补真命令即可，结构不动。
  */
-import { planAsrFtTrainArgv, type AsrFtDatasetPlan, type AsrFtPaths, type AsrFtTrainTuning } from './asr-ft'
+import {
+  planAsrFtTrainArgv,
+  type AsrFtDatasetPlan,
+  type AsrFtPaths,
+  type AsrFtTrainTuning,
+  type FtLedgerEntry
+} from './asr-ft'
 import { dirname, join } from 'node:path'
 import { GV_LEGS, type GvResolvedPaths, type GvTrainOptions } from './gv'
 export type TrainTaskKind = 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
@@ -65,6 +71,8 @@ export interface TrainStartRequest {
     data: AsrFtDatasetPlan
     /** 导出产物目录（训练成功后链式导出写这里，应用新模型从这里拷）。 */
     exportDir: string
+    /** 这次打包吃进去的每一条录音（key / 标签 / 指纹 / 训练或验证集）；manager 开训即落进账本库。 */
+    ledger?: FtLedgerEntry[]
     /** 自适应轮数 / 续训点 / lr（备料服务算好填进来）；没填 = 冻结默认 66 轮 2e-5 新开。 */
     tuning?: AsrFtTrainTuning
   }

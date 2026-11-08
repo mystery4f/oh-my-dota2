@@ -37,6 +37,7 @@ import { locateWorkerScript } from '../voice/runtime'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList } from './ft-record'
+import { asrRunDirsRoot, listTrainRuns, packedLedgerForRun, trainedDatasetEntries } from './run-store'
 import { sovitsChildPid } from '../voice/sovits-server'
 import { ASR_ENGINE_LIST, type AsrEngineId, type AsrEngineSpec } from '@shared/asr/engines'
 
@@ -238,7 +239,8 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
       baseModel: env.paths.baseModelId || env.paths.baseModelDir || ''
     },
     swap: swapView(),
-    coverage: ftTrainCoverage(latestFtLedger(), await ftRecList())
+    // 覆盖标记只认「被某次 run 真正吃过」的条目：库里 run_id 非空的就是。（打包过但没训的不算。）
+    coverage: ftTrainCoverage(trainedDatasetEntries(), await ftRecList())
   }
 }
 
@@ -330,7 +332,7 @@ export function applyAsrFtModel(): AsrFtSwapResult {
 }
 
 function runsRoot(): string {
-  return join(app.getPath('userData'), 'asr-ft-runs')
+  return asrRunDirsRoot()
 }
 
 function readRunMeta(runDir: string): FtRunMeta | null {
@@ -363,36 +365,17 @@ function markAppliedForExport(exportDir: string): void {
   }
 }
 
-/** 读一个 run 的 dataset.jsonl 账本；没有 / 坏了回空。 */
-function readRunLedger(runDir: string): FtLedgerEntry[] {
-  try {
-    return readFileSync(join(runDir, 'dataset.jsonl'), 'utf8')
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as FtLedgerEntry)
-  } catch {
-    return []
-  }
-}
-
-/** 最近一次微调的账本：runs 按名字倒序（ft-<时间戳> 字典序 = 时间序），第一个有账本的。 */
-function latestFtLedger(): FtLedgerEntry[] {
-  for (const name of safeReaddir(runsRoot()).sort().reverse()) {
-    const ledger = readRunLedger(join(runsRoot(), name))
-    if (ledger.length > 0) return ledger
-  }
-  return []
-}
-
 /**
- * 续训候选：最新的 run，其账本与当前打包账本逐条指纹全等（旧数据只增不改）且还留着 checkpoint。
+ * 续训候选：最新的 run，其打包快照与当前账本逐条指纹全等（旧数据只增不改）且还留着 checkpoint。
  * 对不上（重录 / 删过）就 null——静默落回全新开跑，续训绝不接错底。
+ * run 与它那份快照一起从库里读（列表本身就是最新在前），不再扫目录拼文件。
  */
 function latestResumableRun(currentLedger: FtLedgerEntry[]): { resumeFrom: string; lastStep: number } | null {
-  for (const name of safeReaddir(runsRoot()).sort().reverse()) {
-    const runDir = join(runsRoot(), name)
-    const past = readRunLedger(runDir)
-    if (!ftLedgerMatchedOnDisk(past, currentLedger)) continue
+  for (const run of listTrainRuns()) {
+    const runDir = run.artifacts.runDir
+    if (typeof runDir !== 'string' || runDir.length === 0) continue
+    const packed = packedLedgerForRun(run.id)
+    if (packed === null || !ftLedgerMatchedOnDisk(packed, currentLedger)) continue
     const checkpoint = pickLastCheckpointName(safeReaddir(runDir))
     if (!checkpoint) continue
     return { resumeFrom: join(runDir, checkpoint), lastStep: Number(checkpoint.slice('checkpoint-'.length)) }
@@ -479,8 +462,7 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
   // 官方脚本不建输出目录，先垫好省得训练第一步就摔。
   mkdirSync(runDir, { recursive: true })
   mkdirSync(exportDir, { recursive: true })
-  // 账本落盘：dataset.jsonl（逐条指纹，续训对账 + 已训标记）+ run.json（这次跑到哪一步）。
-  writeFileSync(join(runDir, 'dataset.jsonl'), `${pack.ledger.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf8')
+  // run.json 记这次跑到哪一步；逐条指纹的账本随请求交给 manager 落库（开训一行，成功才标已训）。
   writeRunMeta(runDir, {
     runId: stem,
     startedAt: Date.now(),
@@ -503,6 +485,8 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
         paths: env.paths as AsrFtPaths,
         data: { trainJsonl: pack.trainPath, evalJsonl: pack.evalPath, runDir },
         exportDir,
+        // manager 开训即把这份账本写进 train/runs.db；训练成功再把 run_id 落到这些条目上。
+        ledger: pack.ledger,
         tuning
       }
     }
