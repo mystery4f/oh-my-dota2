@@ -71,7 +71,10 @@ Two sections, one shape: 数据 → 运行 → 产物. There is no training wind
   Add a new gate there, never inline in a page.
 - `panel/use-recorder.ts` owns mic capture (getUserMedia → ScriptProcessor → rms →
   `advanceRecording` → `shouldKeepTake` → `encodeWav16k` → `ftRecSave`). Page-level
-  components stay free of audio plumbing.
+  components stay free of audio plumbing. The save callback fires only after a successful
+  write and hands the page the just-saved take; the page owns what happens next
+  (`nextUnrecordedLine` → jump to the next un-recorded line, `null` → stay and show the
+  done state), so a failed save or a missing mic cannot advance the picker.
 - `npm run build` must stay silent about the training pages: no inline colours, no
   custom font sizes, at most one primary button per screen.
 

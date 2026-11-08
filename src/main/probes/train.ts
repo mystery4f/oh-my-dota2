@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   advanceRecording,
   initialRecordingState,
+  nextUnrecordedLine,
   RECORDING_LIMITS,
   parseRecordingKeyParts,
   recordingKey,
@@ -394,6 +395,32 @@ export function runTrainProbe(): void {
       })(),
     sampleKey,
   )
+  // —— 存完去哪一句（T6 录音舒适度）：只前进到没录过的行 ——
+  const lineNext = nextUnrecordedLine({ lines: [1, 2, 3, 4], recorded: [1], current: 1 })
+  push('存完第 1 句 → 落到第 2 句', lineNext === 2, String(lineNext))
+  const lineSkip = nextUnrecordedLine({ lines: [1, 2, 3, 4], recorded: [1, 2, 3], current: 1 })
+  push('跨过已录的行，落到下一条没录的', lineSkip === 4, String(lineSkip))
+  const lineWrap = nextUnrecordedLine({ lines: [1, 2, 3, 4], recorded: [3, 4], current: 4 })
+  push('末尾之后回绕到开头没录的', lineWrap === 1, String(lineWrap))
+  const lineNeverSelf = nextUnrecordedLine({ lines: [1, 2], recorded: [], current: 2 })
+  push('当前句不进候选（自动前进绝不原地/覆盖）', lineNeverSelf === 1, String(lineNeverSelf))
+  const lineDone = nextUnrecordedLine({ lines: [1, 2, 3], recorded: [1, 2, 3], current: 3 })
+  push('整组录完 → 不前进（null，面板停在原地）', lineDone === null, String(lineDone))
+  const lineFree = nextUnrecordedLine({ lines: [], recorded: [], current: 1 })
+  push('自由说组没有编号句 → 不前进', lineFree === null, String(lineFree))
+  // 穷举 [1..4] 的每个 current × 每个已录子集：结果要么 null，要么既没录过也不是当前句。
+  let lineInvariant = true
+  const lineCandidates = [1, 2, 3, 4]
+  for (const current of lineCandidates) {
+    for (let mask = 0; mask < 16; mask += 1) {
+      const recorded = lineCandidates.filter((no) => (mask & (1 << (no - 1))) !== 0)
+      const next = nextUnrecordedLine({ lines: lineCandidates, recorded, current })
+      if (next !== null && (recorded.includes(next) || next === current)) lineInvariant = false
+      const pendingOthers = lineCandidates.filter((no) => no !== current && !recorded.includes(no)).length
+      if ((next === null) !== (pendingOthers === 0)) lineInvariant = false
+    }
+  }
+  push('64 种组合：自动前进永不落在已录行/当前句，null 当且仅当没有未录的句', lineInvariant, String(lineInvariant))
   // —— 推理互斥状态文案（T2 训练窗口的「为什么暂时没声」）——
   push(
     '互斥文案四态齐全',

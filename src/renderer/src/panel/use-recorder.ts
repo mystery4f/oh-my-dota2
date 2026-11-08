@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { FtRecInfo } from '@shared/ipc'
 import {
   advanceRecording,
   initialRecordingState,
@@ -24,8 +25,12 @@ interface MicGraph {
 /**
  * 录音：采样管线留在渲染端，判定全走共享纯缝（阈值、自动停、收不收都在 shared）。
  * 与推理的语音采集同款约束，训练数据才和部署时听到的一致。
+ * onSaved 只在写盘成功后调用，并且带上刚存下的那条——「存完去哪一句」归调用方，
+ * 失败（存不上/没麦克风）压根不会走到回调，所以自动前进不可能踩到已有录音。
  */
-export function useRecorder(onSaved: () => void | Promise<void>): {
+export function useRecorder(
+  onSaved: (target: RecorderTarget, info: FtRecInfo) => void | Promise<void>
+): {
   recording: boolean
   hint: string
   begin: (target: RecorderTarget) => Promise<void>
@@ -72,16 +77,24 @@ export function useRecorder(onSaved: () => void | Promise<void>): {
         return
       }
       setHint(reason ? `${reason}，保存中…` : '保存中…')
+      let info: FtRecInfo
       try {
         const base64 = encodeWav16k(collected, sampleRate.current)
         const binary = atob(base64)
         const bytes = new Uint8Array(binary.length)
         for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-        const info = await window.api.ftRecSave(take.group, takeLineId(take.mode, take.line), bytes)
-        setHint(`已存 ${info.key}（${(info.durationMs / 1000).toFixed(1)}s）`)
-        await saved.current()
+        info = await window.api.ftRecSave(take.group, takeLineId(take.mode, take.line), bytes)
       } catch (err) {
+        // 存失败就停在这句：不前进，错误写在提示里。
         setHint(`保存失败：${String(err)}`)
+        return
+      }
+      setHint(`已存 ${info.key}（${(info.durationMs / 1000).toFixed(1)}s）`)
+      try {
+        await saved.current(take, info)
+      } catch (err) {
+        // 已经存下了，刷新列表失败不能报成「保存失败」，也别因此停在旧句上重录。
+        setHint(`已存 ${info.key}，列表刷新失败：${String(err)}`)
       }
     },
     [teardown]

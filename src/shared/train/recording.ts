@@ -82,3 +82,20 @@ export function parseRecordingKeyParts(group: string, line: string): { group: st
 export function recordingKey(groupId: string, mode: 'lines' | 'free', no: number): string {
   return `${groupId}-${takeLineId(mode, no)}`
 }
+
+/**
+ * 存完一条后该落到哪一句：从当前句往后找第一条没录的，到末尾再回绕到开头；
+ * 全组都录过 = null（面板显示完成态、停在原地，不再跳）。
+ * 候选里永远只有**没录过**的行，且排除当前句——所以自动前进绝不会落在已录行上，
+ * 覆盖只可能来自手动点句号。录失败/没麦克风时调用方压根不该走到这里。
+ */
+export function nextUnrecordedLine(input: {
+  lines: readonly number[]
+  recorded: readonly number[]
+  current: number
+}): number | null {
+  const done = new Set(input.recorded)
+  const pending = input.lines.filter((no) => no !== input.current && !done.has(no))
+  if (pending.length === 0) return null
+  return pending.find((no) => no > input.current) ?? pending[0]
+}

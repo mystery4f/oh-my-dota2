@@ -4,7 +4,7 @@ import type { AsrFtFacts, AsrFtStatusResult } from '@shared/train/asr-ft'
 import type { TrainSnapshot } from '@shared/train/task'
 import { judgeAsrPreflight, preflightBlocks } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
-import { recordingKey, takeLineId } from '@shared/train/recording'
+import { nextUnrecordedLine, recordingKey, takeLineId } from '@shared/train/recording'
 import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
@@ -12,7 +12,7 @@ import { PreflightList, RunRow, Sparkline } from '../components/run-view'
 import { TrainTaskRow } from '../components/train-task-row'
 import { useTrainConsole } from '../use-train-console'
 import { selectClass } from '../components/select-class'
-import { useRecorder } from '../use-recorder'
+import { useRecorder, type RecorderTarget } from '../use-recorder'
 
 
 /**
@@ -33,12 +33,16 @@ export function AsrTrainPage(): React.ReactElement {
   const groups = script?.groups ?? []
   const group = groups.find((item) => item.id === groupId) ?? groups[0] ?? null
 
-  const refreshRecs = React.useCallback(async (): Promise<void> => {
+  const loadRecs = React.useCallback(async (): Promise<Record<string, FtRecInfo>> => {
     const list = await window.api.ftRecList()
     const next: Record<string, FtRecInfo> = {}
     for (const info of list) next[info.key] = info
-    setRecs(next)
+    return next
   }, [])
+
+  const refreshRecs = React.useCallback(async (): Promise<void> => {
+    setRecs(await loadRecs())
+  }, [loadRecs])
 
   const refreshRuns = React.useCallback(async (): Promise<void> => {
     setRuns(await window.api.trainRuns())
@@ -69,7 +73,23 @@ export function AsrTrainPage(): React.ReactElement {
   const { task, taskRunning, busy, note, run: runAction } = useTrainConsole(load)
 
 
-  const recorder = useRecorder(refreshRecs)
+  // 存完一条自动落到「下一条没录的句」：候选只来自 nextUnrecordedLine（排除已录行与当前句），
+  // 整组录完返回 null → 停在原地、面板出完成态。存失败/没麦克风走不到这个回调，所以绝不会覆盖。
+  const handleSaved = React.useCallback(
+    async (target: RecorderTarget): Promise<void> => {
+      const next = await loadRecs()
+      setRecs(next)
+      const savedGroup = script?.groups.find((item) => item.id === target.group) ?? null
+      if (!savedGroup || target.mode !== 'lines') return
+      const lines = savedGroup.lines.map((line) => line.no)
+      const recorded = lines.filter((no) => next[recordingKey(savedGroup.id, 'lines', no)])
+      const nextLine = nextUnrecordedLine({ lines, recorded, current: target.line })
+      if (nextLine !== null) setLineNo(nextLine)
+    },
+    [loadRecs, script]
+  )
+
+  const recorder = useRecorder(handleSaved)
 
   React.useEffect(() => {
     if (group && !group.lines.some((line) => line.no === lineNo)) setLineNo(group.lines[0]?.no ?? 1)
@@ -77,6 +97,7 @@ export function AsrTrainPage(): React.ReactElement {
 
 
   const recordedLines = group ? group.lines.filter((line) => recs[recordingKey(group.id, group.mode, line.no)]) : []
+  const groupComplete = Boolean(group && group.mode === 'lines' && group.lines.length > 0 && recordedLines.length === group.lines.length)
   const activeRec = group ? recs[recordingKey(group.id, group.mode, lineNo)] : undefined
   const currentLine = group?.lines.find((line) => line.no === lineNo) ?? null
   const coverage = group && status ? status.coverage[group.id] : undefined
@@ -126,6 +147,7 @@ export function AsrTrainPage(): React.ReactElement {
                 </option>
               ))}
             </select>
+            {groupComplete ? <StatusPill tone="ready">整组录完</StatusPill> : null}
             {coverage ? (
               <StatusPill tone={coverage.stale > 0 ? 'warn' : 'ready'}>
                 已训 {coverage.done}/{coverage.total}
@@ -143,8 +165,11 @@ export function AsrTrainPage(): React.ReactElement {
                       key={line.no}
                       size="sm"
                       variant={line.no === lineNo ? 'default' : has ? 'secondary' : 'ghost'}
+                      title={has ? `第 ${line.no} 句已录，点一下重录（会覆盖）` : `第 ${line.no} 句还没录`}
+                      aria-label={`第 ${line.no} 句${has ? '（已录）' : '（未录）'}`}
                       onClick={() => setLineNo(line.no)}
                     >
+                      {has ? <span aria-hidden="true">✓</span> : null}
                       {line.no}
                     </Button>
                   )
@@ -159,7 +184,9 @@ export function AsrTrainPage(): React.ReactElement {
               recorder.hint ||
               (activeRec
                 ? `这条已录 ${(activeRec.durationMs / 1000).toFixed(1)}s，重录会覆盖`
-                : '点录制开始，说完自动停')
+                : groupComplete
+                  ? '整组录完：点要重录的句号再开录，存完停在原地'
+                  : '点录制开始，说完自动停，存完自动跳下一句没录的')
             }
           >
             <Button
