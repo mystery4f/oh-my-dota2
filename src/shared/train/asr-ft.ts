@@ -478,7 +478,7 @@ export interface FtCoverageGroup {
 }
 
 /**
- * 已训标记：最近一次训过的账本 vs 磁盘现状，按组算 done/total/stale。
+ * 已训标记：被任意一次 run 真正吃过（run_id 非空）的条目 vs 磁盘现状，按组算 done/total/stale。
  * key+bytes+mtimeMs 全等 = 训过；同 key 但文件变过 = stale（重录了，得再训）；账本没有 = 没训过。
  * current 由调用方只喂逐句键（L 键，见 asrFtStatus 的过滤）：自由说组没有稿子行，改对落账的纠错样本（G01-Tnn）
  * 另有 corrections 一栏，混进来会让「已训 x/20」凭空多出分母。
