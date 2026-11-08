@@ -249,21 +249,37 @@ export function setInferenceHold(hold: boolean): void {
   inferenceHeld = hold
 }
 
-export async function ensureSovitsServer(): Promise<boolean> {
+/** 互斥开关的只读镜像：探针要看见「置位/清除」真的发生了，不能只看 ensure 的返回值。 */
+export function sovitsInferenceHeld(): boolean {
+  return inferenceHeld
+}
+
+/**
+ * 探针缝：端口探测与引擎包目录可注入。训练探针靠它在不碰真实端口、真实安装的前提下
+ * 走完「未安装」这条路——真的 spawn 只能在人工验收里发生。
+ */
+export interface SovitsEnsureIo {
+  portOpen: (port: number) => Promise<boolean>
+  home: () => string
+}
+
+export async function ensureSovitsServer(io: Partial<SovitsEnsureIo> = {}): Promise<boolean> {
   // 训练跑着的时候「朗读」直接让路：不拉起进程，也不复用外部端口，让面板说清为什么没声。
   if (inferenceHeld) {
     setPhase('off', '训练占用显卡，朗读暂停')
     recordSovitsLog('TTS_SOVITS_SERVER_HELD', { reason: 'training' })
     return false
   }
+  const isOpen = io.portOpen ?? portOpen
+  const findHome = io.home ?? discoverSovitsHome
   const settings = loadSettings()
   const port = serverPort(settings.ttsSovitsUrl || 'http://127.0.0.1:9880')
-  if (await portOpen(port)) {
+  if (await isOpen(port)) {
     if (child && child.exitCode === null) setPhase('ready', '服务运行中（应用托管）')
     else setPhase('external', '端口已有服务在跑，直接复用')
     return true
   }
-  const home = discoverSovitsHome()
+  const home = findHome()
   if (!homeUsable(home)) {
     setPhase('off', `引擎包不完整：${home}`)
     recordSovitsLog('TTS_SOVITS_SERVER_FAIL', { reason: 'install-not-found', home })
@@ -304,7 +320,7 @@ export async function ensureSovitsServer(): Promise<boolean> {
     const deadline = Date.now() + 150_000
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 1500))
-      if (await portOpen(port)) {
+      if (await isOpen(port)) {
         recordSovitsLog('TTS_SOVITS_SERVER_READY', { ms: Date.now() - started, pid: spawned.pid })
         // 预热推理：READY 只代表端口开了，第一次真实合成还要付一遍 CUDA/懒加载（实测 5-12s）。
         // 起服就先合成一句废话扔掉，把这笔代价挪到没人说话的时候。

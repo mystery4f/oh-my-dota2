@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { app } from 'electron'
 import {
   advanceRecording,
@@ -66,11 +68,33 @@ import {
 } from '@shared/train/run'
 import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
+import {
+  ensureSovitsServer,
+  setInferenceHold,
+  sovitsInferenceHeld,
+  sovitsServerLogs
+} from '../services/voice/sovits-server'
 
 /**
  * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度/录音判定/GV 微调配置）。
  * 纯函数零进程零网络；进程生命周期（spawn/停/树杀）进 docs/ACCEPTANCE.md 人工验收。
  */
+
+/**
+ * 接线钉：manager 里「开跑置位 / 收场清除」两句。任务生命周期要真 spawn 才走得到，
+ * 纯缝探针跑不了进程，所以这两句以源码文本为契约钉住——删掉任意一句（例如收场忘了清）本探针立刻红。
+ * 读不到源码（安装版没有 src/）不判红：行为半边仍由下面的运行时断言守着。
+ */
+function managerHoldWiring(): { readable: boolean; set: boolean; clear: boolean } {
+  const file = join(process.cwd(), 'src/main/services/train/manager.ts')
+  if (!existsSync(file)) return { readable: false, set: false, clear: false }
+  const source = readFileSync(file, 'utf8')
+  return {
+    readable: true,
+    set: /setInferenceHold\(\s*true\s*\)/.test(source),
+    clear: /setInferenceHold\(\s*false\s*\)/.test(source)
+  }
+}
 
 interface Row {
   name: string
@@ -84,7 +108,7 @@ function push(name: string, ok: boolean, detail: string): void {
   cases.push({ name, ok, detail })
 }
 
-export function runTrainProbe(): void {
+export async function runTrainProbe(): Promise<void> {
   // —— 单任务互斥闸 ——
   push('没有任务 → 能开', canStartTrain(null).ok, JSON.stringify(canStartTrain(null)))
   push('running → 拒绝', canStartTrain('running').ok === false, canStartTrain('running').reason ?? '')
@@ -100,6 +124,59 @@ export function runTrainProbe(): void {
   push('活着的任务都要推理让路', active.every((s) => shouldPauseInference(s)) && ended.every((s) => !shouldPauseInference(s)), `${active}->pause ${ended}->!pause`)
   push('退干净才恢复推理', ended.every((s) => shouldResumeInference(s)) && active.every((s) => !shouldResumeInference(s)), `${ended}->resume ${active}->!resume`)
   push('互斥判定互补', ['idle', 'preparing', 'running', 'stopping', 'done', 'failed', 'stopped'].every((s) => shouldPauseInference(s as TrainTaskStatus) !== shouldResumeInference(s as TrainTaskStatus)), 'pause 与 resume 逐态相反')
+
+  // —— 推理互斥的开关本体（票 62）：置位/清除真的翻，ensure 真的让路 ——
+  setInferenceHold(false)
+  push('开关：初始未置位', !sovitsInferenceHeld(), `held=${sovitsInferenceHeld()}`)
+  setInferenceHold(true)
+  setInferenceHold(true)
+  push('开关：重复置位仍是「已置位」（布尔，不叠计数）', sovitsInferenceHeld(), `held=${sovitsInferenceHeld()}`)
+  // 注入端口/引擎包：探针不碰真实端口、不认领真实安装，真 spawn 只能在人工验收里发生。
+  let ioCalls = 0
+  const probeIo = {
+    portOpen: async (): Promise<boolean> => {
+      ioCalls += 1
+      return false
+    },
+    home: (): string => {
+      ioCalls += 1
+      return join(app.getPath('temp'), 'omd2-train-probe-no-sovits-home')
+    }
+  }
+  const logCount = (needle: string): number => sovitsServerLogs().filter((line) => line.includes(needle)).length
+  const heldBefore = logCount('TTS_SOVITS_SERVER_HELD')
+  const startBefore = logCount('TTS_SOVITS_SERVER_START')
+  const heldEnsure = await ensureSovitsServer(probeIo)
+  push('守住时 ensure 直接拒绝', heldEnsure === false, `ensure=${heldEnsure}`)
+  push('守住时端口与引擎包都不查（更不会 spawn）', ioCalls === 0, `ioCalls=${ioCalls}`)
+  push(
+    '守住时留痕 TTS_SOVITS_SERVER_HELD，且没有启动尝试',
+    logCount('TTS_SOVITS_SERVER_HELD') === heldBefore + 1 && logCount('TTS_SOVITS_SERVER_START') === startBefore,
+    `held ${heldBefore}->${logCount('TTS_SOVITS_SERVER_HELD')} start ${startBefore}->${logCount('TTS_SOVITS_SERVER_START')}`
+  )
+  setInferenceHold(false)
+  push('开关：一次清除即释放（重复置位不叠账）', !sovitsInferenceHeld(), `held=${sovitsInferenceHeld()}`)
+  ioCalls = 0
+  const releasedEnsure = await ensureSovitsServer(probeIo)
+  push(
+    '释放后回到原行为：照常查端口与引擎包（未安装 → false + install-not-found）',
+    releasedEnsure === false && ioCalls === 2 && sovitsServerLogs().some((line) => line.includes('install-not-found')),
+    `ensure=${releasedEnsure} ioCalls=${ioCalls}`
+  )
+  setInferenceHold(false)
+  push('开关：重复清除仍是清除', !sovitsInferenceHeld(), `held=${sovitsInferenceHeld()}`)
+  setInferenceHold(true)
+  ioCalls = 0
+  const reHeld = await ensureSovitsServer(probeIo)
+  push('开关：再置位又拦住（释放不粘）', reHeld === false && ioCalls === 0, `ensure=${reHeld} ioCalls=${ioCalls}`)
+  setInferenceHold(false)
+  // 接线钉：任务生命周期要真 spawn 才走得到，纯缝探针只能钉 manager 里那两句还在。
+  const wiring = managerHoldWiring()
+  push(
+    '接线钉：manager 开跑置位、退场清除两句都还在',
+    !wiring.readable || (wiring.set && wiring.clear),
+    wiring.readable ? `set=${wiring.set} clear=${wiring.clear}` : '源码不在（非源码运行），跳过'
+  )
 
   // —— 计划推导 ——
   const demo = deriveTrainPlan({ kind: 'demo', dataset: '' })
