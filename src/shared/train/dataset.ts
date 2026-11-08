@@ -77,6 +77,35 @@ export function buildFtJsonlText(entries: FtDatasetEntry[]): string {
   return `${entries.map((entry) => buildFtJsonlLine(entry)).join('\n')}\n`
 }
 
+/** funasr（`IndexDSJsonl`）要的一条：键是小写的 key/source/target，不是 qwen3 那套 audio/text。 */
+export interface FtFunasrEntry {
+  key: string
+  wavPath: string
+  text: string
+  /** wav 文件字节数：只有 44 字节头 + PCM16 单声道，用它折算时长（不再读一遍文件）。 */
+  wavBytes: number
+}
+
+/**
+ * 官方 `scp2jsonl` 的长度口径：source_len = 10ms 帧数 = 采样数/160，target_len = 字符数。
+ * 少了这两项 index_ds 会按 source_len=1 过筛（不报错），排批全乱；照官方口径填才对得上。
+ */
+export function buildFtFunasrJsonlLine(entry: FtFunasrEntry): string {
+  const samples = Math.max(0, Math.floor((entry.wavBytes - 44) / 2))
+  return JSON.stringify({
+    key: entry.key,
+    source: entry.wavPath,
+    source_len: Math.max(1, Math.round(samples / 160)),
+    target: entry.text,
+    target_len: entry.text.length
+  })
+}
+
+export function buildFtFunasrJsonlText(entries: readonly FtFunasrEntry[]): string {
+  if (entries.length === 0) return ''
+  return `${entries.map((entry) => buildFtFunasrJsonlLine(entry)).join('\n')}\n`
+}
+
 /** 组进度视图（T4 总览/准备报告共用）：done/时长/缺句清单，一组一行。 */
 export interface FtGroupProgress {
   id: string

@@ -5,9 +5,12 @@ import { app } from 'electron'
 import {
   buildFtDatasetEntries,
   buildFtJsonlText,
+  buildFtFunasrJsonlText,
   splitTrainEval,
   type FtDatasetPrepareResult
 } from '@shared/train/dataset'
+import { ASR_ENGINES } from '@shared/asr/engines'
+import { activeAsrModel } from '../voice/asr-model'
 import type { FtLedgerEntry } from '@shared/train/asr-ft'
 import type { FtDatasetEntry } from '@shared/train/dataset'
 import { ftRecList, ftRecPath, readFtScript } from './ft-record'
@@ -51,6 +54,20 @@ export async function currentFtLedger(): Promise<FtLedgerEntry[]> {
   return buildLedger(train, evalSet)
 }
 
+/** 训练数据格式跟着现役引擎走：微调的就是正在用的那份模型所属的引擎。 */
+function activeFtDatasetFormat(): 'qwen3-jsonl' | 'funasr-jsonl' {
+  const engineId = activeAsrModel()?.engineId ?? 'qwen3'
+  return ASR_ENGINES[engineId].finetune?.dataset ?? 'qwen3-jsonl'
+}
+
+/** 两种格式的差别都收在共享缝里，这里只补磁盘真值（wav 字节数）。 */
+function buildJsonlText(entries: FtDatasetEntry[]): string {
+  if (activeFtDatasetFormat() === 'funasr-jsonl') {
+    return buildFtFunasrJsonlText(entries.map((entry) => ({ ...entry, wavBytes: statSync(entry.wavPath).size })))
+  }
+  return buildFtJsonlText(entries)
+}
+
 export async function prepareFtDataset(): Promise<FtDatasetPrepareResult> {
   const { entries, error } = await collectFtEntries()
   if (error) return fail(error)
@@ -59,9 +76,9 @@ export async function prepareFtDataset(): Promise<FtDatasetPrepareResult> {
   await mkdir(dir, { recursive: true })
   const trainPath = join(dir, 'train.jsonl')
   const evalPath = join(dir, 'eval.jsonl')
-  await writeFile(trainPath, buildFtJsonlText(train), 'utf8')
+  await writeFile(trainPath, buildJsonlText(train), 'utf8')
   // 两条起 splitTrainEval 一定切出验证集：官方脚本 eval_strategy="steps" 无条件，空验证集会 ValueError。
-  await writeFile(evalPath, buildFtJsonlText(evalSet), 'utf8')
+  await writeFile(evalPath, buildJsonlText(evalSet), 'utf8')
   return {
     ok: true,
     trainCount: train.length,

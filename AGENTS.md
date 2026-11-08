@@ -215,13 +215,28 @@ it and nothing happened". The overlay and the pause hint print key names from th
   Two voices trading places mid-match is the exact bug users report as "the voice suddenly sounds
   wrong". The free Edge endpoint needs a warm connection pool, one retry, and it returns 0 bytes
   instead of an error, so a byte-count check is the only reliable failure signal.
-- sherpa ASR (Qwen3 only; SenseVoice removed) runs in a plain `node` child
-  (`resources/asr-sherpa-worker.cjs`, request `{id, wav, dir, hotwords}`) for the same
-  sherpa reason as the TTS worker; the worker logs `ASR_SHERPA_*` markers.
-  Qwen3 needs all three onnx files plus `tokenizer/` (vocab.json + merges.txt).
+- sherpa ASR (two engines: `qwen3` and `paraformer`; SenseVoice removed) runs in a plain `node` child
+  (`resources/asr-sherpa-worker.cjs`, request `{id, kind, wav, dir, hotwords}`) for the same
+  sherpa reason as the TTS worker; the worker logs `ASR_SHERPA_*` markers, and `kind` comes from the
+  engine table — the probe cross-checks the table against the worker's `ASR_KINDS` keys both ways.
+  Qwen3 needs all three onnx files plus `tokenizer/` (vocab.json + merges.txt); paraformer needs
+  `model.int8.onnx` + `tokens.txt`, emits no punctuation, and ignores hotwords (sherpa only does
+  hotwords for transducer models).
   Hotwords (`asrHotwords` setting, comma-separated) are a constructor-time config — the worker's
   recognizer cache key includes them, so editing the list reloads the engine. Single-char
   corrections are never auto-added (noise); the correction loop only merges ≥2-char diffs.
+- ASR fine-tune legs follow the same table: qwen3 trains with `qwen3_asr_sft.py` + the ONNX exporter,
+  paraformer trains through `python -m funasr.bin.train` on `funasr-jsonl` data and exports through the
+  bundled `resources/asr-ft-export-funasr.py` (export + quantize + sherpa metadata/tokens in one process).
+  FunASR traps, all hit for real: `validate_interval` must equal `save_checkpoint_interval` (otherwise
+  `KeyError: model.pt.ep<epoch>.<step>` on the first save, or `No checkpoints found for averaging` at the
+  end when the val table names a file that was never written); `++init_param` must be the weights FILE,
+  not the directory; and `--model` must be the BASE model id, never the run directory, because AutoModel
+  then reads the training config and exports a half-initialized graph (955 → 625 initializers, garbage
+  output). sherpa additionally needs metadata FunASR never writes (`vocab_size`, `lfr_window_size`,
+  `lfr_window_shift`, `neg_mean`, `inv_stddev`, `model_type`) plus `tokens.txt` from the base model's
+  `tokens.json` — without `vocab_size` it refuses to load the file at all. Both legs must be spawned with
+  cwd set to the run/export directory — hydra creates `outputs/` in cwd.
 - GV (GPT-SoVITS) fine-tune data prep resolves every wav by BASENAME ONLY inside the flat `inp_wav_dir`
   (`2-get-hubert-wav32k.py:116-118` strips the path, then joins it onto `inp_wav_dir`); files living in any
   other directory fail to load and the surrounding try/except swallows the error SILENTLY. The zh/en voice

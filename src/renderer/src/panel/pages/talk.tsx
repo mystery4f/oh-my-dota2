@@ -64,7 +64,7 @@ export function TalkPage({
   const [draft, setDraft] = useState('')
   const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([])
 
-  // Qwen3 模型状态：进面板问一次，解压期间每秒刷——别让人对着假进度等。
+  // 识别模型状态：进面板问一次，下载/解压期间每秒刷——别让人对着假进度等。
   useEffect(() => {
     void window.api.asrStatus().then(setAsrStatus)
     void window.api.asrModels().then(setAsrModels)
@@ -114,7 +114,7 @@ export function TalkPage({
       setAsrStatus(await window.api.asrStatus())
     } catch (err) {
       setLog((l) => [
-        { transcript: '', translated: null, spoken: false, stage: null, error: `Qwen3 解压失败：${errorMessage(err)}`, at: Date.now() },
+        { transcript: '', translated: null, spoken: false, stage: null, error: `${activeEngine?.label ?? '模型'} 下载失败：${errorMessage(err)}`, at: Date.now() },
         ...l
       ])
     }
@@ -467,7 +467,7 @@ export function TalkPage({
                           size="sm"
                           variant="ghost"
                           className="h-5 px-1.5 text-xs text-muted-foreground"
-                          title="改成对的，差异词自动并入热词表（仅 Qwen3）"
+                          title={activeEngine?.hotwords === 'prompt' ? '改成对的，差异词自动并入热词表' : '改成对的，差异词不并入热词表（当前引擎不支持热词提示）'}
                           onClick={() => {
                             setEditingAt(entry.at)
                             setDraft(entry.transcript)

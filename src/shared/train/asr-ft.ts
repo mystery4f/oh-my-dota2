@@ -1,12 +1,24 @@
 /** ASR 微调（T5）纯缝：训练/导出命令拼装、checkpoint 挑选、换模/回滚步骤、环境缺口点名。 */
-import { ASR_ENGINES } from '../asr/engines'
+import { ASR_ENGINES, type AsrEngineId } from '../asr/engines'
+
+/** 训练入口的形状：qwen3 用官方 sft 脚本 + 本地底模目录；funasr 用 `python -m funasr.bin.train` + hub 模型 id。 */
+export type AsrFtTrainer = 'qwen3-sft' | 'funasr-paraformer'
 
 /** ASR 微调环境里跑真训练/导出要用的几条路径（检测服务负责填，纯缝只拼命令）。 */
 export interface AsrFtPaths {
+  trainer: AsrFtTrainer
   pythonExe: string
+  /** qwen3 布局：官方微调脚本；funasr 走模块，留空。 */
   sftScript: string
   exportScript: string
   baseModelDir: string
+  /** funasr 布局：hub 模型 id（`++model=`）；qwen3 用本地底模目录，留空。 */
+  baseModelId: string
+}
+
+/** 这个 trainer 支不支持在上一版上续训。funasr 的续训只认自己 output_dir 里的 checkpoint，跨 run 目录接不上。 */
+export function trainerCanResume(trainer: AsrFtTrainer): boolean {
+  return trainer === 'qwen3-sft'
 }
 
 /** 一次 ASR 微调要吃的三样东西：打包产物和这次的输出目录。 */
@@ -25,6 +37,21 @@ export function deriveFtEpochs(trainCount: number): number {
   if (trainCount <= 0) return 66
   const stepsPerEpoch = Math.max(1, Math.ceil(trainCount / FT_SAMPLES_PER_STEP))
   return Math.min(66, Math.max(10, Math.round(FT_TARGET_STEPS / stepsPerEpoch)))
+}
+
+/** funasr 每步只吃 1 条（batch_size 1，不折步），目标定 600 步：40 条数据下约 15 轮。 */
+export const FT_FUNASR_TARGET_STEPS = 600
+
+/** 按 trainer 折算轮数：qwen3 走上面那套（一步 4 条），funasr 一步 1 条。 */
+export function deriveFtEpochsFor(trainer: AsrFtTrainer, trainCount: number): number {
+  if (trainer !== 'funasr-paraformer') return deriveFtEpochs(trainCount)
+  if (trainCount <= 0) return 20
+  return Math.min(40, Math.max(4, Math.round(FT_FUNASR_TARGET_STEPS / trainCount)))
+}
+
+/** 默认学习率：qwen3 微调实测用 2e-5；funasr 官方 finetune.sh 给 2e-4。 */
+export function ftDefaultLr(trainer: AsrFtTrainer): string {
+  return trainer === 'funasr-paraformer' ? '0.0002' : '2e-5'
 }
 
 /** 续训每轮步数（batch 1 × grad_acc 4）。 */
@@ -53,6 +80,7 @@ export interface AsrFtTrainTuning {
 }
 /** 训练参数：试点（G15，20 句）实测收敛的 v5 版本为默认，轮数/lr/续训点可按 tuning 覆盖。 */
 export function planAsrFtTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tuning?: AsrFtTrainTuning): string[] {
+  if (paths.trainer === 'funasr-paraformer') return planFunasrTrainArgv(paths, data, tuning)
   return [
     paths.sftScript,
     '--model_path', paths.baseModelDir,
@@ -73,8 +101,72 @@ export function planAsrFtTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tu
   ]
 }
 
-/** 导出参数：CPU 上量化 int8 并自校验，不占 GPU。 */
-export function planAsrFtExportArgv(paths: AsrFtPaths, checkpointDir: string, exportDir: string): string[] {
+/**
+ * FunASR 训练 argv（hydra 风格 `++k=v`，与官方 finetune.sh 同参数名）。
+ * 与官方脚本的差别只有三处，都是为了本机的 40 条小数据和 CPU：
+ * batch_size 1（官方按 6000 token 一档）、num_workers 0（Windows 子进程不稳）、不跑 deepspeed。
+ */
+function planFunasrTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tuning?: AsrFtTrainTuning): string[] {
+  return [
+    '-m', 'funasr.bin.train',
+    `++model=${paths.baseModelId}`,
+    `++train_data_set_list=${data.trainJsonl}`,
+    `++valid_data_set_list=${data.evalJsonl}`,
+    '++dataset=AudioDataset',
+    '++dataset_conf.index_ds=IndexDSJsonl',
+    '++dataset_conf.data_split_num=1',
+    '++dataset_conf.batch_sampler=BatchSampler',
+    '++dataset_conf.batch_size=1',
+    '++dataset_conf.batch_type=example',
+    '++dataset_conf.sort_size=1024',
+    '++dataset_conf.num_workers=0',
+    `++train_conf.max_epoch=${tuning?.epochs ?? 20}`,
+    '++train_conf.log_interval=1',
+    '++train_conf.resume=false',
+    // 校验间隔必须**等于**存盘间隔，且两者都得小于总步数：trainer 的两处坑都是这么踩的——
+    // ① save_checkpoint 无条件读 val_acc[ckpt_name]，校验没跑过就是 KeyError（实测 'model.pt.ep0.20'）；
+    // ② 收尾 average_checkpoints 按 val 表取文件名再开文件，校验比存盘密时会选中「有记录没文件」的名字
+    //    （实测选中 model.pt.ep0.10），于是 RuntimeError: No checkpoints found for averaging。
+    '++train_conf.validate_interval=20',
+    '++train_conf.save_checkpoint_interval=20',
+    // 至少留 2 个：平均权重那步是按 val 表取前 avg_nbest_model 个文件名再开文件，
+    // keep_nbest_models=1 会把那个文件先删掉，收尾直接 RuntimeError: No checkpoints（实测 2026-11-08）。
+    '++train_conf.keep_nbest_models=2',
+    '++train_conf.avg_nbest_model=1',
+    '++train_conf.use_deepspeed=false',
+    `++optim_conf.lr=${tuning?.lr ?? '0.0002'}`,
+    `++output_dir=${data.runDir}`
+  ]
+}
+/**
+ * 导出参数。
+ * - funasr：走打包的 `asr-ft-export-funasr.py`，它把「导出 → 量化 → 补 tokens/metadata」一步做完。
+ *   `--base` 必须是底模 id（或底模目录），不能是 run 目录——AutoModel 会把 run 目录里的训练配置
+ *   当模型配置读，导出半初始化的图（实测 955 个 initializer 只剩 625 个，输出全是乱码）。
+ * - qwen3：调用训练腿自带的 export 脚本。
+ */
+export function planAsrFtExportArgv(
+  paths: AsrFtPaths,
+  checkpointDir: string,
+  exportDir: string,
+  exportTool = ''
+): string[] {
+  if (paths.trainer === 'funasr-paraformer') {
+    const base = paths.baseModelId || paths.baseModelDir
+    if (exportTool) {
+      return [exportTool, '--base', base, '--init-param', `${checkpointDir}/model.pt`, '--output-dir', exportDir]
+    }
+    return [
+      '-m', 'funasr.bin.export',
+      `++model=${base}`,
+      // init_param 必须是权重文件：AutoModel 只判 os.path.exists，目录会送进 torch.load 直接炸。
+      `++init_param=${checkpointDir}/model.pt`,
+      `++output_dir=${exportDir}`,
+      '++type=onnx',
+      '++quantize=true',
+      '++device=cpu'
+    ]
+  }
   return [
     paths.exportScript,
     '--model', checkpointDir,
@@ -122,15 +214,22 @@ export function asrFtSwapSteps(state: {
   return steps
 }
 /** sherpa 真正加载的三件 int8 文件：导出目录里除此之外还躺着 3–5 GB 的 fp32 外置数据。 */
-export const FT_MODEL_FILES: readonly string[] = ASR_ENGINES.qwen3.finetune?.artifactFiles ?? []
+/** 某个引擎转正后的模型目录里必须有哪几件（sherpa 加载清单，来自引擎表）。 */
+export function ftArtifactTargets(engineId: AsrEngineId = 'qwen3'): string[] {
+  return (ASR_ENGINES[engineId].finetune?.artifacts ?? []).map((item) => item.to)
+}
+
+/** sherpa 真正加载的几件文件：导出目录里除此之外还躺着 3–5 GB 的 fp32 外置数据。 */
+export const FT_MODEL_FILES: readonly string[] = ftArtifactTargets('qwen3')
 
 /**
- * 导出产物齐全判据：sherpa 只认上面这三个 int8 文件（导出脚本默认量化）。
- * 训练腿跑完而导出腿还在写 decoder.int8.onnx 时，目录里已经有别的文件了——
+ * 导出产物齐全判据：缺的是**导出目录里应该出现的那几个源文件**（`artifacts[].from`）。
+ * 训练腿跑完而导出腿还在写最后一件时，目录里已经有别的文件了——
  * 那时点「应用新模型」会把残缺目录转正，识别直接加载失败，所以必须逐件点名。
  */
-export function missingFtExportFiles(names: readonly string[]): string[] {
-  return FT_MODEL_FILES.filter((name) => !names.includes(name))
+export function missingFtExportFiles(names: readonly string[], engineId: AsrEngineId = 'qwen3'): string[] {
+  const sources = (ASR_ENGINES[engineId].finetune?.artifacts ?? []).map((item) => item.from)
+  return sources.filter((name) => !names.includes(name))
 }
 
 /** 回滚动作序列：现役删掉、备份归位。没有备份 = 空序列。 */
@@ -183,6 +282,11 @@ export function ftAppliedNote(result: AsrFtSwapResult): string {
 export function deriveAsrFtEnvGaps(paths: Partial<AsrFtPaths> & { venvOk?: boolean }): string[] {
   const gaps: string[] = []
   if (!paths.venvOk) gaps.push('Python 虚拟环境（venv/Scripts/python.exe，装 torch 等训练依赖）')
+  if (paths.trainer === 'funasr-paraformer') {
+    // funasr 的底模与训练配置由它自己从 ModelScope 拉，本机只需能连上；缺包由异步体检补上来。
+    if (!paths.baseModelId) gaps.push('训练底模 id（引擎表里的 hub 模型，缺了没法起训）')
+    return gaps
+  }
   if (!paths.sftScript) gaps.push('官方微调脚本（sft/qwen3_asr_sft.py）')
   if (!paths.exportScript) gaps.push('ONNX 导出脚本（export/export_qwen3_asr_onnx.py）')
   if (!paths.baseModelDir) gaps.push('底模（models/Qwen3-ASR-0.6B，约 1.2GB）')

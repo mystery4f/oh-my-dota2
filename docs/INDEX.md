@@ -44,7 +44,7 @@ tags: [docs, index]
 | `docs/DESIGN-overlay-v2.md` | 浮层 v2 设计 | 现行 |
 | `docs/DESIGN-panel-v2.md` | 面板 v2 设计 | 待签字 |
 | `docs/DESIGN-voice-corpus.md` | 语音素材：Dota2 语音 → 训练集，含四引擎实测与选型结论 | 草稿（待签字） |
-| `docs/DESIGN-asr-engine-table.md` | ASR 引擎表：换模型 / 接新引擎不再破坏性，四层结构、迁移规则、探针断言与 paraformer 第二行 | 已落地（识别侧；paraformer 微调腿未做） |
+| `docs/DESIGN-asr-engine-table.md` | ASR 引擎表：换模型 / 接新引擎不再破坏性，四层结构、迁移规则、探针断言与 paraformer 第二行（含 FunASR 微调腿） | 已落地（识别 + 微调双引擎） |
 | `docs/STANDARDS.md` | 反重复标准、表与分支的取舍、纯接缝契约 | 现行 |
 | `docs/ARCH-notes.md` | 面板文件清单、训练产物与解析、发布流程、Windows 进程检查的坑（从 AGENTS.md 移出） | 现行 |
 | `docs/GLOSSARY.md` | 术语表 | 现行 |

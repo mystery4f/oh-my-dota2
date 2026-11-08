@@ -16,7 +16,7 @@ import { useRecorder } from '../use-recorder'
 
 
 /**
- * 识别训练：录读稿 → 打包数据集 → 微调 Qwen3-ASR → 应用。
+ * 识别训练：录读稿 → 打包数据集 → 微调现役引擎的模型 → 应用。
  * 三段固定顺序（数据 / 运行 / 产物），开训体检只在运行段里出结论，不拦人看历史。
  */
 export function AsrTrainPage(): React.ReactElement {

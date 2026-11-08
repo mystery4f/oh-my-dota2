@@ -17,18 +17,21 @@ import {
 
   type FtLedgerEntry,
   type FtRunMeta,
-  deriveFtEpochs,
   deriveFtResumeEpochs,
   ftVramNote,
   judgeFtDataset,
   missingFtExportFiles,
-  FT_MODEL_FILES,
+  trainerCanResume,
+  deriveFtEpochsFor,
+  ftDefaultLr,
   ftLedgerMatchedOnDisk,
   ftTrainCoverage,
   parseNvidiaComputeApps
 } from '@shared/train/asr-ft'
 import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
 import { loadSettings } from '../settings'
+import { activeAsrModel } from '../voice/asr-model'
+import { locateWorkerScript } from '../voice/runtime'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList } from './ft-record'
@@ -55,11 +58,21 @@ export function asrFtEnvRoot(): string {
   return loadSettings().asrFtEnvDir.trim() || join(app.getPath('userData'), 'asr-ft-env')
 }
 
-/** 微调腿挂在哪个引擎上：表里第一个声明了 finetune 的引擎（目前只有 Qwen3）。 */
+/**
+ * 微调腿挂在哪个引擎上：先看现役模型所属的引擎（它有 finetune 时），否则表里第一个声明 finetune 的引擎。
+ * 必须跟着现役走——否则面板显示现役 paraformer、权重却写进 qwen3 的目录。
+ */
+function finetuneEngine(): AsrEngineSpec {
+  const active = activeAsrModel()
+  const spec = active ? ASR_ENGINE_LIST.find((item) => item.id === active.engineId) : undefined
+  if (spec?.finetune != null) return spec
+  const fallback = ASR_ENGINE_LIST.find((item) => item.finetune !== null)
+  if (fallback === undefined) throw new Error('引擎表里没有任何引擎声明 finetune')
+  return fallback
+}
+
 function finetuneSpec(): NonNullable<AsrEngineSpec['finetune']> {
-  const spec = ASR_ENGINE_LIST.find((item) => item.finetune !== null)
-  if (spec?.finetune == null) throw new Error('引擎表里没有任何引擎声明 finetune')
-  return spec.finetune
+  return finetuneEngine().finetune as NonNullable<AsrEngineSpec['finetune']>
 }
 
 /**
@@ -87,12 +100,32 @@ function layoutCandidates(root: string): AsrFtLayout[] {
 /** 按布局探环境：sft 脚本出现在哪套布局就认哪套；啥都没有就按规范布局报缺。 */
 export function detectAsrFtEnv(): { ok: boolean; gaps: string[]; paths: Partial<AsrFtPaths>; envRoot: string } {
   const envRoot = asrFtEnvRoot()
+  const finetune = finetuneSpec()
+  if (finetune.trainer === 'funasr-paraformer') {
+    // funasr 走 `python -m`：没有要检测的脚本，只要一个装得下 funasr 的解释器（手动开发布局在前）。
+    const pythonExe =
+      [join(envRoot, 'env', 'Scripts', 'python.exe'), join(envRoot, 'venv', 'Scripts', 'python.exe')].find((path) =>
+        existsSync(path)
+      ) ?? ''
+    const paths: Partial<AsrFtPaths> = {
+      trainer: finetune.trainer,
+      pythonExe,
+      sftScript: '',
+      exportScript: '',
+      baseModelDir: '',
+      baseModelId: finetune.baseModelIds[0] ?? ''
+    }
+    const gaps = deriveAsrFtEnvGaps({ ...paths, venvOk: Boolean(pythonExe) })
+    return { ok: gaps.length === 0, gaps, paths, envRoot }
+  }
   const picked = layoutCandidates(envRoot).find((layout) => existsSync(layout.sftScript)) ?? layoutCandidates(envRoot)[0]
   const paths: Partial<AsrFtPaths> = {
+    trainer: finetune.trainer,
     pythonExe: existsSync(picked.pythonExe) ? picked.pythonExe : '',
     sftScript: existsSync(picked.sftScript) ? picked.sftScript : '',
     exportScript: existsSync(picked.exportScript) ? picked.exportScript : '',
-    baseModelDir: existsSync(join(picked.baseModelDir, 'model.safetensors')) ? picked.baseModelDir : ''
+    baseModelDir: existsSync(join(picked.baseModelDir, 'model.safetensors')) ? picked.baseModelDir : '',
+    baseModelId: ''
   }
   const gaps = deriveAsrFtEnvGaps({ ...paths, venvOk: Boolean(paths.pythonExe) })
   return { ok: gaps.length === 0, gaps, paths, envRoot }
@@ -102,11 +135,9 @@ function asrModelsRoot(): string {
   return join(app.getPath('userData'), 'asr-models')
 }
 
-/** 微调腿的现役模型目录：引擎表里的 canonicalRel（userData 相对路径）。 */
+/** 微调腿的现役模型目录：跟着 finetuneEngine 走（userData 相对路径）。 */
 function activeRel(): string {
-  const spec = ASR_ENGINE_LIST.find((item) => item.finetune !== null)
-  if (spec === undefined) throw new Error('引擎表里没有任何引擎声明 finetune')
-  return spec.canonicalRel
+  return finetuneEngine().canonicalRel
 }
 
 function activeDir(): string {
@@ -156,11 +187,35 @@ function swapView(): AsrFtStatusResult['swap'] {
     lastExportDir: lastExportDir()
   }
 }
+/** python 包体检：只查 finetune.pythonExtra 点名的包，结果按解释器路径缓存（换环境后重启生效）。 */
+let pythonExtraCache: { pythonExe: string; packages: string; missing: string[] } | null = null
+
+function missingPythonPackages(pythonExe: string, packages: readonly string[]): string[] {
+  const key = packages.join(',')
+  if (packages.length === 0 || pythonExe === '') return []
+  if (pythonExtraCache?.pythonExe === pythonExe && pythonExtraCache.packages === key) {
+    return pythonExtraCache.missing
+  }
+  const probe = `import importlib.util as u, json; print(json.dumps([m for m in ${JSON.stringify(packages)} if u.find_spec(m) is None]))`
+  const done = spawnSync(pythonExe, ['-c', probe], { timeout: 30000, windowsHide: true, encoding: 'utf8' })
+  if (done.status !== 0) return []
+  let missing: string[] = []
+  try {
+    const parsed: unknown = JSON.parse(String(done.stdout).trim().split(/\r?\n/).pop() ?? '[]')
+    if (Array.isArray(parsed)) missing = parsed.map((item) => String(item))
+  } catch {
+    missing = []
+  }
+  pythonExtraCache = { pythonExe, packages: key, missing }
+  return missing
+}
 /** 环境检测 + 换模视图 + 已训标记（coverage）；安装进行时由 ipc 层补（install 字段），避免和安装器互相 import。 */
 export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>> {
   const env = detectAsrFtEnv()
+  const missing = missingPythonPackages(env.paths.pythonExe ?? '', finetuneSpec().pythonExtra)
+  const gaps = missing.length > 0 ? [...env.gaps, `python 包缺 ${missing.join('、')}（在 ${env.envRoot} 里 pip install）`] : env.gaps
   return {
-    env: { ok: env.ok, gaps: env.gaps, envRoot: env.envRoot },
+    env: { ok: gaps.length === 0, gaps, envRoot: env.envRoot },
     swap: swapView(),
     coverage: ftTrainCoverage(latestFtLedger(), await ftRecList())
   }
@@ -219,14 +274,28 @@ export function applyAsrFtModel(): AsrFtSwapResult {
         if (swap.lastExportDir) {
           rmSync(next, { recursive: true, force: true })
           mkdirSync(next, { recursive: true })
-          for (const file of FT_MODEL_FILES) cpSync(join(swap.lastExportDir, file), join(next, file))
-          const tokenizer = join(swap.lastExportDir, 'tokenizer')
-          if (existsSync(tokenizer)) cpSync(tokenizer, join(next, 'tokenizer'), { recursive: true })
-        }
-        // 兜底顺序：刚进备份的上一版 → asr-models 下任何自带词表的目录 → 对讲下载的官方模型。
-        const fallbacks = [bak, ...safeReaddir(asrModelsRoot()).map((d) => join(asrModelsRoot(), d)), shippedModelDir()]
-        if (ensureTokenizerFiles(next, fallbacks) === 'no-source') {
-          throw new Error('导出产物缺 tokenizer 词表文件，备份和原始模型目录里也没得借')
+          // 产物映射来自引擎表：qwen3 是三件 onnx 原样搬，paraformer 要把 model_quant.onnx 改名成 model.int8.onnx。
+          const finetune = finetuneSpec()
+          for (const artifact of finetune.artifacts) {
+            cpSync(join(swap.lastExportDir, artifact.from), join(next, artifact.to))
+          }
+          // 兜底顺序：刚进备份的上一版 → asr-models 下任何目录 → 对讲下载的官方模型。
+          const fallbacks = [bak, ...safeReaddir(asrModelsRoot()).map((d) => join(asrModelsRoot(), d)), shippedModelDir()]
+          // 借件：导出目录里没有、sherpa 又要的文件（qwen3 的 tokenizer/、paraformer 的 tokens.txt）。
+          for (const item of finetune.borrow) {
+            const target = join(next, item.path)
+            if (existsSync(target)) continue
+            const source = fallbacks.map((dir) => join(dir, item.path)).find((path) => existsSync(path))
+            if (source === undefined) {
+              throw new Error(`导出产物缺 ${item.path}，备份和原始模型目录里也没得借`)
+            }
+            cpSync(source, target, { recursive: item.recursive === true })
+          }
+          // qwen3 的词表是三件齐用，逐件再兜一层（借目录只能整目录借，缺一件就是坏目录）。
+          const needsTokenizer = finetune.borrow.some((item) => item.path === 'tokenizer')
+          if (needsTokenizer && ensureTokenizerFiles(next, fallbacks) === 'no-source') {
+            throw new Error('导出产物缺 tokenizer 词表文件，备份和原始模型目录里也没得借')
+          }
         }
         renameSync(next, active)
       }
@@ -361,6 +430,10 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
   if (!env.ok || !env.paths.pythonExe) {
     return { ok: false, error: `微调环境没就绪：${env.gaps.join('；')}` }
   }
+  const missingPkgs = missingPythonPackages(env.paths.pythonExe, finetuneSpec().pythonExtra)
+  if (missingPkgs.length > 0) {
+    return { ok: false, error: `训练环境缺 python 包：${missingPkgs.join('、')}（在 ${env.envRoot} 里 pip install）` }
+  }
   const vramNote = ftVramGuard()
   const pack = await prepareFtDataset()
   // 两个 JSONL 都得有（官方脚本的 eval_strategy 是无条件 steps），判据在共享缝里，好让探针盯住。
@@ -369,10 +442,12 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
     return { ok: false, error: ready.error }
   }
   // 续训：窗口开关 + 上次账本对得上才接旧 checkpoint（lr 降一档防把权重带飞）；接不上静默新开。
-  const prior = resume ? latestResumableRun(pack.ledger) : null
+  const trainer = env.paths.trainer ?? 'qwen3-sft'
+  // funasr 的续训只认自己 output_dir 里的 checkpoint（跨 run 目录接不上），只有 qwen3 那条腿接旧点。
+  const prior = resume && trainerCanResume(trainer) ? latestResumableRun(pack.ledger) : null
   const tuning: AsrFtTrainTuning = prior
     ? { epochs: deriveFtResumeEpochs(pack.trainCount, prior.lastStep), lr: '1e-5', resumeFrom: prior.resumeFrom }
-    : { epochs: deriveFtEpochs(pack.trainCount) }
+    : { epochs: deriveFtEpochsFor(trainer, pack.trainCount), lr: ftDefaultLr(trainer) }
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')
   // 目录名固定 ASCII（ft-<时间戳>）：decoder 的 fp32 中间产物超过 2 GB，torch 的 external-data
   // 写入在 Windows 上用窄字符路径开文件，路径里带中文（曾用数据集名当目录名「地图」）会
@@ -416,14 +491,22 @@ export async function resolveAsrFtTrainRequest(resume: boolean): Promise<{
 /** 训练成功后的链式下一步：挑编号最大的 checkpoint，拼导出命令；没存出 checkpoint 就 null。 */
 export function buildAsrFtExportPlan(request: TrainStartRequest): TrainPlan | null {
   const asr = request.asrFt
-  if (!asr || !asr.paths.exportScript) return null
+  if (!asr) return null
+  // funasr 走打包的导出工具，其余 trainer 必须真有导出脚本才继续。
+  if (asr.paths.trainer !== 'funasr-paraformer' && !asr.paths.exportScript) return null
+  const exportTool =
+    asr.paths.trainer === 'funasr-paraformer' ? locateWorkerScript('asr-ft-export-funasr.py') : ''
+  if (asr.paths.trainer === 'funasr-paraformer' && !exportTool) return null
   // 走到这里 = 训练腿 exit 0（manager 的链回调）：账本标 trained；导出腿接着跑，转正再标 applied。
   markRunStatus(asr.data.runDir, 'trained')
-  const checkpoint = pickLastCheckpointName(safeReaddir(asr.data.runDir))
-  if (!checkpoint) return null
+  // funasr 的 run 目录本身就是 checkpoint 目录（config.yaml + model.pt 同层，没有 checkpoint-<n> 子目录）。
+  const checkpointDir =
+    asr.paths.trainer === 'funasr-paraformer' ? asr.data.runDir : pickLastCheckpointName(safeReaddir(asr.data.runDir))
+  if (!checkpointDir) return null
   return {
     exe: asr.paths.pythonExe,
-    args: planAsrFtExportArgv(asr.paths, join(asr.data.runDir, checkpoint), asr.exportDir),
-    cwd: dirname(asr.paths.exportScript)
+    args: planAsrFtExportArgv(asr.paths, checkpointDir, asr.exportDir, exportTool),
+    // cwd 钉在导出目录：hydra 会在 cwd 里建 outputs/，不能让它在安装目录里落垃圾。
+    cwd: asr.paths.exportScript ? dirname(asr.paths.exportScript) : asr.exportDir
   }
 }

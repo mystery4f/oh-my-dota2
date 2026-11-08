@@ -115,7 +115,14 @@ export function runTrainProbe(): void {
   push('合法 kind 原样通过', normalizeTrainKind('gv-sovits') === 'gv-sovits', normalizeTrainKind('gv-sovits'))
 
   // —— asr-ft 真训练链（T5 闭环） ——
-  const ftPaths: AsrFtPaths = { pythonExe: 'P:/ython.exe', sftScript: 'S/ft.py', exportScript: 'E/export.py', baseModelDir: 'M/base' }
+  const ftPaths: AsrFtPaths = {
+    trainer: 'qwen3-sft',
+    pythonExe: 'P:/ython.exe',
+    sftScript: 'S/ft.py',
+    exportScript: 'E/export.py',
+    baseModelDir: 'M/base',
+    baseModelId: ''
+  }
   const ftData = { trainJsonl: 'T.jsonl', evalJsonl: 'V.jsonl', runDir: 'R' }
   const ftPlan = deriveTrainPlan({ kind: 'asr-ft', dataset: '', asrFt: { paths: ftPaths, data: ftData, exportDir: 'X' } })
   const epochAt = ftPlan.args.indexOf('--epochs')

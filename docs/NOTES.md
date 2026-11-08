@@ -661,3 +661,20 @@
 - 配置态（解锁）5 秒无操作自动锁回穿透：解锁是临时操作窗口，不是常驻状态。倒计时在 `OverlayManager.armIdle()`，渲染层用 `overlayKeepAlive()`（1 秒节流）推后它。
 - 拖动松手时贴边吸附（`snapToEdges`，阈值 24px）：拖得再准也会留 1~2px 缝，换 DPI 就是一条亮边。
 - 新行 400ms 亮黄；超过 12 行的旧行降到 55% 不透明度——保留上下文，又不糊满下半屏。
+
+### FunASR 微调的两次「参数写错就炸」——都是 trainer 自己挖的坑
+
+- 症状一：训练跑了 20 步后 `KeyError: 'model.pt.ep0.20'`，栈落在 `train_utils/trainer.py:198` 的 `save_checkpoint`。
+- 根因一：`save_checkpoint` 无条件读 `self.val_acc_step_or_eoch[ckpt_name]`，而这张表只有 `validate_epoch`（`step_in_epoch % validate_interval == 0` 时触发）会写。官方脚本给的 `validate_interval=2000` 在几十步的小数据集上永远不触发，于是第一次存盘就撞空字典。
+- 修法一：让 `validate_interval` 不大于 `save_checkpoint_interval`，校验先跑、存盘后跑；两边 `ckpt_name` 算法一致（都是 `model.pt.ep{epoch}.{step}`），所以名字对得上。
+- 症状二：训练跑完、checkpoint 都写出来了，收尾却 `RuntimeError: No checkpoints found for averaging`（`average_nbest_models.py:65`）。
+- 根因二：`_get_checkpoint_paths` 先从 `model.pt` 取 `val_acc` 表、按准确率取前 `avg_nbest_model` 个**文件名**，再逐个 `os.path.isfile`。表里记的是「每次校验」的名字，文件却只在「每次存盘」时写——`validate_interval=10` + `save_checkpoint_interval=20` 时最高分的名字是 `model.pt.ep0.10`，那个文件从来没存在过，于是 `state_dicts` 为空。实测日志第一行就是 `average_checkpoints: [... model.pt.ep0.10]`。
+- 修法二：让 `validate_interval` **等于** `save_checkpoint_interval`（都 20），保证「有记录的都有文件」；再加 `keep_nbest_models=2`，否则 `keep_nbest_models=1` 会在存盘时删掉前一个文件、平均那步读到已删的名字（同一处报错的另一条触发路径）。`avg_nbest_model=1` 保留。代价是每次多留一个 checkpoint（paraformer-large 约 880 MB）。
+- 附带：`funasr.bin.export` 的 `++init_param` 必须是**权重文件路径**——`AutoModel` 只判 `os.path.exists`，给目录会直接进 `torch.load(dir)` 报 `IsADirectoryError`；量化后产物叫 `model_quant.onnx`，sherpa 认的是 `model.int8.onnx`，转正时按引擎表的 `artifacts` 映射改名。
+
+### FunASR 导出的 paraformer 在 sherpa 里出乱码——两句错话叠在一起
+
+- 症状：微调后的 paraformer 导出成功、`model.int8.onnx` 也在，交给 `resources/asr-sherpa-worker.cjs`（`kind=paraformer`）能加载，但识别结果是一串看似合理的中文乱码：「藜藜崐 ad 或玖贩纷鄮纷狈赐缴拧」。同一段音频用 FunASR 的 Pytorch 通路解出来是正确的「我没到还在冷却」，所以不是权重坏了。
+- 根因一（元数据）：FunASR 的导出只写 `model.onnx` / `model_quant.onnx`，既不写 `tokens.txt`，也不写 sherpa 需要的图上 metadata。缺 `vocab_size` 时 sherpa 直接拒绝加载——`offline-paraformer-model.cc:Init:102 'vocab_size' does not exist in the metadata`；补上 `vocab_size / lfr_window_size / lfr_window_shift / neg_mean / inv_stddev / model_type / version` 才能开文件。这些值都能从底模目录推出来：`tokens.json` 给词表（8404 条，`<blank> 0` 起），`am.mvn` 的 `<AddShift>` 段就是 `neg_mean`、`<Rescale>` 段就是 `inv_stddev`（各 560 维，正好 80×7）。
+- 根因二（导出参数）：`++model=` 必须给**底模 id 或底模目录**，不能给训练 run 目录。喂 run 目录时 `AutoModel` 会把 run 里的 `config.yaml`（hydra 存下来的训练配置）当模型配置读，导出半初始化的图——实测同一份 checkpoint 两种写法：正常写法导出 955 个 initializer、解出「我没到还在冷却」；喂 run 目录只导出 625 个 initializer、解出上面那串乱码。权重本身只动了 3e-6（一次小数据微调），不足以改变输出，所以乱码只能是图结构错。
+- 修法：把「导出 → 量化 → 补 metadata/tokens」收进打包脚本 `resources/asr-ft-export-funasr.py`，argv 是 `--base <底模 id> --init-param <run>/model.pt --output-dir <out>`；脚本按 `tokens.json` 写 `tokens.txt`、按 `am.mvn` 补 metadata，产出直接叫 `model.int8.onnx`，转正时按引擎表 `artifacts` 拷过去即可。量化那步依赖 onnx ≥ 1.16：onnx 1.14 上会抛 `AttributeError: INT4`（`onnx.TensorProto` 那时还没有 INT4 成员）。

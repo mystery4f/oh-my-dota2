@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { app } from 'electron'
 import { ASR_ENGINE_LIST, ASR_ENGINES, requiredPathsAll } from '@shared/asr/engines'
 import {
@@ -65,10 +65,32 @@ export function runAsrEnginesProbe(): void {
     }
     if (spec.finetune) {
       const ft = spec.finetune
-      push(`表：${spec.id} 微调有训练脚本`, ft.trainScripts.length > 0, ft.trainScripts.join(' | '))
-      push(`表：${spec.id} 微调有导出脚本`, ft.exportScripts.length > 0, ft.exportScripts.join(' | '))
-      push(`表：${spec.id} 微调有底模目录`, ft.baseModelDirs.length > 0, ft.baseModelDirs.join(' | '))
-      push(`表：${spec.id} 微调产物是必备文件的子集`, ft.artifactFiles.every((f) => spec.requiredPaths.includes(f)), ft.artifactFiles.join(' | '))
+      push(`表：${spec.id} 微调有训练脚本`, ft.trainScripts.length > 0 || ft.trainer === 'funasr-paraformer', ft.trainScripts.join(' | ') || 'python -m funasr.bin.train')
+      push(
+        `表：${spec.id} 微调有导出脚本`,
+        ft.exportScripts.length > 0 || Boolean(ft.exportTool) || ft.trainer === 'funasr-paraformer',
+        ft.exportScripts.join(' | ') || ft.exportTool || 'python -m funasr.bin.export'
+      )
+      push(
+        `表：${spec.id} 打包的导出工具真在 resources 里`,
+        !ft.exportTool || existsSync(locateWorkerScript(ft.exportTool)),
+        ft.exportTool || '（用训练腿自带脚本）'
+      )
+      push(
+        `表：${spec.id} 微调有底模（本地目录或 hub id）`,
+        ft.baseModelDirs.length > 0 || ft.baseModelIds.length > 0,
+        ft.baseModelDirs.join(' | ') || ft.baseModelIds.join(' | ')
+      )
+      push(
+        `表：${spec.id} 微调产物都落进必备文件`,
+        ft.artifacts.length > 0 && ft.artifacts.every((item) => spec.requiredPaths.includes(item.to)),
+        ft.artifacts.map((item) => `${item.from}→${item.to}`).join(' | ')
+      )
+      push(
+        `表：${spec.id} 装环境要的包都在体检清单里`,
+        ft.pips.every((pip) => ft.pythonExtra.includes(pip.split('==')[0])),
+        ft.pips.join(' | ') || '（都在安装器冻结清单里）'
+      )
     } else {
       push(`表：${spec.id} 不支持微调要写明`, spec.finetune === null, 'null')
     }

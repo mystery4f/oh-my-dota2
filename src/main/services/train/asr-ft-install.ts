@@ -1,3 +1,4 @@
+import { ASR_ENGINE_LIST } from '@shared/asr/engines'
 import { spawn } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, type Dirent } from 'node:fs'
@@ -49,6 +50,21 @@ export const ASR_FT_PIP_SPEC: string[] = [
   'qwen-asr==0.0.6'
 ]
 
+/**
+ * 各引擎 finetune.pips 的并集：一条环境伺候所有训练腿，谁少了包就在面板点名。
+ * 冻结清单里已有的版本不再重复（否则 uv 会为同一包解析两次）。
+ */
+export function enginePips(): string[] {
+  const frozen = new Set(ASR_FT_PIP_SPEC.map((item) => item.split('==')[0]))
+  const extra = new Set<string>()
+  for (const spec of ASR_ENGINE_LIST) {
+    for (const pip of spec.finetune?.pips ?? []) {
+      const name = pip.split('==')[0]
+      if (!frozen.has(name)) extra.add(pip)
+    }
+  }
+  return [...extra]
+}
 export interface AsrFtInstallStep {
   /** 展示名：装 uv / 建 venv / 装依赖 / 下底模。 */
   stage: string
@@ -278,7 +294,9 @@ export async function installAsrFtEnv(): Promise<AsrFtInstallState> {
             '--index-strategy', 'unsafe-best-match',
             '--index-url', PYPI_MIRROR,
             '--find-links', TORCH_CU121_MIRROR,
-            ...ASR_FT_PIP_SPEC
+            // 冻结清单 + 各引擎自己的包（如 funasr），一次装完两条腿都能训。
+            ...ASR_FT_PIP_SPEC,
+            ...enginePips()
           ],
           envRoot,
           { UV_HTTP_TIMEOUT: '600' },

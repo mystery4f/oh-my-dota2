@@ -138,7 +138,10 @@ export function deriveTrainPlan(req: TrainStartRequest): TrainPlan {
       if (!asr) {
         return { exe: '', args: [], cwd: null, unavailable: 'ASR 微调环境没就绪：先在训练窗口里把环境装好（并至少录一条句子）' }
       }
-      return { exe: asr.paths.pythonExe, args: planAsrFtTrainArgv(asr.paths, asr.data, asr.tuning), cwd: null }
+      // hydra 会在 cwd 下建 outputs/<日期>/<时间>/.hydra：funasr 那条腿必须把 cwd 钉在这次 run 目录，
+      // 否则安装目录里多一堆垃圾（qwen3 的 sft 脚本不写 cwd，保持 null 走默认）。
+      const cwd = asr.paths.trainer === 'funasr-paraformer' ? asr.data.runDir : null
+      return { exe: asr.paths.pythonExe, args: planAsrFtTrainArgv(asr.paths, asr.data, asr.tuning), cwd }
     }
     case 'gv-gpt':
     case 'gv-sovits': {

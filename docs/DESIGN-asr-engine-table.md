@@ -237,4 +237,17 @@ flowchart TD
 - 训练腿：`src/main/services/train/asr-ft.ts` 的布局、现役 / 备份 / 待转正目录全部改从 `spec.finetune` 与 `spec.canonicalRel` 推导；`FT_MODEL_FILES` 来自 `artifactFiles`。
 - 实测：同一段真人录音走 worker，paraformer 出「我没到还在冷却」（无标点），微调后的 qwen3 出「我没大，还在冷却。」——引擎路由与适配器都对。
 
-仍未做：paraformer 的微调腿。它的训练/导出是 FunASR 侧（`funasr/bin/train_ds.py` + `funasr/bin/export.py`），数据集是 `wav.scp` + `text` 而不是 qwen3 的 ChatML jsonl，`AsrFinetuneSpec.trainer` 需要一个 `funasr-paraformer` 分支，训练环境还要装 `funasr`。这部分按上面的取舍没进本次范围。
+## 落地记录：paraformer 的微调腿（2026-11-08 晚）
+
+`AsrFinetuneSpec.trainer` 现在有第二个值 `funasr-paraformer`，训练目标由「现役模型属于哪个引擎」决定（`finetuneEngine()` 先看 `activeAsrModel()`，回落到表里第一个能训的引擎），所以选 paraformer 当现役就等于选它的训练腿。
+
+- 表：`AsrFinetuneSpec` 拆成两半——`artifacts`（导出产物 `from → to` 改名表，paraformer 是 `model.int8.onnx → model.int8.onnx` 与 `tokens.txt → tokens.txt`）与 `borrow`（导出目录里没有时从备份 / 原始模型目录借的件）；另加 `baseModelIds`（FunASR 从 ModelScope 自己拉底模，不需要本地目录）、`exportTool`（打包的导出工具名）、`pips`（装环境要的冻结版本）与 `pythonExtra`（体检要 import 的模块名）。
+- 数据：`dataset` 从 `qwen3-jsonl` 切成 `funasr-jsonl`，新格式只有五个字段 `key / source / source_len / target / target_len`，长度按 FunASR 的口径（`source_len` = 采样数/160 = 10ms 帧数，`target_len` = 字符数）。
+- 训练 argv：`python -m funasr.bin.train ++model=<hub id> …`，与官方 finetune.sh 的差别只有三处——`batch_size=1`、`num_workers=0`、不跑 deepspeed。
+- 导出不再直接调 `funasr.bin.export`，改走打包的 `resources/asr-ft-export-funasr.py`（导出 + 量化 + 补 sherpa 元数据一步做完）。原因有三条实测证据：FunASR 的导出只写 `model.onnx`/`model_quant.onnx`，而 sherpa 的 `OfflineParaformerModel` 还要 `tokens.txt` 和图上 metadata（缺 `vocab_size` 直接报 `'vocab_size' does not exist in the metadata` 拒绝加载）；`++model=` 必须是底模 id 或底模目录，喂 run 目录会让 AutoModel 把训练配置当模型配置读，导出半初始化的图（同一段音频：955 个 initializer 的导出解出「我没到还在冷却」，625 个的解出「藜藜崐 ad 或玖贩纷鄮纷狈赐缴拧」）；量化那步要 onnx ≥ 1.16，老的 onnx 1.14 会抛 `AttributeError: INT4`。
+- 三条训练侧硬约束（都写进了 argv 注释与 `docs/NOTES.md`）：`validate_interval` 必须等于 `save_checkpoint_interval`（否则要么 `KeyError: model.pt.ep{epoch}.{step}`，要么收尾挑中「有记录没文件」的名字报 `No checkpoints found for averaging`）；`keep_nbest_models` 至少 2；`init_param` 必须是权重文件而不是目录。
+- 进程：两条腿的 cwd 都钉在本次 run / 导出目录——hydra 会往 cwd 里建 `outputs/`，不钉就把垃圾写进安装目录（实测在仓库根拉出过 `outputs/2026-11-08/`）。
+- 环境：`asr-ft-install.ts` 的 pip 清单 = 冻结清单 + 各引擎 `pips` 的并集（paraformer 追加 `funasr==1.0.27`），装一次两条腿都能训；面板体检会 import 一遍 `pythonExtra`，缺包直接在「开训体检」里点名。
+- 实测证据（2026-11-08）：`.tmp/funasr-run4` 用 38 条真人录音跑完，产出 `model.pt / model.pt.best / model.pt.avg1`；`resources/asr-ft-export-funasr.py` 用同一份 checkpoint 导出后，worker 以 `kind=paraformer` 加载并解出「我没到还在冷却」「中路河道差个甲野」（G14-L01 / G15-L18），整链 `训练 → 导出 → int8+metadata → sherpa 推理` 打通；`ASR_ENGINES_PROBE 47/47 PASS`、`TRAIN_PROBE 91/91 PASS`、两套 tsc 干净、eslint 0 error。
+
+仍未做：G14 训一遍 paraformer 后拿 G15 当测试集量上限；paraformer 的标点外挂（`OfflinePunctuation`）。
