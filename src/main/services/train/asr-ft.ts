@@ -236,6 +236,10 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
   // 估时（#65）：条数 / 时长取当前账本，续训起点取与开训闸门同一判据（接不上的那轮不算）。
   const ledger = await currentFtLedger()
   const source = findIncrementalSource(ledger, trainer)
+  // 增量的验证集不是默认尾部 holdout，而是上一轮 run 的 evalKeys（开训时 prepareFtDataset 就按它重打包）：
+  // 估时要用同一份切分，否则上一轮只留 1 条验证时步数会少算一条数据。
+  const evalKeys = source.ok ? new Set(source.source.evalKeys) : null
+  const incrementalEvalTakes = evalKeys === null ? undefined : ledger.filter((entry) => evalKeys.has(entry.key)).length
   const costInput = {
     trainer,
     takes: ledger.length,
@@ -244,7 +248,7 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
   }
   const estimate = {
     fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),
-    incremental: estimateFtCost({ ...costInput, mode: 'incremental' })
+    incremental: estimateFtCost({ ...costInput, mode: 'incremental', evalTakes: incrementalEvalTakes })
   }
   return {
     env: { ok: gaps.length === 0, gaps, envRoot: env.envRoot },

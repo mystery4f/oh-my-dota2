@@ -28,9 +28,10 @@ export function ftDatasetDir(): string {
 
 /**
  * 已录句子 × 稿子 → 待打包条目；缺件时带人话原因。
- * 打包与「当前账本」都从这里取条目，别各自再建一次。
+ * 打包与「当前账本」都从这里取条目，别各自再建一次。`allowSingle` 给账本用：
+ * 只有一条时打包会拒（没验证集），但账本仍要有这一条——估时/待训得能说「1 条」，而不是「还没录训练集」。
  */
-async function collectFtEntries(): Promise<{ entries: FtDatasetEntry[]; error: string | null }> {
+async function collectFtEntries(options?: { allowSingle?: boolean }): Promise<{ entries: FtDatasetEntry[]; error: string | null }> {
   const script = await readFtScript()
   if (script.error || script.groups.length === 0) return { entries: [], error: script.error ?? '读稿里没有句子' }
   const recorded = new Set((await ftRecList()).map((info) => info.key))
@@ -39,18 +40,30 @@ async function collectFtEntries(): Promise<{ entries: FtDatasetEntry[]; error: s
     (group, line) => recorded.has(`${group}-${line}`),
     (group, line) => ftRecPath(group, line)
   )
-  if (entries.length === 0) return { entries, error: '还没有已录的句子——先在上方录几条再打包' }
-  if (entries.length < 2) return { entries, error: '只有一条录音不够——官方脚本必须带验证集，至少再录一条再打包' }
+  if (entries.length === 0) return { entries, error: ftPackGate(entries.length) }
+  // 文件缺失先查：它同时挡住打包与账本（账本的指纹必须是磁盘真值）。
   if (!entries.every((entry) => existsSync(entry.wavPath))) {
     return { entries, error: '有录音文件丢失（列表和磁盘对不上），重录缺失的句子后再打包' }
   }
-  return { entries, error: null }
+  const gate = ftPackGate(entries.length, options?.allowSingle === true)
+  return { entries, error: gate }
+}
+
+/**
+ * 打包门槛（条数 → 拒绝理由，null = 可以打包）：0/1 条的话术只在这里写一遍。
+ * `allowSingle` 是账本口：只有一条时开训会拒（凑不出验证集），但估时与「待训」必须先看见这一条，
+ * 否则面板会说「还没录训练集」——录了却像没录。
+ */
+export function ftPackGate(count: number, allowSingle = false): string | null {
+  if (count === 0) return '还没有已录的句子——先在上方录几条再打包'
+  if (count < 2 && !allowSingle) return '只有一条录音不够——官方脚本必须带验证集，至少再录一条再打包'
+  return null
 }
 
 /** 当前录音的账本（不落盘）：续训对账、开训体检都读这一份，别各自重算。 */
 export async function currentFtLedger(): Promise<FtLedgerEntry[]> {
-  const { entries, error } = await collectFtEntries()
-  if (error) return []
+  const { entries } = await collectFtEntries({ allowSingle: true })
+  if (entries.length === 0) return []
   const { train, eval: evalSet } = splitTrainEval(entries)
   return buildLedger(train, evalSet)
 }

@@ -84,6 +84,7 @@ import {
 import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
 import { findIncrementalSource, stageIncrementalSource } from '../services/train/asr-ft'
+import { ftPackGate } from '../services/train/ft-dataset'
 import {
   closeTrainStore,
   packedLedgerForRun,
@@ -340,11 +341,17 @@ export async function runTrainProbe(): Promise<void> {
     estOne.steps === 66 && estOne.minutes === 6 && estOneFunasr.steps === 40 && estOneFunasr.minutes === 1,
     `qwen3: ${estOne.label} | funasr: ${estOneFunasr.label}`
   )
-  const estG14 = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 40, audioMs: 76_000 })
-  const estG14Funasr = estimateFtCost({ mode: 'fresh', trainer: 'funasr-paraformer', takes: 40, audioMs: 76_000 })
+  // 40 条按默认尾部 holdout 留 2 条验证 ⇒ 38 条进训练，两条腿的 660 / 608 步都不变。
+  const estG14 = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 40, audioMs: 59_000 })
+  const estG14Funasr = estimateFtCost({ mode: 'fresh', trainer: 'funasr-paraformer', takes: 40, audioMs: 59_000 })
   push(
-    '开训估时对得上实测：G14 40 条 → qwen3 660 步 65 分钟（BENCH 实测 1:05:18）、paraformer 608 步 6 分钟（BENCH 约 6 分钟）',
-    estG14.steps === 660 && Math.abs(estG14.minutes - 65) <= 1 && estG14Funasr.steps === 608 && estG14Funasr.minutes === 6,
+    '开训估时对得上实测：G14 40 条（38 训 + 2 验）→ qwen3 660 步 65 分钟（BENCH 实测 1:05:18）、paraformer 608 步 6 分钟（BENCH 约 6 分钟）',
+    estG14.steps === 660 &&
+      Math.abs(estG14.minutes - 65) <= 1 &&
+      estG14.trainTakes === 38 &&
+      estG14Funasr.steps === 608 &&
+      estG14Funasr.minutes === 6 &&
+      estG14Funasr.trainTakes === 38,
     `qwen3: ${estG14.steps}步/${estG14.minutes}分 paraformer: ${estG14Funasr.steps}步/${estG14Funasr.minutes}分`
   )
   const estMany = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 400 })
@@ -360,18 +367,42 @@ export async function runTrainProbe(): Promise<void> {
     estIncQwen.steps === 200 && estIncQwen.minutes === 20 && estIncFunasr.steps === 304 && estIncFunasr.minutes === 3,
     `qwen3: ${estIncQwen.label} | funasr: ${estIncFunasr.label}`
   )
+  // 音频时长只进文案（docs/BENCH.md 的「只做标签」决定）：跨过 1 分钟换单位，但步数一分钟都不变。
+  const estG14AudioMin = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 40, audioMs: 76_000 })
   const qwenCost = ftCostBasis('qwen3-sft')
   const funasrCost = ftCostBasis('funasr-paraformer')
   push(
-    '每步耗时只有引擎表一份（qwen3 5.9 / paraformer 0.6 秒），估时文案自称「估算」并指向 docs/BENCH.md',
+    '每步耗时只有引擎表一份（qwen3 5.9 / paraformer 0.6 秒），估时文案自称「估算」并指向 docs/BENCH.md；音频时长只进标签',
     qwenCost !== null &&
       qwenCost.secPerStep === 5.9 &&
       funasrCost !== null &&
       funasrCost.secPerStep === 0.6 &&
       estG14.label.includes('估算') &&
       estG14.basis.includes('docs/BENCH.md') &&
-      estG14.label.includes('76 秒音频'),
-    `qwen3:${qwenCost?.secPerStep} funasr:${funasrCost?.secPerStep} ｜ ${estG14.basis}`
+      estG14.label.includes('59 秒音频') &&
+      estG14AudioMin.label.includes('1 分钟音频') &&
+      estG14AudioMin.steps === estG14.steps &&
+      estG14AudioMin.minutes === estG14.minutes,
+    `qwen3:${qwenCost?.secPerStep} funasr:${funasrCost?.secPerStep} ｜ ${estG14.label} ｜ ${estG14AudioMin.label} ｜ ${estG14.basis}`
+  )
+  // 增量估时必须跟开训同一份切分：真开跑会拿上一轮 evalKeys 重打包，不是默认尾部 holdout。
+  const incCostEntries = Array.from({ length: 12 }, (_, i) => ({ key: `K${i}`, wavPath: `X:/${i}.wav`, text: `${i}` }))
+  const incCostSplit = splitIncrementalEval(incCostEntries, ['K0'])
+  const estIncByEvalKeys = estimateFtCost({
+    mode: 'incremental',
+    trainer: 'funasr-paraformer',
+    takes: incCostEntries.length,
+    evalTakes: incCostSplit.eval.length
+  })
+  const estIncByHoldout = estimateFtCost({ mode: 'incremental', trainer: 'funasr-paraformer', takes: incCostEntries.length })
+  push(
+    '增量估时按开训真正用的切分算：上一轮只留 1 条 evalKeys → 11 训 × 12 轮 = 132 步；默认 holdout 会少报成 120 步',
+    incCostSplit.train.length === 11 &&
+      estIncByEvalKeys.trainTakes === incCostSplit.train.length &&
+      estIncByEvalKeys.steps === 132 &&
+      estIncByHoldout.trainTakes === 10 &&
+      estIncByHoldout.steps === 120,
+    `按上一轮 eval: ${estIncByEvalKeys.label} ｜ 按尾部 holdout: ${estIncByHoldout.label}`
   )
   push(
     '增量找权重：avg1 > best > model.pt；都没有就是 null（上层据此拒启动）',
@@ -554,6 +585,11 @@ export async function runTrainProbe(): Promise<void> {
   push('两条起必切验证集（官方脚本 eval_strategy 无条件 steps）', split.train.length === 1 && split.eval.length === 1, `train=${split.train.length} eval=${split.eval.length}`)
   const splitOne = splitTrainEval(built.entries.slice(0, 1))
   push('只有一条时验证集留空（打包层会先拒）', splitOne.train.length === 1 && splitOne.eval.length === 0, `train=${splitOne.train.length} eval=${splitOne.eval.length}`)
+  push(
+    '一条录音：打包拒（没验证集），账本照收——面板不会把「录了 1 条」说成「还没录训练集」',
+    ftPackGate(0) !== null && ftPackGate(1) !== null && ftPackGate(1, true) === null && ftPackGate(2) === null && ftPackGate(0, true) !== null,
+    `0:${ftPackGate(0)} ｜ 1:${ftPackGate(1)} ｜ 1+账本:${ftPackGate(1, true)}`
+  )
   const splitBig = splitTrainEval([1, 2, 3, 4, 5].map((no) => ({ key: `G01-L${String(no).padStart(2, '0')}`, wavPath: `w${no}`, text: `t${no}` })))
   push('够量时尾部 2 条进验证', splitBig.train.length === 3 && splitBig.eval.length === 2 && splitBig.eval[0].wavPath === 'w4', `train=${splitBig.train.length} eval=${splitBig.eval.length}`)
   // —— 录音判定（T4a 录音面板）：开停/收尾/命名全在共享缝 ——

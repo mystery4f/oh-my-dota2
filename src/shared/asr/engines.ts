@@ -60,6 +60,11 @@ export interface AsrFinetuneSpec {
    * 既不排程也不拦截。数字来自 docs/BENCH.md 的实测（G14，RTX 4060 8G），换机器就换这里。
    */
   secPerStep: number
+  /**
+   * 一步吃几条：qwen3 = batch_size × grad_acc，funasr = DatasetConf.batch_size（example 批）。
+   * 轮数折算（每轮几步）与训练 argv 都读这一项，改批大小只需改这里。
+   */
+  samplesPerStep: number
 }
 
 export interface AsrEngineSpec {
@@ -125,7 +130,9 @@ export const ASR_ENGINES: Record<AsrEngineId, AsrEngineSpec> = {
       pips: [],
       // 4060 8G 实测 G14 全链 660 步 1:05:18，全程均 5.9 秒/步（尾段纯训练 3.4 秒/步，
       // 估时取全程均：校验与存盘也是用户要等的时间）。
-      secPerStep: 5.9
+      secPerStep: 5.9,
+      // batch_size 1 × grad_acc 4：训练 argv 的 --grad_acc 就从这里取值（见 shared/train/asr-ft）。
+      samplesPerStep: 4
     },
     note: '逐字生成，短句约 0.7 秒；模型约 980MB'
   },
@@ -173,7 +180,9 @@ export const ASR_ENGINES: Record<AsrEngineId, AsrEngineSpec> = {
       pythonExtra: ['funasr', 'torchaudio', 'modelscope', 'onnxruntime', 'onnx'],
       pips: ['funasr==1.0.27', 'modelscope'],
       // 4060 Laptop 实测 G14：600 步（30 轮 × 20 条）约 6 分钟，均 0.6 秒/步，已含校验与存盘。
-      secPerStep: 0.6
+      secPerStep: 0.6,
+      // DatasetConf.batch_size=1（example 批）：一条录音一步，训练 argv 也从这里取值。
+      samplesPerStep: 1
     },
     note: '非自回归：约 0.07 秒/句、无标点、不吃热词；同批 40 条错字率 13.7%（Qwen3 底模 6.27%）'
   },
