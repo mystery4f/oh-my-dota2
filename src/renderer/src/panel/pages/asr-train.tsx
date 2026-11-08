@@ -253,7 +253,7 @@ export function AsrTrainPage(): React.ReactElement {
             <Button
               size="sm"
               variant="outline"
-              disabled={recorder.recording || !group || group.mode !== 'lines'}
+              disabled={taskRunning || recorder.recording || !group || group.mode !== 'lines'}
               onClick={() => void recorder.begin({ group: group?.id ?? '', mode: group?.mode ?? 'lines', line: lineNo })}
             >
               录制
@@ -309,7 +309,7 @@ export function AsrTrainPage(): React.ReactElement {
             <Button
               size="sm"
               variant="outline"
-              disabled={Boolean(busy)}
+              disabled={Boolean(busy) || taskRunning}
               onClick={() =>
                 void runAction('打包', async () => {
                   const result = await window.api.ftDatasetPrepare()
@@ -365,8 +365,8 @@ export function AsrTrainPage(): React.ReactElement {
             label="开训方式"
             hint={
               mode === 'incremental'
-                ? '接上一轮的权重：只补这批新录的错，约 300 步；验证集沿用上一轮，新录的句子只进训练集'
-                : '从底模重训：轮数按录音量自动算，够 800 步就停；换引擎或重录过就用它'
+                ? '接上一轮的权重：只补这批新录的错，步数看下方「预计耗时」；验证集沿用上一轮，新录的句子只进训练集'
+                : '从底模重训：轮数按录音量自动算，步数看下方「预计耗时」；换引擎或重录过就用它'
             }
           >
             <div className="flex items-center gap-1">
@@ -398,8 +398,8 @@ export function AsrTrainPage(): React.ReactElement {
               blocks.length > 0
                 ? `先解决：${blocks.map((item) => item.label).join('、')}`
                 : mode === 'incremental'
-                  ? '接上一轮的权重，跑满约 300 步就停'
-                  : '轮数按录音量自动算，够 800 步就停'
+                  ? '接上一轮的权重，步数跟上方估算一致'
+                  : '轮数按录音量自动算，步数跟上方估算一致'
             }
           >
             <Button

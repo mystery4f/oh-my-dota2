@@ -2,6 +2,7 @@
 import { recordingKey } from './recording'
 import type { FtLedgerEntry } from './asr-ft'
 import { correctionTakeNo, isCorrectionTakeKey } from './corrections'
+import { WAV_BYTES_PER_SAMPLE, WAV_HEADER_BYTES } from '../wav'
 export interface FtDatasetEntry {
   /** 完整录音键（组-句，如 G14-L03）：账本/续训判定按它对账。 */
   key: string
@@ -152,7 +153,7 @@ export interface FtFunasrEntry {
  * 少了这两项 index_ds 会按 source_len=1 过筛（不报错），排批全乱；照官方口径填才对得上。
  */
 export function buildFtFunasrJsonlLine(entry: FtFunasrEntry): string {
-  const samples = Math.max(0, Math.floor((entry.wavBytes - 44) / 2))
+  const samples = Math.max(0, Math.floor((entry.wavBytes - WAV_HEADER_BYTES) / WAV_BYTES_PER_SAMPLE))
   return JSON.stringify({
     key: entry.key,
     source: entry.wavPath,

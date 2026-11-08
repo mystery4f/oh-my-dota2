@@ -1,5 +1,6 @@
 /** ASR 微调（T5）纯缝：训练/导出命令拼装、checkpoint 挑选、换模/回滚步骤、环境缺口点名。 */
 import { ASR_ENGINE_LIST, ASR_ENGINES, type AsrEngineId } from '../asr/engines'
+import { WAV_BYTES_PER_MS, WAV_HEADER_BYTES } from '../wav'
 import type { FtCorrectionSamples } from './corrections'
 import { holdoutTakes } from './dataset'
 
@@ -16,11 +17,6 @@ export interface AsrFtPaths {
   baseModelDir: string
   /** funasr 布局：hub 模型 id（`++model=`）；qwen3 用本地底模目录，留空。 */
   baseModelId: string
-}
-
-/** 这个 trainer 支不支持在上一版上续训。funasr 的续训只认自己 output_dir 里的 checkpoint，跨 run 目录接不上。 */
-export function trainerCanResume(trainer: AsrFtTrainer): boolean {
-  return trainer === 'qwen3-sft'
 }
 
 /** 一次 ASR 微调要吃的三样东西：打包产物和这次的输出目录。 */
@@ -142,14 +138,15 @@ export function ftCostBasis(trainer: AsrFtTrainer): { secPerStep: number; engine
 
 /**
  * 「大概多少步 / 大概几分钟」：输入的条数与总时长来自当前录音账本，轮数走 planFtTuning。
- * 0 条、1 条、几百条都返回同一形状（不抛）；takes 只算能进训练的逐句录音，自由说组不在内。
+ * 0 条、1 条、几百条都返回同一形状（不抛）；takes 是账本里能进训练的条数——逐句录音与
+ * 「改对一句」落账的纠错样本（G01-Tnn）都算，没纠错的自由说 T 键不进账本，自然不在内。
  * 验证集条数默认取尾部 holdout（与开训打包 splitTrainEval 同一口径）；增量要传 evalTakes =
  * 上一轮 evalKeys 里今天还在的条数——真开跑就是拿这些当验证集，不传就会多算一条训练数据。
  */
 export function estimateFtCost(input: {
   mode: AsrFtMode
   trainer: AsrFtTrainer
-  /** 能进训练的录音条数（逐句组的已录句；自由说组不进训）。 */
+  /** 账本里能进训练的录音条数（逐句已录句 + 纠错样本；没纠错的自由说录音不进账本）。 */
   takes: number
   /** 这些录音的总时长（毫秒）：只进文案，不影响步数。 */
   audioMs?: number
@@ -458,7 +455,7 @@ export interface FtLedgerEntry {
   split: 'train' | 'eval'
 }
 
-/** run.json 的形状：一次微调从开跑到转正的状态流水。 */
+/** run.json 的形状：一次微调从开跑到收场的流水（训练目录自己的账本，面板不读它）。 */
 export interface FtRunMeta {
   runId: string
   startedAt: number
@@ -470,6 +467,7 @@ export interface FtRunMeta {
   status: 'running' | 'trained' | 'applied' | 'failed'
   finishedAt: number | null
   exportDir: string
+  /** 开跑写死 false；「转正过」记进 runs.db 的 applied（面板只读库），这里不再回写。 */
   applied: boolean
 }
 
@@ -482,7 +480,8 @@ export interface FtCoverageGroup {
 /**
  * 已训标记：最近一次训过的账本 vs 磁盘现状，按组算 done/total/stale。
  * key+bytes+mtimeMs 全等 = 训过；同 key 但文件变过 = stale（重录了，得再训）；账本没有 = 没训过。
- * free 组（Txx）没有标准答案从不进训，UI 自行按组模式过滤。
+ * current 由调用方只喂逐句键（L 键，见 asrFtStatus 的过滤）：自由说组没有稿子行，改对落账的纠错样本（G01-Tnn）
+ * 另有 corrections 一栏，混进来会让「已训 x/20」凭空多出分母。
  */
 export function ftTrainCoverage(
   manifest: readonly FtLedgerEntry[],
@@ -517,19 +516,16 @@ export function ftLedgerMatchedOnDisk(
 /** 8G 卡实测训练净占 ~6.2G（峰值 7661 − 空闲基线 1488）+ 200 MiB 余量。这是「建议线」，不是硬闸。 */
 export const FT_TRAIN_NEED_MIB = 6400
 
-/** wav 头字节数（录音模块写的就是 44 字节标准头）。 */
-export const FT_WAV_HEADER_BYTES = 44
-
-/** 16k 单声道 16bit = 32000 字节/秒（录音模块 BYTES_PER_MS 的同一数字）。 */
-export const FT_WAV_BYTES_PER_MS = 32
+/**
+ * wav 时长（毫秒）：标准 44 字节头 + 每毫秒字节数，常量归 `src/shared/wav.ts` 一份
+ * （编码器、训练集字节数换算、这里是同一套数字）。
+ */
+export function ftWavDurationMs(bytes: number): number {
+  return Math.max(0, Math.round((bytes - WAV_HEADER_BYTES) / WAV_BYTES_PER_MS))
+}
 
 /** 待训条数到这条线就把提示语换成「够再训一次了」——只是提示，绝不自动开训。 */
 export const FT_PENDING_PROMPT_AT = 20
-
-/** wav 时长（毫秒）：44 字节头 + 32 字节/毫秒，与录音模块同一换算。 */
-export function ftWavDurationMs(bytes: number): number {
-  return Math.max(0, Math.round((bytes - FT_WAV_HEADER_BYTES) / FT_WAV_BYTES_PER_MS))
-}
 
 /** 待训摘要：条数、总时长，以及面板直接显示的那句人话。 */
 export interface FtPendingTakes {

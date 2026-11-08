@@ -16,8 +16,6 @@ import { findDatasetEntry, forgetDatasetTake, recordDatasetTake } from './run-st
  * asr-ft/ 下（安装版是 <安装目录>-data，开发版是项目 data/），绝不引用外置盘路径。
  */
 
-/** 16k mono 16-bit wav：32000 字节/秒，头部 44 字节（换算在共享纯缝里，面板与探针同一份）。 */
-
 /** 随包自带的读稿：打包后在 resources/ 下，开发时在仓库 resources/。 */
 export function ftScriptPath(): string {
   if (app.isPackaged) return join(process.resourcesPath, 'asr-ft-script.md')

@@ -41,7 +41,7 @@ import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList } from './ft-record'
 import { correctionSamplesStatus } from '../voice/corrections'
-import { asrRunDirsRoot, listDatasetEntries, listTrainRuns, packedLedgerForRun, trainedDatasetEntries } from './run-store'
+import { listDatasetEntries, listTrainRuns, packedLedgerForRun, patchTrainRun, trainedDatasetEntries } from './run-store'
 import { sovitsChildPid } from '../voice/sovits-server'
 import { ASR_ENGINE_LIST, type AsrEngineId, type AsrEngineSpec } from '@shared/asr/engines'
 
@@ -307,7 +307,8 @@ function ensureTokenizerFiles(into: string, fallbackDirs: string[]): string | nu
 
 export function applyAsrFtModel(): AsrFtSwapResult {
   const swap = swapView()
-  // 正常路径上 .next 根本不存在（它只在 promote-next 里现拷现改名），所以判据是「有导出产物」。
+  // .next 里可能躺着开训前备好的增量副本（#63 的 stageIncrementalSource 就落在这里），
+  // 所以判据是「有导出产物」——只看 .next 会把「训练完还没导出」当成可转正。
   const steps = asrFtSwapSteps({ ...swap, exportExists: Boolean(swap.lastExportDir) })
   if (steps.length === 0) {
     return { ok: false, error: '没有可应用的新模型：先跑一次训练，等「导出 ONNX」完成再点' }
@@ -367,10 +368,6 @@ export function applyAsrFtModel(): AsrFtSwapResult {
   return { ok: true, error: null, model: swap.lastExportDir ? basename(swap.lastExportDir) : null }
 }
 
-function runsRoot(): string {
-  return asrRunDirsRoot()
-}
-
 function readRunMeta(runDir: string): FtRunMeta | null {
   try {
     return JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8')) as FtRunMeta
@@ -383,7 +380,6 @@ function writeRunMeta(runDir: string, meta: FtRunMeta): void {
   writeFileSync(join(runDir, 'run.json'), JSON.stringify(meta, null, 2), 'utf8')
 }
 
-/** run.json 缺了（老 run / 磁盘问题）就静默跳过——记账不能反过来挡训练。 */
 /** 供 manager 失败收场回写（账本状态只前进不回退；run.json 缺了就跳过）。 */
 export function markRunStatus(runDir: string, status: FtRunMeta['status'], patch?: Partial<FtRunMeta>): void {
   const meta = readRunMeta(runDir)
@@ -391,14 +387,18 @@ export function markRunStatus(runDir: string, status: FtRunMeta['status'], patch
   writeRunMeta(runDir, { ...meta, ...patch, status, finishedAt: status === 'running' ? null : Date.now() })
 }
 
-/** 转正后回写：找 exportDir 对上的那次 run 标 applied；找不到（老 run 没账本）就跳过。 */
+/**
+ * 转正后回写训练记录：面板只读 runs.db（ADR：库是训练记录的唯一来源），所以翻牌必须落在库里；
+ * 训练目录里的 run.json 只是那一轮自己的流水，由 manager 收场时写，这里不再兼管。
+ * 按导出目录找那一轮——找不到（老 run 没进库）就静默跳过，记账不能反过来挡换模。
+ * applied 是历史事实「这一轮的模型被转正过」：之后再应用别的轮或回滚都不回退它
+ * （与 GV 注册音色包同一口径，见 gv.ts 的同名补写）。
+ */
 function markAppliedForExport(exportDir: string): void {
   if (!exportDir) return
-  for (const name of safeReaddir(runsRoot())) {
-    const runDir = join(runsRoot(), name)
-    const meta = readRunMeta(runDir)
-    if (meta?.exportDir === exportDir) markRunStatus(runDir, 'applied', { applied: true })
-  }
+  const run = listTrainRuns().find((item) => item.artifacts.exportDir === exportDir)
+  if (!run) return
+  patchTrainRun(run.id, (current) => ({ ...current, applied: true, status: 'applied' }))
 }
 
 /** 增量微调的接续点：上一轮 run 的目录、磁盘上真实存在的权重，以及它那份验证集。 */
@@ -503,6 +503,11 @@ function ftVramGuard(): string | null {
   return ftVramNote({ totalMiB, usedMiB, apps, excludePids: ownPid ? [ownPid] : [] })
 }
 
+/**
+ * 回滚：把上一版从 .bak 换回现役目录，只动磁盘，不改训练历史。
+ * 记录里的 applied 是历史事实「这一轮的模型被转正过」——回滚不会把它抹成没应用过
+ * （GV 删掉音色包同样不改那一轮的 applied；要靠历史判断「现在跑的是哪一版」看的是现役目录，不是这个旗标）。
+ */
 export function rollbackAsrFtModel(): AsrFtSwapResult {
   const steps = asrFtRollbackSteps({ bakExists: slotReady(backupDir(), finetuneEngine().id) })
   if (steps.length === 0) {

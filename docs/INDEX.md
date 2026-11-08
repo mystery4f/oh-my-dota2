@@ -30,7 +30,7 @@ tags: [docs, index]
 | 文件 | 用途 | 状态 |
 | --- | --- | --- |
 | `docs/PLAN.md` | 计划真相源，里程碑带勾选与证据 | 现行 |
-| `docs/PLAN-train-v3.md` | 训练管理 v3 执行计划 | 现行 |
+| `docs/PLAN-train-v3.md` | 训练管理 v3 那一轮的执行计划（已落地；现状看 AGENTS.md / ARCH-notes） | 历史快照 |
 | `docs/TODO.md` | 跨会话交接的待办 | 现行 |
 | `GLOSSARY.md`（根） | 项目领域术语表：识别引擎 / 模型 / 微调腿 / 转正 / 热词 / 推理互斥… | 现行 |
 | `docs/IDEAS.md` | 功能想法池（未排期） | 现行 |
