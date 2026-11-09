@@ -139,7 +139,8 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     // 结果已经写进那一行里了；「播没播」加一句，播了就带上这次的起播总时长——慢在哪一段一眼看得见。
     const detail = formatChainOverlay(reply.timing)
     const doneLine = reply.spoken ? (detail ? `已播 · ${detail}` : '已播') : reply.error ? '未播' : null
-    sink.stage(doneLine, 2000)
+    // 带拆解的两行要多留一会儿才读得完：2 秒只够看一眼「已播」，五段数字根本来不及看。
+    sink.stage(doneLine, detail ? 8000 : 2000)
   }
 
   /** 失败也落一行 + 面板可见的链路结果：按了没反应比报错更糟。 */
