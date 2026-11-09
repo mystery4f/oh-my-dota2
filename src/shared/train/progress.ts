@@ -15,7 +15,7 @@ function stageOf(text: string): string {
 export function parseTrainProgress(line: string): TrainProgress | null {
   const text = line.trim()
   if (!text) return null
-  const epoch = /epoch\s+(\d+)\s*\/\s*(\d+)/i.exec(text)
+  const epoch = /epoch[:\s]+(\d+)\s*\/\s*(\d+)/i.exec(text)
   if (epoch) {
     const total = Number(epoch[2])
     if (total <= 0) return null
