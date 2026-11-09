@@ -67,6 +67,7 @@ jobs:
         run: |
           npx electron out/main/index.js --train-probe
           npx electron out/main/index.js --voice-out-probe
+          npx electron out/main/index.js --voice-chain-probe
           npx electron out/main/index.js --tts-pipeline-probe
           npx electron out/main/index.js --sovits-refs-probe
           npx electron out/main/index.js --sovits-voicepack-probe

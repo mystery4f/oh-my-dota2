@@ -42,6 +42,7 @@ import { runOverlayGeometryProbe } from './probes/overlay-geometry'
 import { runHotkeyProbe } from './probes/hotkeys'
 import { runHoldWatchProbe } from './probes/hold-watch'
 import { runVoiceOutProbe } from './probes/voice-out'
+import { runVoiceChainProbe } from './probes/voice-chain'
 import { runAsrSwapProbe } from './probes/asr-swap'
 import { runInPlaceGuardProbe } from './probes/inplace-guard'
 import { runAsrHotwordsProbe } from './probes/asr-hotwords'
@@ -215,6 +216,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--hotkey-probe')) void runHotkeyProbe()
   if (process.argv.includes('--hold-watch-probe')) void runHoldWatchProbe()
   if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()
+  if (process.argv.includes('--voice-chain-probe')) void runVoiceChainProbe()
   if (process.argv.includes('--asr-hotwords-probe')) void runAsrHotwordsProbe()
   if (process.argv.includes('--provider-reasoning-probe')) void runProviderReasoningProbe()
   if (process.argv.includes('--zhipu-live-probe')) void runZhipuLiveProbe()
