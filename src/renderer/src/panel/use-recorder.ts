@@ -8,6 +8,7 @@ import {
   type RecordingStepState
 } from '@shared/train/recording'
 import { encodeWav16k } from '@shared/wav'
+import { openMicStream } from '../lib/mic'
 
 /** 一次录音的目标：录哪一组、哪一段。自由说组用 T 段，逐句组用 L 段。 */
 export interface RecorderTarget {
@@ -109,9 +110,7 @@ export function useRecorder(
       if (graph.current) return
       let stream: MediaStream
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
-        })
+        stream = await openMicStream()
       } catch (err) {
         setHint(`拿不到麦克风：${String(err)}`)
         return

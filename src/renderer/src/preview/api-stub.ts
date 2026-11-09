@@ -295,6 +295,7 @@ const implemented = {
     return hotkeyPayload()
   },
   appVersion: async () => '0.0.0-stub',
+  appOpenExternal: async () => ({ ok: true, error: null }),
   updateCheck: async () => ({ channel: 'stable', status: 'dev', version: '0.0.0' }),
   updateInstall: async () => true,
   onUpdateStatus: (callback) => {
@@ -366,7 +367,14 @@ const implemented = {
   onVoiceRuntimeState: () => () => {},
   onVoiceChainResult: () => () => {},
   onVoiceRecordState: () => () => {},
-  voiceOutTest: async () => ({ ok: true, durationMs: 900, hint: 'stub 声出已播' }),
+  voiceOutTest: async () => ({ ok: true, durationMs: 900, hint: 'stub 声出已播', sinkLabel: 'CABLE Input (VB-Audio Virtual Cable)' }),
+  voiceOutCable: async () => ({
+    installed: true,
+    endpoints: ['CABLE Input (VB-Audio Virtual Cable)', 'CABLE Output (VB-Audio Virtual Cable)'],
+    driverOnly: false,
+    error: null
+  }),
+  voiceOutCableInstall: async () => ({ ok: true, launched: true, dir: 'C:\\data\\vb-cable', error: null }),
   overlayVoiceToggle: async () => ({ ok: true }),
   trainRuns: async () => stubTrainRuns,
   trainRun: async (id) => stubTrainRuns.find((run) => run.id === id) ?? null,

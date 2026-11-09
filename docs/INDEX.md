@@ -91,6 +91,7 @@ tags: [docs, index]
 | `docs/adr/tts-length-cap-rejected.md` | 念白限长 40 的提案被否决 |
 | `docs/adr/tts-parallel-infer.md` | `parallel_infer` 保持 false |
 | `docs/adr/tts-repeat-cache.md` | sovits 重复句缓存 |
+| `docs/adr/voice-out-vb-cable.md` | 声出经 VB-Cable 进游戏语音：检测放主进程（驱动层，不靠空 label）、面板四步引导、测试结果报实际设备 |
 
 ## 协作约定
 

@@ -7,7 +7,13 @@ import {
   type VoiceOutTestResult,
   type VoiceRuntimeStatus
 } from '@shared/ipc'
-import { DEFAULT_VOICE_OUT_VOICE, VOICE_OUT_VOICES } from '@shared/voice-out'
+import {
+  DEFAULT_VOICE_OUT_VOICE,
+  VOICE_OUT_VOICES,
+  findCableOutput,
+  isVirtualCableName,
+  type VirtualCableStatus
+} from '@shared/voice-out'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
@@ -20,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
 import { selectClass } from '../components/select-class'
+import { Modal } from '../components/modal'
 import { errorMessage } from '@shared/errors'
 import { useSaveFlash, useSettings } from '../use-settings'
 import { useVoicePacks } from '../use-voice-packs'
@@ -69,6 +76,11 @@ export function TalkPage({
   // 纠错样本（#66）的即时回执：存上了说存到哪条，到顶了说为什么没存（这条提示就是唯一出口）。
   const [correctionNote, setCorrectionNote] = useState<string | null>(null)
   const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([])
+  // 虚拟声卡（VB-Cable）：声出进游戏语音的前置。问主进程（驱动层），不拿空 label 当「没装」。
+  const [cable, setCable] = useState<VirtualCableStatus | null>(null)
+  const [cableGuideOpen, setCableGuideOpen] = useState(false)
+  const [linkNote, setLinkNote] = useState<string | null>(null)
+  const [installingCable, setInstallingCable] = useState(false)
 
   // 识别模型状态：进面板问一次，下载/解压期间每秒刷——别让人对着假进度等。
   useEffect(() => {
@@ -99,6 +111,31 @@ export function TalkPage({
       .then((all) => setOutputs(all.filter((d) => d.kind === 'audiooutput')))
       .catch(() => setOutputs([]))
   }, [])
+
+  const recheckCable = useCallback(() => {
+    void window.api.voiceOutCable().then(setCable).catch(() => setCable(null))
+  }, [])
+  useEffect(() => {
+    recheckCable()
+  }, [recheckCable])
+
+  // 一键安装：下载解压都归主进程，这里只负责拉起与文案。UAC 与重启必须用户自己点。
+  const installCable = useCallback((): void => {
+    setInstallingCable(true)
+    setLinkNote(null)
+    void window.api
+      .voiceOutCableInstall()
+      .then((result) => {
+        setCableGuideOpen(true)
+        if (result.launched) setLinkNote('已启动官方安装向导：装完点完成、重启电脑，再回来点「重新检测」')
+        else setLinkNote(result.error ?? '安装没走通')
+      })
+      .catch(() => setLinkNote('安装没走通'))
+      .finally(() => setInstallingCable(false))
+  }, [])
+
+  // 输出设备清单里的虚拟声卡播放端；选它，声出才进得了游戏的麦克风。
+  const cableOutput = findCableOutput(outputs.map((d) => ({ deviceId: d.deviceId, label: d.label })))
 
   // 纠错回路：改对了就把差异词并进热词表，下一句录音就少错一次。
   const hotwordsRef = useRef(settings?.asrHotwords ?? '')
@@ -162,7 +199,7 @@ export function TalkPage({
     try {
       setOutResult(await window.api.voiceOutTest())
     } catch (e) {
-      setOutResult({ ok: false, durationMs: null, hint: null, error: errorMessage(e) })
+      setOutResult({ ok: false, durationMs: null, hint: null, sinkLabel: '', error: errorMessage(e) })
     } finally {
       setOutBusy(false)
     }
@@ -349,6 +386,53 @@ export function TalkPage({
               </select>
             )}
           </Row>
+          <Row
+            label="虚拟声卡"
+            hint="声出要进 Dota 2 语音：译文播到 CABLE Input，游戏里麦克风选 CABLE Output"
+          >
+            {cable === null ? (
+              <span className="text-xs text-muted-foreground">检查中…</span>
+            ) : cable.error !== null ? (
+              <span className="text-xs text-amber-400">没查成：{cable.error}</span>
+            ) : !cable.installed ? (
+              <span className="text-xs text-amber-400">没检测到 VB-Cable：声出只会从扬声器出来，队友听不到</span>
+            ) : cable.driverOnly ? (
+              <span className="text-xs text-amber-400">驱动在，音频端点还没出现：重启一次再检测</span>
+            ) : (
+              <span className="text-xs text-muted-foreground">已装：{cable.endpoints.join(' / ')}</span>
+            )}
+            <Button size="sm" variant="outline" onClick={recheckCable}>
+              重新检测
+            </Button>
+            {cable && cable.error === null && (!cable.installed || cable.driverOnly) ? (
+              <Button size="sm" variant="secondary" onClick={() => setCableGuideOpen(true)}>
+                怎么装…
+              </Button>
+            ) : null}
+            {cable && cable.error === null && !cable.installed ? (
+              <Button size="sm" variant="secondary" disabled={installingCable} onClick={installCable}>
+                {installingCable ? '准备中…' : '一键安装'}
+              </Button>
+            ) : null}
+            {cableOutput && settings.ttsOutputDevice !== cableOutput.deviceId ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void save.wrap(update({ ttsOutputDevice: cableOutput.deviceId }))}
+              >
+                设为输出
+              </Button>
+            ) : null}
+          </Row>
+          <Row label="本机也播放" hint="调试用：译文同时播到系统默认扬声器；正式用时关掉，本机就只剩游戏里能听到">
+            <Button
+              size="sm"
+              variant={settings.ttsMonitorLocal ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ ttsMonitorLocal: !settings.ttsMonitorLocal }))}
+            >
+              {settings.ttsMonitorLocal ? '开（本机也能听到）' : '关'}
+            </Button>
+          </Row>
           <Row label="输出设备" htmlFor="v2-outDevice" hint="选 VB-Cable 的「CABLE Input」；找不到已选设备时回退系统默认并提示">
             <select
               id="v2-outDevice"
@@ -392,6 +476,15 @@ export function TalkPage({
                   ? `通过${outResult.durationMs ? ` · ${(outResult.durationMs / 1000).toFixed(1)} 秒` : ''}`
                   : outResult.error ?? '声出失败'}
               </StatusPill>
+            ) : null}
+            {outResult?.sinkLabel ? (
+              <span
+                className={`text-xs ${isVirtualCableName(outResult.sinkLabel) ? 'text-muted-foreground' : 'text-amber-400'}`}
+              >
+                {isVirtualCableName(outResult.sinkLabel)
+                  ? `已播到 ${outResult.sinkLabel}`
+                  : `播到 ${outResult.sinkLabel}（不是虚拟声卡，队友听不到）`}
+              </span>
             ) : null}
             {recording ? <span className="text-xs text-amber-400">● 正在录音，说完再点一次</span> : null}
           </Row>
@@ -511,6 +604,48 @@ export function TalkPage({
           <StatusPill tone="idle">侧边栏</StatusPill>
         </Row>
       </CollapsibleGroup>
+
+      <Modal
+        open={cableGuideOpen}
+        title="让声出进 Dota 2 语音：装 VB-Cable"
+        hint="VB-Cable 是一块虚拟声卡：把声出的译文接进游戏麦克风，不改游戏文件"
+        onClose={() => setCableGuideOpen(false)}
+      >
+        <div className="space-y-3">
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>点「一键安装」：自动下载并打开官方安装器；UAC 问一次，走完向导后重启一次电脑。</li>
+            <li>Dota 2：设置 → 音频 → 语音输入设备，选 CABLE Output (VB-Audio Virtual Cable)。</li>
+            <li>本页「输出设备」选 CABLE Input (VB-Audio Virtual Cable)。</li>
+            <li>按一次说话键，确认「测试声出」显示已播到 CABLE Input。</li>
+          </ol>
+          <p className="text-xs text-muted-foreground">
+            注意：输出设备指向虚拟声卡后，本机扬声器就听不到译文了；要自己听，把输出设备切回扬声器即可。
+          </p>
+          {linkNote ? <p className="text-xs text-amber-400">{linkNote}</p> : null}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() =>
+                void window.api
+                  .appOpenExternal('https://vb-audio.com/Cable/')
+                  .then((r) => setLinkNote(r.ok ? null : r.error))
+              }
+            >
+              打开下载页
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setCableGuideOpen(false)
+                recheckCable()
+              }}
+            >
+              重新检测
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </>
   )
 }

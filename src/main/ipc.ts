@@ -1,8 +1,8 @@
-import { app, clipboard, ipcMain } from 'electron'
+import { app, clipboard, ipcMain, shell } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { errorMessage } from '@shared/errors'
-import { IPC, ipcContract, type MainHandlers } from '@shared/ipc'
+import { IPC, ipcContract, type MainHandlers, type OpenExternalResult } from '@shared/ipc'
 import { translateInPlace, voiceReply } from './services/reply/reply-service'
 import { generatePanelSuggestions } from './services/reply/panel-suggestions'
 import { loadSettings, saveSettings } from './services/settings'
@@ -34,6 +34,8 @@ import {
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { onVoiceOutReadiness, refreshVoiceOutReadiness } from './services/voice/voice-out-readiness'
+import { detectVirtualCable } from './services/voice/virtual-cable'
+import { installVirtualCable } from './services/voice/virtual-cable-install'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
 import {
   autoVoicePackSetup,
@@ -95,6 +97,18 @@ function runtimeStatusSnapshot() {
   }
 }
 
+/** 只放行 https：面板引导只该打开官方页面，不接受 file:// 之类的本地路径。 */
+async function openExternalSafe(raw: string): Promise<OpenExternalResult> {
+  try {
+    const target = new URL(raw)
+    if (target.protocol !== 'https:') return { ok: false, error: `只允许 https 链接：${target.protocol}` }
+    await shell.openExternal(target.toString())
+    return { ok: true, error: null }
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) }
+  }
+}
+
 /** 契约 handler 表（#30）：每条 invoke/send 通道一行，签名由 MainHandlers 钉死； */
 const handlers: MainHandlers = {
   // 设置 / 提供商 / 翻译
@@ -131,6 +145,7 @@ const handlers: MainHandlers = {
   captureStop: () => getCaptureService().stop(),
   captureStatus: () => ({ ...getCaptureService().status(), gsi: gsiStatus() }),
   appVersion: () => app.getVersion(),
+  appOpenExternal: (url) => openExternalSafe(url),
   updateCheck: () => checkForUpdates(),
   updateInstall: () => installUpdate(),
   // 浮层：面板与热键共用同一条链
@@ -186,6 +201,9 @@ const handlers: MainHandlers = {
   voiceCorrection: (input) => saveVoiceCorrection(input),
   ttsPreview: (text) => getTtsAdapter().preview(String(text ?? '')),
   voiceOutTest: () => getVoiceOutService().test(),
+  voiceOutCable: () => detectVirtualCable(),
+  // 一键安装：只搬官方包并提权拉起官方安装器；不静默注入驱动（VB-Cable 许可不允许并入安装流程）。
+  voiceOutCableInstall: () => installVirtualCable(),
   ttsOfflineState: () => offlineStatus(),
   ttsOfflineDownload: () => ensureOfflineModel(),
   asrStatus: () => asrStatus(),

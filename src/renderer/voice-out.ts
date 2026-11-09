@@ -10,6 +10,8 @@ import {
 interface ActivePlay {
   requestId: number
   player: HTMLAudioElement
+  /** 本机监听那一路（没开就是 null）；结束事件只报主路，监听路失败静默。 */
+  monitor: HTMLAudioElement | null
   objectUrl: string
   /** START 到达时真正起播的动作：每一单的 player 不同，闭包里带各自的句柄。 */
   begin: () => void
@@ -25,6 +27,7 @@ function reportEnded(requestId: number, ok: boolean, durationMs: number | null, 
 function cleanup(): void {
   if (!active) return
   active.player.pause()
+  active.monitor?.pause()
   active.player.src = ''
   URL.revokeObjectURL(active.objectUrl)
   active = null
@@ -58,6 +61,7 @@ async function handlePlay(payload: {
   audioBase64: string
   audioMime: string
   requestedDevice: string
+  monitorLocal: boolean
 }): Promise<void> {
   cleanup()
   const { requestId, audioBase64, audioMime, requestedDevice } = payload
@@ -88,6 +92,14 @@ async function handlePlay(payload: {
       }
     }
 
+    // 调试监听：同一份音频再开一路到系统默认输出。结束/失败只报主路——
+    // 监听路哑掉不该把「已播到虚拟声卡」判成失败。
+    let monitor: HTMLAudioElement | null = null
+    if (payload.monitorLocal) {
+      monitor = new Audio(objectUrl)
+      monitor.preload = 'auto'
+    }
+
     await waitForMetadata(player, 8000)
     const durationMs = Number.isFinite(player.duration) ? Math.round(player.duration * 1000) : null
 
@@ -102,13 +114,15 @@ async function handlePlay(payload: {
 
     const begin = (): void => {
       // 自动播放策略已在主进程关闭（autoplay-policy=no-user-gesture-required）。
+      // 监听路失败不汇报：它只是给人耳听的副本。
+      void monitor?.play().catch(() => {})
       void player.play().catch((err) => {
         reportEnded(requestId, false, null, `播放被拒绝: ${String(err)}`)
         cleanup()
       })
     }
 
-    active = { requestId, player, objectUrl, begin }
+    active = { requestId, player, objectUrl, begin, monitor }
     window.api.voiceOut.reportReady({
       requestId,
       ok: true,

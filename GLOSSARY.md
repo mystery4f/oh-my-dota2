@@ -23,6 +23,10 @@ _Avoid_: 播报、TTS 播放
 译文合成英文人声、经虚拟声卡送进游戏语音频道，队友听到声音的通道。
 _Avoid_: 麦克风输出、TTS 发送
 
+**虚拟声卡（virtual cable）**：
+VB-Cable 这块软件声卡的两个端点：播放端 `CABLE Input` 接声出，录音端 `CABLE Output` 接到 Dota 2 的语音输入；两者同名不同端，选反了就是「自己听得到、队友听不到」。
+_Avoid_: 虚拟麦克风、假麦
+
 **GV**：
 GPT-SoVITS 音色克隆引擎在本项目的简称，加载英雄音色包做离线合成。
 _Avoid_: so-vits、gptsovits

@@ -1,6 +1,7 @@
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { encodeWav16k } from '@shared/wav'
+import { openMicStream } from '../lib/mic'
 
 /** 录音上限：一条对讲顶多 20 秒，超时自动停——忘记停也不会一直占着麦克风。 */
 const RECORD_MAX_MS = 20_000
@@ -42,9 +43,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
   async function start(): Promise<void> {
     if (recording) return
     try {
-      recordStream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
-      })
+      recordStream = await openMicStream()
     } catch (err) {
       const micError = '麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）'
       sink.pushRow({ id: `voice-err-${Date.now()}`, ts: Date.now(), original: '🎤 ' + micError, translated: null })

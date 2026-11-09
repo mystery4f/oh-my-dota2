@@ -26,6 +26,8 @@ export type SegmentOutcome =
 export interface SegmentPlayerOptions {
   /** 说话音频的输出设备 id（空串 = 系统默认）。 */
   device: string
+  /** 本机监听：同一段音频开两路——虚拟声卡那路给游戏，默认输出那路给人耳（调试期用）。 */
+  monitorLocal: boolean
   /** 测试模式：只放音频、不模拟按键，键位逻辑整段跳过。 */
   testMode: boolean
   /** 说话键的 VK；null = 键名无法识别，原因经 onKeyError 报给调用方。 */
@@ -110,7 +112,8 @@ export class SegmentPlayer {
       requestId,
       audioBase64: audio.toString('base64'),
       audioMime: mime,
-      requestedDevice: this.options.device
+      requestedDevice: this.options.device,
+      monitorLocal: this.options.monitorLocal
     })
     const ready = await readyPromise
     if (!ready || !ready.ok) {

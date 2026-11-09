@@ -99,7 +99,7 @@ class VoiceOutService {
           : '测试句为空'
       console.log('VOICE_OUT_SKIP', JSON.stringify({ skip: plan.skip, engine: synth.engine }))
       showHint(error)
-      return { ok: false, durationMs: null, hint: null, error }
+      return { ok: false, durationMs: null, hint: null, sinkLabel: '', error }
     }
 
     const audio = audioOrNull
@@ -107,12 +107,16 @@ class VoiceOutService {
     const requestId = nextRequestId
     nextRequestId += 1
 
+    // 真正起播的那块设备由渲染层回报（onSpeak.sinkLabel）：面板测试结果要能说清「播到哪」。
+    let playedSink: string | null = null
     const player = new SegmentPlayer({
       device: settings.ttsOutputDevice,
+      monitorLocal: settings.ttsMonitorLocal,
       testMode: settings.voiceOutTestMode,
       keyVk: speakKeyVk(settings.ttsSpeakKey),
       onHint: showHint,
       onSpeak: ({ bytes, durationMs, sinkLabel, keyHeld, holdMs }) => {
+        playedSink = sinkLabel || null
         console.log(
           'VOICE_OUT_SPEAK',
           JSON.stringify({
@@ -142,17 +146,17 @@ class VoiceOutService {
     if (outcome.kind === 'not-ready') {
       console.log('VOICE_OUT_NOT_READY', JSON.stringify({ requestId, error: outcome.error }))
       showHint(`声出失败：${outcome.error}`)
-      return { ok: false, durationMs: null, hint: outcome.hint, error: outcome.error }
+      return { ok: false, durationMs: null, hint: outcome.hint, sinkLabel: '', error: outcome.error }
     }
     if (outcome.kind === 'timeout') {
       console.log('VOICE_OUT_ENDED_TIMEOUT', JSON.stringify({ requestId }))
-      return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, keyError, error: '播放结束事件超时（说话键已松开）' }
+      return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, sinkLabel: playedSink ?? '', keyError, error: '播放结束事件超时（说话键已松开）' }
     }
     if (outcome.kind === 'failed') {
-      return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, keyError, error: outcome.error ?? '播放失败' }
+      return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, sinkLabel: playedSink ?? '', keyError, error: outcome.error ?? '播放失败' }
     }
-    if (keyError) return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, keyError }
-    return { ok: true, durationMs: outcome.durationMs, hint: outcome.hint }
+    if (keyError) return { ok: false, durationMs: outcome.durationMs, hint: outcome.hint, sinkLabel: playedSink ?? '', keyError }
+    return { ok: true, durationMs: outcome.durationMs, hint: outcome.hint, sinkLabel: playedSink ?? '' }
   }
 
   /** 错误绝不往外抛：链上还排着别的活，抛出去会污染后面每一单。 */
@@ -174,6 +178,7 @@ class VoiceOutService {
     const plan = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, text)
     const player = new SegmentPlayer({
       device: settings.ttsOutputDevice,
+      monitorLocal: settings.ttsMonitorLocal,
       testMode: settings.voiceOutTestMode,
       keyVk: speakKeyVk(settings.ttsSpeakKey),
       onHint: showHint,

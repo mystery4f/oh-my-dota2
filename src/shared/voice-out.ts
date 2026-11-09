@@ -169,6 +169,54 @@ export function resolveOutputSink(requested: string, devices: AudioOutputDevice[
   return { sinkId: DEFAULT_SINK_ID, label: '', fallback: true, hint: SINK_FALLBACK_HINT }
 }
 
+/* ── 虚拟声卡（VB-Cable）───────────────────────────────────────────────
+ * 声出要进游戏语音，译文必须播到虚拟播放端（CABLE Input），
+ * 而游戏里的麦克风选的是它的录音端（CABLE Output）。
+ * 设备名匹配与检测结果形状都收在这里：主进程拿它验驱动层清单，面板拿它标状态。
+ */
+
+/** 端点名形如 "CABLE Input (VB-Audio Virtual Cable)"：驱动名与端点名都带 vb-audio / cable。 */
+const VIRTUAL_CABLE_NAME = /vb-audio|cable/i
+
+/** 单个设备名像不像虚拟声卡端点。 */
+export function isVirtualCableName(name: string): boolean {
+  return VIRTUAL_CABLE_NAME.test(name)
+}
+
+/** 从设备名清单里挑出虚拟声卡端点（去重保序）；空数组 = 没装。 */
+export function matchVirtualCable(names: string[]): string[] {
+  const hits = names.map((name) => name.trim()).filter((name) => name.length > 0 && isVirtualCableName(name))
+  return [...new Set(hits)]
+}
+
+/** 面板设备清单里挑出虚拟声卡的播放端（CABLE Input）；找不到返回 null。 */
+export function findCableOutput(devices: AudioOutputDevice[]): AudioOutputDevice | null {
+  return devices.find((device) => isVirtualCableName(device.label)) ?? null
+}
+
+/** 虚拟声卡检测结果。error 非空表示「没查成」，不能当成「没装」。 */
+export interface VirtualCableStatus {
+  /** 驱动或端点存在：驱动服务在，或设备清单里出现了 CABLE 端点。 */
+  installed: boolean
+  /** 命中的端点名（播放端/录音端都算），直接显示给用户。 */
+  endpoints: string[]
+  /** 驱动在、端点却没出现在设备清单：多半没重启，或端点被禁用。 */
+  driverOnly: boolean
+  /** 检测本身没跑成（PowerShell 不可用/超时）的说明。 */
+  error: string | null
+}
+
+/** 一键安装 VB-Cable 的结果：下载解压成功才会 launched；驱动生效仍要用户点完向导并重启。 */
+export interface CableInstallResult {
+  ok: boolean
+  /** 官方安装器是否已提权启动（UAC 被拒时为 false，包仍留在 dir 里可以手动双击）。 */
+  launched: boolean
+  /** 包的解压目录。 */
+  dir: string
+  /** 失败原因的说明；ok 时为空。 */
+  error: string | null
+}
+
 /** 说话键的按住窗口：提前 PTT_MARGIN_MS 按下，音频结束后再过 PTT_MARGIN_MS 松开。 */
 export interface PttWindow {
   /** 播放开始前多久按下（毫秒）。 */

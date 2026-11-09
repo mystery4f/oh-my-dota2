@@ -1,4 +1,4 @@
-import type { VoiceReplyStage } from './voice-out'
+import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
 import type { HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import { DEFAULT_HOTKEYS } from './hotkeys'
 
@@ -147,6 +147,8 @@ export interface AppSettings {
   proxyUrl: string
   targetLang: string
   ttsOutputDevice: string
+  /** 调试用：译文同时播到系统默认扬声器；正式使用时关掉，本机就只剩游戏里能听到。 */
+  ttsMonitorLocal: boolean
   /**
    * 声出引擎：edge = 英文神经嗓占位（默认）；offline = 本地离线模型（中文嗓，念英文吞字）；
    * sovits = GV（GPT-SoVITS）音色包——音色由参考音频决定，权重切换走现有音色包管线。
@@ -327,6 +329,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proxyUrl: '',
   targetLang: 'zh-CN',
   ttsOutputDevice: '',
+  ttsMonitorLocal: false,
   ttsSpeakKey: 'F5',
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
@@ -415,10 +418,18 @@ export interface VoiceOutTestResult {
   durationMs: number | null
   /** 输出设备回退等提示；无提示为 null。 */
   hint: string | null
+  /** 实际播到哪块输出设备；没起播（合成失败 / 窗口没就绪）时为空串。 */
+  sinkLabel: string
   /** 说话键按下/松开失败的说明（播放照常进行，只是频道没开）。 */
   keyError?: string
   /** 整体失败原因（合成失败 / 窗口超时等）。 */
   error?: string
+}
+
+/** 打开外部链接的结果：只放行 https，失败原因直接给用户看。 */
+export interface OpenExternalResult {
+  ok: boolean
+  error: string | null
 }
 
 /** 主进程 → 声出窗口：播这段音频，并按 requestedDevice 选输出。 */
@@ -427,6 +438,8 @@ export interface VoiceOutPlayRequest {
   audioBase64: string
   audioMime: string
   requestedDevice: string
+  /** 本机也放一份（调试用）：渲染层额外开一个默认输出播放器，与虚拟声卡那路同源同起。 */
+  monitorLocal: boolean
 }
 
 /** 声出窗口 → 主进程：元数据就绪（时长已知、setSinkId 已生效，可以开按说话键了）。 */
@@ -693,6 +706,8 @@ export const IPC = {
   TRANSLATION_CACHE_CLEAR: 'cache:clear',
   UPDATE_CHECK: 'update:check',
   APP_VERSION: 'app:version',
+  /** 只允许 https：面板里的安装引导用它打开官方下载页。 */
+  APP_OPEN_EXTERNAL: 'app:open-external',
   UPDATE_INSTALL: 'update:install',
   UPDATE_STATUS: 'update:status',
   CAPTURE_UPDATE: 'capture:update',
@@ -781,6 +796,10 @@ export const IPC = {
   /** #46：声出就绪快照（读一次 + 变更推送），判断在 shared 的纯函数里。 */
   VOICE_OUT_READINESS: 'voice-out:readiness',
   VOICE_OUT_READINESS_STATE: 'voice-out:readiness-state',
+  /** 虚拟声卡（VB-Cable）检测：声出能不能进游戏语音的前置。 */
+  VOICE_OUT_CABLE: 'voice-out:cable',
+  /** 一键安装 VB-Cable：下载官方包 → 解压 → 提权启动官方安装器（UAC/重启仍由用户完成）。 */
+  VOICE_OUT_CABLE_INSTALL: 'voice-out:cable-install',
   OVERLAY_GEOMETRY: 'overlay:geometry',
   OVERLAY_GEOMETRY_RESET: 'overlay:geometry-reset',
   OVERLAY_VOICE: 'overlay:voice',
@@ -965,6 +984,7 @@ export const ipcContract = {
   onCaptureUpdate: listen<CaptureEntry[]>(IPC.CAPTURE_UPDATE),
   onCaptureReplace: listen<CaptureEntry[]>(IPC.CAPTURE_REPLACE),
   appVersion: invoke<[], string>(IPC.APP_VERSION),
+  appOpenExternal: invoke<[string], OpenExternalResult>(IPC.APP_OPEN_EXTERNAL),
   updateCheck: invoke<[], UpdateState>(IPC.UPDATE_CHECK),
   updateInstall: invoke<[], boolean>(IPC.UPDATE_INSTALL),
   onUpdateStatus: listen<UpdateState>(IPC.UPDATE_STATUS),
@@ -1022,6 +1042,8 @@ export const ipcContract = {
   // #46 声出就绪：一键把服务拉起 + 读/订阅就绪快照（判断只有一份，在 shared 里）。
   sovitsStartServer: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_START_SERVER),
   voiceOutReadiness: invoke<[], VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS),
+  voiceOutCable: invoke<[], VirtualCableStatus>(IPC.VOICE_OUT_CABLE),
+  voiceOutCableInstall: invoke<[], CableInstallResult>(IPC.VOICE_OUT_CABLE_INSTALL),
   onVoiceOutReadiness: listen<VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS_STATE),
   // 训练管理与 ASR 微调
   trainStart: invoke<[TrainStartRequest], TrainStartResult>(IPC.TRAIN_START),

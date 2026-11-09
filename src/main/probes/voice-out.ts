@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { OFFLINE_VOICES } from '@shared/ipc'
+import { DEFAULT_SETTINGS, OFFLINE_VOICES } from '@shared/ipc'
 import { speechFailHint } from '@shared/speech-plan'
 import {
   DEFAULT_SINK_ID,
@@ -12,6 +12,8 @@ import {
   VOICE_OUT_VOICES,
   decideVoiceOutReply,
   decideVoiceOutTest,
+  findCableOutput,
+  matchVirtualCable,
   normalizeSpeakKey,
   normalizeVoiceOutEngine,
   pickPlayableSegments,
@@ -23,6 +25,7 @@ import {
   spokenStatusLine,
   type AudioOutputDevice
 } from '@shared/voice-out'
+import { pickCaptureDevice } from '@shared/mic'
 import {
   judgeVoiceOutReadiness,
   sameVoiceOutReadiness,
@@ -32,6 +35,7 @@ import {
   type VoiceOutReadinessInput
 } from '@shared/voice-out-readiness'
 import { splitForSpeech } from '../services/voice/speech-pipeline'
+import { pickCablePackUrl } from '../services/voice/virtual-cable-install'
 
 /**
  * 声出探针（--voice-out-probe）：只验「脑子」，不碰网络、不碰驱动、不开游戏。
@@ -216,6 +220,67 @@ export function runVoiceOutProbe(): void {
   )
   const noDevices = resolveOutputSink('{cable-0}.0000', [])
   push('设备列表为空也照样回退，不抛错', noDevices.sinkId === DEFAULT_SINK_ID && noDevices.fallback, JSON.stringify(noDevices))
+
+  const cableHits = matchVirtualCable([
+    'CABLE Input (VB-Audio Virtual Cable)',
+    'CABLE Output (VB-Audio Virtual Cable)',
+    'VB-Audio Virtual Cable',
+    '扬声器 (Realtek)',
+    'CABLE Input (VB-Audio Virtual Cable)'
+  ])
+  push(
+    '虚拟声卡端点：VB-Cable 播放/录音端都算，普通输出不算，重复项去重',
+    cableHits.length === 3 &&
+      cableHits[0].startsWith('CABLE Input') &&
+      cableHits[1].startsWith('CABLE Output') &&
+      !cableHits.some((name) => name.includes('Realtek')),
+    JSON.stringify(cableHits)
+  )
+  const cableNone = matchVirtualCable(['扬声器 (Realtek)', '  '])
+  push('没有 VB-Cable 时返回空清单', cableNone.length === 0, JSON.stringify(cableNone))
+  const cableOutput = findCableOutput(devices)
+  push(
+    '设备清单里挑出 CABLE Input（面板「设为输出」用）',
+    cableOutput?.deviceId === '{cable-0}.0000',
+    JSON.stringify(cableOutput)
+  )
+
+  // 一键安装：官方页同时挂多个历史版本，取版本号最大的那个；页面没链接时返回 null 交给兜底常量。
+  const packHtml = [
+    'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip',
+    'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack46.zip'
+  ].join(' ')
+  push(
+    '一键安装取官方页最新驱动包（版本号最大），页面没链接时返回 null',
+    pickCablePackUrl(packHtml)?.endsWith('VBCABLE_Driver_Pack46.zip') === true &&
+      pickCablePackUrl('<p>no link</p>') === null,
+    String(pickCablePackUrl(packHtml))
+  )
+
+  // 本机监听默认关：正式形态就是「本机听不到、队友听得到」，要看译文得自己开开关。
+  push(
+    '本机监听默认关（避免正式对局里被自己的译文分心）',
+    DEFAULT_SETTINGS.ttsMonitorLocal === false,
+    String(DEFAULT_SETTINGS.ttsMonitorLocal)
+  )
+
+  // —— 决策二·补：录音设备选择（系统默认输入可能被设成虚拟声卡） ——
+  const cableDefault: { deviceId: string; label: string }[] = [
+    { deviceId: 'default', label: 'Default - CABLE Output (VB-Audio Virtual Cable)' },
+    { deviceId: 'communications', label: 'Communications - 耳机 (LINKLIKE Cloudpods)' },
+    { deviceId: 'mic-1', label: '麦克风阵列 (适用于数字麦克风的英特尔® 智音技术)' },
+    { deviceId: 'cable-in', label: 'CABLE Output (VB-Audio Virtual Cable)' }
+  ]
+  push('默认输入是虚拟声卡时换回真实麦克风', pickCaptureDevice(cableDefault) === 'mic-1', String(pickCaptureDevice(cableDefault)))
+  push(
+    '只有虚拟线和立体声混音时不动系统默认',
+    pickCaptureDevice([
+      { deviceId: 'cable-in', label: 'CABLE Output (VB-Audio Virtual Cable)' },
+      { deviceId: 'mix', label: '立体声混音 (Realtek)' }
+    ]) === null,
+    String(pickCaptureDevice([{ deviceId: 'cable-in', label: 'CABLE Output (VB-Audio Virtual Cable)' }, { deviceId: 'mix', label: '立体声混音 (Realtek)' }]))
+  )
+  push('显式指定的麦克风可用时优先', pickCaptureDevice(cableDefault, 'mic-1') === 'mic-1', String(pickCaptureDevice(cableDefault, 'mic-1')))
 
   // —— 决策三：说话键时序 ——
   const normal = pttWindow(3000)
