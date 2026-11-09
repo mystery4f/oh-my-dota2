@@ -4,8 +4,15 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { FtRecInfo } from '@shared/ipc'
 import { ftWavDurationMs } from '@shared/train/asr-ft'
-import { parseRecordingKeyParts, RECORDING_GROUP_SHAPE, resolveFtScript, scriptTextForKey } from '@shared/train/recording'
-import type { FtScriptCandidate, FtScriptState } from '@shared/train/recording'
+import {
+  parseRecordingKeyParts,
+  RECORDING_GROUP_SHAPE,
+  resolveFtScript,
+  scriptPreamble,
+  scriptTextForKey,
+  serializeFtScript
+} from '@shared/train/recording'
+import type { FtScriptCandidate, FtScriptGroup, FtScriptState } from '@shared/train/recording'
 import { isCorrectionTakeKey } from '@shared/train/corrections'
 import { findDatasetEntry, forgetDatasetTake, recordDatasetTake } from './run-store'
 
@@ -39,6 +46,33 @@ async function readScriptCandidate(path: string): Promise<FtScriptCandidate> {
 export async function readFtScript(): Promise<FtScriptState> {
   const [data, bundled] = await Promise.all([readScriptCandidate(ftUserScriptPath()), readScriptCandidate(ftScriptPath())])
   return resolveFtScript(data, bundled)
+}
+
+/**
+ * 保存读稿：把面板编辑后的组写回数据目录那份。
+ * 开头那段说明从「当前生效的读稿」原样带回去（第一次编辑时它来自随包稿），改稿不该顺手删掉使用说明。
+ * 上一份先备份成 `asr-ft-script.bak.md`——改错了能直接拿回来，不必重录任何东西。
+ */
+export async function saveFtScript(groups: readonly FtScriptGroup[]): Promise<FtScriptState> {
+  const effective = await readScriptCandidate(ftUserScriptPath())
+  const source = effective.markdown ?? (await readScriptCandidate(ftScriptPath())).markdown ?? ''
+  const markdown = serializeFtScript(groups, scriptPreamble(source))
+  if (effective.markdown !== null) {
+    await writeFile(userScriptBackupPath(), effective.markdown, 'utf8')
+  }
+  await writeFile(ftUserScriptPath(), markdown, 'utf8')
+  return readFtScript()
+}
+
+/** 恢复随包读稿：删掉数据目录那份就回到内置稿（不碰备份，反悔还能再拿回来）。 */
+export async function resetFtScript(): Promise<FtScriptState> {
+  if (existsSync(ftUserScriptPath())) await unlink(ftUserScriptPath())
+  return readFtScript()
+}
+
+/** 自定义读稿的备份：编辑器每次保存前把上一版写到这里。 */
+export function userScriptBackupPath(): string {
+  return join(app.getPath('userData'), 'asr-ft-script.bak.md')
 }
 
 function recDir(): string {

@@ -44,6 +44,8 @@ const LOG_RING_LIMIT = 500
 const BROADCAST_MIN_MS = 250
 /** 训练栈 OOM 的原文标记：torch 抛 `torch.OutOfMemoryError: CUDA out of memory`，也有 RuntimeError 包装的写法。 */
 const OOM_RE = /CUDA out of memory|OutOfMemoryError|out of memory/i
+/** Python 收场那行：`RuntimeError: …` / `some.module.Error: …`，用来把 exit code 变成一句人话。 */
+const ERROR_LINE_RE = /(?:^|\s)(?:[A-Za-z_][\w.]*Error|Exception):\s*\S/
 /** 训练日志落盘上限：一圈环形日志挡不住崩溃现场，磁盘这份才是事后唯一证据。 */
 const TRAIN_LOG_MAX_BYTES = 4 * 1024 * 1024
 let trainLogSize = -1
@@ -308,6 +310,20 @@ class TrainManager {
     return this.logs.slice(-60).some((line) => OOM_RE.test(line.text))
   }
 
+  /**
+   * 退场原因只写 exit code 等于没说：Python 那边已经把 traceback 打进日志了，
+   * 这里捞最后一条真错误（`XxxError: …` / `Exception: …`）附在收场文案后面。
+   */
+  private lastErrorLine(): string | null {
+    const tail = this.logs.slice(-80)
+    for (let index = tail.length - 1; index >= 0; index--) {
+      const text = tail[index].text.trim()
+      if (!ERROR_LINE_RE.test(text)) continue
+      return text.length > 160 ? `${text.slice(0, 157)}…` : text
+    }
+    return null
+  }
+
   private finish(status: Extract<TrainTaskStatus, 'done' | 'failed' | 'stopped'>, code: number | null): void {
     // asr-ft 失败收场回写 run.json（成功标 trained 走链回调、转正标 applied 走 apply）；缺账本就跳过。
     if (status === 'failed' && this.request?.asrFt) markRunStatus(this.request.asrFt.data.runDir, 'failed')
@@ -320,7 +336,9 @@ class TrainManager {
           ? '已停止'
           : this.sawOom()
             ? '失败：显存不足（CUDA OOM），关掉占卡程序再点一次'
-            : `失败 (exit ${code ?? '?'})`
+            : this.lastErrorLine() === null
+              ? `失败 (exit ${code ?? '?'})`
+              : `失败 (exit ${code ?? '?'})：${this.lastErrorLine()}`
     if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
     // 记录收场：终态 + 失败原因 + 从磁盘取指标（训练框架自己写的文件，比 stdout 可靠）。
     if (this.run) {

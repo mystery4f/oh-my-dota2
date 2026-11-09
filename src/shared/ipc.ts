@@ -10,7 +10,7 @@ import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@s
 import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
 import type { TrainRunRecord } from '@shared/train/run'
 import type { AsrState } from '@shared/asr/models'
-import type { FtScriptState } from '@shared/train/recording'
+import type { FtScriptGroup, FtScriptState } from '@shared/train/recording'
 import type { FtCorrectionInput, FtCorrectionSaveResult } from '@shared/train/corrections'
 
 // 读稿的类型归纯缝（解析与来源选择都在那里），契约只把它们带出来给渲染端。
@@ -744,6 +744,9 @@ export const IPC = {
   TRAIN_GV_REGISTER: 'train:gv-register',
   // ASR 微调录音（T4a）：内置读稿 + 录音存取，全部落在应用数据目录 asr-ft/ 下。
   FT_SCRIPT_READ: 'ft:script-read',
+  // 读稿编辑器：保存写回数据目录那份（上一版备份成 asr-ft-script.bak.md），恢复则删掉它回到随包稿。
+  FT_SCRIPT_SAVE: 'ft:script-save',
+  FT_SCRIPT_RESET: 'ft:script-reset',
   FT_REC_LIST: 'ft:rec-list',
   FT_REC_SAVE: 'ft:rec-save',
   FT_REC_DELETE: 'ft:rec-delete',
@@ -1023,6 +1026,8 @@ export const ipcContract = {
   trainGvWebui: invoke<[{ open: boolean }], { ok: boolean; running: boolean; error?: string }>(IPC.TRAIN_GV_WEBUI),
   trainGvRegister: invoke<[GvRegisterPayload], GvRegisterResult>(IPC.TRAIN_GV_REGISTER),
   ftScriptRead: invoke<[], FtScriptState>(IPC.FT_SCRIPT_READ),
+  ftScriptSave: invoke<[FtScriptGroup[]], FtScriptState>(IPC.FT_SCRIPT_SAVE),
+  ftScriptReset: invoke<[], FtScriptState>(IPC.FT_SCRIPT_RESET),
   ftRecList: invoke<[], FtRecInfo[]>(IPC.FT_REC_LIST),
   ftRecSave: invoke<[string, string, Uint8Array], FtRecInfo>(IPC.FT_REC_SAVE),
   ftRecDelete: invoke<[string, string], void>(IPC.FT_REC_DELETE),

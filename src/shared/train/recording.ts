@@ -213,3 +213,130 @@ export function scriptTextForKey(groups: readonly FtScriptGroup[], key: string):
   if (!group || group.mode !== 'lines') return null
   return group.lines.find((line) => line.no === Number(match[3]))?.text ?? null
 }
+
+/* ── 读稿编辑器（面板抽屉）：序列化与增删改都是纯函数，IO 留在主进程 ────────────── */
+
+/** 编辑结果：改不动就说人话，绝不静默返回原对象让面板以为存上了。 */
+export type FtScriptEdit = { ok: true; groups: FtScriptGroup[] } | { ok: false; error: string }
+
+/** 读稿开头那段说明（第一个 `## Gxx` 之前的一切）：编辑保存时原样带回去，别把说明吃掉。 */
+export function scriptPreamble(markdown: string): string {
+  const match = /^##\s+G\d+/m.exec(markdown)
+  if (!match) return markdown.trim() ? `${markdown.replace(/\s+$/, '')}\n` : ''
+  return markdown.slice(0, match.index)
+}
+
+/**
+ * 序列化回 markdown：与 parseFtScript 严格往返（组标题、编号句、组说明）。
+ * numbers 允许断号——编辑器只追加不重排，`G14-L07` 这类键才不会挪位。
+ */
+export function serializeFtScript(groups: readonly FtScriptGroup[], preamble = ''): string {
+  const parts: string[] = []
+  const head = preamble.replace(/\s+$/, '')
+  if (head) parts.push(head, '')
+  for (const group of groups) {
+    parts.push(`## ${group.id}${group.title ? ` ${group.title}` : ''}`)
+    for (const line of group.lines) parts.push(`${line.no}. ${line.text}`)
+    if (group.note) parts.push(group.note)
+    parts.push('')
+  }
+  return `${parts.join('\n').replace(/\s+$/, '')}\n`
+}
+
+/** 下一个没被占用的组号（G01…G99）：满了就 null，面板据此禁用「新建组」。 */
+export function nextGroupId(groups: readonly FtScriptGroup[]): string | null {
+  const used = new Set(groups.map((group) => group.id))
+  for (let no = 1; no <= 99; no += 1) {
+    const id = `G${String(no).padStart(2, '0')}`
+    if (!used.has(id)) return id
+  }
+  return null
+}
+
+function findGroup(groups: readonly FtScriptGroup[], groupId: string): FtScriptGroup | null {
+  return groups.find((group) => group.id === groupId) ?? null
+}
+
+/** 新建组：标题留空也行，句号为空的组按 parseFtScript 的规则算自由说。 */
+export function addScriptGroup(groups: readonly FtScriptGroup[], title: string): FtScriptEdit {
+  const id = nextGroupId(groups)
+  if (id === null) return { ok: false, error: '组号用完了（G01–G99）——先删掉不用的组' }
+  return { ok: true, groups: [...groups, { id, title: title.trim(), mode: 'lines', lines: [], note: '' }] }
+}
+
+/** 改组标题：自由说组也能改标题（它的 wav 不按行号命名，标题只是给人看的）。 */
+export function renameScriptGroup(
+  groups: readonly FtScriptGroup[],
+  groupId: string,
+  title: string
+): FtScriptEdit {
+  if (!findGroup(groups, groupId)) return { ok: false, error: `没有 ${groupId} 这一组` }
+  return {
+    ok: true,
+    groups: groups.map((group) => (group.id === groupId ? { ...group, title: title.trim() } : group))
+  }
+}
+
+/** 追加一句到组末：编号取组内最大值 +1，不重排任何已有编号（否则已录的键会全部挪位）。 */
+export function appendScriptLine(
+  groups: readonly FtScriptGroup[],
+  groupId: string,
+  text: string
+): FtScriptEdit {
+  const group = findGroup(groups, groupId)
+  if (!group) return { ok: false, error: `没有 ${groupId} 这一组` }
+  const body = text.trim()
+  if (!body) return { ok: false, error: '句子是空的' }
+  if (group.mode === 'free' && group.lines.length === 0) {
+    return { ok: false, error: `${groupId} 是自由说组：它的录音不按行号命名，不能加句子` }
+  }
+  const no = group.lines.reduce((max, line) => Math.max(max, line.no), 0) + 1
+  return {
+    ok: true,
+    groups: groups.map((item) =>
+      item.id === groupId ? { ...item, mode: 'lines', lines: [...item.lines, { no, text: body }] } : item
+    )
+  }
+}
+
+/** 改一句的正文：编号不动——同一个 `Gxx-Lnn` 换文本，面板据此把该行标成「需重录」。 */
+export function updateScriptLine(
+  groups: readonly FtScriptGroup[],
+  key: string,
+  text: string
+): FtScriptEdit {
+  const body = text.trim()
+  if (!body) return { ok: false, error: '句子不能改成空的（要删就删这一行）' }
+  let hit = false
+  const next = groups.map((group) => {
+    const lines = group.lines.map((line) => {
+      if (recordingKey(group.id, 'lines', line.no) !== key) return line
+      hit = true
+      return { ...line, text: body }
+    })
+    return lines === group.lines ? group : { ...group, lines }
+  })
+  if (!hit) return { ok: false, error: `稿子里没有 ${key} 这一句` }
+  return { ok: true, groups: next }
+}
+
+/** 删一句：编号不重排。已经录过的 wav 会变成孤儿，删之前由面板告警（纯缝不碰磁盘）。 */
+export function deleteScriptLine(groups: readonly FtScriptGroup[], key: string): FtScriptEdit {
+  let hit = false
+  const next = groups.map((group) => {
+    const lines = group.lines.filter((line) => {
+      const match = recordingKey(group.id, 'lines', line.no) === key
+      if (match) hit = true
+      return !match
+    })
+    return lines.length === group.lines.length ? group : { ...group, lines }
+  })
+  if (!hit) return { ok: false, error: `稿子里没有 ${key} 这一句` }
+  return { ok: true, groups: next.map((group) => (group.lines.length === 0 ? { ...group, mode: 'free' } : group)) }
+}
+
+/** 删整组：录音文件不动（面板负责说清哪些 wav 变孤儿）。 */
+export function deleteScriptGroup(groups: readonly FtScriptGroup[], groupId: string): FtScriptEdit {
+  if (!findGroup(groups, groupId)) return { ok: false, error: `没有 ${groupId} 这一组` }
+  return { ok: true, groups: groups.filter((group) => group.id !== groupId) }
+}

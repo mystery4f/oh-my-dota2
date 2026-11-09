@@ -372,6 +372,15 @@ const implemented = {
   },
   trainGvRegister: async ({ name }) => ({ ok: true, entry: { name } }),
   ftScriptRead: async () => stubScript,
+  // 预览里的编辑保存只改内存：真写盘只有 Electron 里才有，但抽屉的往返能照着看。
+  ftScriptSave: async (groups) => {
+    stubScript.groups = groups as typeof stubScript.groups
+    stubScript.source = 'data'
+    stubScript.path = 'data/asr-ft-script.md'
+    stubScript.warning = null
+    return stubScript
+  },
+  ftScriptReset: async () => stubScript,
   ftRecList: async () => [...stubRecs],
   ftRecSave: async (group, line, bytes) => {
     // 预览里也真的「存下」：保存后列表带上新标记，自动前进才有东西可看。
@@ -451,7 +460,9 @@ const implemented = {
       estimateBasis: estimate.fresh.basis,
       // 纠错样本（#66）：预览里点「存」假存一条，这一行跟着涨（真的写盘只有 Electron 里才有）。
       corrections: judgeCorrectionSamples(stubCorrections),
-      install: null
+      install: null,
+      // 预览里挑两句「稿子改了但没重录」的样本，好让琥珀色行与增量置灰看得见。
+      scriptStale: ['G14-L02', 'G14-L05']
     }
   },
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),

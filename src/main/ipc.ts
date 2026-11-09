@@ -47,7 +47,16 @@ import { getOverlayManager } from './windows/overlay'
 import { broadcastToWindows as broadcast } from './windows/broadcast'
 import { listTrainRuns, loadTrainRun } from './services/train/run-store'
 import { getTrainManager } from './services/train/manager'
-import { ftRecDelete, ftRecList, ftRecPath, ftRecRead, ftRecSave, readFtScript } from './services/train/ft-record'
+import {
+  ftRecDelete,
+  ftRecList,
+  ftRecPath,
+  ftRecRead,
+  ftRecSave,
+  readFtScript,
+  resetFtScript,
+  saveFtScript
+} from './services/train/ft-record'
 import { prepareFtDataset } from './services/train/ft-dataset'
 import {
   applyAsrFtModel,
@@ -271,6 +280,9 @@ const handlers: MainHandlers = {
   trainSnapshot: () => getTrainManager().snapshot(),
   // ASR 微调录音（T4a）：读稿解析 + 录音 CRUD，文件全在 userData/asr-ft/ 下。
   ftScriptRead: () => readFtScript(),
+  // 读稿编辑器：保存写回数据目录那份（先备份上一版），恢复则删掉它回到随包稿。
+  ftScriptSave: (groups) => saveFtScript(groups),
+  ftScriptReset: () => resetFtScript(),
   ftRecList: () => ftRecList(),
   ftRecSave: (group, line, data) => ftRecSave(group, line, data),
   ftRecDelete: (group, line) => ftRecDelete(group, line),

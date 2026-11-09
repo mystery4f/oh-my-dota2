@@ -9,6 +9,8 @@ import { CORRECTION_GROUP } from '@shared/train/corrections'
 import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
+import { Modal } from '../components/modal'
+import { ScriptEditor } from '../components/script-editor'
 import { PreflightList, RunRow, Sparkline } from '../components/run-view'
 import { TrainTaskRow } from '../components/train-task-row'
 import { useTrainConsole } from '../use-train-console'
@@ -29,6 +31,8 @@ const FT_MODE_OPTIONS: { id: AsrFtMode; label: string }[] = [
  */
 export function AsrTrainPage(): React.ReactElement {
   const [script, setScript] = React.useState<FtScriptState | null>(null)
+  // 读稿编辑抽屉：组和句子都在里面改，保存才落盘（改文本 = 那句要重录）。
+  const [editingScript, setEditingScript] = React.useState(false)
   const [recs, setRecs] = React.useState<Record<string, FtRecInfo>>({})
   const [status, setStatus] = React.useState<AsrFtStatusResult | null>(null)
   const [runs, setRuns] = React.useState<TrainRunRecord[]>([])
@@ -156,6 +160,31 @@ export function AsrTrainPage(): React.ReactElement {
                 {script.source === 'data' ? '自定义' : '随包'}
               </StatusPill>
             ) : null}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!script}
+              title="在面板里改组和句子，保存后写回数据目录那份读稿"
+              onClick={() => setEditingScript(true)}
+            >
+              编辑
+            </Button>
+            {script?.source === 'data' ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                title="删掉数据目录那份读稿，回到随包自带的那份"
+                onClick={() =>
+                  void runAction('恢复随包读稿', async () => {
+                    const next = await window.api.ftScriptReset()
+                    setScript(next)
+                    return '已回到随包读稿'
+                  })
+                }
+              >
+                恢复随包
+              </Button>
+            ) : null}
           </Row>
           {script?.warning ? <p className="px-4 py-2 text-xs text-amber-300">{script.warning}</p> : null}
           <Row
@@ -220,13 +249,23 @@ export function AsrTrainPage(): React.ReactElement {
             <Row label="句子" stacked hint={currentLine ? currentLine.text : '这一组没有稿子'}>
               <div className="flex flex-wrap items-center gap-1">
                 {group.lines.map((line) => {
-                  const has = recs[recordingKey(group.id, group.mode, line.no)]
+                  const key = recordingKey(group.id, group.mode, line.no)
+                  const has = recs[key]
+                  // 稿子改了但这句还是按旧文本录的：wav 在，但它现在会让「增量」判据不通过。
+                  const stale = has !== undefined && (status?.scriptStale ?? []).includes(key)
                   return (
                     <Button
                       key={line.no}
                       size="sm"
                       variant={line.no === lineNo ? 'default' : has ? 'secondary' : 'ghost'}
-                      title={has ? `第 ${line.no} 句已录，点一下重录（会覆盖）` : `第 ${line.no} 句还没录`}
+                      className={stale ? 'border border-amber-500/50 text-amber-300' : undefined}
+                      title={
+                        stale
+                          ? `第 ${line.no} 句的稿子改过了，重录才能进新的训练集`
+                          : has
+                            ? `第 ${line.no} 句已录，点一下重录（会覆盖）`
+                            : `第 ${line.no} 句还没录`
+                      }
                       aria-label={`第 ${line.no} 句${has ? '（已录）' : '（未录）'}`}
                       onClick={() => setLineNo(line.no)}
                     >
@@ -484,6 +523,22 @@ export function AsrTrainPage(): React.ReactElement {
           </Row>
         </Group>
       </Panel>
+      <Modal
+        open={editingScript}
+        title="编辑读稿"
+        hint="组和句子都能增删改；删掉的编号不再复用。保存后写回数据目录的读稿，改过的句子需要重录。"
+        onClose={() => setEditingScript(false)}
+      >
+        <ScriptEditor
+          groups={groups}
+          recordedKeys={Object.keys(recs)}
+          onClose={() => setEditingScript(false)}
+          onSaved={(next) => {
+            setScript((prev) => (prev ? { ...prev, groups: next } : prev))
+            void refreshStatus()
+          }}
+        />
+      </Modal>
     </>
   )
 }

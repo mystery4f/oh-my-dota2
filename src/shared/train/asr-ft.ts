@@ -3,6 +3,7 @@ import { ASR_ENGINE_LIST, ASR_ENGINES, type AsrEngineId } from '../asr/engines'
 import { WAV_BYTES_PER_MS, WAV_HEADER_BYTES } from '../wav'
 import type { FtCorrectionSamples } from './corrections'
 import { holdoutTakes } from './dataset'
+import { scriptTextForKey, type FtScriptGroup } from './recording'
 
 /** 训练入口的形状：qwen3 用官方 sft 脚本 + 本地底模目录；funasr 用 `python -m funasr.bin.train` + hub 模型 id。 */
 export type AsrFtTrainer = 'qwen3-sft' | 'funasr-paraformer'
@@ -398,6 +399,8 @@ export interface AsrFtStatusResult {
   estimate: Record<AsrFtMode, FtCostEstimate>
   /** 估算依据的一句话（面板提示用；与 estimate.label 同源，避免面板自己拼）。 */
   estimateBasis: string
+  /** 稿子改了、但这条录音还是按旧文本录的键（Gxx-Lnn）：面板把这些行标成「需重录」。 */
+  scriptStale: string[]
 }
 
 /** 开训闸门看到的两件事实：显存提示，以及上一轮的权重是否真的能接（增量）。panel 只显示，不自己推。 */
@@ -511,6 +514,56 @@ export function ftLedgerMatchedOnDisk(
   if (past.length === 0) return false
   const now = new Map(current.map((c) => [c.key, `${c.bytes}|${c.mtimeMs}`]))
   return past.every((e) => now.get(e.key) === `${e.bytes}|${e.mtimeMs}`)
+}
+
+/**
+ * 谱系判据（增量能不能接着跑）：上次打包过的每一条，键、文本、字节、mtime 都得和今天一模一样。
+ * 只比字节/mtime 不够——改稿但没重录时 wav 没动，账本文本却变了：那时接着旧权重训，
+ * 等于把新标签硬塞进旧模型，用户的口径是「改了就回底模重训，只有新增才增量」。
+ */
+export interface FtLineage {
+  incremental: boolean
+  /** 键还在但变了（文本或音频）：面板点名哪几句。 */
+  changed: { key: string; from: string; to: string }[]
+  /** 上次训过、现在稿子里没了：增量接不上。 */
+  removed: string[]
+}
+
+export function ftLedgerLineage(
+  past: readonly FtLedgerEntry[],
+  current: readonly FtLedgerEntry[]
+): FtLineage {
+  if (past.length === 0) return { incremental: false, changed: [], removed: [] }
+  const now = new Map(current.map((entry) => [entry.key, entry]))
+  const changed: { key: string; from: string; to: string }[] = []
+  const removed: string[] = []
+  for (const entry of past) {
+    const live = now.get(entry.key)
+    if (!live) {
+      removed.push(entry.key)
+      continue
+    }
+    if (live.bytes !== entry.bytes || live.mtimeMs !== entry.mtimeMs || live.text !== entry.text) {
+      changed.push({ key: entry.key, from: entry.text, to: live.text })
+    }
+  }
+  return { incremental: changed.length === 0 && removed.length === 0, changed, removed }
+}
+
+/**
+ * 需要重录的键：稿子改了文本，但磁盘上这条录音还是按旧文本录的。
+ * 判据是「账本里落的文本 ≠ 当前稿子的文本」——重录会覆盖 wav 并把新文本写进账本，标记自动消失。
+ */
+export function scriptStaleKeys(
+  groups: readonly FtScriptGroup[],
+  ledger: readonly FtLedgerEntry[]
+): string[] {
+  return ledger
+    .filter((entry) => {
+      const text = scriptTextForKey(groups, entry.key)
+      return text !== null && text !== entry.text
+    })
+    .map((entry) => entry.key)
 }
 
 /** 8G 卡实测训练净占 ~6.2G（峰值 7661 − 空闲基线 1488）+ 200 MiB 余量。这是「建议线」，不是硬闸。 */

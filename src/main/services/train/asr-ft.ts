@@ -1,13 +1,25 @@
 import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  readSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join } from 'node:path'
 import {
   asrFtRollbackSteps,
   asrFtSwapSteps,
   deriveAsrFtEnvGaps,
-  incrementalWeightFile,
   planAsrFtExportArgv,
   planFtTuning,
   pickLastCheckpointName,
@@ -24,7 +36,8 @@ import {
   ftVramNote,
   judgeFtDataset,
   missingFtExportFiles,
-  ftLedgerMatchedOnDisk,
+  ftLedgerLineage,
+  type FtLineage,
   ftTrainCoverage,
   parseNvidiaComputeApps,
   ftArtifactTargets,
@@ -32,6 +45,7 @@ import {
   summarizePendingTakes,
   estimateFtCost,
   ftWavDurationMs,
+  scriptStaleKeys,
 } from '@shared/train/asr-ft'
 import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
 import { loadSettings } from '../settings'
@@ -39,7 +53,7 @@ import { activeAsrModel } from '../voice/asr-model'
 import { locateWorkerScript } from '../voice/runtime'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
-import { ftRecList } from './ft-record'
+import { ftRecList, readFtScript } from './ft-record'
 import { correctionSamplesStatus } from '../voice/corrections'
 import { listDatasetEntries, listTrainRuns, packedLedgerForRun, patchTrainRun, trainedDatasetEntries } from './run-store'
 import { sovitsChildPid } from '../voice/sovits-server'
@@ -276,7 +290,10 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
       hasRun: listTrainRuns().some((run) => run.kind === 'asr-ft')
     }),
     estimate,
-    estimateBasis: estimate.fresh.basis
+    estimateBasis: estimate.fresh.basis,
+    // 需要重录的句子：稿子文本和账本里落的不一致，就是「改了稿但没重录」。
+    // 面板据此把行染成琥珀色；「增量」能不能接同样看文本（谱系判据），两处口径一致。
+    scriptStale: scriptStaleKeys((await readFtScript()).groups, listDatasetEntries())
   }
 }
 
@@ -412,30 +429,98 @@ export interface IncrementalSource {
   evalKeys: string[]
 }
 
+
+/** 谱系差异说人话：面板要能指出「哪几句改了、删了几句」，用户才知道回去补录哪几条。 */
+function describeLineage(lineage: FtLineage): string {
+  const keys = (list: readonly string[]): string =>
+    `${list.slice(0, 3).join('、')}${list.length > 3 ? ` 等 ${list.length} 条` : ''}`
+  const parts: string[] = []
+  if (lineage.changed.length > 0) parts.push(`改了 ${keys(lineage.changed.map((item) => item.key))}`)
+  if (lineage.removed.length > 0) parts.push(`删了 ${keys(lineage.removed)}`)
+  return parts.join('，')
+}
 /**
  * 增量起点：最新一轮「账本对得上」的 run，且磁盘上真有能接的权重。
  * 对不上就点名拒绝——增量静默落回全新训练，等于把「补训几分钟」变成「底模重训一小时」。
  * 对账口径与 asrFtFacts 同一份：旧数据只增不改（重录/删掉就接不上）。
  */
+/** torch.save 写的是 zip 包，正常文件末尾一定有 EOCD；没有就是半成品。 */
+const TORCH_EOCD = Buffer.from([0x50, 0x4b, 0x05, 0x06])
+
+/**
+ * 权重文件到底能不能 load。文件名存在不等于能读：训练中途被停止时，正在写的那个 checkpoint
+ * 会留下「大小看着对、末尾缺 Central Directory」的残件，torch.load 报
+ * `PytorchStreamReader failed reading zip archive: failed finding central directory`。
+ * 拿它当增量起点等于一开始就崩（实测 11 秒退出），所以按名字优先级挑第一个真完整的。
+ */
+function torchArchiveIntact(path: string): boolean {
+  try {
+    const size = statSync(path).size
+    if (size < 1024) return false
+    const tailLength = Math.min(66_000, size)
+    const tail = Buffer.alloc(tailLength)
+    const fd = openSync(path, 'r')
+    try {
+      readSync(fd, tail, 0, tailLength, size - tailLength)
+    } finally {
+      closeSync(fd)
+    }
+    return tail.includes(TORCH_EOCD)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 按 avg1 → best → pt 的优先级，挑第一个「末尾完整」的 funasr 权重。
+ * 坏掉的记下来，好让报错点名是哪个文件残了。
+ */
+export function usableIncrementalWeight(
+  dir: string,
+  names: readonly string[]
+): { ok: true; weight: string } | { ok: false; broken: string[] } {
+  const broken: string[] = []
+  for (const name of ['model.pt.avg1', 'model.pt.best', 'model.pt']) {
+    if (!names.includes(name)) continue
+    if (torchArchiveIntact(join(dir, name))) return { ok: true, weight: name }
+    broken.push(name)
+  }
+  return { ok: false, broken }
+}
+
 export function findIncrementalSource(
   currentLedger: readonly FtLedgerEntry[],
   trainer: AsrFtTrainer
 ): { ok: true; source: IncrementalSource } | { ok: false; error: string } {
   let sawRun = false
   let sawMatched = false
+  /** 最近一轮对不上的具体差异：面板要能说「第几句改了、删了几句」，而不是一句「对不上」。 */
+  let sawDrift = ''
+  /** 找到过权重、但末尾缺 Central Directory（训练中途停下的残件）：报错要点名文件。 */
+  let sawBroken = ''
   for (const run of listTrainRuns()) {
     const runDir = run.artifacts.runDir
     if (typeof runDir !== 'string' || runDir.length === 0) continue
     sawRun = true
     const packed = packedLedgerForRun(run.id)
-    if (packed === null || !ftLedgerMatchedOnDisk(packed, currentLedger)) continue
+    // 对账用谱系判据（键 + 文本 + 字节 + mtime 全等）：改稿没重录时 wav 没动、文本变了，
+    // 只比字节就放过它，等于把新标签硬塞进旧权重。口径见 ftLedgerLineage。
+    if (packed === null) continue
+    const lineage = ftLedgerLineage(packed, currentLedger)
+    if (!lineage.incremental) {
+      if (!sawDrift) sawDrift = describeLineage(lineage)
+      continue
+    }
     sawMatched = true
     const names = safeReaddir(runDir)
     const evalKeys = packed.filter((entry) => entry.split === 'eval').map((entry) => entry.key)
     if (trainer === 'funasr-paraformer') {
-      const weight = incrementalWeightFile(names)
-      if (!weight) continue
-      return { ok: true, source: { runDir, artifact: weight, lastStep: 0, evalKeys } }
+      const usable = usableIncrementalWeight(runDir, names)
+      if (!usable.ok) {
+        if (!sawBroken) sawBroken = usable.broken.join('、')
+        continue
+      }
+      return { ok: true, source: { runDir, artifact: usable.weight, lastStep: 0, evalKeys } }
     }
     const checkpoint = pickLastCheckpointName(names)
     if (!checkpoint) continue
@@ -448,14 +533,18 @@ export function findIncrementalSource(
     return { ok: false, error: '增量微调要从上一轮的权重接着跑，但还没有任何一轮训练记录——先做一次「从底模重训」' }
   }
   if (!sawMatched) {
-    return { ok: false, error: '上一轮的录音和现在对不上（有重录或删除）：增量会把旧错带进新权重——先做一次「从底模重训」' }
+    return { ok: false, error: `上一轮的录音和现在对不上（${sawDrift || '有重录或删除'}）：增量会把旧错带进新权重——先做一次「从底模重训」` }
   }
   return {
     ok: false,
     error:
       trainer === 'funasr-paraformer'
-        ? '上一轮的权重文件不在了（找过 model.pt.avg1 / model.pt.best / model.pt）：没法接着训，先做一次「从底模重训」'
-        : '上一轮的 checkpoint 不在了（训练目录里没有 checkpoint-<步数>）：没法接着训，先做一次「从底模重训」'
+        ? sawBroken.length > 0
+          ? `上一轮的权重是半成品（${sawBroken} 末尾缺 Central Directory，多半是训练中途被停止时正在写）：torch 读不了它，先做一次「从底模重训」`
+          : '上一轮的权重文件不在了（找过 model.pt.avg1 / model.pt.best / model.pt）：没法接着训，先做一次「从底模重训」'
+        : sawBroken.length > 0
+          ? `上一轮的 checkpoint 是半成品（${sawBroken}）：先做一次「从底模重训」`
+          : '上一轮的 checkpoint 不在了（训练目录里没有 checkpoint-<步数>）：没法接着训，先做一次「从底模重训」'
   }
 }
 
@@ -475,6 +564,15 @@ export function stageIncrementalSource(
     rmSync(to, { recursive: true, force: true })
     mkdirSync(staging, { recursive: true })
     cpSync(from, to, { recursive: statSync(from).isDirectory() })
+    // 抄完再验一次：磁盘满/被截断的副本会让 torch 一上来就崩，不如在这里拦住并说清楚。
+    if (statSync(to).size !== statSync(from).size) {
+      rmSync(to, { recursive: true, force: true })
+      return { ok: false, error: `复制接续权重没抄全（${from} → ${to}），磁盘可能满了` }
+    }
+    if (!statSync(to).isDirectory() && !torchArchiveIntact(to)) {
+      rmSync(to, { force: true })
+      return { ok: false, error: `要接的权重是半成品（${from} 末尾缺 Central Directory）：训练中途停止会留下这种文件，先做一次「从底模重训」` }
+    }
     return { ok: true, stagedPath: to }
   } catch (err) {
     return { ok: false, error: `复制接续权重失败：${errorMessage(err)}` }

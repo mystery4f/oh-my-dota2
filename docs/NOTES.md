@@ -678,3 +678,10 @@
 - 根因一（元数据）：FunASR 的导出只写 `model.onnx` / `model_quant.onnx`，既不写 `tokens.txt`，也不写 sherpa 需要的图上 metadata。缺 `vocab_size` 时 sherpa 直接拒绝加载——`offline-paraformer-model.cc:Init:102 'vocab_size' does not exist in the metadata`；补上 `vocab_size / lfr_window_size / lfr_window_shift / neg_mean / inv_stddev / model_type / version` 才能开文件。这些值都能从底模目录推出来：`tokens.json` 给词表（8404 条，`<blank> 0` 起），`am.mvn` 的 `<AddShift>` 段就是 `neg_mean`、`<Rescale>` 段就是 `inv_stddev`（各 560 维，正好 80×7）。
 - 根因二（导出参数）：`++model=` 必须给**底模 id 或底模目录**，不能给训练 run 目录。喂 run 目录时 `AutoModel` 会把 run 里的 `config.yaml`（hydra 存下来的训练配置）当模型配置读，导出半初始化的图——实测同一份 checkpoint 两种写法：正常写法导出 955 个 initializer、解出「我没到还在冷却」；喂 run 目录只导出 625 个 initializer、解出上面那串乱码。权重本身只动了 3e-6（一次小数据微调），不足以改变输出，所以乱码只能是图结构错。
 - 修法：把「导出 → 量化 → 补 metadata/tokens」收进打包脚本 `resources/asr-ft-export-funasr.py`，argv 是 `--base <底模 id> --init-param <run>/model.pt --output-dir <out>`；脚本按 `tokens.json` 写 `tokens.txt`、按 `am.mvn` 补 metadata，产出直接叫 `model.int8.onnx`，转正时按引擎表 `artifacts` 拷过去即可。量化那步依赖 onnx ≥ 1.16：onnx 1.14 上会抛 `AttributeError: INT4`（`onnx.TensorProto` 那时还没有 INT4 成员）。
+
+### 增量微调的起点必须是完整 zip——被停止的训练留下半成品权重
+
+- 症状：面板点「开始训练（增量）」后 11 秒就 `失败 (exit 1)`，日志里只有 pytorch 的 `RuntimeError: PytorchStreamReader failed reading zip archive: failed finding central directory`。
+- 根因：上一轮训练被用户停止时，`model.pt.best` 正写到一半，文件在但末尾没有 zip 的 EOCD（`50 4b 05 06`）。`incrementalWeightFile` 只按文件名优先级（`avg1 → best → model.pt`）挑，从不看内容，于是拿残件当起点；`torch.load` 立刻炸。同目录里 `model.pt` 是完整的，优先级却排在残件之后。
+- 修法：`src/main/services/train/asr-ft.ts` 的 `torchArchiveIntact`（读末 66000 字节找 EOCD，<1KB 直接判坏）+ `usableIncrementalWeight`（挑第一个真完整的），`findIncrementalSource` 与 `stageIncrementalSource` 都用它；只剩残件时报「上一轮的权重是半成品（… 末尾缺 Central Directory，多半是训练中途被停止时正在写）：先做一次「从底模重训」」，复制到 `<现役目录>.next` 后再复验一次（大小不符 = 没抄全）。
+- 附带修掉「失败原因等于没说」：`src/main/services/train/manager.ts` 的 `lastErrorLine()` 从日志尾巴取最后一条真错误行，stage 变成 `失败 (exit 1)：RuntimeError: …`，同时写进 runs.db 的 `error`。

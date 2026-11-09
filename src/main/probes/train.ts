@@ -8,11 +8,20 @@ import {
   nextUnrecordedLine,
   RECORDING_LIMITS,
   parseRecordingKeyParts,
+  parseFtScript,
   recordingKey,
   resolveFtScript,
   scriptTextForKey,
   shouldKeepTake,
-  takeLineId
+  takeLineId,
+  addScriptGroup,
+  appendScriptLine,
+  deleteScriptLine,
+  nextGroupId,
+  renameScriptGroup,
+  serializeFtScript,
+  updateScriptLine,
+  type FtScriptGroup
 } from '@shared/train/recording'
 import {
   CORRECTION_GROUP,
@@ -75,6 +84,8 @@ import {
   normalizeAsrFtMode,
   estimateFtCost,
   ftCostBasis,
+  ftLedgerLineage,
+  scriptStaleKeys,
   type AsrFtPaths,
   type FtLedgerEntry
 } from '@shared/train/asr-ft'
@@ -99,7 +110,13 @@ import {
 } from '@shared/train/run'
 import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
-import { applyAsrFtModel, findIncrementalSource, rollbackAsrFtModel, stageIncrementalSource } from '../services/train/asr-ft'
+import {
+  applyAsrFtModel,
+  findIncrementalSource,
+  rollbackAsrFtModel,
+  stageIncrementalSource,
+  usableIncrementalWeight
+} from '../services/train/asr-ft'
 import { ASR_ENGINE_LIST } from '@shared/asr/engines'
 import { ftPackGate } from '../services/train/ft-dataset'
 import {
@@ -472,7 +489,6 @@ function push(name: string, ok: boolean, detail: string): void {
 }
 
 export async function runTrainProbe(): Promise<void> {
-  // —— 单任务互斥闸 ——
   push('没有任务 → 能开', canStartTrain(null).ok, JSON.stringify(canStartTrain(null)))
   push('running → 拒绝', canStartTrain('running').ok === false, canStartTrain('running').reason ?? '')
   push('preparing → 拒绝', canStartTrain('preparing').ok === false, canStartTrain('preparing').reason ?? '')
@@ -1254,6 +1270,7 @@ export async function runTrainProbe(): Promise<void> {
   push('体检：GV 缺备料阻断', preflightBlocks(gv).map((item) => item.id).join(',') === 'data', gv.map((item) => `${item.id}:${item.level}`).join(' '))
   storeCases()
   await correctionsCases()
+  scriptEditorCases()
 
   // —— 读稿来源（#61）：数据目录的自定义稿优先，缺失/坏了才回落到随包自带的 ——
   const bundledMd = '## G01 日常\n1. 今天天气不错。\n2. 我中午吃了碗面。\n'
@@ -1338,6 +1355,107 @@ export async function runTrainProbe(): Promise<void> {
  * #59 存储层：训练记录 + 数据集账本对着一个临时库跑，data/ 里的真库一个字节都不碰。
  * 迁移用例现造旧目录（train-runs/*.json + asr-ft-runs/<目录>/dataset.jsonl），导两次验幂等。
  */
+/**
+ * 读稿编辑器（面板内增删改）：序列化往返、断号不复用、删句/删组、谱系判据、残件权重。
+ * 前三组都跑纯缝，最后两组碰临时目录——data/ 里的真稿与真权重一个字节都不动。
+ */
+function scriptEditorCases(): void {
+  const fixture: FtScriptGroup[] = [
+    { id: 'G14', title: '对线', mode: 'lines', note: '', lines: [{ no: 1, text: '我没大，还在冷却。' }, { no: 2, text: '我血不多了，先撤。' }] },
+    { id: 'G21', title: '自由说', mode: 'free', note: '想到什么说什么', lines: [] }
+  ]
+  const text = serializeFtScript(fixture)
+  const back = parseFtScript(text)
+  push(
+    '读稿：序列化再解析回到同一份（组/标题/句子都在，自由说组不写编号句）',
+    back.length === 2 &&
+      back[0].id === 'G14' &&
+      back[0].title === '对线' &&
+      back[0].lines.map((line) => line.text).join('|') === '我没大，还在冷却。|我血不多了，先撤。' &&
+      back[1].mode === 'free' &&
+      back[1].lines.length === 0,
+    back.map((group) => `${group.id}:${group.mode}:${group.lines.length}`).join(' '),
+  )
+  const appended = appendScriptLine(fixture, 'G14', '新的一句')
+  push(
+    '读稿：加句 = 组内最大编号 + 1（不动已有编号）',
+    appended.ok && appended.groups[0].lines.length === 3 && appended.groups[0].lines[2].no === 3,
+    appended.ok ? `${appended.groups[0].lines.map((line) => line.no).join(',')}` : appended.error,
+  )
+  const afterDelete = deleteScriptLine(fixture, 'G14-L01')
+  const appendedAgain = afterDelete.ok ? appendScriptLine(afterDelete.groups, 'G14', '新的一句') : afterDelete
+  push(
+    '读稿：删掉 L01 后加句拿到 L03（断号不复用，旧录音不会被新句子顶掉）',
+    afterDelete.ok && appendedAgain.ok && appendedAgain.groups[0].lines.map((line) => line.no).join(',') === '2,3',
+    appendedAgain.ok ? appendedAgain.groups[0].lines.map((line) => line.no).join(',') : appendedAgain.error,
+  )
+  const emptied = deleteScriptLine(fixture, 'G14-L01')
+  const emptied2 = emptied.ok ? deleteScriptLine(emptied.groups, 'G14-L02') : emptied
+  push(
+    '读稿：删到一句不剩的组回落成自由说（不留空壳逐句组）',
+    emptied2.ok && emptied2.groups[0].mode === 'free' && emptied2.groups[0].lines.length === 0,
+    emptied2.ok ? `${emptied2.groups[0].mode}/${emptied2.groups[0].lines.length}` : emptied2.error,
+  )
+  const added = addScriptGroup(fixture, '新的一组')
+  push(
+    '读稿：新增组取第一个空编号（G14/G21 占用 → G01），满 99 组返回 null',
+    added.ok &&
+      added.groups[added.groups.length - 1].id === 'G01' &&
+      nextGroupId(fixture) === 'G01' &&
+      nextGroupId([]) === 'G01',
+    added.ok ? added.groups[added.groups.length - 1].id : added.error,
+  )
+  const renamed = renameScriptGroup(fixture, 'G21', '想到什么')
+  push(
+    '读稿：改组标题只动标题，句子一个不动',
+    renamed.ok && renamed.groups[1].title === '想到什么' && renamed.groups[0].lines.length === 2,
+    renamed.ok ? renamed.groups[1].title : renamed.error,
+  )
+  const edited = updateScriptLine(fixture, 'G14-L01', '我没大了，还在冷却。')
+  const staleAfter = edited.ok ? scriptStaleKeys(edited.groups, [{ key: 'G14-L01', wavPath: 'x', bytes: 1, mtimeMs: 1, text: '我没大，还在冷却。', split: 'train' }]) : []
+  const staleBefore = scriptStaleKeys(fixture, [{ key: 'G14-L01', wavPath: 'x', bytes: 1, mtimeMs: 1, text: '我没大，还在冷却。', split: 'train' }])
+  push(
+    '读稿：改文本 = 那句要重录（稿子与账本文本不一致的键被点名）',
+    edited.ok && staleAfter.join(',') === 'G14-L01' && staleBefore.length === 0,
+    `${staleBefore.join(',') || '(无)'} → ${staleAfter.join(',') || '(无)'}`,
+  )
+  const past: FtLedgerEntry[] = [
+    { key: 'G14-L01', wavPath: 'x', bytes: 10, mtimeMs: 1, text: '我没大，还在冷却。', split: 'train' },
+    { key: 'G14-L02', wavPath: 'y', bytes: 20, mtimeMs: 2, text: '我血不多了，先撤。', split: 'eval' }
+  ]
+  const appendOnly = ftLedgerLineage(past, [...past, { key: 'G14-L03', wavPath: 'z', bytes: 30, mtimeMs: 3, text: '新的一句', split: 'train' }])
+  const textChanged = ftLedgerLineage(past, [{ ...past[0], text: '我血不多了' }, past[1]])
+  const removed = ftLedgerLineage(past, [past[0]])
+  const empty = ftLedgerLineage([], past)
+  push(
+    '增量判据：只在末尾加新句才算能接（改文本/删句子/没有历史都不行）',
+    appendOnly.incremental &&
+      appendOnly.changed.length === 0 &&
+      !textChanged.incremental &&
+      textChanged.changed.length === 1 &&
+      !removed.incremental &&
+      removed.removed.join(',') === 'G14-L02' &&
+      !empty.incremental,
+    `append:${appendOnly.incremental} text:${textChanged.changed.length} removed:${removed.removed.join(',')} empty:${empty.incremental}`,
+  )
+  const weightDir = mkdtempSync(join(tmpdir(), 'omd2-weights-'))
+  try {
+    const intact = Buffer.concat([Buffer.alloc(2048, 1), Buffer.from([0x50, 0x4b, 0x05, 0x06])])
+    writeFileSync(join(weightDir, 'model.pt'), intact)
+    // .best 是训练中途被停下的残件：大小看着对，末尾没有 Central Directory。
+    writeFileSync(join(weightDir, 'model.pt.best'), Buffer.alloc(2048, 2))
+    const picked = usableIncrementalWeight(weightDir, ['model.pt.best', 'model.pt'])
+    const allBroken = usableIncrementalWeight(weightDir, ['model.pt.best'])
+    push(
+      '增量起点：跳过后缀不全的 model.pt.best，退到完整的 model.pt；全坏则点名文件',
+      picked.ok && picked.weight === 'model.pt' && !allBroken.ok && allBroken.broken.join(',') === 'model.pt.best',
+      picked.ok ? picked.weight : picked.broken.join(','),
+    )
+  } finally {
+    rmSync(weightDir, { recursive: true, force: true })
+  }
+}
+
 function storeCases(): void {
   const root = mkdtempSync(join(tmpdir(), 'omd2-train-store-'))
   try {
@@ -1605,8 +1723,16 @@ function storeCases(): void {
     )
     const incRunDir = join(root, 'asr-ft-runs-inc', 'ft-1')
     mkdirSync(incRunDir, { recursive: true })
-    writeFileSync(join(incRunDir, 'model.pt.avg1'), 'weights-avg1', 'utf8')
-    writeFileSync(join(incRunDir, 'model.pt'), 'weights-last', 'utf8')
+    // torch 权重是 zip：开头 PK\x03\x04、结尾 EOCD。校验器认这两个字节，
+    // 所以 fixture 不能是一串随便的文本，否则测的是「文件坏没坏」而不是「挑没挑对」。
+    const fakeWeights = (size: number): Buffer => {
+      const buffer = Buffer.alloc(size, 0x41)
+      Buffer.from([0x50, 0x4b, 0x03, 0x04]).copy(buffer, 0)
+      Buffer.from([0x50, 0x4b, 0x05, 0x06]).copy(buffer, size - 4)
+      return buffer
+    }
+    writeFileSync(join(incRunDir, 'model.pt.avg1'), fakeWeights(4096))
+    writeFileSync(join(incRunDir, 'model.pt'), fakeWeights(2048))
     const incRun = buildTrainRun({
       kind: 'asr-ft',
       experiment: 'ft-inc',
