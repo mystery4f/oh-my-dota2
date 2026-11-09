@@ -670,6 +670,8 @@
 - 症状二：训练跑完、checkpoint 都写出来了，收尾却 `RuntimeError: No checkpoints found for averaging`（`average_nbest_models.py:65`）。
 - 根因二：`_get_checkpoint_paths` 先从 `model.pt` 取 `val_acc` 表、按准确率取前 `avg_nbest_model` 个**文件名**，再逐个 `os.path.isfile`。表里记的是「每次校验」的名字，文件却只在「每次存盘」时写——`validate_interval=10` + `save_checkpoint_interval=20` 时最高分的名字是 `model.pt.ep0.10`，那个文件从来没存在过，于是 `state_dicts` 为空。实测日志第一行就是 `average_checkpoints: [... model.pt.ep0.10]`。
 - 修法二：让 `validate_interval` **等于** `save_checkpoint_interval`（都 20），保证「有记录的都有文件」；再加 `keep_nbest_models=2`，否则 `keep_nbest_models=1` 会在存盘时删掉前一个文件、平均那步读到已删的名字（同一处报错的另一条触发路径）。`avg_nbest_model=1` 保留。代价是每次多留一个 checkpoint（paraformer-large 约 880 MB）。
+- 症状三（2026-11-09 补）：修法二在 8 epoch 的增量跑里又炸了——同样的 `RuntimeError: No checkpoints found for averaging`。根因三是 keep 窗口和 avg 挑名是**两套账**：keep_nbest 是「存盘时看当时的 acc、删掉窗口外最差的**文件**」，avg 是「收尾读最后 `model.pt` 的 val 表、按 acc 挑前 `avg_nbest_model` 个**名字**再开文件」。8 个 epoch 全程 acc 钉死 0.4250（2 条验证数据 1 条 0.1，均值封顶，`>=` 平手永远不刷新 best），val 表首位 `model.pt.ep0.20` 早在第 5 个 epoch 就被窗口淘汰——窗口里有文件的名字不是表里最优的名字。实测 torch.load 最后的 `model.pt`：val 表前五全是 0.425 的平手（ep0.20/ep1/ep1.20/ep2/ep2.20），`saved_ckpts` 只剩 `['model.pt.ep7','model.pt.ep7.20']`。
+- 修法三：`keep_nbest_models` 提到 **4**。窗口够宽就能盖住「表里最优的名字已在窗口外」的错位；代价是 run 目录多留两个 checkpoint（paraformer-large 每个 ~880 MB）。真正的盲测集拉开 acc 差距之前，这条就是唯一的稳妥解。
 - 附带：`funasr.bin.export` 的 `++init_param` 必须是**权重文件路径**——`AutoModel` 只判 `os.path.exists`，给目录会直接进 `torch.load(dir)` 报 `IsADirectoryError`；量化后产物叫 `model_quant.onnx`，sherpa 认的是 `model.int8.onnx`，转正时按引擎表的 `artifacts` 映射改名。
 
 ### FunASR 导出的 paraformer 在 sherpa 里出乱码——两句错话叠在一起

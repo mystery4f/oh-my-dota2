@@ -265,9 +265,11 @@ function planFunasrTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tuning?:
     //    （实测选中 model.pt.ep0.10），于是 RuntimeError: No checkpoints found for averaging。
     '++train_conf.validate_interval=20',
     '++train_conf.save_checkpoint_interval=20',
-    // 至少留 2 个：平均权重那步是按 val 表取前 avg_nbest_model 个文件名再开文件，
-    // keep_nbest_models=1 会把那个文件先删掉，收尾直接 RuntimeError: No checkpoints（实测 2026-11-08）。
-    '++train_conf.keep_nbest_models=2',
+    // 至少留 2 个还不够：keep 的窗口是「保存时看 acc」，但 avg 挑名是「收尾按 val 表挑最优」——
+    // 8 epoch 的增量跑里 val 表首位（model.pt.ep0.20）早被窗口淘汰（实测 2026-11-09：
+    // 收尾 RuntimeError: No checkpoints found for averaging，saved_ckpts 只剩 ep7/ep7.20）。
+    // 留 4 个才能盖住「最优名在窗口外」的错位；窗口再大也只是磁盘，无语义影响。
+    '++train_conf.keep_nbest_models=4',
     '++train_conf.avg_nbest_model=1',
     '++train_conf.use_deepspeed=false',
     `++optim_conf.lr=${tuning?.lr ?? '0.0002'}`,
