@@ -27,7 +27,6 @@ const PERSISTED_FIELDS = [
   'ttsOutVoice',
   'voiceOutTestMode',
   'voiceTranscribeOnly',
-  'voiceCaptureEnabled',
   'voiceShowTiming',
   'asrActiveModel',
   'asrHotwords',
@@ -110,9 +109,6 @@ function sentinelFor(
     case 'voiceTranscribeOnly':
       // 布尔开关：非当前值落盘原样读回（无归一化，同 voiceOutTestMode 一档）。
       return !current.voiceTranscribeOnly as AppSettings[typeof key]
-    case 'voiceCaptureEnabled':
-      // 对讲总开关：布尔，非当前值落盘原样读回（缺省 false，无归一化，同 voiceOutTestMode 一档）。
-      return !current.voiceCaptureEnabled as AppSettings[typeof key]
     case 'voiceShowTiming':
       // 耗时统计开关：布尔，非当前值落盘原样读回（缺省 false，无归一化，同 voiceOutTestMode 一档）。
       return !current.voiceShowTiming as AppSettings[typeof key]
