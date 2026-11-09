@@ -11,7 +11,7 @@ import { SECTION_GROUPS, SECTIONS, type SectionId } from './sections'
 const KEYWORDS: Record<SectionId, string[]> = {
   overview: ['自检', '状态', '四条链路', 'status'],
   engine: [
-    'api key', 'key', '密钥', '模型', 'deepseek', 'openai', 'ollama', 'mimo', '智谱',
+    'api key', 'key', '密钥', '模型', 'deepseek', 'openai', 'ollama', 'mimo', '智谱', 'ark', '火山', '方舟', '豆包', 'doubao',
     'glm', '自定义', '代理', 'proxy', '推理', '思考', '词数', '缓存', '试验台', '试翻'
   ],
   voice: ['音色训练', '微调', 'gpt-sovits', 'sovits', 'gpt 腿', '声学', '语义', '实验', '备料', 'webui', '训练记录'],

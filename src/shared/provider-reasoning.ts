@@ -2,7 +2,7 @@ import type { ProviderConfig, ProviderId, ProviderPreset } from './ipc'
 
 /**
  * 每家供应商关/开「先思考」用的不是同一个字段，猜错就是 400 或者白等 7 秒：
- * - zai：小米 MiMo、智谱 GLM 同源，`thinking: { type: 'enabled' | 'disabled' }`
+ * - zai：小米 MiMo、智谱 GLM、火山豆包同源，`thinking: { type: 'enabled' | 'disabled' }`
  * - deepseek：同一套 `thinking` 字段，但只在需要时下发
  * - openai：`reasoning_effort`（o 系列）；custom 按 OpenAI 兼容处理
  * - ollama：本地模型没有统一开关，什么都不发
@@ -13,6 +13,7 @@ export function thinkingFormatFor(id: ProviderId): ThinkingFormat | null {
   switch (id) {
     case 'mimo':
     case 'zhipu':
+    case 'ark':
       return 'zai'
     case 'deepseek':
       return 'deepseek'
@@ -49,6 +50,9 @@ export function directReasoningParams(provider: Pick<ProviderConfig, 'id' | 'rea
       // 打开时不带 effort（MiMo 不认档位），只把 thinking 打开。
       return on ? { thinking: { type: 'enabled' } } : { reasoning_effort: 'none' }
     case 'zhipu':
+      return { thinking: { type: on ? 'enabled' : 'disabled' } }
+    case 'ark':
+      // 实测：豆包不带 thinking 字段时默认就开思考（2.1-lite 26-32s/句，mini 1.5s），必须显式关。
       return { thinking: { type: on ? 'enabled' : 'disabled' } }
     case 'deepseek':
       // deepseek-chat 默认不思考，关的时候什么都不发最安全。
