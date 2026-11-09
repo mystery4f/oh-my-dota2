@@ -171,6 +171,12 @@ it and nothing happened". The overlay and the pause hint print key names from th
   checked against what is actually on screen.
   Dota pushes each chat message about 26 times in a row, so the writer keeps a bounded dedupe set
   keyed by game time + player + channel + slot + text.
+- Voice reply timing: `logs/voice-chain.jsonl`, one line per 对讲 (`at`/`spoken`/`stage`/`engine`/`chars`/`segments` +
+  `asrMs`/`translateMs`/`firstAudioMs`/`playStartMs`/`speakMs`/`totalMs`), hard-capped at 256 KB through the same
+  `appendCappedJsonl` the capped writer uses. A leg that was never measured is `null`, never 0; `totalMs` counts from the
+  ASR start to the first sound, so it is the number the operator actually feels. The console twin is the
+  `VOICE_CHAIN_TIMING` line; the overlay prints `已播 · 起播共 X` and the panel's 识别记录 row prints the full breakdown.
+  Read it before claiming any leg is fast or slow — the ASR receipt in `chain-timing.ts` is single-use within 60 s.
 - GSI frame summary: `logs/gsi-summary.json`, written by the app itself every 5 s while frames arrive
   (atomic replace, per-match reset when `map.matchid` changes, final flush on `POST_GAME`). It answers what
   the raw frame dump cannot: real match or training ground, whether `allplayers` is actually delivered, and

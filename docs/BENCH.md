@@ -229,6 +229,11 @@ actions           {ocr:98, gap:142, same:68, busy:75}   ← 修复前的数字
 - **分段情形**（英文译文超分句长度，默认 30 字符、可设 10–60）：各段并行合成、按序投递，第一段一就绪就进频道（不等同全部合成完）；后续段接上一段尾巴连续播，说话键整句不松。整句收尾 = 各段播放时长之和 + 200 ms 尾巴；单段合成失败整段跳过不占位，其余照播，全败才整句静默 + 浮层提示。
 - 日志锚点：`VOICE_OUT_SPEAK`（durationMs/sink/keyHeld/holdMs）、`VOICE_REPLY_SEGMENT_OK`（逐段 durationMs）、`VOICE_REPLY_SKIP`（全段合成失败 + 引擎名）。
 
+- **分段计时（voice-reply-latency）**：每次对讲落一行 `logs/voice-chain.jsonl`——`asrMs` / `translateMs` / `firstAudioMs` /
+  `playStartMs` / `speakMs` / `totalMs`（缺段 `null`，不是 0），控制台同名锚点 `VOICE_CHAIN_TIMING`。`totalMs` = 识别开始到
+  出声（含识别本身），也就是队友听到第一声之前那句人实际等的时间。浮层「已播 · 起播共 X」、面板识别记录行给完整拆解。
+  真机 3 次取中位后回填本节的三段数字；在那之前本节的端到端数字仍是估计值。
+
 真机测法：测试局里说固定中文句，从「停止录音」掐表到队友端（第二台设备录音）听到英文第一声；长句另数分段数与段间空隙；至少 3 次取中位，数字回填本节。
 
 ## 训练产线（ASR 已实测回填；GV 数字待真机回填）
