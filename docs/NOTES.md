@@ -318,6 +318,13 @@
 - `delay()` 在 `src/main/windows/voice-out.ts:17` 与 `src/main/services/voice/voice-out.ts:31` 各有一份：两行工具函数，抽取的收益不如多一次跨模块耦合。
 - 教训：评审的 P2 逐条记录、逐条决策（修/不修 + 为什么），比默默留着强——下次动到同一片代码时有账可查。
 
+### 开麦把蓝牙耳机切进通话模式，游戏声音断一两秒（讲话卡顿的元凶）
+
+- 症状：按语音键讲话时 Dota 2 卡一下、**游戏声音彻底消失 1–2 秒**，松手之后还会再卡一次。收起浮层、换合成引擎都没用；朗读（不开麦）正常。
+- 排除：性能采样里 CPU 从没超过 50%、GPU 63%、显存几乎不动——机器根本没饱和，不是合成也不是识别吃满 CPU。注意 `Win32_PerfRawData_PerfOS_Processor.PercentProcessorTime` 是**反向**计数器（累计的是空闲时间），拿它算 busy 会得出完全相反的结论；逐核 busy 要用 `PercentIdleTime`，单进程占用用 `Get-Process .CPU` 差值。
+- 根因：`openMicStream()` 第一步是不带 deviceId 的 `getUserMedia({ audio: MIC_CONSTRAINTS })`，打中的是系统默认输入。默认一旦是蓝牙耳机（本例 LINKLIKE Cloudpods），Windows 就把整条蓝牙从音乐模式（A2DP）切到通话模式（HFP），正在放的游戏音频被掐断；随后代码再换成「麦克风阵列」重开一次，蓝牙切回 A2DP——**一次对讲断两下**，音频引擎两次重配，也就卡两下。
+- 修法两层：系统层把「声音输入」默认改成内置麦克风阵列，立刻不卡（用户实测）；代码层让这件事不依赖系统设置——`src/renderer/src/lib/mic.ts` 用 localStorage 记住上次选中的 deviceId（键 `oh-my-dota2.captureDeviceId`），之后直接 `deviceId: { exact }` 开麦，不再先碰默认设备；`warmMic()` 在浮层入口 `src/renderer/src/overlay/overlay-main.tsx` 预热一次，把「第一次的代价」挪到开局前。缓存失效（设备拔掉）时清掉缓存、退回原来的探测流程。
+- 教训：**蓝牙耳机的麦克风和它的音乐输出是互斥的**，任何「临时开一下麦」的代码都会让用户听到断声。这类问题看症状就能分辨：声音**彻底**消失一两秒再回来是链路重配，不是增益或缓冲的小抖动。另外 `default` / `communications` 只是伪设备，真正可用的是「麦克风阵列」——`pickCaptureDevice` 本来就选对了，错的是选之前那次「先按默认开一次」。
 ## ASR 微调（Qwen3）
 
 ### G15 试点：底模 13/20 → 微调 19/20

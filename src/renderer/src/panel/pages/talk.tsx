@@ -77,6 +77,8 @@ export function TalkPage({
   // 纠错样本（#66）的即时回执：存上了说存到哪条，到顶了说为什么没存（这条提示就是唯一出口）。
   const [correctionNote, setCorrectionNote] = useState<string | null>(null)
   const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([])
+  // 讲话设备（声音输入）：伪设备（default / communications）照列，选中的值由 pickCaptureDevice 兜底。
+  const [inputs, setInputs] = useState<MediaDeviceInfo[]>([])
   // 虚拟声卡（VB-Cable）：声出进游戏语音的前置。问主进程（驱动层），不拿空 label 当「没装」。
   const [cable, setCable] = useState<VirtualCableStatus | null>(null)
   const [cableGuideOpen, setCableGuideOpen] = useState(false)
@@ -106,11 +108,17 @@ export function TalkPage({
   }, [])
   useEffect(() => window.api.onVoiceOutReadiness(setReadiness), [])
   useEffect(() => {
-    // 输出设备只在面板里枚举：插拔后重新打开页面就能看到。
+    // 输入/输出设备只在面板里枚举：插拔后重新打开页面就能看到。
     navigator.mediaDevices
       ?.enumerateDevices()
-      .then((all) => setOutputs(all.filter((d) => d.kind === 'audiooutput')))
-      .catch(() => setOutputs([]))
+      .then((all) => {
+        setOutputs(all.filter((d) => d.kind === 'audiooutput'))
+        setInputs(all.filter((d) => d.kind === 'audioinput'))
+      })
+      .catch(() => {
+        setOutputs([])
+        setInputs([])
+      })
   }, [])
 
   const recheckCable = useCallback(() => {
@@ -258,6 +266,28 @@ export function TalkPage({
     <>
       <Panel>
         <Group label="怎么听">
+          <Row
+            label="讲话设备"
+            htmlFor="v2-micDevice"
+            hint="语音对讲从哪收声。蓝牙耳机的麦克风会让 Windows 把耳机切到通话模式——游戏声音断一两秒再回来，之后变闷；要一边听游戏一边说话，选内置的「麦克风阵列」。"
+          >
+            <select
+              id="v2-micDevice"
+              value={settings.micDevice}
+              onChange={(e) => void save.wrap(update({ micDevice: e.target.value }))}
+              className={`${selectClass} max-w-72`}
+            >
+              <option value="">自动（先挑真麦克风，跳过虚拟声卡）</option>
+              {inputs.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `输入设备 ${d.deviceId.slice(0, 8)}…`}
+                </option>
+              ))}
+              {settings.micDevice && !inputs.some((d) => d.deviceId === settings.micDevice) ? (
+                <option value={settings.micDevice}>（已保存，当前未接入）</option>
+              ) : null}
+            </select>
+          </Row>
           <Row label="识别引擎" stacked hint={engineHint}>
             <select
               className={selectClass}

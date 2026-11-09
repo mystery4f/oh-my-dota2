@@ -20,6 +20,7 @@ const PERSISTED_FIELDS = [
   'ttsDropBacklog',
   'ttsSpeakSegmentChars',
   'ttsOutputDevice',
+  'micDevice',
   'ttsSpeakKey',
   'ttsSpeakMode',
   'voiceCaptureMode',
@@ -86,6 +87,9 @@ function sentinelFor(
     case 'ttsOutputDevice':
       // 哨兵值是「一台不存在的设备」：存的是原样字符串还是原样回来（归一化不发生在写入侧）。
       return (current.ttsOutputDevice === 'sink-sentinel-a' ? 'sink-sentinel-b' : 'sink-sentinel-a') as AppSettings[typeof key]
+    case 'micDevice':
+      // 同上：设备 id 原样落盘原样读回，选中的就是读回来的那一个。
+      return (current.micDevice === 'mic-sentinel-a' ? 'mic-sentinel-b' : 'mic-sentinel-a') as AppSettings[typeof key]
     case 'ttsSpeakKey':
       // 两个都是合法键：验的是「选中的那一个」而不是「任意字符串」。
       return (current.ttsSpeakKey === 'F5' ? 'F6' : 'F5') as AppSettings[typeof key]

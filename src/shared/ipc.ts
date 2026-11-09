@@ -151,6 +151,12 @@ export interface AppSettings {
   proxyUrl: string
   targetLang: string
   ttsOutputDevice: string
+  /**
+   * 讲话设备（声音输入）：'' = 自动挑（跳过虚拟声卡与蓝牙通话端点，见 pickCaptureDevice）。
+   * 选蓝牙耳机的麦克风会让 Windows 把耳机从音乐模式切到通话模式：游戏声音断一两秒、之后变单声道闷音。
+   * 那是协议限制，软件绕不过；要一边听游戏一边说话，选内置的「麦克风阵列」。
+   */
+  micDevice: string
   /** 调试用：译文同时播到系统默认扬声器；正式使用时关掉，本机就只剩游戏里能听到。 */
   ttsMonitorLocal: boolean
   /**
@@ -349,6 +355,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proxyUrl: '',
   targetLang: 'zh-CN',
   ttsOutputDevice: '',
+  micDevice: '',
   ttsMonitorLocal: false,
   ttsSpeakKey: 'F5',
   ttsSpeakMode: 'hold',

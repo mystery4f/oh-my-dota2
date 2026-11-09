@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@shared/errors'
 import type { AppSettings } from '@shared/ipc'
+import { setMicDevicePreference } from '@/lib/mic'
 
 /**
  * 设置读写钩子：v2 面板全部设置交互只走这一个入口。
@@ -27,6 +28,11 @@ export function useSettings(): {
       .then(setSettings)
       .catch((e) => setLoadError(errorMessage(e)))
   }, [])
+
+  // 讲话设备跟着设置走：面板一改，两条录音腿（对讲 / 训练）下次开麦就用新设备。
+  useEffect(() => {
+    if (settings) setMicDevicePreference(settings.micDevice)
+  }, [settings])
 
   const update = useCallback(async (patch: Partial<AppSettings>): Promise<void> => {
     // 乐观更新前留档：失败时按字段回滚，别的字段不动。
