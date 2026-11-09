@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { errorMessage } from '@shared/errors'
 import {
   HOTKEY_ACTIONS,
+  captureKeyClash,
   chordFromKeyEvent,
   findHotkeyConflicts,
   formatAccelerator,
@@ -185,6 +186,14 @@ export function HotkeysPage(): React.ReactElement {
           {flash.flash ? <span className="text-xs text-muted-foreground">{flash.flash}</span> : null}
           {flash.error ? <span className="text-xs text-destructive">{flash.error}</span> : null}
         </Row>
+        {captureKeyClash(settings?.hotkeys?.voiceCapture ?? '', settings?.ttsSpeakKey ?? '') ? (
+          <Row label="键位冲突">
+            <p className="text-xs text-destructive">
+              录音键和说话键都是 {settings?.hotkeys?.voiceCapture}——替按说话键的播报会被当成你的输入，
+              录进自己的播报再触发播报。改掉其中一处。
+            </p>
+          </Row>
+        ) : null}
       </Group>
 
       <Group label="整表">

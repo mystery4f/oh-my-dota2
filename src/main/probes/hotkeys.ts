@@ -3,6 +3,7 @@ import {
   DEFAULT_HOTKEYS,
   HOTKEY_ACTIONS,
   HOTKEY_ACTION_IDS,
+  captureKeyClash,
   chordFromKeyEvent,
   describeHotkeys,
   findHotkeyConflicts,
@@ -199,6 +200,8 @@ export function runHotkeyProbe(): void {
       normalizeCaptureMode(undefined) === 'hold',
     'toggle/hold/乱填→hold'
   )
+  push('同键冲突判定', captureKeyClash('F5', 'f5') && !captureKeyClash('F5', 'F6'), 'F5≡f5、F5≢F6')
+  push('空键不算冲突', !captureKeyClash('', 'F5') && !captureKeyClash('F5', ''), '空串放行')
   push(
     '录音横幅按模式换文案',
     recordingStageLine('hold', 'Alt+Shift+V').includes('松开结束') &&

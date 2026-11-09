@@ -77,6 +77,12 @@ export function normalizeCaptureMode(raw: unknown): CaptureMode {
   return raw === 'toggle' ? 'toggle' : 'hold'
 }
 
+/** 录音键与说话键同键：本应用替按说话键的注入会被监听侧当成玩家输入，播报误触录音成回声环。 */
+export function captureKeyClash(capture: string, speak: string): boolean {
+  const a = capture.trim().toLowerCase()
+  return a !== '' && a === speak.trim().toLowerCase()
+}
+
 /**
  * 录音中横幅那句提示：按住模式说「松开结束」，敲一下模式点名那个键。
  * 两种模式结束方式不同，同一句文案会让用户对着「按一下结束」按住不放。

@@ -5,6 +5,7 @@ import {
   describeHotkeys,
   findHotkeyConflicts,
   normalizeHotkeyMap,
+  captureKeyClash,
   type HotkeyActionId,
   type HotkeyMap
 } from '@shared/hotkeys'
@@ -44,10 +45,19 @@ export function installHotkeys(next: HotkeyHandlers): void {
  */
 export function applyHotkeys(map: Partial<HotkeyMap>): HotkeyVerdicts {
   const normalized = normalizeHotkeyMap(map)
-  const captureMode = loadSettings().voiceCaptureMode
+  const settings = loadSettings()
+  const captureMode = settings.voiceCaptureMode
   globalShortcut.unregisterAll()
   // 语音对讲切回敲一下时必须把常驻监视进程收掉，否则按住那只手还会继续录。
   if (captureMode !== 'hold') stopHoldWatch()
+  // 录音键和说话键同键时，播报替按游戏说话键的注入会被当成玩家输入（globalShortcut 与
+  // GetAsyncKeyState 都分不清），录进自己的播报再触发播报，成回声环。这里只能提醒，改键在面板。
+  if (captureKeyClash(normalized.voiceCapture ?? '', settings.ttsSpeakKey)) {
+    console.log(
+      'HOTKEY_CAPTURE_SPEAK_CLASH',
+      JSON.stringify({ voiceCapture: normalized.voiceCapture, ttsSpeakKey: settings.ttsSpeakKey })
+    )
+  }
   const next: HotkeyVerdicts = {}
   for (const id of HOTKEY_ACTION_IDS) {
     const accelerator = normalized[id]

@@ -15,7 +15,9 @@ npx electron out/main/index.js --<probe-name>
 ## Catalogue
 
 - Probes (run `taskkill /F /IM electron.exe` first — a leftover process holds the single-instance lock
-  and the probe exits silently):
+  and the probe exits silently). A probe process must skip ambient wiring: no whole-table hotkey
+  registration, no resident bridges, no timers — `installHotkeys` overwriting a probe's own watcher is
+  how `--hold-watch-probe` failed its first run, so guard the entry with `if (!probeRun)`:
   `npx electron out/main/index.js --<probe>`
   - `--inplace-probe` resident input bridge ping
   - `--reply-latency-probe` reply translation latency after warm-up
