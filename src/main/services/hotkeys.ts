@@ -1,6 +1,7 @@
 import { globalShortcut } from 'electron'
 import {
   HOTKEY_ACTION_IDS,
+  acceleratorVks,
   describeHotkeys,
   findHotkeyConflicts,
   normalizeHotkeyMap,
@@ -9,6 +10,7 @@ import {
 } from '@shared/hotkeys'
 import type { HotkeyVerdicts, HotkeysResult } from '@shared/ipc'
 import { loadSettings, saveSettings } from './settings'
+import { stopHoldWatch, watchHold } from './input/hotkey-hold'
 
 /**
  * 全局热键注册服务：把「动作 → 处理函数」和「动作 → 组合键」分开管。
@@ -19,7 +21,12 @@ import { loadSettings, saveSettings } from './settings'
  */
 
 /** 入口注入的动作处理函数。 */
-export type HotkeyHandlers = Record<HotkeyActionId, () => void>
+export type HotkeyHandlers = Record<HotkeyActionId, () => void> & {
+  /** 按住模式的按下：开始录音（未提供时退回 voiceCapture 本身）。 */
+  voiceCaptureStart?: () => void
+  /** 按住模式的松开：结束录音并触发翻译播报。 */
+  voiceCaptureStop?: () => void
+}
 
 let handlers: HotkeyHandlers | null = null
 /** 上一次注册的结果：面板读热键表时连它一起显示。 */
@@ -37,15 +44,40 @@ export function installHotkeys(next: HotkeyHandlers): void {
  */
 export function applyHotkeys(map: Partial<HotkeyMap>): HotkeyVerdicts {
   const normalized = normalizeHotkeyMap(map)
+  const captureMode = loadSettings().voiceCaptureMode
   globalShortcut.unregisterAll()
+  // 语音对讲切回敲一下时必须把常驻监视进程收掉，否则按住那只手还会继续录。
+  if (captureMode !== 'hold') stopHoldWatch()
   const next: HotkeyVerdicts = {}
   for (const id of HOTKEY_ACTION_IDS) {
     const accelerator = normalized[id]
     if (!accelerator) {
+      if (id === 'voiceCapture') stopHoldWatch()
       next[id] = 'unbound'
       continue
     }
     const handler = handlers?.[id]
+    // 按住说话要的是「松开」：组合键拆成 VK 表交给常驻轮询进程，这个动作因此不注册
+    // globalShortcut——两边同时监听会让一次按下既开录又被 toggle 关掉。
+    if (id === 'voiceCapture' && captureMode === 'hold') {
+      const vks = acceleratorVks(accelerator)
+      if (vks) {
+        const start = handlers?.voiceCaptureStart ?? handler
+        const stop = handlers?.voiceCaptureStop
+        watchHold(vks, {
+          onPress: () => start?.(),
+          onRelease: () => stop?.(),
+          // 进程起不来就退回敲一下：宁可语义降级，也不能让热键变哑。
+          onUnavailable: () => {
+            console.log('HOTKEY_HOLD_FALLBACK', JSON.stringify({ action: id, accelerator }))
+            if (handler) globalShortcut.register(accelerator, handler)
+          }
+        })
+        next[id] = 'accepted'
+        continue
+      }
+      console.log('HOTKEY_HOLD_NO_VKS', JSON.stringify({ action: id, accelerator }))
+    }
     const ok = handler ? globalShortcut.register(accelerator, handler) : false
     if (!ok) console.log('HOTKEY_REGISTER_FAIL', JSON.stringify({ action: id, accelerator }))
     next[id] = ok ? 'accepted' : 'rejected'
@@ -57,6 +89,7 @@ export function applyHotkeys(map: Partial<HotkeyMap>): HotkeyVerdicts {
 /** 退出前调用：撤销全部注册，免得系统里留下按了会唤醒已退出进程的键。 */
 export function releaseHotkeys(): void {
   globalShortcut.unregisterAll()
+  stopHoldWatch()
   verdicts = {}
 }
 

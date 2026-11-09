@@ -61,10 +61,30 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   {
     id: 'voiceCapture',
     label: '语音对讲',
-    hint: '按一下开始录音，再按一下结束并翻译声出',
+    hint: '按住说话、松开触发；也可以设成敲一下开始、再敲一下结束（见下方「语音对讲怎么按」）',
     defaultAccelerator: 'Alt+Shift+V'
   }
 ] as const
+
+/** 语音对讲热键的两种按法：hold 按住说话、松开触发；toggle 按一下开录、再按一下触发。 */
+export type CaptureMode = 'hold' | 'toggle'
+
+/** 出厂按法：按住说话最接近玩家的肌肉记忆，也不怕忘了关麦。 */
+export const DEFAULT_CAPTURE_MODE: CaptureMode = 'hold'
+
+/** 只认两个合法值；乱填打回 hold（toggle 的坏值后果是「录了不知道停」）。 */
+export function normalizeCaptureMode(raw: unknown): CaptureMode {
+  return raw === 'toggle' ? 'toggle' : 'hold'
+}
+
+/**
+ * 录音中横幅那句提示：按住模式说「松开结束」，敲一下模式点名那个键。
+ * 两种模式结束方式不同，同一句文案会让用户对着「按一下结束」按住不放。
+ */
+export function recordingStageLine(mode: CaptureMode, key: string): string {
+  if (mode === 'hold') return '● 录音中 · 松开结束'
+  return key ? `● 录音中 · ${key} 结束` : '● 录音中'
+}
 
 export type HotkeyMap = Record<HotkeyActionId, string>
 
@@ -232,6 +252,75 @@ export function normalizeAccelerator(raw: string): string | null {
   return [...ordered, parsed.key].join('+')
 }
 
+/**
+ * accelerator → 物理键码（VK）。按住检测只能靠 GetAsyncKeyState 轮询，
+ * 而这套轮询必须拿到组合里每一个键的 VK；认不出的键返回 null，
+ * 调用方退回 globalShortcut 的「敲一下」注册——热键绝不能变哑。
+ */
+const MODIFIER_VKS: Record<Modifier, number> = { Ctrl: 0x11, Alt: 0x12, Shift: 0x10, Super: 0x5b }
+
+const NAMED_VKS: Record<string, number> = {
+  Space: 0x20,
+  Tab: 0x09,
+  Enter: 0x0d,
+  Escape: 0x1b,
+  Backspace: 0x08,
+  Delete: 0x2e,
+  Insert: 0x2d,
+  Home: 0x24,
+  End: 0x23,
+  PageUp: 0x21,
+  PageDown: 0x22,
+  Up: 0x26,
+  Down: 0x28,
+  Left: 0x25,
+  Right: 0x27,
+  PrintScreen: 0x2c,
+  Numlock: 0x90,
+  Capslock: 0x14,
+  Scrolllock: 0x91,
+  VolumeUp: 0xaf,
+  VolumeDown: 0xae,
+  VolumeMute: 0xad,
+  Plus: 0xbb
+}
+
+/** 标点键各占一个 OEM 码，跟字符的 ASCII 无关；把 `;` 和 `'` 弄反是最常见的错。 */
+const PUNCTUATION_VKS: Record<string, number> = {
+  '-': 0xbd,
+  '=': 0xbb,
+  '[': 0xdb,
+  ']': 0xdd,
+  '\\': 0xdc,
+  ';': 0xba,
+  "'": 0xde,
+  ',': 0xbc,
+  '.': 0xbe,
+  '/': 0xbf,
+  '`': 0xc0
+}
+
+function mainKeyVk(key: string): number | null {
+  if (key.length === 1) {
+    const code = key.charCodeAt(0)
+    // 字母的 VK 就是大写 ASCII，数字同理。
+    if (code >= 65 && code <= 90) return code
+    if (code >= 48 && code <= 57) return code
+    return PUNCTUATION_VKS[key] ?? null
+  }
+  const functionKey = /^F([1-9]|1[0-9]|2[0-4])$/.exec(key)
+  if (functionKey) return 0x6f + Number(functionKey[1])
+  return NAMED_VKS[key] ?? null
+}
+
+/** canonical accelerator → VK 列表（修饰键在前、主键在后）；空串或认不出返回 null。 */
+export function acceleratorVks(accelerator: string): number[] | null {
+  const parsed = parseAccelerator(accelerator)
+  if (!parsed) return null
+  const key = mainKeyVk(parsed.key)
+  if (key === null) return null
+  return [...parsed.modifiers.map((modifier) => MODIFIER_VKS[modifier]), key]
+}
 /** 给人看的写法：Super 在 Windows 上叫 Win。 */
 export function formatAccelerator(accelerator: string): string {
   if (!accelerator) return UNBOUND_LABEL

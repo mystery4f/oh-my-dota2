@@ -110,13 +110,19 @@ export function App(): JSX.Element {
       },
       stage: setStage,
       reportChain: (result: VoiceChainSummary) => window.api.reportVoiceChain(result),
-      voiceCaptureKey: () => statusRef.current?.hotkeys.voiceCapture ?? ''
+      voiceCaptureKey: () => statusRef.current?.hotkeys.voiceCapture ?? '',
+      voiceCaptureMode: () => statusRef.current?.voiceCaptureMode ?? 'hold'
     })
     const offSpeech = subscribeSpeech()
     const offToggle = window.api.onVoiceRecordToggle(() => captureRef.current?.toggle())
+    // 按住模式：主进程的常驻键盘监视给出按下/松开两条，分别走 start / stop。
+    const offStart = window.api.onVoiceRecordStart(() => captureRef.current?.start())
+    const offStop = window.api.onVoiceRecordStop(() => captureRef.current?.stop())
     return () => {
       offSpeech()
       offToggle()
+      offStart()
+      offStop()
     }
   }, [])
 

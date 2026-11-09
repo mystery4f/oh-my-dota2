@@ -300,6 +300,27 @@ export function TalkPage({
             />
           </Row>
           <Row
+            label="说话方式"
+            hint="要和游戏里语音按键的设置一致：按住 = 游戏选「按住说话」；敲一下 = 游戏选「切换」，按一下开麦、播完再按一下关麦"
+          >
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant={settings.ttsSpeakMode === 'hold' ? 'secondary' : 'outline'}
+                onClick={() => void save.wrap(update({ ttsSpeakMode: 'hold' }))}
+              >
+                按住
+              </Button>
+              <Button
+                size="sm"
+                variant={settings.ttsSpeakMode === 'toggle' ? 'secondary' : 'outline'}
+                onClick={() => void save.wrap(update({ ttsSpeakMode: 'toggle' }))}
+              >
+                敲一下
+              </Button>
+            </div>
+          </Row>
+          <Row
             label="热词"
             htmlFor="v2-hotwords"
             stacked

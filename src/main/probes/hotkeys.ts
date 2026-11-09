@@ -6,7 +6,11 @@ import {
   chordFromKeyEvent,
   describeHotkeys,
   findHotkeyConflicts,
+  DEFAULT_CAPTURE_MODE,
+  acceleratorVks,
   formatAccelerator,
+  normalizeCaptureMode,
+  recordingStageLine,
   normalizeAccelerator,
   normalizeHotkeyMap,
   parseAccelerator,
@@ -167,6 +171,40 @@ export function runHotkeyProbe(): void {
     JSON.stringify(parsed)
   )
 
+  // 按住模式靠 acceleratorVks 把组合键翻译成 GetAsyncKeyState 的 VK 码：
+  // 这里只要错一位，热键就变成「按了半天没反应」，实机上极难看出是哪一步。
+  push(
+    '组合键拆出三个 VK（Alt+Shift+V）',
+    JSON.stringify(acceleratorVks('Alt+Shift+V')) === JSON.stringify([0x12, 0x10, 0x56]),
+    JSON.stringify(acceleratorVks('Alt+Shift+V'))
+  )
+  push(
+    '修饰键别名统一到 VK（Control+Space）',
+    JSON.stringify(acceleratorVks('Control+Space')) === JSON.stringify([0x11, 0x20]),
+    JSON.stringify(acceleratorVks('Control+Space'))
+  )
+  push(
+    '功能键用 VK（Shift+F1）',
+    JSON.stringify(acceleratorVks('Shift+F1')) === JSON.stringify([0x10, 0x70]),
+    JSON.stringify(acceleratorVks('Shift+F1'))
+  )
+  push('空键不拆', acceleratorVks('') === null, String(acceleratorVks('')))
+  push('未知键名不拆', acceleratorVks('NotAKey') === null, String(acceleratorVks('NotAKey')))
+  push('默认识别方式是按住', DEFAULT_CAPTURE_MODE === 'hold', DEFAULT_CAPTURE_MODE)
+  push(
+    '识别方式归一化',
+    normalizeCaptureMode('toggle') === 'toggle' &&
+      normalizeCaptureMode('hold') === 'hold' &&
+      normalizeCaptureMode('nonsense') === 'hold' &&
+      normalizeCaptureMode(undefined) === 'hold',
+    'toggle/hold/乱填→hold'
+  )
+  push(
+    '录音横幅按模式换文案',
+    recordingStageLine('hold', 'Alt+Shift+V').includes('松开结束') &&
+      recordingStageLine('toggle', 'Alt+Shift+V').includes('Alt+Shift+V'),
+    recordingStageLine('hold', 'Alt+Shift+V')
+  )
   // 真注册一轮：canonical 写法必须被平台接受，否则规则自洽而键照样抢不到。
   // 注册结果按真实系统为准，抢不到可能只是别的软件占着，所以这里只把「全失败」当失败。
   let registered = 0

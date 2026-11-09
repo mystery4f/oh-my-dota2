@@ -4,6 +4,7 @@ import { speechFailHint } from '@shared/speech-plan'
 import {
   DEFAULT_SINK_ID,
   DEFAULT_SPEAK_KEY,
+  DEFAULT_SPEAK_MODE,
   DEFAULT_VOICE_OUT_ENGINE,
   MIN_SPEAK_MS,
   PTT_MARGIN_MS,
@@ -15,6 +16,7 @@ import {
   findCableOutput,
   matchVirtualCable,
   normalizeSpeakKey,
+  normalizeSpeakMode,
   normalizeVoiceOutEngine,
   pickPlayableSegments,
   pttWatchdogMs,
@@ -335,6 +337,15 @@ export function runVoiceOutProbe(): void {
   push('F1..F12 连续映射 0x70..0x7B', speakKeyVk('F1') === 0x70 && speakKeyVk('F12') === 0x7b, `${speakKeyVk('F1')}..${speakKeyVk('F12')}`)
   push('字母/数字 → ASCII 码（A=65, 5=53）', speakKeyVk('A') === 65 && speakKeyVk('5') === 53, `${speakKeyVk('A')},${speakKeyVk('5')}`)
   push('乱填（经归一化）永远解析得出 VK', speakKeyVk('ctrl') === speakKeyVk(DEFAULT_SPEAK_KEY), String(speakKeyVk('ctrl')))
+  push('说话方式默认按住（与游戏默认一致）', DEFAULT_SPEAK_MODE === 'hold', DEFAULT_SPEAK_MODE)
+  push(
+    '说话方式：toggle 保留，乱填/空值打回 hold',
+    normalizeSpeakMode('toggle') === 'toggle' &&
+      normalizeSpeakMode('hold') === 'hold' &&
+      normalizeSpeakMode('bogus') === 'hold' &&
+      normalizeSpeakMode(null) === 'hold',
+    `toggle→${normalizeSpeakMode('toggle')}, bogus→${normalizeSpeakMode('bogus')}`
+  )
 
   // —— 决策五（票 05）：一键到底该不该声出、走哪条静默分支 ——
   const noSpeech = decideVoiceOutReply({ recognized: '', translated: null })

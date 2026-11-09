@@ -81,7 +81,8 @@ const overlay = {
     overlayLock: 'Alt+Shift+P',
     overlayCollapse: 'Alt+Shift+B',
     overlayPanel: 'Alt+Shift+H'
-  }
+  },
+  voiceCaptureMode: 'hold' as const
 }
 const overlaySnap = (): Awaited<ReturnType<WindowApi['overlayStatus']>> => ({
   ...overlay,

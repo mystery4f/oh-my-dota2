@@ -36,6 +36,8 @@ guessing the fields costs a rework round.
 - `npm run build` — electron-vite build into `out/`
 - `npx tsc --noEmit -p tsconfig.node.json --composite false` and the same with `tsconfig.web.json`
 - `npx eslint .` — 0 errors expected; exactly 1 permanent `react-refresh` warning (button.tsx:41)
+- `npm run check:shared` — rejects value-import cycles inside `src/shared/` (they pass typecheck and
+  break at runtime in the renderer); `import type` edges are erased and ignored. Wired into `npm run lint`.
 - `npm run panel:preview` — the dashboard in a plain browser at `localhost:5199`, no Electron and no
   game: `scripts/panel-preview.mts` serves `src/renderer/src/preview/api-stub.ts` as a fake `window.api`
   before the app boots. That stub is typed against `WindowApi`, so a renamed channel or a changed result
@@ -91,9 +93,15 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
 - `overlayCollapse` (default `Alt+Shift+B`) collapse / expand the overlay to its 132x34 icon
 - `inplaceSend` (default `Alt+Shift+T`) the only text out: reads the game chat draft (Chinese typed, not yet sent), translates, pastes back and presses Enter
 - `overlayPanel` (default `Alt+Shift+H`) summon panel: the overlay temporarily becomes an interactive sheet (history 200 rows / quick phrases / AI suggestions, click a row to copy); pressing again or Esc closes it and restores click-through
-- `voiceCapture` (default `Alt+Shift+V`) toggle record: speak Chinese → the active recognition model (`asrActiveModel`: Qwen3 or Paraformer) transcribes → translate → the reply
-  is spoken through voice-out (the panel 「说一句试试」 button runs the same chain; keyboard auto-repeat is debounced
-  500ms in `toggleVoiceCapture`)
+- `voiceCapture` (default `Alt+Shift+V`) record → speech chain: speak Chinese → the active recognition model (`asrActiveModel`:
+  Qwen3 or Paraformer) transcribes → translate → the reply is spoken through voice-out. How it is pressed is
+  `voiceCaptureMode` (`hold` by default; the panel's 热键 → 语音对讲怎么按): **hold** = recording runs while the chord is
+  down and the chain fires on release, **toggle** = press to start, press again to trigger. `globalShortcut` only reports
+  key DOWN, so hold mode does not use it: a resident `hotkey-hold.ps1` (bundled through `?raw`, deployed by `deployPsScript`) polls `GetAsyncKeyState` at
+  40 ms (`src/main/services/input/hotkey-hold.ts`) and emits `HOLD 1` / `HOLD 0`; the watcher restarts 5× with 3 s backoff
+  and falls back to a `globalShortcut` toggle when it gives up — the hotkey must never go silent. Never register both paths
+  for `voiceCapture`: one press would start and stop in the same instant. Keyboard auto-repeat is debounced 500ms in
+  `toggleVoiceCapture` (toggle mode only; the watcher emits one edge per physical press).
 
 Two actions may never share an accelerator — the panel refuses the whole table and marks both rows. A key another
 program already owns is reported per row (`被占用`), never silently dropped: that is the only visible form of "I pressed
@@ -181,6 +189,17 @@ it and nothing happened". The overlay and the pause hint print key names from th
   at launch — restart the game after the first write.
 
 ## Hard rules learned the hard way
+
+- An external `RegisterHotKey` probe proves nothing about Electron's `globalShortcut`: both can hold the
+  same accelerator, so a "free" answer is not evidence of a dead hotkey (this cost a whole debugging
+  round: every probe said FREE while the app was happily toggling the overlay). Verify by effect — inject
+  the accelerator (`SendKeys("%+o")`) and watch the visible outcome — or read the app's own
+  `HOTKEY_REGISTER_FAIL` line.
+- `data/settings.json` is rewritten by the app on every save, with normalization; a hand edit looks like
+  it "reverts itself". Read it to learn the current values, change values through the panel.
+- Every main build prints `BUILD_STAMP {at,bytes}` at startup. When a change seems to have no effect,
+  compare that timestamp with `out/main/index.js` before debugging the code: a `bg_run` dev task dies
+  together with electron, and the watcher stops rebuilding without any error.
 
 - Batch scripts that call an external API per item (LLM review, ASR, downloads) must give every
   request its own timeout plus retries and append results as they arrive. Bare `Promise.allSettled`

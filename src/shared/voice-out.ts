@@ -1,9 +1,9 @@
 import { SPEECH_MIME, resolveSpeechPlan } from './speech-plan'
-import type { VoiceOutEngine } from './ipc'
+import type { SpeakMode, VoiceOutEngine } from './ipc'
 import type { TtsVoiceOption } from './tts-voices'
 
 // 引擎类型与 AppSettings 同源（ipc.ts 定义），这里再出口，声出决策面只认 @shared/voice-out。
-export type { VoiceOutEngine }
+export type { SpeakMode, VoiceOutEngine }
 
 /**
  * 声出（voice-out）的纯决策：念不念、念什么、哪个嗓、输出设备怎么路由、说话键按多久。
@@ -52,6 +52,17 @@ export const VOICE_OUT_TEST_LINE = 'Hello team, this is a voice out test. Good l
 
 /** 说话键默认值：与 Dota 2 常见的语音按键习惯一致，面板可改。 */
 export const DEFAULT_SPEAK_KEY = 'F5'
+
+/** 说话方式默认值：按住整段，与 Dota 2 默认的「按住说话」一致。 */
+export const DEFAULT_SPEAK_MODE: SpeakMode = 'hold'
+
+/**
+ * 说话方式归一化：只认两个合法值，乱填打回 hold。
+ * toggle 的坏值后果比 hold 严重——开麦那一下敲过之后没人关，队友会全程听房间回声。
+ */
+export function normalizeSpeakMode(raw: unknown): SpeakMode {
+  return raw === 'toggle' ? 'toggle' : 'hold'
+}
 
 /** 按键窗口的头尾余量：提前按下、延后松开，保证游戏收到的语音不吃掉首尾。 */
 export const PTT_MARGIN_MS = 200

@@ -11,6 +11,7 @@ app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer')
 // 朗读是「程序自己放音频」：Chromium 默认要求先有用户手势，否则 play() 直接被拒。
 // 表现为「朗读开了但一点声音都没有」，日志里只有一条被吞掉的 NotAllowedError。
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import { captureHint } from '@shared/overlay-hint'
 import { warmEdge } from './services/voice/edge'
@@ -39,6 +40,7 @@ import { runChatBlockProbe } from './probes/chat-block'
 import { runInPlaceProbe, runReplyLatencyProbe } from './probes/latency'
 import { runOverlayGeometryProbe } from './probes/overlay-geometry'
 import { runHotkeyProbe } from './probes/hotkeys'
+import { runHoldWatchProbe } from './probes/hold-watch'
 import { runVoiceOutProbe } from './probes/voice-out'
 import { runAsrSwapProbe } from './probes/asr-swap'
 import { runInPlaceGuardProbe } from './probes/inplace-guard'
@@ -165,6 +167,15 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
+  // 构建戳：用 bg_run 起的 dev 会随 electron 一起退出，watcher 停了之后窗口还在，很容易把旧构建当新代码。
+  // 改完主进程代码先看这行的时间是否变化，再决定要不要重启。
+  try {
+    const built = __filename
+    const stat = statSync(built)
+    console.log('BUILD_STAMP', JSON.stringify({ at: stat.mtime.toISOString(), bytes: stat.size }))
+  } catch (error) {
+    console.log('BUILD_STAMP', JSON.stringify({ error: errorMessage(error) }))
+  }
   installProxyAwareFetch()
   applyProxy(loadSettings().proxyUrl)
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
@@ -202,6 +213,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--translate-accuracy-probe')) void runTranslateAccuracyProbe()
   if (process.argv.includes('--overlay-geometry-probe')) void runOverlayGeometryProbe()
   if (process.argv.includes('--hotkey-probe')) void runHotkeyProbe()
+  if (process.argv.includes('--hold-watch-probe')) void runHoldWatchProbe()
   if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()
   if (process.argv.includes('--asr-hotwords-probe')) void runAsrHotwordsProbe()
   if (process.argv.includes('--provider-reasoning-probe')) void runProviderReasoningProbe()
@@ -238,7 +250,8 @@ app.whenReady().then(() => {
   // 全局热键：处理函数只交一次，键本身来自设置表（面板可改）。
   // 抢不到不炸只记：别的软件（剪辑工具/输入法/游戏助手）占了这个键时，
   // 用户按了没反应，面板里能直接看到是哪一个动作被占了。
-  installHotkeys({
+  // 探针不装整表：按键监视是常驻进程，装了会覆盖探针自己那一路（--hold-watch-probe 就靠它）。
+  if (!probeRun) installHotkeys({
     overlayToggle: () => {
       getOverlayManager().toggle()
     },
@@ -266,6 +279,13 @@ app.whenReady().then(() => {
     },
     voiceCapture: () => {
       getOverlayManager().toggleVoiceCapture()
+    },
+    // 按住模式：按下开录、松开触发，两次按键之间没有 toggle 的去抖窗口。
+    voiceCaptureStart: () => {
+      getOverlayManager().startVoiceCapture()
+    },
+    voiceCaptureStop: () => {
+      getOverlayManager().stopVoiceCapture()
     }
   })
 

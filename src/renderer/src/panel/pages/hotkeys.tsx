@@ -13,6 +13,7 @@ import {
 import type { HotkeysResult } from '@shared/ipc'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
+import { useSaveFlash, useSettings } from '../use-settings'
 
 /**
  * 热键页：整张表一起改、一起存（注册也按整表重做）。
@@ -39,6 +40,9 @@ export function HotkeysPage(): React.ReactElement {
   const [pending, setPending] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // 语音对讲怎么按不在这张表里（表只管键位），单独读写设置，保存即时生效。
+  const { settings, update } = useSettings()
+  const flash = useSaveFlash()
 
   useEffect(() => {
     void window.api.getHotkeys().then((next) => {
@@ -157,6 +161,30 @@ export function HotkeysPage(): React.ReactElement {
             </Row>
           )
         })}
+      </Group>
+
+      <Group label="语音对讲怎么按">
+        <Row
+          label="按住 / 敲一下"
+          hint="按住：按住说完再松开，松开那一刻才触发识别与翻译；敲一下：按一下开始录，再按一下结束。按住模式支持 Alt/Shift 组合键。"
+        >
+          <Button
+            variant={(settings?.voiceCaptureMode ?? 'hold') === 'hold' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => void flash.wrap(update({ voiceCaptureMode: 'hold' }))}
+          >
+            按住
+          </Button>
+          <Button
+            variant={settings?.voiceCaptureMode === 'toggle' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => void flash.wrap(update({ voiceCaptureMode: 'toggle' }))}
+          >
+            敲一下
+          </Button>
+          {flash.flash ? <span className="text-xs text-muted-foreground">{flash.flash}</span> : null}
+          {flash.error ? <span className="text-xs text-destructive">{flash.error}</span> : null}
+        </Row>
       </Group>
 
       <Group label="整表">

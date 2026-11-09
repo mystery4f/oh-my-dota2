@@ -25,7 +25,8 @@ const EMPTY_OVERLAY: OverlayStatus = {
   opacity: 0.34,
   geometry: { x: 0, y: 0, width: 0, height: 0 },
   hint: null,
-  hotkeys: {}
+  hotkeys: {},
+  voiceCaptureMode: 'hold'
 }
 
 /** 分位数比单次数字更能说明「为什么刚才那么慢」。 */

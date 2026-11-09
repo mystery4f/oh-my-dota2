@@ -1,5 +1,5 @@
 import type { VoiceOutEndedReport, VoiceOutReadyReport } from '@shared/ipc'
-import { MIN_SPEAK_MS, PTT_MARGIN_MS, pttWatchdogMs, pttWindow } from '@shared/voice-out'
+import { MIN_SPEAK_MS, PTT_MARGIN_MS, pttWatchdogMs, pttWindow, type SpeakMode } from '@shared/voice-out'
 import { getPttKeySender } from '../input/ptt-key'
 import { getVoiceOutWindow } from '../../windows/voice-out'
 
@@ -32,6 +32,8 @@ export interface SegmentPlayerOptions {
   testMode: boolean
   /** 说话键的 VK；null = 键名无法识别，原因经 onKeyError 报给调用方。 */
   keyVk: number | null
+  /** 说话方式：hold 播放期间按住；toggle 起播前敲一下开麦、播完再敲一下关麦。 */
+  speakMode: SpeakMode
   /** 回落设备时的一行提示：两条腿的规则一样（ready.fallback && hint），所以留在这里。 */
   onHint?: (text: string) => void
   /** 正要起播（键已按下）时回调一次，供各自写日志。 */
@@ -40,6 +42,12 @@ export interface SegmentPlayerOptions {
   onKeyError?: (error: string, requestId: number) => void
 }
 
+/** 一次「敲一下」的结果：down 成功但 up 失败时键还按着，收尾必须再试一次。 */
+interface KeyTap {
+  ok: boolean
+  error?: string
+  downOk: boolean
+}
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -85,7 +93,7 @@ function waitEnded(requestId: number, timeoutMs: number): Promise<VoiceOutEndedR
 }
 
 /**
- * 一段音频怎么播：等窗口就绪 → 按住说话键（整单只按一次）→ 起播 → 等结束 → 收尾松键。
+ * 一段音频怎么播：等窗口就绪 → 打开说话通道（整单只做一次）→ 起播 → 等结束 → 收尾松键。
  *
  * 测试腿与对讲腿此前各写一遍这七步，规则一样却各自为政：按住/松开的时机、头部余量只等一次、
  * 尾巴余量、失败后也要松键——改一处就漏另一处，而漏掉的后果是说话键卡死在频道里。
@@ -123,7 +131,7 @@ export class SegmentPlayer {
 
     const hold = pttWindow(ready.durationMs ?? MIN_SPEAK_MS)
     this.releaseMs = hold.releaseMs
-    // 键按上了再报「要播了」：日志里的 keyHeld 是按下那一刻的事实，不是意图。
+    // 通道开了再报「要播了」：日志里的 keyHeld 是那一刻的事实（hold = 键按着，toggle = 麦已开），不是意图。
     await this.pressKeyOnce(requestId)
     this.options.onSpeak?.({
       requestId,
@@ -149,18 +157,26 @@ export class SegmentPlayer {
     return { kind: 'played', durationMs: ended.durationMs ?? ready.durationMs, hint: ready.hint }
   }
 
-  /** 收尾：尾巴余量后松开说话键。任何提前 return / 抛错的路径都必须调它——键卡死比这句没播出严重。 */
+  /** 收尾：尾巴余量后关掉说话通道（hold 松开 / toggle 再敲一下）。任何提前 return / 抛错的路径都必须调它——键卡死比这句没播出严重。 */
   async finish(): Promise<string | null> {
     if (this.keyHeld) await delay(this.releaseMs)
     return this.releaseKey()
   }
 
-  /** 整单只按一次：中途松键频道会露缝；键按下失败也不再重试，避免每段都报一次同样的错。 */
+  /**
+   * 打开说话通道，整单只做一次：hold 按下并按住；toggle 敲一下（按下再松开），游戏那边就已经开麦。
+   * 中途再敲会让频道露缝；键操作失败也不再重试，避免每段都报一次同样的错。
+   */
   private async pressKeyOnce(requestId: number): Promise<void> {
     if (this.options.testMode || this.keyHeld || this.keyError) return
     const vk = this.options.keyVk
     if (vk === null) {
       this.keyError = '说话键无法识别（检查设置里的说话键）'
+    } else if (this.options.speakMode === 'toggle') {
+      const tap = await this.tapKey(vk)
+      // up 失败时键还按着：当作「已开麦」，finish() 会再敲一次把它关掉。
+      if (tap.downOk) this.keyHeld = true
+      if (!tap.ok) this.keyError = tap.error ?? '说话键敲击失败'
     } else {
       const down = await getPttKeySender().down(vk)
       if (down.ok) this.keyHeld = true
@@ -169,11 +185,28 @@ export class SegmentPlayer {
     if (this.keyError) this.options.onKeyError?.(this.keyError, requestId)
   }
 
+  /** 敲一下 = 按下再松开：toggle 的开麦与关麦都是这个动作，中间隔多久由游戏自己判定。 */
+  private async tapKey(vk: number): Promise<KeyTap> {
+    const sender = getPttKeySender()
+    const down = await sender.down(vk)
+    if (!down.ok) return { ok: false, error: down.error, downOk: false }
+    const up = await sender.up(vk)
+    return { ok: up.ok, error: up.error, downOk: true }
+  }
+
+  /** 收尾松键：hold 直接松开；toggle 再敲一下（按下再松开）把麦关掉。 */
   private async releaseKey(): Promise<string | null> {
     if (!this.keyHeld) return this.keyError
     this.keyHeld = false
     const vk = this.options.keyVk
     if (vk === null) return this.keyError
+    if (this.options.speakMode === 'toggle') {
+      const tap = await this.tapKey(vk)
+      // 关麦那一下的 up 也失败：键还按着，留给下一单的收尾再试。
+      if (tap.downOk && !tap.ok) this.keyHeld = true
+      if (!tap.ok && !this.keyError) this.keyError = tap.error ?? '说话键关麦失败'
+      return this.keyError
+    }
     const up = await getPttKeySender().up(vk)
     if (!up.ok && !this.keyError) this.keyError = up.error ?? '说话键松开失败'
     return this.keyError

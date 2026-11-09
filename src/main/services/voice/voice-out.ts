@@ -114,6 +114,7 @@ class VoiceOutService {
       monitorLocal: settings.ttsMonitorLocal,
       testMode: settings.voiceOutTestMode,
       keyVk: speakKeyVk(settings.ttsSpeakKey),
+      speakMode: settings.ttsSpeakMode,
       onHint: showHint,
       onSpeak: ({ bytes, durationMs, sinkLabel, keyHeld, holdMs }) => {
         playedSink = sinkLabel || null
@@ -181,6 +182,7 @@ class VoiceOutService {
       monitorLocal: settings.ttsMonitorLocal,
       testMode: settings.voiceOutTestMode,
       keyVk: speakKeyVk(settings.ttsSpeakKey),
+      speakMode: settings.ttsSpeakMode,
       onHint: showHint,
       onKeyError: (error, requestId) => console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, error }))
     })

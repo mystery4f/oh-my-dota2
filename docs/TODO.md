@@ -5,6 +5,15 @@
 
 ## 刚完成并已验证
 
+**语音对讲：按住说话（2026-11-09；待真机验收）**
+
+- 新增 `voiceCaptureMode`（`hold`|`toggle`，默认 `hold`）：按住说完松开才触发识别→翻译→播报；敲一下仍是按一次开录、再按一次结束。面板热键页「语音对讲怎么按」即时保存，决策见 `docs/adr/voice-capture-hold.md`。
+- `globalShortcut` 只给按下，拿不到松开：常驻 `hotkey-hold.ps1` 以 40ms 轮询 `GetAsyncKeyState`（进程管在 `src/main/services/input/hotkey-hold.ts`，3 秒退避重开 5 次，仍失败退回敲一下并打 `HOTKEY_HOLD_GIVE_UP`）；按住模式下该动作不注册 `globalShortcut`，避免一次按下既开录又被 toggle 关掉。
+- 组合键靠 `acceleratorVks()` 拆 VK（Alt+Shift+V → `[0x12,0x10,0x56]`）；拆不出来退回敲一下并打 `HOTKEY_HOLD_NO_VKS`。录音横幅按模式换文案（`recordingStageLine`），按住模式说「松开结束」。
+- 已跑绿：两条 `tsc`、`eslint`（只余 button.tsx:41 永久警告）、`check:shared`、`npm run build`、`--hotkey-probe`（44/44）、`--settings-persist-probe`（49/49）、`--hold-watch-probe`（4/4，真按真放：keybd_event 注入 F13 按住 300ms + 轻敲 120ms，press/release 各两条、长按不重复）。
+- 红线：录音键（voiceCapture）和说话键（ttsSpeakKey）不能绑同一枚键——GetAsyncKeyState 分不清实体按下和本应用替按的注入，播报会被误当成按住说话，录进自己的播报再触发播报，成回声环（用户已把游戏语音键改 F6、说话键须同步改 F6 避开）。
+- 待验收（只剩真机对局）：Dota 2 开着时按住 3–5 秒说话，确认松开即触发、长按不被 20 秒上限截断；组合键在游戏窗口焦点下仍能被读到。
+
 **风行者至宝音色：参考语言可配置 + v2 微调上线（2026-10-30；提交 `e0f2c32` 已推）**
 
 - `ttsSovitsPromptLang`（`zh`|`en`，默认 `zh`）：`sovits.ts` 透传给 `/tts` 的 `prompt_lang`，面板「参考语言」下拉。零样本音色由「参考音频 + 逐字转写」对齐，英文参考必须配 `en`，写死 `zh` 时英文参考会劣化——这就是本次改动的动因。
@@ -220,6 +229,7 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
 - `#26` 声出过渡：GV 英文音色包就绪前，声出引擎用 Edge 英文神经嗓占位（面板可切换），包好了换 GV。
   - 2026-10-31 实测：风行者中文微调包跨语种直接读英文，**有时不吐字**（整词吞掉），不能当正式方案——英文包训练是前置。
   - 已定：声出走虚拟声卡进游戏语音频道；`Alt+Shift+V` 一键到底；失败静默跳过不退文出；说话键 app 自动按住，**默认 F5、可配置**。
+  - 已定：说话方式两种——`hold` 按住整段（默认，对应游戏「按住说话」）、`toggle` 敲一下开麦、播完再敲一下关麦（对应游戏「切换」）；面板可选，落盘归一化，真机验收待做。
   - 已定：虚拟声卡选 **VB-Cable**（驱动层检测 + 面板引导 + 一键下载并拉起官方安装器 + 本机监听开关默认关，见 `docs/adr/voice-out-vb-cable.md`）；待定只剩：翻译是否反向。
   - 训练侧（应用外）：GV 英文包数据与微调，产物走现有音色包权重切换（`gptWeights`/`sovitsWeights`），应用侧零改动。
   - 双语包（2026-11-02 完成）：风行者至宝语音全量提取（中文 897 + 英文 898 条，vpk 经 Source2Viewer-CLI），中英一起微调，产物兼读双语，解决声出英文占位；风行者 854 条（e15-854/s1384）与米拉娜 2218 条中英（e15/e8_s3520）均已训练并部署，待用户验收听感。

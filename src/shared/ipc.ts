@@ -1,6 +1,6 @@
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
-import type { HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
-import { DEFAULT_HOTKEYS } from './hotkeys'
+import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
+import { DEFAULT_CAPTURE_MODE, DEFAULT_HOTKEYS } from './hotkeys'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
@@ -97,6 +97,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 
 export type OfflineVoiceId = 'baker' | 'xiao_ya' | 'eula'
 export type VoiceOutEngine = 'edge' | 'offline' | 'sovits'
+/** 说话方式：hold = 按住整段（游戏里选「按住说话」）；toggle = 敲一下开麦、播完再敲一下关麦（游戏里选「切换」）。 */
+export type SpeakMode = 'hold' | 'toggle'
 
 export interface OfflineVoice {
   id: OfflineVoiceId
@@ -161,6 +163,11 @@ export interface AppSettings {
    * 声出期间由应用自动按下/松开（合成成功才按，头尾各留 200ms 余量）；乱填打回 F5。
    */
   ttsSpeakKey: string
+  /**
+   * 说话方式：hold = 播放期间按住说话键，播完再松开；toggle = 起播前敲一下开麦、播完再敲一下关麦。
+   * 必须和游戏里语音按键的设置一致，否则队友听不到或频道一直开着。
+   */
+  ttsSpeakMode: SpeakMode
   /** 测试模式：开了只放音频到所选输出设备、不模拟按下说话键——游戏没开也能全链路试听，F5 不会落到别的窗口上。 */
   voiceOutTestMode: boolean
   /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
@@ -288,6 +295,11 @@ export interface AppSettings {
    * 全局热键表：动作 id → canonical 组合键，空串 = 该动作不绑键。
    * 单独一项而不是五个平铺字段——面板一次改整张表，平铺就要五个归一化分支加五处探针。
    */
+  /**
+   * 语音对讲热键怎么按：hold = 按住说话、松开触发；toggle = 按一下开录、再按一下触发。
+   * 只影响「语音对讲」这一个动作；其余热键永远是敲一下。
+   */
+  voiceCaptureMode: CaptureMode
   hotkeys: Record<HotkeyActionId, string>
 }
 
@@ -331,6 +343,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsOutputDevice: '',
   ttsMonitorLocal: false,
   ttsSpeakKey: 'F5',
+  ttsSpeakMode: 'hold',
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
   /** 现役模型空 = 由注册表按可用性自动选（#67 起引擎跟着这个 id 走，不再单独存）。 */
@@ -373,6 +386,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayVisible: false,
   overlayOpacity: 0.34,
   overlayBounds: null,
+  voiceCaptureMode: DEFAULT_CAPTURE_MODE,
   hotkeys: { ...DEFAULT_HOTKEYS }
 }
 
@@ -669,6 +683,8 @@ export interface OverlayStatus {
    * 浮层没有设置访问权，键名不随状态下来就只能写死在渲染端里。
    */
   hotkeys: Partial<Record<HotkeyActionId, string>>
+  /** 语音对讲怎么按：录音横幅要靠它选文案（按住 = 松开结束）。 */
+  voiceCaptureMode: CaptureMode
   /** 快捷短语表（呼出面板第二页直接渲染）：随状态下来，浮层不读设置文件。 */
   quickPhrases: string[]
 }
@@ -722,6 +738,9 @@ export const IPC = {
   VOICE_CHAIN_RESULT: 'voice:chain-result',
   VOICE_REPLY: 'voice:reply',
   VOICE_RECORD_TOGGLE: 'voice:record-toggle',
+  /** 按住模式的两条推送：热键按下就开录，松开就停录并触发整条语音链。 */
+  VOICE_RECORD_START: 'voice:record-start',
+  VOICE_RECORD_STOP: 'voice:record-stop',
   VOICE_TTS_PREVIEW: 'voice:tts-preview',
   VOICE_OUT_TEST: 'voice-out:test',
   VOICE_OUT_PLAY: 'voice-out:play',
@@ -1013,6 +1032,8 @@ export const ipcContract = {
   reportVoiceState: send<[boolean]>(IPC.OVERLAY_VOICE_STATE),
   reportVoiceChain: send<[VoiceChainSummary]>(IPC.OVERLAY_VOICE_RESULT),
   onVoiceRecordToggle: listen<void>(IPC.VOICE_RECORD_TOGGLE),
+  onVoiceRecordStart: listen<void>(IPC.VOICE_RECORD_START),
+  onVoiceRecordStop: listen<void>(IPC.VOICE_RECORD_STOP),
   onVoiceRecordState: listen<{ recording: boolean }>(IPC.VOICE_RECORD_STATE),
   onVoiceChainResult: listen<VoiceChainSummary>(IPC.VOICE_CHAIN_RESULT),
   onVoiceRuntimeState: listen<VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATE),

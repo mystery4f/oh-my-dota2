@@ -21,6 +21,8 @@ const PERSISTED_FIELDS = [
   'ttsSpeakSegmentChars',
   'ttsOutputDevice',
   'ttsSpeakKey',
+  'ttsSpeakMode',
+  'voiceCaptureMode',
   'ttsOutEngine',
   'ttsOutVoice',
   'voiceOutTestMode',
@@ -86,6 +88,12 @@ function sentinelFor(
     case 'ttsSpeakKey':
       // 两个都是合法键：验的是「选中的那一个」而不是「任意字符串」。
       return (current.ttsSpeakKey === 'F5' ? 'F6' : 'F5') as AppSettings[typeof key]
+    case 'ttsSpeakMode':
+      // 两个都是合法模式：验的是「选中的那一个」而不是「任意字符串」（乱填由 settings 归一化打回 hold）。
+      return (current.ttsSpeakMode === 'hold' ? 'toggle' : 'hold') as AppSettings[typeof key]
+    case 'voiceCaptureMode':
+      // 同上：hold / toggle 都是合法值，乱填由 settings 的 normalizeCaptureMode 打回 hold。
+      return (current.voiceCaptureMode === 'hold' ? 'toggle' : 'hold') as AppSettings[typeof key]
     case 'ttsOutEngine':
       // 两个都是合法引擎（edge / offline）：合法值必须原样落盘原样读回。
       return (current.ttsOutEngine === 'edge' ? 'offline' : 'edge') as AppSettings[typeof key]

@@ -17,7 +17,8 @@ const EMPTY_OVERLAY: OverlayStatus = {
   opacity: 0.45,
   geometry: { x: 0, y: 0, width: 520, height: 260 },
   hint: null,
-  hotkeys: {}
+  hotkeys: {},
+  voiceCaptureMode: 'hold'
 }
 
 /** 浮层页：纯视觉与对局归属，都是「点一下立刻见效」的控件，没有保存按钮。 */

@@ -74,7 +74,8 @@ class OverlayManager {
         overlayPanel: formatAccelerator(settings.hotkeys.overlayPanel),
         voiceCapture: formatAccelerator(settings.hotkeys.voiceCapture)
       },
-      quickPhrases: settings.quickPhrases
+      quickPhrases: settings.quickPhrases,
+      voiceCaptureMode: settings.voiceCaptureMode
     }
   }
 
@@ -261,6 +262,20 @@ class OverlayManager {
     if (!this.win) this.win = this.createWindow()
     if (!this.win.isVisible()) this.show()
     this.win.webContents.send(IPC.VOICE_RECORD_TOGGLE)
+  }
+  /**
+   * 按住模式：按下开录。不做 toggle 那 500ms 去抖——按住信号是轮询进程给的，
+   * 一次物理按下只会来一条；渲染侧的 start 本身是幂等的。
+   */
+  startVoiceCapture(): void {
+    if (!this.win) this.win = this.createWindow()
+    if (!this.win.isVisible()) this.show()
+    this.win.webContents.send(IPC.VOICE_RECORD_START)
+  }
+
+  /** 按住模式：松开停录并触发整条链路（识别 → 翻译 → 播报）。 */
+  stopVoiceCapture(): void {
+    this.win?.webContents.send(IPC.VOICE_RECORD_STOP)
   }
 
   /** Subscribe to status changes (tray menu, dashboard cues). */

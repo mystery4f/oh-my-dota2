@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DEFAULT_SETTINGS, OFFLINE_VOICES, PROVIDER_PRESETS, type AppSettings, type ProviderConfig } from '@shared/ipc'
 import { normalizeTrainKind } from '@shared/train/task'
-import { normalizeSpeakKey, normalizeVoiceOutEngine } from '@shared/voice-out'
-import { normalizeHotkeyMap } from '@shared/hotkeys'
+import { normalizeSpeakKey, normalizeSpeakMode, normalizeVoiceOutEngine } from '@shared/voice-out'
+import { normalizeCaptureMode, normalizeHotkeyMap } from '@shared/hotkeys'
 import { healProviderReasoning } from '@shared/provider-reasoning'
 import { maxWordsFromSettings } from './providers'
 
@@ -88,6 +88,11 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     else merged.ttsSpeakSegmentChars = Math.min(60, Math.max(10, Math.round(rawSeg)))
     // 说话键：只认 F1–F12 和单个字母/数字（SendInput 的 VK 码能对上的集合），乱填打回 F5。
     merged.ttsSpeakKey = normalizeSpeakKey(merged.ttsSpeakKey)
+    // 说话方式：hold = 按住整段，toggle = 敲一下开麦、播完再敲一下关麦。乱填打回 hold——
+    // 坏值落到 toggle 的后果是「开麦不关」，队友会全程听到房间回声。
+    merged.ttsSpeakMode = normalizeSpeakMode(merged.ttsSpeakMode)
+    // 语音对讲怎么按：hold 按住说话、松开触发；toggle 按一下开录、再按一下触发。乱填打回 hold。
+    merged.voiceCaptureMode = normalizeCaptureMode(merged.voiceCaptureMode)
     // 声出引擎：只认三引擎层的合法值，乱填打回 edge（英文占位）；声出音色不在这里钳，
     // resolveVoiceOutSynth 决策时对不上清单自会打回默认（和 ttsVoice 同一策略）。
     merged.ttsOutEngine = normalizeVoiceOutEngine(merged.ttsOutEngine)

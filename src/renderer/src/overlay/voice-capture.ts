@@ -1,3 +1,4 @@
+import { recordingStageLine, type CaptureMode } from '@shared/hotkeys'
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { encodeWav16k } from '@shared/wav'
@@ -25,6 +26,8 @@ export interface VoiceCaptureSink {
   stage(label: string | null, holdMs?: number): void
   reportChain(result: VoiceChainSummary): void
   voiceCaptureKey(): string
+  /** 按住 / 敲一下：横幅文案靠它区分「松开结束」与「再按一下结束」。 */
+  voiceCaptureMode(): CaptureMode
 }
 
 /**
@@ -63,8 +66,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     recordNode.connect(recordCtx.destination)
     recording = true
     window.api.reportVoiceState(true)
-    const stopKey = sink.voiceCaptureKey()
-    sink.stage(`● 录音中${stopKey ? ` · ${stopKey} 结束` : ''}`)
+    sink.stage(recordingStageLine(sink.voiceCaptureMode(), sink.voiceCaptureKey()))
     recordTimer = setTimeout(() => void stop(), RECORD_MAX_MS)
   }
 
@@ -147,6 +149,13 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     toggle(): void {
       if (recording) void stop()
       else void start()
+    },
+    // 按住模式：按下开录、松开结束。内部有幂等守卫，重复信号不会翻面。
+    start(): void {
+      void start()
+    },
+    stop(): void {
+      void stop()
     },
     get recording(): boolean {
       return recording
