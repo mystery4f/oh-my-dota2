@@ -22,6 +22,7 @@ import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type WindowApi 
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
 import { estimateFtCost, summarizePendingTakes } from '@shared/train/asr-ft'
+import type { AsrCheckState } from '@shared/train/asr-check'
 import { judgeCorrectionSamples } from '@shared/train/corrections'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
@@ -161,6 +162,25 @@ const sovitsStatus: Awaited<ReturnType<WindowApi['sovitsStatus']>> = {
  * 时间用相对量，预览里永远像刚跑完。
  */
 const stubNow = Date.now()
+// 全量识别比对的假结果：三条一致、一条差 1 字、一条明显错，够看清弹层的样子。
+const stubAsrCheck: AsrCheckState = {
+  running: false,
+  done: 5,
+  total: 5,
+  current: '',
+  startedAt: 0,
+  finishedAt: 0,
+  error: null,
+  canceled: false,
+  items: [
+    { key: 'G14-L01', expected: '我的跳刀还没好', actual: '我的跳刀还没好。', grade: 'same', distance: 0 },
+    { key: 'G14-L02', expected: '我没到还在冷却', actual: '我没到还在冷却。', grade: 'same', distance: 0 },
+    { key: 'G15-L04', expected: '我的真视有了，能排眼', actual: '我的镇也有了，人排也。', grade: 'near', distance: 2 },
+    { key: 'G20-L12', expected: '对面在偷盾，快回来', actual: '对面在偷蹲快回来。', grade: 'near', distance: 1 },
+    { key: 'G99-T01', expected: '我方高地塔要掉了先撤', actual: '我们高地要掉了。', grade: 'wrong', distance: 4 }
+  ]
+}
+
 const stubTrainRuns: Awaited<ReturnType<WindowApi['trainRuns']>> = [
   {
     id: 'asr-ft-stub-running',
@@ -450,6 +470,10 @@ const implemented = {
     skippedCorrections: [],
     error: null
   }),
+  // 全量识别比对：预览里给一份「已跑完」的结果，点开就能看到不一致长什么样。
+  asrCheckStart: async () => stubAsrCheck,
+  asrCheckStop: async () => stubAsrCheck,
+  asrCheckState: async () => stubAsrCheck,
   ftAsrftStatus: async () => {
     const engine = stubFinetuneEngine()
     const finetune = engine.finetune as NonNullable<AsrEngineSpec['finetune']>
@@ -471,7 +495,8 @@ const implemented = {
       takes: lineRecs.length,
       audioMs: lineRecs.reduce((sum, rec) => sum + rec.durationMs, 0),
       lastStep: 0,
-      pendingTakes: pending.count
+      pendingTakes: pending.count,
+      pendingAudioMs: pending.durationMs
     }
     const estimate = {
       fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),

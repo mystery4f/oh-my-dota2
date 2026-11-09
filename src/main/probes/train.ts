@@ -109,6 +109,7 @@ import {
   type TrainRunRecord
 } from '@shared/train/run'
 import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
+import { gradeAsrCheck, gradeSpoken, summarizeAsrCheck } from '@shared/train/asr-check'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
 import {
   applyAsrFtModel,
@@ -717,16 +718,17 @@ export async function runTrainProbe(): Promise<void> {
       estG14AudioMin.minutes === estG14.minutes,
     `qwen3:${qwenCost?.secPerStep} funasr:${funasrCost?.secPerStep} ｜ ${estG14.label} ｜ ${estG14AudioMin.label} ｜ ${estG14.basis}`
   )
-  // 估时文案要说清「为什么一条新录音也要跑几十步」：增量的代价是把全部数据再过几遍，不是只学新的那条。
+  // 估时文案要说清「增量到底训几条」：只训没训过的那些，老录音不再过一遍（2026-11-09 按用户定义改）。
   // 数字（steps / minutes）不因文案改动而变，改的只是人怎么读它。
   const estIncOne = estimateFtCost({ mode: 'incremental', trainer: 'qwen3-sft', takes: 40, lastStep: 660, pendingTakes: 1 })
   const estFreshLabel = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 40 })
   push(
-    '估时文案：增量说「新增 1 条 / 全部 38 条再过 N 轮」，全量说「38 条进训练、2 条留验证」，步数不受措辞影响',
+    '估时文案：增量说「新增 1 条 / 只训这 1 条」，步数按这 1 条算（ceil(660/1)+2 轮 = 662 步，已跑 660 → 还差 2 步）',
     estIncOne.label.includes('新增 1 条') &&
-      estIncOne.label.includes('再过') &&
+      estIncOne.label.includes('只训这 1 条') &&
       estIncOne.pendingTakes === 1 &&
-      estIncOne.steps === 200 &&
+      estIncOne.trainTakes === 1 &&
+      estIncOne.steps === 2 &&
       estFreshLabel.label.includes('进训练') &&
       estFreshLabel.label.includes('留验证') &&
       estFreshLabel.steps === 660,
@@ -1289,6 +1291,25 @@ export async function runTrainProbe(): Promise<void> {
   )
   const gv = judgeGvPreflight({ expName: 'mirana', missing: ['音素表 2-name2text.txt'], gptTrained: false, sovitsTrained: false })
   push('体检：GV 缺备料阻断', preflightBlocks(gv).map((item) => item.id).join(',') === 'data', gv.map((item) => `${item.id}:${item.level}`).join(' '))
+  // —— 全量识别比对：判定口径只有一份，标点/空白不参与，差 1 字算「差一点」——
+  const sameBoth = gradeSpoken('我的跳刀还没好', '我的跳刀还没好。')
+  const oneChar = gradeSpoken('对面在偷盾，快回来', '对面在偷蹲快回来。')
+  const farOff = gradeSpoken('我方高地塔要掉了先撤', '我们高地要掉了。')
+  const summary = summarizeAsrCheck([
+    gradeAsrCheck('a', '我的跳刀还没好', '我的跳刀还没好。'),
+    gradeAsrCheck('b', '对面在偷盾，快回来', '对面在偷蹲快回来。'),
+    gradeAsrCheck('c', '我方高地塔要掉了先撤', '我们高地要掉了。')
+  ])
+  push(
+    '比对：标点不算差异、差 1 字算差一点',
+    sameBoth.grade === 'same' && oneChar.grade === 'near' && farOff.grade === 'wrong',
+    `${sameBoth.grade}/${oneChar.grade}:${oneChar.distance}/${farOff.grade}:${farOff.distance}`
+  )
+  push(
+    '比对：汇总按三档分开数',
+    summary.same === 1 && summary.near === 1 && summary.wrong === 1 && summary.total === 3,
+    `${summary.same}/${summary.near}/${summary.wrong}/${summary.total}`
+  )
   storeCases()
   await correctionsCases()
   scriptEditorCases()

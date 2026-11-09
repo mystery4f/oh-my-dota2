@@ -18,6 +18,7 @@ import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 import { Modal } from '../components/modal'
+import { AsrCheckDialog } from '../components/asr-check-dialog'
 import { ScriptEditor } from '../components/script-editor'
 import { PreflightList, RunRow, Sparkline } from '../components/run-view'
 import { TrainTaskRow } from '../components/train-task-row'
@@ -54,6 +55,8 @@ export function AsrTrainPage(): React.ReactElement {
   const [script, setScript] = React.useState<FtScriptState | null>(null)
   // 读稿编辑抽屉：组和句子都在里面改，保存才落盘（改文本 = 那句要重录）。
   const [editingScript, setEditingScript] = React.useState(false)
+  // 全量识别比对：弹层自己起跑、自己轮询，页面只负责开与关。
+  const [checkOpen, setCheckOpen] = React.useState(false)
   const [recs, setRecs] = React.useState<Record<string, FtRecInfo>>({})
   const [status, setStatus] = React.useState<AsrFtStatusResult | null>(null)
   const [runs, setRuns] = React.useState<TrainRunRecord[]>([])
@@ -78,6 +81,7 @@ export function AsrTrainPage(): React.ReactElement {
     const cost = status?.estimate[target]
     return cost && cost.steps > 0 ? `${cost.steps} 步 / ${cost.minutes} 分钟` : '还没法估算'
   }
+  const pendingCount = status?.pending.count ?? 0
   const modeTouched = React.useRef(false)
   React.useEffect(() => {
     if (modeTouched.current || !facts || facts.incremental) return
@@ -639,6 +643,12 @@ export function AsrTrainPage(): React.ReactElement {
                     打包
                   </Button>
                 </Row>
+
+                <Row label="全量识别比对" hint="用现役模型把每条录音都跑一遍，和稿子原文对一遍；不一致的会列出来，点开约一分钟">
+                  <Button size="sm" variant="outline" disabled={taskRunning} onClick={() => setCheckOpen(true)}>
+                    开始比对
+                  </Button>
+                </Row>
               </>
             ) : null}
 
@@ -664,7 +674,7 @@ export function AsrTrainPage(): React.ReactElement {
                   label="开训方式"
                   hint={
                     mode === 'incremental'
-                      ? `增量微调：接上一轮的权重，只补这批新录的错（换过来全量重训要约 ${costOf('fresh')}）；验证集沿用上一轮，新录的句子只进训练集`
+                      ? `增量微调：接上一轮的权重，只训没训过的 ${pendingCount} 条（换过来全量重训要约 ${costOf('fresh')}）；验证集沿用上一轮，老录音不再过一遍`
                       : `全量重训：吃全部录音、从底模重训，轮数按录音量自动算（换过来增量微调只需约 ${costOf('incremental')}）；换引擎或重录过就用它`
                   }
                 >
@@ -785,6 +795,8 @@ export function AsrTrainPage(): React.ReactElement {
           }}
         />
       </Modal>
+
+      <AsrCheckDialog open={checkOpen} onClose={() => setCheckOpen(false)} />
     </>
   )
 }

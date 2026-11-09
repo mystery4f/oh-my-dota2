@@ -259,7 +259,8 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
     takes: ledger.length,
     audioMs: ledger.reduce((sum, entry) => sum + ftWavDurationMs(entry.bytes), 0),
     lastStep: source.ok ? source.source.lastStep : 0,
-    pendingTakes: pending.count
+    pendingTakes: pending.count,
+    pendingAudioMs: pending.durationMs
   }
   const estimate = {
     fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),
@@ -713,7 +714,8 @@ export async function resolveAsrFtTrainRequest(mode: AsrFtMode): Promise<{
     const found = findIncrementalSource(pack.ledger, trainer)
     if (!found.ok) return { ok: false, error: found.error }
     source = found.source
-    pack = await prepareFtDataset({ evalKeys: source.evalKeys })
+    // 增量只打包没训过的录音：定义就是「拿已经微调过的模型去训新材料」，老录音不再过一遍。
+    pack = await prepareFtDataset({ evalKeys: source.evalKeys, onlyUntrained: true })
     const repacked = judgeFtDataset(pack)
     if (!repacked.ok) return { ok: false, error: repacked.error }
     const staged = stageIncrementalSource(source, stagingDir())

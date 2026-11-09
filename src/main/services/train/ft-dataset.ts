@@ -82,6 +82,15 @@ export async function currentFtLedger(): Promise<FtLedgerEntry[]> {
   return buildLedger(train, evalSet)
 }
 
+/** 账本里还没被任何一轮训练用过的 key（run_id 为空的最新修订）：增量打包的唯一筛选依据。 */
+function untrainedKeys(): Set<string> {
+  return new Set(
+    listDatasetEntries()
+      .filter((entry) => entry.runId === null)
+      .map((entry) => entry.key)
+  )
+}
+
 /**
  * 训练数据格式跟着「训练目标」走，不是跟着现役模型走——两者早就可以不同（见 ADR）。
  * 曾经这里读 activeAsrModel()：切到 qwen3 训练，打包却出了 funasr 的 jsonl，
@@ -100,13 +109,27 @@ function buildJsonlText(entries: FtDatasetEntry[]): string {
 }
 
 /**
- * 打包：默认尾部 holdout 切验证集；增量微调传入上一轮的验证集（evalKeys），
- * 新录的句子只进训练集——验证集换了，loss 就没法跟前一轮比。
+ * 打包：默认尾部 holdout 切验证集；增量微调传入上一轮的验证集（evalKeys）并且只打包没训过的录音。
+ * 增量的定义就是「用已经微调过的模型去训没训过的材料」——把老录音再塞一遍等于每轮都全量重练，
+ * 时长翻倍、还让「增量」这个词名不副实（docs/adr/asr-train-rewrite.md）。
  */
-export async function prepareFtDataset(options?: { evalKeys?: readonly string[] }): Promise<FtDatasetPrepareResult> {
-  const { entries, skipped, error } = await collectFtEntries()
+export async function prepareFtDataset(options?: {
+  evalKeys?: readonly string[]
+  /** true：只打包账本里 run_id 为空的录音（上一轮的验证集照样留着，见下）。 */
+  onlyUntrained?: boolean
+}): Promise<FtDatasetPrepareResult> {
+  const { entries: all, skipped, error } = await collectFtEntries()
   if (error) return fail(error, skipped)
-  const split = options?.evalKeys ? splitIncrementalEval(entries, options.evalKeys) : splitTrainEval(entries)
+  const evalKeys = options?.evalKeys
+  // 上一轮验证集的句子虽然训过，也必须留在包里：验证集换了句子，loss 就跟前一轮没法比。
+  const keepEval = new Set(evalKeys ?? [])
+  const entries = options?.onlyUntrained
+    ? all.filter((entry) => keepEval.has(entry.key) || untrainedKeys().has(entry.key))
+    : all
+  if (options?.onlyUntrained && entries.every((entry) => keepEval.has(entry.key))) {
+    return fail('账本里没有待训录音：增量微调只训没训过的句子，要重练全部数据请用全量重训', skipped)
+  }
+  const split = evalKeys ? splitIncrementalEval(entries, evalKeys) : splitTrainEval(entries)
   const { train, eval: evalSet } = split
   const dir = ftDatasetDir()
   await mkdir(dir, { recursive: true })

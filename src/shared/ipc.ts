@@ -6,6 +6,7 @@ import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult 
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
 import type { VoiceOutReadiness } from '@shared/voice-out-readiness'
 import type { FtDatasetPrepareResult } from '@shared/train/dataset'
+import type { AsrCheckState } from '@shared/train/asr-check'
 import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@shared/train/gv'
 import type { TrainLogPage, TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
 import type { TrainRunRecord } from '@shared/train/run'
@@ -797,6 +798,10 @@ export const IPC = {
   FT_REC_READ: 'ft:rec-read',
   FT_REC_ASR: 'ft:rec-asr',
   FT_DATASET_PREPARE: 'ft:dataset-prepare',
+  // 全量识别比对：每条录音喂给现役模型，和稿子原文比一遍。结果只在内存里，关掉弹层就丢。
+  ASR_CHECK_START: 'asr-check:start',
+  ASR_CHECK_STOP: 'asr-check:stop',
+  ASR_CHECK_STATE: 'asr-check:state',
   // ASR 微调闭环（T5）：环境状态 / 换模 / 回滚，训练+导出走 TRAIN_START/STOP。
   FT_ASRFT_STATUS: 'ft:asrft-status',
   FT_ASRFT_FACTS: 'ft:asrft-facts',
@@ -1088,6 +1093,9 @@ export const ipcContract = {
   ftRecRead: invoke<[string, string], Uint8Array>(IPC.FT_REC_READ),
   ftRecAsr: invoke<[string, string], VoiceTranscribeResult>(IPC.FT_REC_ASR),
   ftDatasetPrepare: invoke<[], FtDatasetPrepareResult>(IPC.FT_DATASET_PREPARE),
+  asrCheckStart: invoke<[], AsrCheckState>(IPC.ASR_CHECK_START),
+  asrCheckStop: invoke<[], AsrCheckState>(IPC.ASR_CHECK_STOP),
+  asrCheckState: invoke<[], AsrCheckState>(IPC.ASR_CHECK_STATE),
   ftAsrftStatus: invoke<[], AsrFtStatusResult>(IPC.FT_ASRFT_STATUS),
   ftAsrftFacts: invoke<[], AsrFtFacts>(IPC.FT_ASRFT_FACTS),
   ftAsrftInstall: invoke<[], AsrFtInstallState>(IPC.FT_ASRFT_INSTALL),

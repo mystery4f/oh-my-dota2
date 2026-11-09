@@ -177,8 +177,13 @@ export function estimateFtCost(input: {
   evalTakes?: number
   /** 续训起点已到第几步（qwen3 增量用它算「这次还要跑多少」）。 */
   lastStep?: number
-  /** 这次是新录了几条（账本里 run_id 为空的条数）：只进文案，增量要解释「为什么一条新录音也要跑几十步」。 */
+  /**
+   * 账本里还没训过的条数：增量只训这些，所以它同时是增量的训练集基数（不是文案点缀）。
+   * 不传时增量退回「全部 takes」的老算法——只有探针会那样调，面板永远传。
+   */
   pendingTakes?: number
+  /** 这些新录音的总时长（毫秒）：只进文案。 */
+  pendingAudioMs?: number
 }): FtCostEstimate {
   const takes = Math.max(0, Math.floor(input.takes))
   const cost = ftCostBasis(input.trainer)
@@ -187,8 +192,22 @@ export function estimateFtCost(input: {
   }
   const basis = `按 ${cost.engineLabel} ${cost.secPerStep} 秒/步（4060 实测基准，见 docs/BENCH.md）估算：含校验与存盘，机器 / 显存 / 数据量一变就会差几成到倍数`
   if (takes === 0) return { steps: 0, minutes: 0, trainTakes: 0, pendingTakes: 0, label: '还没录训练集：先录几条再估', basis }
-  const evalTakes = Math.min(takes, Math.max(0, Math.floor(input.evalTakes ?? holdoutTakes(takes))))
-  const trainCount = takes - evalTakes
+  // 增量只训「还没训过」的那几条（docs/adr/asr-train-rewrite.md）：训练集基数就是新增条数，
+  // 上一轮的验证集是额外文件、不重新切 holdout，所以 evalTakes 在增量里不参与步数。
+  const incremental = input.mode === 'incremental' && input.pendingTakes !== undefined
+  const pending = Math.max(0, Math.floor(input.pendingTakes ?? 0))
+  if (incremental && pending === 0) {
+    return {
+      steps: 0,
+      minutes: 0,
+      trainTakes: 0,
+      pendingTakes: 0,
+      label: '账本里没有新录音：增量微调只训没训过的句子，要重练全部数据请用全量重训',
+      basis
+    }
+  }
+  const evalTakes = incremental ? 0 : Math.min(takes, Math.max(0, Math.floor(input.evalTakes ?? holdoutTakes(takes))))
+  const trainCount = incremental ? pending : takes - evalTakes
   // 轮数必须带 lastStep：qwen3 续训的轮数是「(lastStep + 200) / 每轮步数」向上取整，不带就少算。
   const epochs = planFtTuning({ mode: input.mode, trainer: input.trainer, trainCount, lastStep: input.lastStep }).epochs ?? 1
   const budget = epochs * ftStepsPerEpoch(input.trainer, trainCount)
@@ -197,14 +216,11 @@ export function estimateFtCost(input: {
     input.mode === 'incremental' && input.trainer !== 'funasr-paraformer' ? Math.max(0, Math.floor(input.lastStep ?? 0)) : 0
   const steps = Math.max(0, budget - done)
   const minutes = steps === 0 ? 0 : Math.max(1, Math.round((steps * cost.secPerStep) / 60))
-  const audio = ftAudioLabel(input.audioMs ?? 0)
-  const pending = Math.max(0, Math.floor(input.pendingTakes ?? 0))
-  // 一句话要同时回答「多久」和「值不值」：全量说清训练/验证条数，增量说清新增几条、
-  // 以及为什么一条新录音也要跑几十步（增量要把全部数据再过几遍，不复习就会忘）。
-  const detail =
-    input.mode === 'incremental'
-      ? `新增 ${pending} 条，增量要把全部 ${trainCount} 条再过 ${epochs} 轮`
-      : `${trainCount} 条进训练、${evalTakes} 条留验证，从底模重训 ${epochs} 轮`
+  const audio = ftAudioLabel(incremental ? (input.pendingAudioMs ?? input.audioMs ?? 0) : (input.audioMs ?? 0))
+  // 一句话要同时回答「多久」和「值不值」：全量说清训练/验证条数，增量说清只训新增的那几条。
+  const detail = incremental
+    ? `新增 ${pending} 条，只训这 ${pending} 条，从上一轮权重接着跑 ${epochs} 轮`
+    : `${trainCount} 条进训练、${evalTakes} 条留验证，从底模重训 ${epochs} 轮`
   return {
     steps,
     minutes,
