@@ -55,7 +55,7 @@ import { reconcileTrainState } from './services/train/reconcile'
 import { runVoiceRuntimeProbe } from './probes/voice-runtime'
 import { loadSettings } from './services/settings'
 import { hotkeysState, installHotkeys, releaseHotkeys } from './services/hotkeys'
-import { warmTranslator } from './services/session/durable-translator'
+import { resetSessionsOnBoot, warmTranslator } from './services/session/durable-translator'
 import { translateInPlace } from './services/reply/reply-service'
 import { suppressExperimentalSqliteWarning } from './services/session/warnings'
 import { getOverlayManager } from './windows/overlay'
@@ -236,6 +236,8 @@ app.whenReady().then(() => {
   if (process.argv.includes('--asr-swap-probe')) void runAsrSwapProbe()
 
   const startup = loadSettings()
+  // 重启即新会话：上一个进程的会话库与槽位 id 先清掉，新进程从空白历史开始（用户要求）。
+  if (!probeRun) resetSessionsOnBoot()
   // 进对局自动开始处理聊天：GSI 报 GAME_IN_PROGRESS 时会再拉一次，这里覆盖「启动时已在局内」。
   if (!probeRun && startup.autoStartCapture) getCaptureService().start()
   // 预热翻译会话：冷启动的建库与会话创建放在后台，用户第一条消息就是热路径。

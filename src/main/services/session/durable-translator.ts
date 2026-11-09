@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
 import { normalizeLine } from '@shared/chat-line'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { Context } from '@earendil-works/chord'
@@ -212,6 +212,33 @@ function writeState(path: string, value: Record<string, number>): void {
   } catch {
     // A missing state file only costs a fresh conversation; never fail translation over it.
   }
+}
+
+/**
+ * 重启即新会话：上一个进程留下的 `conversations-<hash>.json` 里存着各槽位的会话 id，
+ * 新进程照着 id 打开就会继承旧对话的 few-shot 历史（用户要的是关掉再开就是干净的一轮）。
+ * 连会话库一起删，顺带清掉切换 provider 时留下的孤儿文件——`translate-cache.sqlite` 在上一级目录，不受影响。
+ */
+export function resetSessionsOnBoot(): void {
+  const dir = join(app.getPath('userData'), 'sessions')
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch {
+    // 第一次启动还没有这个目录。
+    return
+  }
+  const gone: string[] = []
+  for (const name of names) {
+    if (!name.startsWith('translator-') && !name.startsWith('conversations-')) continue
+    try {
+      rmSync(join(dir, name), { force: true })
+      gone.push(name)
+    } catch {
+      // 删不掉只会让下一轮继承旧历史，不该拦住启动。
+    }
+  }
+  if (gone.length > 0) console.log('SESSIONS_RESET', JSON.stringify({ files: gone.length }))
 }
 
 /** 会话系统指令 = 方向提示词（短格式 + 示例）+ 编号契约；静态，会话按会话配置指令，不按行。 */
