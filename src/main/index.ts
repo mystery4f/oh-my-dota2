@@ -148,7 +148,16 @@ function createDashboard(): void {
   }
 }
 
+const probeFlag = process.argv.find((arg) => arg.startsWith('--') && arg.endsWith('-probe'))
 if (!app.requestSingleInstanceLock()) {
+  if (probeFlag) {
+    // 单实例锁被开发版占着时，探针会静默退场（exit 0、没有 PASS 行），看的人只会当成「过了」。
+    console.error(
+      `PROBE_BLOCKED: single-instance lock held by another electron instance — ${probeFlag} cannot run. ` +
+        'Close the app first (powershell Stop-Process -Name electron -Force), then rerun.',
+    )
+    app.exit(2)
+  }
   app.quit()
 } else {
   app.on('second-instance', () => showDashboard())

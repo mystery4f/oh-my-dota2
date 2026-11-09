@@ -882,6 +882,12 @@ export async function runTrainProbe(): Promise<void> {
   push('Epoch 大小写不敏感', parseTrainProgress('Epoch 12/20')?.percent === 60, p('Epoch 12/20'))
   push('epoch 10/10 → 100%', parseTrainProgress('epoch 10/10')?.percent === 100, p('epoch 10/10'))
   push('epoch 0/0 → null（防除零）', parseTrainProgress('epoch 0/0') === null, p('epoch 0/0'))
+  // 2026-11-09 真实事故：正则只认空格形 `epoch 3/8`，FunASR 实际打「epoch: 3/8」（带冒号），面板进度一直 0%。
+  // fixture 用 data/logs/train.log 里的原行（去掉日志器加的时间戳前缀，就是 manager 收到的那行）。
+  const funasrLine =
+    "[2026-11-09 11:37:37,119][root][INFO] - val, rank: 0, epoch: 3/8, data_slice: 0/1, step_in_slice: 1/2, step_in_epoch: 0, total step: 117, (loss_avg_rank: 1.115), (loss_avg_epoch: 1.115), (ppl_avg_epoch: 3.051e+00), (acc_avg_epoch: 0.100), (lr: 0.000e+00), [('loss_att', 1.015), ('acc', 0.1), ('loss_pre', 0.1), ('loss', 1.115), ('batch_size', 1)], {'data_load': '0.003', 'forward_time': '0.082'}, GPU, memory: usage: 2.508 GB, peak: 4.171 GB, cache: 3.061 GB, cache_peak: 4.369 GB"
+  push('FunASR 真实日志行（epoch: 3/8 带冒号）→ 37%', parseTrainProgress(funasrLine)?.percent === 37 && parseTrainProgress(funasrLine)?.stage === 'epoch 3/8', p(funasrLine))
+  push('FunASR 冒号短形 epoch: 7/8 → 87%', parseTrainProgress('epoch: 7/8')?.percent === 87, p('epoch: 7/8'))
   push('tqdm 进度条 → 直接取百分比', parseTrainProgress(' 45%|█████     | 210/500 [01:10<01:26]')?.percent === 45, p(' 45%|█████     | 210/500 [01:10<01:26]'))
   push('step 120/600 → 20%', parseTrainProgress('step 120/600')?.percent === 20, p('step 120/600'))
   push('裸百分比也认', parseTrainProgress('training 99% complete')?.percent === 99, p('training 99% complete'))

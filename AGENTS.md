@@ -218,6 +218,10 @@ it and nothing happened". The overlay and the pause hint print key names from th
 - Docs/notes edits: a heredoc or `node -e "..."` line carrying backticks gets those backticks executed
   by bash before the file is written; markdown table rows and inline code vanished that way twice.
   Use the file-edit tool for anything containing backticks, template literals or `$(...)`.
+- Multi-line `node` scripts go to `.tmp/*.mjs` and run as `node .tmp/x.mjs` — never inline
+  `node -e "…"` with nested quotes: the escaping accidents of one session produced a CRLF regex
+  that silently matched nothing, a dump guard that never actually got inserted, and nine junk
+  files at the repo root. If the script must verify it was written, grep the file after running it.
 - TTS: never fall back to the system voice when synthesis fails — skip that line silently instead.
   Two voices trading places mid-match is the exact bug users report as "the voice suddenly sounds
   wrong". The free Edge endpoint needs a warm connection pool, one retry, and it returns 0 bytes
