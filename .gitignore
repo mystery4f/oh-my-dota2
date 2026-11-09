@@ -15,3 +15,6 @@ data/
 
 # cmd redirect accident from POSIX shells: `foo > nul` creates a real file named nul
 /nul
+
+# tsc --noEmit still writes this next to tsconfig files; it is a build artifact, not source
+*.tsbuildinfo

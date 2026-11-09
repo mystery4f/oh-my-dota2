@@ -4,7 +4,21 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default tseslint.config(
-  { ignores: ['out', 'dist', 'node_modules', '.tmp/**', 'resources/**', 'data/**', 'logs/**', '.pi/**'] },
+  {
+    // `.dev-flow/**` 是别的工作树落在仓库里的构建产物（out/main、out/preload …），
+    // 不 ignore 就会让 `eslint .` 永久报上千条错误，提交钩子只能靠 --no-verify 绕过。
+    ignores: [
+      'out',
+      'dist',
+      'node_modules',
+      '.tmp/**',
+      'resources/**',
+      'data/**',
+      'logs/**',
+      '.pi/**',
+      '.dev-flow/**'
+    ]
+  },
   {
     files: ['**/*.config.js'],
     languageOptions: {
@@ -20,7 +34,8 @@ export default tseslint.config(
       globals: {
         console: 'readonly',
         process: 'readonly',
-        Buffer: 'readonly'
+        Buffer: 'readonly',
+        URL: 'readonly'
       }
     }
   },

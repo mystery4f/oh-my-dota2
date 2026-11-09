@@ -38,6 +38,11 @@ guessing the fields costs a rework round.
 - `npx eslint .` — 0 errors expected; exactly 1 permanent `react-refresh` warning (button.tsx:41)
 - `npm run check:shared` — rejects value-import cycles inside `src/shared/` (they pass typecheck and
   break at runtime in the renderer); `import type` edges are erased and ignored. Wired into `npm run lint`.
+- `npm run check:docs` — every markdown under `docs/` must be listed in `docs/INDEX.md`, and every index
+  reference must exist; a doc nobody indexes is a doc nobody reads. `scripts/check-index.mjs`, wired into `npm run lint`.
+- `npm run check:pure` — assertions over `src/shared/` logic (grade distance, epoch maths) with no Electron:
+  `node --experimental-strip-types`, plus `scripts/pure-resolve.mjs` for the extensionless relative imports
+  Node's ESM resolver insists on. Anything with a side effect still belongs to a probe. Wired into `npm run lint`.
 - `npm run panel:preview` — the dashboard in a plain browser at `localhost:5199`, no Electron and no
   game: `scripts/panel-preview.mts` serves `src/renderer/src/preview/api-stub.ts` as a fake `window.api`
   before the app boots. That stub is typed against `WindowApi`, so a renamed channel or a changed result
@@ -52,6 +57,8 @@ guessing the fields costs a rework round.
   and the 预检 rows look missing.
 - `.githooks/pre-commit` runs `npm run typecheck` then `npm run lint` (the same two commands as CI).
   Enable once per clone: `git config core.hooksPath .githooks`; skip once with `git commit --no-verify`.
+  Other worktrees live under `.dev-flow/` inside this repo, and eslint now ignores that path — a hook that
+  fails on someone else's build output is a hook everybody skips.
 - Probes: the catalogue (one line per probe, what it pins) lives in `docs/PROBES.md` — read the matching line before touching that seam.
   `taskkill /F /IM electron.exe` first (a leftover process holds the single-instance lock and the probe exits silently — the tell is exit 0 after ~3 s with no `PASS` lines), then `npx electron out/main/index.js --<probe>`. `cmd /c "taskkill …"` is unreliable from bash (the quoting collapses and cmd just prints its banner); `powershell -NoProfile -Command "Stop-Process -Name electron -Force"` always works.
 
