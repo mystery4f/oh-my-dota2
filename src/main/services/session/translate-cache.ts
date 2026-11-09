@@ -114,70 +114,90 @@ function looksCorrupt(err: unknown): boolean {
   return /malformed|not a database|disk image is malformed|database corruption/i.test(message)
 }
 
+/** 半开的句柄关不掉也无所谓：后面还要把文件挪走。 */
+function closeQuietly(handle: DatabaseSync | null): void {
+  try {
+    handle?.close()
+  } catch {
+    // 已经坏了，关闭失败不影响挪文件
+  }
+}
+
 function open(): DatabaseSync | null {
   if (db !== null) return db
   if (dbFailed) return null
-  try {
-    const file = translationCachePath()
-    mkdirSync(dirname(file), { recursive: true })
-    const next = new DatabaseSync(file)
-    next.exec('PRAGMA journal_mode = WAL')
-    // 早期版本按方向单边存，语义换成双向账本后那张表没用了。
-    next.exec('DROP TABLE IF EXISTS translation')
-    // 表结构演进过（补原文/统计字段），老账本丢掉重来——它是缓存，不是账本数据。
-    const existing = next
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pair'")
-      .get() as { name: string } | undefined
-    if (existing !== undefined) {
-      const columns = (next.prepare('PRAGMA table_info(pair)').all() as { name: string }[]).map(
-        (column) => column.name
-      )
-      if (!REQUIRED_COLUMNS.every((name) => columns.includes(name))) next.exec('DROP TABLE pair')
-    }
-    next.exec(`
-      CREATE TABLE IF NOT EXISTS pair (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        provider TEXT NOT NULL,
-        tone TEXT NOT NULL,
-        a TEXT NOT NULL,
-        a_raw TEXT NOT NULL,
-        b TEXT NOT NULL,
-        a_han INTEGER NOT NULL,
-        direction TEXT NOT NULL,
-        origin TEXT NOT NULL,
-        a_len INTEGER NOT NULL,
-        b_len INTEGER NOT NULL,
-        a_words INTEGER NOT NULL,
-        b_words INTEGER NOT NULL,
-        hits INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        last_hit_at INTEGER NOT NULL,
-        last_origin TEXT NOT NULL,
-        UNIQUE(provider, tone, a)
-      )
-    `)
-    next.exec('CREATE INDEX IF NOT EXISTS idx_pair_b ON pair(provider, tone, b)')
-    next.exec('CREATE INDEX IF NOT EXISTS idx_pair_hits ON pair(hits DESC)')
-    // 索引损坏时 prepare/run 都会抛，但 SELECT 仍能读——所以必须在打开时查一次，
-    // 否则症状是「读得到旧行、写不进新行」，看起来像词库凭空停止增长。
-    const check = next.prepare('PRAGMA quick_check(1)').get() as { quick_check?: string } | undefined
-    if (check !== undefined && check.quick_check !== 'ok') {
-      try {
-        next.close()
-      } catch {
-        // 已经坏了，关闭失败无所谓
+  // 自愈只给一次机会：文件挪不动时下次打开还会抛，那时认命降级，别在这里打转。
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let opened: DatabaseSync | null = null
+    try {
+      const file = translationCachePath()
+      mkdirSync(dirname(file), { recursive: true })
+      const next = new DatabaseSync(file)
+      opened = next
+      next.exec('PRAGMA journal_mode = WAL')
+      // 早期版本按方向单边存，语义换成双向账本后那张表没用了。
+      next.exec('DROP TABLE IF EXISTS translation')
+      // 表结构演进过（补原文/统计字段），老账本丢掉重来——它是缓存，不是账本数据。
+      const existing = next
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pair'")
+        .get() as { name: string } | undefined
+      if (existing !== undefined) {
+        const columns = (next.prepare('PRAGMA table_info(pair)').all() as { name: string }[]).map(
+          (column) => column.name
+        )
+        if (!REQUIRED_COLUMNS.every((name) => columns.includes(name))) next.exec('DROP TABLE pair')
       }
-      healCorruptDatabase(`quick_check: ${check.quick_check}`)
-      return open()
+      next.exec(`
+        CREATE TABLE IF NOT EXISTS pair (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          provider TEXT NOT NULL,
+          tone TEXT NOT NULL,
+          a TEXT NOT NULL,
+          a_raw TEXT NOT NULL,
+          b TEXT NOT NULL,
+          a_han INTEGER NOT NULL,
+          direction TEXT NOT NULL,
+          origin TEXT NOT NULL,
+          a_len INTEGER NOT NULL,
+          b_len INTEGER NOT NULL,
+          a_words INTEGER NOT NULL,
+          b_words INTEGER NOT NULL,
+          hits INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          last_hit_at INTEGER NOT NULL,
+          last_origin TEXT NOT NULL,
+          UNIQUE(provider, tone, a)
+        )
+      `)
+      next.exec('CREATE INDEX IF NOT EXISTS idx_pair_b ON pair(provider, tone, b)')
+      next.exec('CREATE INDEX IF NOT EXISTS idx_pair_hits ON pair(hits DESC)')
+      // 索引损坏时 prepare/run 都会抛，但 SELECT 仍能读——所以必须在打开时查一次，
+      // 否则症状是「读得到旧行、写不进新行」，看起来像词库凭空停止增长。
+      const check = next.prepare('PRAGMA quick_check(1)').get() as { quick_check?: string } | undefined
+      if (check !== undefined && check.quick_check !== 'ok') {
+        closeQuietly(next)
+        healCorruptDatabase(`quick_check: ${check.quick_check}`)
+        continue
+      }
+      db = next
+      return db
+    } catch (err) {
+      // 库文件被截断时（头里写着 8 页、实际只剩 6 页）连 PRAGMA 都过不去，走不到上面的
+      // quick_check 分支——所以这里也必须自愈，否则这个进程的记账本从此彻底消失，
+      // 症状是「说过的句子永远不命中、每句都花一次模型往返」，却没有任何报错提示。
+      closeQuietly(opened)
+      if (attempt === 0 && looksCorrupt(err)) {
+        healCorruptDatabase(errorMessage(err))
+        continue
+      }
+      // 缓存坏了不能拖垮翻译：退回进程内 Map，功能降级但结果照出。
+      dbFailed = true
+      console.log('TRANSLATE_CACHE_OPEN_FAILED', errorMessage(err))
+      return null
     }
-    db = next
-    return db
-  } catch (err) {
-    // 缓存坏了不能拖垮翻译：退回进程内 Map，功能降级但结果照出。
-    dbFailed = true
-    console.log('TRANSLATE_CACHE_OPEN_FAILED', errorMessage(err))
-    return null
   }
+  dbFailed = true
+  return null
 }
 
 /** 关掉句柄，只为探针验证「落盘后重新打开还在」。 */
