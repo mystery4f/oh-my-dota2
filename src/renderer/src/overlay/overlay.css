@@ -142,6 +142,8 @@
   font-size: 11px;
   line-height: 1.4;
   margin-top: 2px;
+  /* 耗时统计开着时这一行写两行（「已播 · 共 X」/ 各段拆解）：换行要真换行。 */
+  white-space: pre-line;
 }
 .spoken.ok {
   color: #86efac;

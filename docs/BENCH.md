@@ -232,8 +232,8 @@ actions           {ocr:98, gap:142, same:68, busy:75}   ← 修复前的数字
 - **分段计时（voice-reply-latency）**：开关是 `voiceShowTiming`（面板「对讲 → 耗时统计」，**默认关**——关着时一行都不量，
   浮层、识别记录、日志三处都没有数字）。开着时每次对讲落一行 `logs/voice-chain.jsonl`——`asrMs` / `translateMs` /
   `firstAudioMs` / `playStartMs` / `speakMs` / `totalMs`（缺段 `null`，不是 0），控制台同名锚点 `VOICE_CHAIN_TIMING`；
-  浮层那行写两行（`已播 · 共 X` / `识别 … 译 … 首音 … 起播 … 播完 …`）并停留 8 秒（关着时只写「已播」、停留 2 秒），
-  面板识别记录行给同一份拆解。
+  数字挂在那一行条目自己身上（`已播 · 共 X` 换行接 `识别 … 译 … 首音 … 起播 … 播完 …`），条目在数字就在；
+  阶段行只写「已播」两秒，面板识别记录行给同一份拆解。
   `totalMs` = 识别开始到出声（含识别本身），也就是队友听到第一声之前那句人实际等的时间。
   本节早先那段按估计写的数字仍留着作对照；真机实测见下一条（冷启动与缓存命中要分开读）。
 - **真机实测（2026-11-09，worktree 构建，`data/logs/voice-chain.jsonl`）**：

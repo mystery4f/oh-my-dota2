@@ -124,7 +124,10 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       sink.patchRow({ id: rowId, error: reply.error ?? '翻译失败' })
     }
     if (reply.stage === 'voice-out' || reply.spoken) {
-      sink.patchRow({ id: rowId, spoken: spokenStatusLine(reply.spoken, reply.error) })
+      // 耗时拆解挂在那一行自己身上：条目还在，数字就在——阶段行两秒后清掉也不带走它。
+      const base = spokenStatusLine(reply.spoken, reply.error)
+      const detail = formatChainOverlay(reply.timing)
+      sink.patchRow({ id: rowId, spoken: detail === null ? base : { ...base, text: `${base.text} · ${detail}` } })
     }
     sink.reportChain({
       transcript,
@@ -136,11 +139,9 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       // 面板纠错凭这张票取原音：同一句说两遍时文本一样，只有票分得清是哪一段录音。
       utteranceId: result.utteranceId
     })
-    // 结果已经写进那一行里了；「播没播」加一句，播了就带上这次的起播总时长——慢在哪一段一眼看得见。
-    const detail = formatChainOverlay(reply.timing)
-    const doneLine = reply.spoken ? (detail ? `已播 · ${detail}` : '已播') : reply.error ? '未播' : null
-    // 带拆解的两行要多留一会儿才读得完：2 秒只够看一眼「已播」，五段数字根本来不及看。
-    sink.stage(doneLine, detail ? 8000 : 2000)
+    // 结果已经写进那一行里了；这里只补一句「播没播」——耗时数字在条目里，不在这里重复。
+    // 阶段行只说结局：数字在上面的条目里，不需要抢两行的高度。
+    sink.stage(reply.spoken ? '已播' : reply.error ? '未播' : null, 2000)
   }
 
   /** 失败也落一行 + 面板可见的链路结果：按了没反应比报错更糟。 */
