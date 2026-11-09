@@ -1,4 +1,5 @@
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
+import type { VoiceChainTiming } from './voice-timing'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import { DEFAULT_CAPTURE_MODE, DEFAULT_HOTKEYS } from './hotkeys'
 
@@ -486,6 +487,8 @@ export interface VoiceReplyResult {
   stage: VoiceReplyStage | null
   /** 失败说明；成功为 null。 */
   error: string | null
+  /** 分段计时：识别/翻译/首音/起播/播完各花了多久（voice-reply-latency）；量不到的段为 null。 */
+  timing?: VoiceChainTiming
 }
 
 /** 语音链在面板上的回显：一条摘要覆盖 成功 / 某环失败 / 压根没识别到话。 */
@@ -500,6 +503,8 @@ export interface VoiceChainSummary {
   stage: VoiceReplyStage | null
   /** 失败说明；成功为 null。 */
   error: string | null
+  /** 分段计时：浮层「已播」行与面板记录行读的就是它；识别都没跑就没这一项。 */
+  timing?: VoiceChainTiming
   /**
    * 这一段原音的票据（主进程内存里那张 stash 的键）：面板纠错时原样送回去，
    * 主进程按它取录音。同一句说过两遍时文本一样、录音不同，只有票据分得清是哪一段。

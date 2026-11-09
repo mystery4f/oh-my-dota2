@@ -15,6 +15,7 @@ import {
   type VirtualCableStatus
 } from '@shared/voice-out'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
+import { formatChainTiming } from '@shared/voice-timing'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
 import {
@@ -590,6 +591,11 @@ export function TalkPage({
                       {entry.corrected ? '✏️ ' : ''}🎤 原文「{entry.transcript || '（空）'}」→ 译文「
                       {entry.translated ?? (entry.stage === 'skipped' ? '（只看识别）' : '（翻译失败）')}」
                       {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}{' '}
+                      {entry.timing ? (
+                        <span className="mr-1 text-muted-foreground" title="一次对讲的分段耗时：识别 → 译 → 首音 → 起播 → 播完">
+                          {formatChainTiming(entry.timing)}
+                        </span>
+                      ) : null}
                       {entry.transcript ? (
                         <Button
                           size="sm"

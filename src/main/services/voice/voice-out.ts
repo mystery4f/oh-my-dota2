@@ -1,4 +1,5 @@
 import type { VoiceOutTestResult } from '@shared/ipc'
+import type { ChainTimer } from './chain-timing'
 import {
   VOICE_OUT_TEST_LINE,
   VOICE_OUT_VOICES,
@@ -36,6 +37,8 @@ export interface VoiceOutSpeakOutcome {
   spoken: boolean
   /** 首个失败说明（合成全败 / 键失败 / 播放失败）；成功为 null。 */
   error: string | null
+  /** 切出的段数（合成失败的段也算）：GV 每多一段就多一次每请求地板。 */
+  segments: number
 }
 
 
@@ -61,8 +64,8 @@ class VoiceOutService {
   }
 
   /** 一键到底的声出腿：译文切段并行合成，按序播出，说话键全程按住。 */
-  speakReply(text: string): Promise<VoiceOutSpeakOutcome> {
-    return this.enqueue(() => this.runReply(text))
+  speakReply(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
+    return this.enqueue(() => this.runReply(text, timer))
   }
 
   private async run(): Promise<VoiceOutTestResult> {
@@ -161,17 +164,17 @@ class VoiceOutService {
   }
 
   /** 错误绝不往外抛：链上还排着别的活，抛出去会污染后面每一单。 */
-  private async runReply(text: string): Promise<VoiceOutSpeakOutcome> {
+  private async runReply(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
     try {
-      return await this.runReplyInner(text)
+      return await this.runReplyInner(text, timer)
     } catch (err) {
       const error = errorMessage(err)
       console.log('VOICE_REPLY_ERROR', JSON.stringify({ error }))
-      return { spoken: false, error }
+      return { spoken: false, error, segments: 0 }
     }
   }
 
-  private async runReplyInner(text: string): Promise<VoiceOutSpeakOutcome> {
+  private async runReplyInner(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
     const settings = loadSettings()
     // 引擎/封装/嗓逐段按设置解析（与测试腿同一个 resolveVoiceOutSynth）：音色传面板「声出音色」
     // （ttsOutVoice）——测试声出验的就是对讲要用的这把嗓；GV 本就不选嗓（音色由参考音频决定），
@@ -184,6 +187,8 @@ class VoiceOutService {
       keyVk: speakKeyVk(settings.ttsSpeakKey),
       speakMode: settings.ttsSpeakMode,
       onHint: showHint,
+      // 起播那一刻（键已按下、窗口开始播）才是计时的「起播」点，不是调用 play 的时刻。
+      onSpeak: () => timer?.notePlayStart(),
       onKeyError: (error, requestId) => console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, error }))
     })
 
@@ -211,6 +216,8 @@ class VoiceOutService {
         async (segment) => {
           segmentCount += 1
           if (segment.audio === null) return
+          // 第一段有声的音频到手 = 「首音」终点；后面的段不再改这个数。
+          timer?.noteFirstAudio()
           synthOkAny = true
           const requestId = nextRequestId
           nextRequestId += 1
@@ -233,6 +240,8 @@ class VoiceOutService {
           console.log('VOICE_REPLY_SEGMENT_OK', JSON.stringify({ requestId, index: segment.index, durationMs: outcome.durationMs }))
         }
       )
+      // 所有段送完：整句的「播完」点（收尾的松键要等尾巴余量，不算说话时间）。
+      timer?.noteSpeakEnd()
     } finally {
       // 尾巴：最后一截音频收进频道再松键；任何提前 return / 抛错的路径都必须松键。
       await player.finish()
@@ -244,14 +253,14 @@ class VoiceOutService {
       const error = `${speechFailHint(engine, currentVoiceOutReadiness()?.reason)}，这句不出声`
       console.log('VOICE_REPLY_SKIP', JSON.stringify({ skip: 'synth-failed', engine, segments: segmentCount }))
       showHint(error)
-      return { spoken: false, error }
+      return { spoken: false, error, segments: segmentCount }
     }
-    if (!audioPlayed) return { spoken: false, error: '声出播放失败' }
+    if (!audioPlayed) return { spoken: false, error: '声出播放失败', segments: segmentCount }
     if (player.error) {
       // 音频播出去了（本地能听见），但频道没开——队友没听到，按失败算并说明原因。
-      return { spoken: false, error: player.error }
+      return { spoken: false, error: player.error, segments: segmentCount }
     }
-    return { spoken: true, error: null }
+    return { spoken: true, error: null, segments: segmentCount }
   }
 }
 

@@ -1,6 +1,7 @@
 import { recordingStageLine, type CaptureMode } from '@shared/hotkeys'
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
+import { formatChainTotal } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
 import { openMicStream } from '../lib/mic'
 
@@ -131,11 +132,14 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       spoken: reply.spoken,
       stage: reply.stage,
       error: reply.error,
+      timing: reply.timing,
       // 面板纠错凭这张票取原音：同一句说两遍时文本一样，只有票分得清是哪一段录音。
       utteranceId: result.utteranceId
     })
-    // 结果已经写进那一行里了；只有「播没播」还需要一句，说完就收。
-    sink.stage(reply.spoken ? '已播' : reply.error ? '未播' : null, 2000)
+    // 结果已经写进那一行里了；「播没播」加一句，播了就带上这次的起播总时长——慢在哪一段一眼看得见。
+    const total = formatChainTotal(reply.timing)
+    const doneLine = reply.spoken ? (total ? `已播 · ${total}` : '已播') : reply.error ? '未播' : null
+    sink.stage(doneLine, 2000)
   }
 
   /** 失败也落一行 + 面板可见的链路结果：按了没反应比报错更糟。 */
