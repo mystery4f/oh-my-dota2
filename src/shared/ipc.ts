@@ -302,6 +302,11 @@ export interface AppSettings {
    * 单独一项而不是五个平铺字段——面板一次改整张表，平铺就要五个归一化分支加五处探针。
    */
   /**
+   * 语音对讲总开关。<b>默认关</b>：关着时不注册 voiceCapture 热键、不起按住轮询进程，整条
+   * 识别→翻译→声出 的链就不会被误触而白跑一次（一句要 5 秒上下，见 docs/BENCH.md）。
+   */
+  voiceCaptureEnabled: boolean
+  /**
    * 语音对讲热键怎么按：hold = 按住说话、松开触发；toggle = 按一下开录、再按一下触发。
    * 只影响「语音对讲」这一个动作；其余热键永远是敲一下。
    */
@@ -393,6 +398,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayVisible: false,
   overlayOpacity: 0.34,
   overlayBounds: null,
+  voiceCaptureEnabled: false,
   voiceCaptureMode: DEFAULT_CAPTURE_MODE,
   hotkeys: { ...DEFAULT_HOTKEYS }
 }

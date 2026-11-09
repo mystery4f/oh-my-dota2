@@ -102,6 +102,9 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
   and falls back to a `globalShortcut` toggle when it gives up — the hotkey must never go silent. Never register both paths
   for `voiceCapture`: one press would start and stop in the same instant. Keyboard auto-repeat is debounced 500ms in
   `toggleVoiceCapture` (toggle mode only; the watcher emits one edge per physical press).
+  The whole chain sits behind `voiceCaptureEnabled` (**off by default**; panel 对讲 → 语音对讲): while it is off
+  the action is never registered and the hold watcher never spawns, so a default install runs none of this and
+  cannot burn a 5 s chain by accident. Turning it on is an explicit opt-in, not a hotkey that is merely listed.
 
 Two actions may never share an accelerator — the panel refuses the whole table and marks both rows. A key another
 program already owns is reported per row (`被占用`), never silently dropped: that is the only visible form of "I pressed

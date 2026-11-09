@@ -151,6 +151,11 @@ export async function runVoiceChainProbe(): Promise<void> {
     const emptyTiming = { asrMs: null, translateMs: null, firstAudioMs: null, playStartMs: null, speakMs: null, totalMs: null }
     push('formatChainOverlay: 一段都没量到就返回 null（那行只写「已播」）', formatChainOverlay(undefined) === null && formatChainOverlay(emptyTiming) === null, '')
     push('voiceShowTiming 默认关（面板里才开）', DEFAULT_SETTINGS.voiceShowTiming === false, `voiceShowTiming=${String(DEFAULT_SETTINGS.voiceShowTiming)}`)
+    push(
+      'voiceCaptureEnabled 默认关（整条对讲链默认不注册、不起进程）',
+      DEFAULT_SETTINGS.voiceCaptureEnabled === false,
+      `voiceCaptureEnabled=${String(DEFAULT_SETTINGS.voiceCaptureEnabled)}`
+    )
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
