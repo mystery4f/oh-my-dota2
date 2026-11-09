@@ -27,17 +27,23 @@ export async function voiceReply(transcript: string): Promise<VoiceReplyResult> 
   const recognized = String(transcript ?? '').trim()
   // 对讲计时：识别那一段由 transcribeAudio 记着，这里领走——链从识别开始算，不是从翻译开始。
   const timer = new ChainTimer(takeAsrRun())
+  const timed = settings.voiceShowTiming
+  // 耗时统计是可选开的（面板「对讲 → 耗时统计」，默认关）：关着就一行都不量，
+  // 浮层、面板记录、logs/voice-chain.jsonl 就不会有数字——没有「量了但不显示」的中间态。
   // 每一条出口都带着同一份计时离开：失败的那次同样看得出崩在哪一段。
-  const finish = (result: VoiceReplyResult, segments = 0): VoiceReplyResult => ({
-    ...result,
-    timing: reportChainTiming(timer, {
-      spoken: result.spoken,
-      stage: result.stage,
-      engine: settings.ttsOutEngine,
-      chars: result.translated?.length ?? 0,
-      segments
-    })
-  })
+  const finish = (result: VoiceReplyResult, segments = 0): VoiceReplyResult =>
+    timed
+      ? {
+          ...result,
+          timing: reportChainTiming(timer, {
+            spoken: result.spoken,
+            stage: result.stage,
+            engine: settings.ttsOutEngine,
+            chars: result.translated?.length ?? 0,
+            segments
+          })
+        }
+      : result
   if (decideVoiceOutReply({ recognized, translated: null }).skip === 'empty-recognition') {
     return finish({ translated: null, spoken: false, stage: 'recognize', error: '未识别到语音' })
   }

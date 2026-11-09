@@ -41,7 +41,11 @@ export function formatChainTiming(timing: VoiceChainTiming | null | undefined): 
 }
 
 /** 浮层那一行只给最该看的数字：从识别开始到出声，一共等了多久。 */
-export function formatChainTotal(timing: VoiceChainTiming | null | undefined): string | null {
-  if (!timing || timing.totalMs === null || !Number.isFinite(timing.totalMs)) return null
-  return `起播共 ${formatMs(timing.totalMs)}`
+/** 浮层那两行：第一行等多长时间，第二行慢在哪一段；一段都没量到返回 null（那行就只写「已播」）。 */
+export function formatChainOverlay(timing: VoiceChainTiming | null | undefined): string | null {
+  const legs = formatChainTiming(timing)
+  if (legs === null) return null
+  const total = timing?.totalMs
+  if (total === null || total === undefined || !Number.isFinite(total)) return legs
+  return `共 ${formatMs(total)}\n${legs}`
 }

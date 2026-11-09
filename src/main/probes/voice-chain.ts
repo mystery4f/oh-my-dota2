@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { formatChainTiming, formatChainTotal, formatMs } from '@shared/voice-timing'
+import { formatChainOverlay, formatChainTiming, formatMs } from '@shared/voice-timing'
+import { DEFAULT_SETTINGS } from '@shared/ipc'
 import { appendCappedJsonl } from '../services/logs/jsonl'
 import { ChainTimer, noteAsrRun, reportChainTiming, takeAsrRun } from '../services/voice/chain-timing'
 
@@ -98,8 +99,16 @@ export async function runVoiceChainProbe(): Promise<void> {
       formatChainTiming(null) === null,
     'null'
   )
-  push('formatChainTotal: 只报识别开始到出声', formatChainTotal(full) === `起播共 ${formatMs(full.totalMs)}`, String(formatChainTotal(full)))
-  push('formatChainTotal: 没起播就没有这一句', formatChainTotal(partial) === null, 'null')
+  push(
+    'formatChainOverlay: 有总计就写「共 …」再换行给拆解',
+    formatChainOverlay(full)?.startsWith(`共 ${formatMs(full.totalMs)}\n`) === true,
+    String(formatChainOverlay(full))
+  )
+  push(
+    'formatChainOverlay: 没起播就没有「共」那行，只画量到的段',
+    formatChainOverlay(partial) === formatChainTiming(partial),
+    String(formatChainOverlay(partial))
+  )
 
   // —— jsonl 日志：有上限，但最后一条永远在 ——
   const dir = mkdtempSync(join(app.getPath('temp'), 'voice-chain-'))
@@ -132,6 +141,16 @@ export async function runVoiceChainProbe(): Promise<void> {
       written.trim().slice(0, 200)
     )
     push('reportChainTiming: 返回的就是这份计时（浮层/面板读同一份）', returned.playStartMs !== null && returned.totalMs !== null, JSON.stringify(returned))
+    // —— 浮层两行（voiceShowTiming 开着时才走到这里）：第一行总时长，第二行五段拆解 ——
+    const overlay = formatChainOverlay(returned)
+    push(
+      'formatChainOverlay: 第一行「共 …」，第二行就是面板那份拆解',
+      overlay === `共 ${formatMs(returned.totalMs)}\n${formatChainTiming(returned)}`,
+      JSON.stringify(overlay)
+    )
+    const emptyTiming = { asrMs: null, translateMs: null, firstAudioMs: null, playStartMs: null, speakMs: null, totalMs: null }
+    push('formatChainOverlay: 一段都没量到就返回 null（那行只写「已播」）', formatChainOverlay(undefined) === null && formatChainOverlay(emptyTiming) === null, '')
+    push('voiceShowTiming 默认关（面板里才开）', DEFAULT_SETTINGS.voiceShowTiming === false, `voiceShowTiming=${String(DEFAULT_SETTINGS.voiceShowTiming)}`)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

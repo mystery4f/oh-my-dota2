@@ -35,6 +35,8 @@
   font-size: 11px;
   line-height: 1.4;
   text-align: right;
+  /* 耗时统计（voiceShowTiming）在浮层上写两行：总时长 / 各段拆解。 */
+  white-space: pre-line;
   animation: rise-in 200ms ease-out;
 }
 #stage.warn {

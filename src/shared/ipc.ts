@@ -175,6 +175,11 @@ export interface AppSettings {
   /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
   voiceTranscribeOnly: boolean
   /**
+   * 对讲耗时统计（默认关）：开了才给每句话记账——浮层那行多一行五段数字，面板记录行与
+   * `logs/voice-chain.jsonl` 同步有；关着时一行都不量，界面上也没有数字可画。
+   */
+  voiceShowTiming: boolean
+  /**
    * 现役识别模型 id（`<engine>:<rel>`），来自 ASR_MODELS 的注册表；空 = 按可用性自动选。
    * 引擎不再单独存（旧 `asrEngine` 字段已在 #67 退役）：模型属于哪个引擎由这个 id 的前缀决定。
    */
@@ -347,6 +352,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsSpeakMode: 'hold',
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
+  voiceShowTiming: false,
   /** 现役模型空 = 由注册表按可用性自动选（#67 起引擎跟着这个 id 走，不再单独存）。 */
   asrActiveModel: '',
   /** 训练目标引擎空 = 跟现役模型走；填了就固定训这个引擎（运行时模型没装也能选）。 */

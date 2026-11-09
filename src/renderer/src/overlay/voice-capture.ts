@@ -1,7 +1,7 @@
 import { recordingStageLine, type CaptureMode } from '@shared/hotkeys'
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
-import { formatChainTotal } from '@shared/voice-timing'
+import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
 import { openMicStream } from '../lib/mic'
 
@@ -137,8 +137,8 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       utteranceId: result.utteranceId
     })
     // 结果已经写进那一行里了；「播没播」加一句，播了就带上这次的起播总时长——慢在哪一段一眼看得见。
-    const total = formatChainTotal(reply.timing)
-    const doneLine = reply.spoken ? (total ? `已播 · ${total}` : '已播') : reply.error ? '未播' : null
+    const detail = formatChainOverlay(reply.timing)
+    const doneLine = reply.spoken ? (detail ? `已播 · ${detail}` : '已播') : reply.error ? '未播' : null
     sink.stage(doneLine, 2000)
   }
 

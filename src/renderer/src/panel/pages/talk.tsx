@@ -544,6 +544,15 @@ export function TalkPage({
               {settings.voiceTranscribeOnly ? '开（不翻译不声出）' : '关'}
             </Button>
           </Row>
+          <Row label="耗时统计" hint="识别/译/首音/起播/播完各段多久：浮层与识别记录里都能看到；默认关">
+            <Button
+              size="sm"
+              variant={settings.voiceShowTiming ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ voiceShowTiming: !settings.voiceShowTiming }))}
+            >
+              {settings.voiceShowTiming ? '开' : '关'}
+            </Button>
+          </Row>
         </Group>
 
         {log.length > 0 ? (
