@@ -47,6 +47,8 @@ export function applyHotkeys(map: Partial<HotkeyMap>): HotkeyVerdicts {
   const normalized = normalizeHotkeyMap(map)
   const settings = loadSettings()
   const captureMode = settings.voiceCaptureMode
+  // 总开关关着就不注册 voiceCapture，也不起按住轮询进程：默认配置下这条链一个进程都不起。
+  const captureOn = settings.voiceCaptureEnabled
   globalShortcut.unregisterAll()
   // 语音对讲切回敲一下时必须把常驻监视进程收掉，否则按住那只手还会继续录。
   if (captureMode !== 'hold') stopHoldWatch()
@@ -60,6 +62,11 @@ export function applyHotkeys(map: Partial<HotkeyMap>): HotkeyVerdicts {
   }
   const next: HotkeyVerdicts = {}
   for (const id of HOTKEY_ACTION_IDS) {
+    if (id === 'voiceCapture' && !captureOn) {
+      stopHoldWatch()
+      next[id] = 'unbound'
+      continue
+    }
     const accelerator = normalized[id]
     if (!accelerator) {
       if (id === 'voiceCapture') stopHoldWatch()

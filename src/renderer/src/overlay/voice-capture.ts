@@ -1,6 +1,7 @@
 import { recordingStageLine, type CaptureMode } from '@shared/hotkeys'
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
+import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
 import { openMicStream } from '../lib/mic'
 
@@ -123,7 +124,10 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       sink.patchRow({ id: rowId, error: reply.error ?? '翻译失败' })
     }
     if (reply.stage === 'voice-out' || reply.spoken) {
-      sink.patchRow({ id: rowId, spoken: spokenStatusLine(reply.spoken, reply.error) })
+      // 耗时拆解挂在那一行自己身上：条目还在，数字就在——阶段行两秒后清掉也不带走它。
+      const base = spokenStatusLine(reply.spoken, reply.error)
+      const detail = formatChainOverlay(reply.timing)
+      sink.patchRow({ id: rowId, spoken: detail === null ? base : { ...base, text: `${base.text} · ${detail}` } })
     }
     sink.reportChain({
       transcript,
@@ -131,10 +135,12 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       spoken: reply.spoken,
       stage: reply.stage,
       error: reply.error,
+      timing: reply.timing,
       // 面板纠错凭这张票取原音：同一句说两遍时文本一样，只有票分得清是哪一段录音。
       utteranceId: result.utteranceId
     })
-    // 结果已经写进那一行里了；只有「播没播」还需要一句，说完就收。
+    // 结果已经写进那一行里了；这里只补一句「播没播」——耗时数字在条目里，不在这里重复。
+    // 阶段行只说结局：数字在上面的条目里，不需要抢两行的高度。
     sink.stage(reply.spoken ? '已播' : reply.error ? '未播' : null, 2000)
   }
 

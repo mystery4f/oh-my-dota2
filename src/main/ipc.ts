@@ -13,6 +13,7 @@ import { testProvider, translateText } from './services/providers'
 import { clearTranslationCache, inspectTranslationCache, sessionStatus, translateTry } from './services/session/durable-translator'
 import { getCaptureService } from './services/capture/capturer'
 import { getVoiceOutService } from './services/voice/voice-out'
+import { noteAsrRun } from './services/voice/chain-timing'
 import { getTtsAdapter } from './services/voice/tts'
 import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { transcribeWav } from './services/voice/asr'
@@ -191,7 +192,10 @@ const handlers: MainHandlers = {
     const wav = Buffer.from(base64, 'base64')
     writeFileSync(wavPath, wav)
     // 引擎路由在这里只有一行：识别引擎的选择与「模型没就绪」的提示都由 transcribeWav 负责。
+    // 对讲计时：这一段就是「识别耗时」；紧接着的 voiceReply 会把它领走（60 秒内有效）。
+    const startedAt = Date.now()
     const result = await transcribeWav(wavPath)
+    if (result.ok) noteAsrRun(startedAt, Date.now() - startedAt)
     // #66：这句的原音留在内存里，并把票据（utteranceId）随结果交给渲染层——语音页纠错在
     // 另一个窗口、时间也更晚，而 utterance.wav 下一句就被覆盖了。票据而不是文本：同一句说两遍
     // 文本一样、录音不同，按文本找会把较新那段音配到较旧那一行上。

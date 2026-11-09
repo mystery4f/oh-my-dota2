@@ -1,4 +1,5 @@
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
+import type { VoiceChainTiming } from './voice-timing'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import { DEFAULT_CAPTURE_MODE, DEFAULT_HOTKEYS } from './hotkeys'
 
@@ -175,6 +176,11 @@ export interface AppSettings {
   /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
   voiceTranscribeOnly: boolean
   /**
+   * 对讲耗时统计（默认关）：开了才给每句话记账——浮层那行多一行五段数字，面板记录行与
+   * `logs/voice-chain.jsonl` 同步有；关着时一行都不量，界面上也没有数字可画。
+   */
+  voiceShowTiming: boolean
+  /**
    * 现役识别模型 id（`<engine>:<rel>`），来自 ASR_MODELS 的注册表；空 = 按可用性自动选。
    * 引擎不再单独存（旧 `asrEngine` 字段已在 #67 退役）：模型属于哪个引擎由这个 id 的前缀决定。
    */
@@ -297,6 +303,11 @@ export interface AppSettings {
    * 单独一项而不是五个平铺字段——面板一次改整张表，平铺就要五个归一化分支加五处探针。
    */
   /**
+   * 语音对讲总开关。<b>默认关</b>：关着时不注册 voiceCapture 热键、不起按住轮询进程，整条
+   * 识别→翻译→声出 的链就不会被误触而白跑一次（一句要 5 秒上下，见 docs/BENCH.md）。
+   */
+  voiceCaptureEnabled: boolean
+  /**
    * 语音对讲热键怎么按：hold = 按住说话、松开触发；toggle = 按一下开录、再按一下触发。
    * 只影响「语音对讲」这一个动作；其余热键永远是敲一下。
    */
@@ -347,6 +358,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsSpeakMode: 'hold',
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
+  voiceShowTiming: false,
   /** 现役模型空 = 由注册表按可用性自动选（#67 起引擎跟着这个 id 走，不再单独存）。 */
   asrActiveModel: '',
   /** 训练目标引擎空 = 跟现役模型走；填了就固定训这个引擎（运行时模型没装也能选）。 */
@@ -387,6 +399,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayVisible: false,
   overlayOpacity: 0.34,
   overlayBounds: null,
+  voiceCaptureEnabled: false,
   voiceCaptureMode: DEFAULT_CAPTURE_MODE,
   hotkeys: { ...DEFAULT_HOTKEYS }
 }
@@ -467,6 +480,8 @@ export interface VoiceOutReadyReport {
   fallback: boolean
   hint: string | null
   error?: string
+  /** 起播准备的分段（ms）：枚举设备 / 绑定输出（含 base64→blob）/ 等解码起步。 */
+  prep?: { devicesMs: number; sinkMs: number; metaMs: number }
 }
 
 /** 声出窗口 → 主进程：播放结束/失败；主进程据此松开说话键。 */
@@ -487,6 +502,8 @@ export interface VoiceReplyResult {
   stage: VoiceReplyStage | null
   /** 失败说明；成功为 null。 */
   error: string | null
+  /** 分段计时：识别/翻译/首音/起播/播完各花了多久（voice-reply-latency）；量不到的段为 null。 */
+  timing?: VoiceChainTiming
 }
 
 /** 语音链在面板上的回显：一条摘要覆盖 成功 / 某环失败 / 压根没识别到话。 */
@@ -501,6 +518,8 @@ export interface VoiceChainSummary {
   stage: VoiceReplyStage | null
   /** 失败说明；成功为 null。 */
   error: string | null
+  /** 分段计时：浮层「已播」行与面板记录行读的就是它；识别都没跑就没这一项。 */
+  timing?: VoiceChainTiming
   /**
    * 这一段原音的票据（主进程内存里那张 stash 的键）：面板纠错时原样送回去，
    * 主进程按它取录音。同一句说过两遍时文本一样、录音不同，只有票据分得清是哪一段。

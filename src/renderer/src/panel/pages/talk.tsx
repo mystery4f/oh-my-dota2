@@ -15,6 +15,7 @@ import {
   type VirtualCableStatus
 } from '@shared/voice-out'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
+import { formatChainTiming } from '@shared/voice-timing'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
 import {
@@ -534,6 +535,18 @@ export function TalkPage({
               {settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
             </Button>
           </Row>
+          <Row
+            label="语音对讲"
+            hint="按住说话整条链：识别→翻译→声出。默认关——关着时不注册热键、不起按住轮询进程；想省性能就让它一直关着"
+          >
+            <Button
+              size="sm"
+              variant={settings.voiceCaptureEnabled ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ voiceCaptureEnabled: !settings.voiceCaptureEnabled }))}
+            >
+              {settings.voiceCaptureEnabled ? '开' : '关'}
+            </Button>
+          </Row>
           <Row label="只看识别" hint="转写完就停：不翻译、不声出——测口音、调模型用，测完记得关">
             <Button
               size="sm"
@@ -541,6 +554,15 @@ export function TalkPage({
               onClick={() => void save.wrap(update({ voiceTranscribeOnly: !settings.voiceTranscribeOnly }))}
             >
               {settings.voiceTranscribeOnly ? '开（不翻译不声出）' : '关'}
+            </Button>
+          </Row>
+          <Row label="耗时统计" hint="识别/译/首音/起播/播完各段多久：浮层与识别记录里都能看到；默认关">
+            <Button
+              size="sm"
+              variant={settings.voiceShowTiming ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ voiceShowTiming: !settings.voiceShowTiming }))}
+            >
+              {settings.voiceShowTiming ? '开' : '关'}
             </Button>
           </Row>
         </Group>
@@ -590,6 +612,11 @@ export function TalkPage({
                       {entry.corrected ? '✏️ ' : ''}🎤 原文「{entry.transcript || '（空）'}」→ 译文「
                       {entry.translated ?? (entry.stage === 'skipped' ? '（只看识别）' : '（翻译失败）')}」
                       {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}{' '}
+                      {entry.timing ? (
+                        <span className="mr-1 text-muted-foreground" title="一次对讲的分段耗时：识别 → 译 → 首音 → 起播 → 播完">
+                          {formatChainTiming(entry.timing)}
+                        </span>
+                      ) : null}
                       {entry.transcript ? (
                         <Button
                           size="sm"

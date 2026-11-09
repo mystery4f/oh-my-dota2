@@ -18,7 +18,7 @@
  * FunASR fine-tune leg (target row and estimate both follow it); `?script=bad` makes the read script
  * fail so the fallback warning row on 识别训练 is visible.
  */
-import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type WindowApi } from '@shared/ipc'
+import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type VoiceChainSummary, type WindowApi } from '@shared/ipc'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
 import { estimateFtCost, summarizePendingTakes } from '@shared/train/asr-ft'
@@ -32,6 +32,29 @@ const outEngine = query.get('outEngine') as typeof settings.ttsOutEngine | null
 const scriptMode = query.get('script')
 if (engine) settings.ttsEngine = engine
 if (outEngine) settings.ttsOutEngine = outEngine
+/**
+ * `?voiceDemo` 时预览页自己收一次「对讲完成」：面板「识别记录」行与浮层的完成行都要有真实结果才看得见。
+ * 数字就是 `formatChainTiming` 会画的那五段，缺一段不写 0。
+ */
+const stubVoiceChain: VoiceChainSummary = {
+  transcript: 'stub 这句中文会被识别出来',
+  translated: 'The stub line comes back translated.',
+  spoken: true,
+  stage: null,
+  error: null,
+  utteranceId: 'stub-utterance',
+  timing: {
+    asrMs: 690,
+    translateMs: 1180,
+    firstAudioMs: 2100,
+    playStartMs: 2100,
+    speakMs: 3600,
+    totalMs: 3970
+  }
+}
+
+/** 演示只发一次，挂了几个监听都只算一次。 */
+let chainDemoSent = false
 
 const hotkeys = { ...DEFAULT_HOTKEYS }
 const hotkeyPayload = (): Awaited<ReturnType<WindowApi['getHotkeys']>> => ({
@@ -386,7 +409,15 @@ const implemented = {
   voiceRuntimeInstall: async () => ({ ok: true, error: null }),
   voiceModelRemove: async () => ({ ok: true, error: null }),
   onVoiceRuntimeState: () => () => {},
-  onVoiceChainResult: () => () => {},
+  onVoiceChainResult: (cb) => {
+    // `?voiceDemo` 才有结果：预览页平时保持安静，要看待机态不该被一条假记录占位。
+    // 只发一次：StrictMode 会挂两次监听，发两次就成了同一毫秒的两行（记录行按 at 做 key）。
+    if (query.has('voiceDemo') && !chainDemoSent) {
+      chainDemoSent = true
+      setTimeout(() => cb(stubVoiceChain), 120)
+    }
+    return () => {}
+  },
   onVoiceRecordState: () => () => {},
   voiceOutTest: async () => ({ ok: true, durationMs: 900, hint: 'stub 声出已播', sinkLabel: 'CABLE Input (VB-Audio Virtual Cable)' }),
   voiceOutCable: async () => ({

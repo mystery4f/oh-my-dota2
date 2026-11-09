@@ -8,6 +8,7 @@ import { abortTranslation, translateReply } from '../session/durable-translator'
 import { toPrintableAscii } from '@shared/chat-line'
 import { getInPlaceSender } from '../input/chat-inplace'
 import { getVoiceOutService } from '../voice/voice-out'
+import { ChainTimer, reportChainTiming, takeAsrRun } from '../voice/chain-timing'
 import { getOverlayManager } from '../../windows/overlay'
 
 /**
@@ -24,44 +25,67 @@ import { getOverlayManager } from '../../windows/overlay'
 export async function voiceReply(transcript: string): Promise<VoiceReplyResult> {
   const settings = loadSettings()
   const recognized = String(transcript ?? '').trim()
+  // 对讲计时：识别那一段由 transcribeAudio 记着，这里领走——链从识别开始算，不是从翻译开始。
+  const timer = new ChainTimer(takeAsrRun())
+  const timed = settings.voiceShowTiming
+  // 耗时统计是可选开的（面板「对讲 → 耗时统计」，默认关）：关着就一行都不量，
+  // 浮层、面板记录、logs/voice-chain.jsonl 就不会有数字——没有「量了但不显示」的中间态。
+  // 每一条出口都带着同一份计时离开：失败的那次同样看得出崩在哪一段。
+  const finish = (result: VoiceReplyResult, segments = 0): VoiceReplyResult =>
+    timed
+      ? {
+          ...result,
+          timing: reportChainTiming(timer, {
+            spoken: result.spoken,
+            stage: result.stage,
+            engine: settings.ttsOutEngine,
+            chars: result.translated?.length ?? 0,
+            segments
+          })
+        }
+      : result
   if (decideVoiceOutReply({ recognized, translated: null }).skip === 'empty-recognition') {
-    return { translated: null, spoken: false, stage: 'recognize', error: '未识别到语音' }
+    return finish({ translated: null, spoken: false, stage: 'recognize', error: '未识别到语音' })
   }
   // 只看识别（测口音/调模型）：转写完就停，翻译、剪贴板、声出、按键全跳过。
   if (settings.voiceTranscribeOnly) {
-    return { translated: null, spoken: false, stage: 'skipped', error: null }
+    return finish({ translated: null, spoken: false, stage: 'skipped', error: null })
   }
   let translated: string | null
   try {
     // $ 前缀 = 对讲口语模式标记（SYSTEM_PROMPTS zh-en 的 spoken mode）：让译文带自然停顿，念出来更像人。
     translated = await translateReply(settings.provider, '$' + recognized, settings.replyTone)
+    timer.noteTranslated()
   } catch (err) {
-    return {
+    return finish({
       translated: null,
       spoken: false,
       stage: 'translate',
       error: errorMessage(err)
-    }
+    })
   }
   // 模型偶尔把标记原样抄进译文：念出来就成了「dollar」。对讲侧剥掉开头泄漏的 $。
   translated = translated.replace(/^\$\s*/, '')
   const plan = decideVoiceOutReply({ recognized, translated })
   if (!plan.speak) {
-    return {
+    return finish({
       translated: null,
       spoken: false,
       stage: 'translate',
       error: plan.skip === 'empty-translation' ? '翻译结果为空' : '翻译失败'
-    }
+    })
   }
   clipboard.writeText(plan.text)
-  const spoken = await getVoiceOutService().speakReply(plan.text)
-  return {
-    translated: plan.text,
-    spoken: spoken.spoken,
-    stage: spoken.spoken ? null : 'voice-out',
-    error: spoken.error
-  }
+  const spoken = await getVoiceOutService().speakReply(plan.text, timer)
+  return finish(
+    {
+      translated: plan.text,
+      spoken: spoken.spoken,
+      stage: spoken.spoken ? null : 'voice-out',
+      error: spoken.error
+    },
+    spoken.segments
+  )
 }
 
 

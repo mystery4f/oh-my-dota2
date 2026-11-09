@@ -5,6 +5,14 @@
 
 ## 刚完成并已验证
 
+**对讲分段计时：慢在哪一段（2026-11-09；待真机回填基线）**
+
+- 计时形状收在 `src/shared/voice-timing.ts`（`asrMs`/`translateMs`/`firstAudioMs`/`playStartMs`/`speakMs`/`totalMs`，缺段 `null` 不是 0）；`src/main/services/voice/chain-timing.ts` 的 `ChainTimer` 跟串行链走，识别那一段由 `transcribeAudio` 记账（60 秒内有效——对讲一次一句，别处的转写抢不走）。
+- 证据：`logs/voice-chain.jsonl` 一句一行（`appendCappedJsonl`，256 KB 截断），控制台锚点 `VOICE_CHAIN_TIMING`；浮层「已播 · 起播共 X」，面板「识别记录」行给 识别/译/首音/起播/播完 的完整拆解。
+- 起播点取 `SegmentPlayer` 的 `onSpeak`（键已按下、窗口开始播），不是调用 `play` 的时刻；`totalMs` 从识别开始算，含 ASR 本身。
+- 已跑绿：两条 `tsc`、`eslint`（只余 button.tsx:41 永久警告）、`check:shared`、`npm run build`、`--voice-chain-probe`（19/19，已进 CI 纯探针名单）。
+- 下一步（2026-11-09 深夜实测后重写）：**起播那 1.8–2.7 s 全是按键**——`readyMs` 只有 18–341 ms（枚举设备 9–15、绑定 8–17、解码 0–12），`keyMs` 1787 / 2702 ms。根因不在按键本身：`src/main/services/input/ptt-key.ts` 每按一次都起一个新的 `powershell -NoProfile -ExecutionPolicy Bypass -File ptt-key.ps1`，而 `ptt-key.ps1:11` 的 `Add-Type` 每次现场编译 C# P/Invoke。隔离实测（同一台机器）：裸 `powershell -NoProfile -Command "exit 0"` **880 ms**（967/871/881），同一路径跑带 `Add-Type` 的脚本 **1.17/1.33/1.17 s**——所以是「起进程」贵，不是「送键」贵，一句对讲要起两次（按下 + 松开）。改法：照 `src/main/services/input/hotkey-hold.ts` 的常驻范式（`deployPsScript` + READY 握手 + stdin 收发 + 退避重启），一次编译常驻，预期 `keyMs` 掉到几十毫秒、起播 1.8 s → 0.2 s。**这条没做，本次先收尾**；`gsi.ts` 里手写的那份「超过上限清空」可以改用 `appendCappedJsonl`，也没动。
+
 **语音对讲：按住说话（2026-11-09；待真机验收）**
 
 - 新增 `voiceCaptureMode`（`hold`|`toggle`，默认 `hold`）：按住说完松开才触发识别→翻译→播报；敲一下仍是按一次开录、再按一次结束。面板热键页「语音对讲怎么按」即时保存，决策见 `docs/adr/voice-capture-hold.md`。
