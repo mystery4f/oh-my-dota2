@@ -145,7 +145,7 @@ export function ScriptEditor({
           </p>
         ) : null}
         <p className="mb-2 text-xs text-muted-foreground">
-          改过的句子要重录；只在末尾加新句才能「接着上次权重」训练，其余改动都要「从底模重训」。
+          改过的句子要重录；只在末尾加新句才能「增量微调」，其余改动都要「全量重训」。
         </p>
         <div className="flex items-center justify-end gap-2">
           {saved ? <span className="text-xs text-emerald-300">已保存</span> : null}

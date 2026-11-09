@@ -717,6 +717,21 @@ export async function runTrainProbe(): Promise<void> {
       estG14AudioMin.minutes === estG14.minutes,
     `qwen3:${qwenCost?.secPerStep} funasr:${funasrCost?.secPerStep} ｜ ${estG14.label} ｜ ${estG14AudioMin.label} ｜ ${estG14.basis}`
   )
+  // 估时文案要说清「为什么一条新录音也要跑几十步」：增量的代价是把全部数据再过几遍，不是只学新的那条。
+  // 数字（steps / minutes）不因文案改动而变，改的只是人怎么读它。
+  const estIncOne = estimateFtCost({ mode: 'incremental', trainer: 'qwen3-sft', takes: 40, lastStep: 660, pendingTakes: 1 })
+  const estFreshLabel = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 40 })
+  push(
+    '估时文案：增量说「新增 1 条 / 全部 38 条再过 N 轮」，全量说「38 条进训练、2 条留验证」，步数不受措辞影响',
+    estIncOne.label.includes('新增 1 条') &&
+      estIncOne.label.includes('再过') &&
+      estIncOne.pendingTakes === 1 &&
+      estIncOne.steps === 200 &&
+      estFreshLabel.label.includes('进训练') &&
+      estFreshLabel.label.includes('留验证') &&
+      estFreshLabel.steps === 660,
+    `增量: ${estIncOne.label} | 全量: ${estFreshLabel.label}`
+  )
   // 增量估时必须跟开训同一份切分：真开跑会拿上一轮 evalKeys 重打包，不是默认尾部 holdout。
   const incCostEntries = Array.from({ length: 12 }, (_, i) => ({ key: `K${i}`, wavPath: `X:/${i}.wav`, text: `${i}` }))
   const incCostSplit = splitIncrementalEval(incCostEntries, ['K0'])
@@ -786,7 +801,7 @@ export async function runTrainProbe(): Promise<void> {
       !ftLedgerMatchedOnDisk([], [{ key: 'G14-L01', bytes: 100, mtimeMs: 1 }]),
     '三态判定'
   )
-  push('续训轮数：checkpoint 660 + 补 200 步、每轮 5 步 → 172', deriveFtResumeEpochs(20, 660) === 172, String(deriveFtResumeEpochs(20, 660)))
+  push('续训轮数：checkpoint 660、每轮 5 步 → ceil(660/5)+2 = 134', deriveFtResumeEpochs(20, 660) === 134, String(deriveFtResumeEpochs(20, 660)))
   const apps = parseNvidiaComputeApps('1234, python.exe, 4096\n7, C:\\py, torch.exe, 512\nrubbish\n')
   push(
     'nvidia-smi compute-apps 解析：pid 首逗号、显存末逗号、中间当名字、垃圾行跳过',
@@ -1269,7 +1284,7 @@ export async function runTrainProbe(): Promise<void> {
       preflightBlocks(incMissing).map((item) => item.id).join(',') === 'incremental' &&
       (incMissing.find((item) => item.id === 'incremental')?.detail ?? '').includes('没有可接的上一轮权重') &&
       preflightBlocks(freshAvailable).length === 0 &&
-      (freshAvailable.find((item) => item.id === 'incremental')?.detail ?? '').includes('接着上次权重'),
+      (freshAvailable.find((item) => item.id === 'incremental')?.detail ?? '').includes('「增量微调」'),
     `${incReady.find((item) => item.id === 'incremental')?.level}/${incMissing.find((item) => item.id === 'incremental')?.level}/fresh+has:${freshAvailable.find((item) => item.id === 'incremental')?.level}`
   )
   const gv = judgeGvPreflight({ expName: 'mirana', missing: ['音素表 2-name2text.txt'], gptTrained: false, sovitsTrained: false })
@@ -1723,7 +1738,7 @@ function storeCases(): void {
     ]
     const emptySrc = findIncrementalSource(incLedger(100), 'funasr-paraformer')
     push(
-      '增量：库是空的 → 拒启动并点名先做一次「从底模重训」',
+      '增量：库是空的 → 拒启动并点名先做一次「全量重训」',
       !emptySrc.ok && emptySrc.error.includes('还没有任何一轮训练记录'),
       emptySrc.ok ? 'found' : emptySrc.error
     )

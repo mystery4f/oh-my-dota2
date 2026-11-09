@@ -21,15 +21,16 @@ import { Modal } from '../components/modal'
 import { ScriptEditor } from '../components/script-editor'
 import { PreflightList, RunRow, Sparkline } from '../components/run-view'
 import { TrainTaskRow } from '../components/train-task-row'
+import { TrainLogBox } from '../components/train-log-box'
 import { useTrainConsole } from '../use-train-console'
 import { selectClass } from '../components/select-class'
 import { useRecorder, type RecorderTarget } from '../use-recorder'
 import { useSaveFlash, useSettings } from '../use-settings'
 
-/** 开训方式的两档：接着上一轮权重（只补新错，默认）与从底模重训（最稳的底）。 */
+/** 开训方式的两档：增量微调（接上一轮权重，只补新错，默认）与全量重训（从底模重训，最稳的底）。 */
 const FT_MODE_OPTIONS: { id: AsrFtMode; label: string }[] = [
-  { id: 'incremental', label: '接着上次权重' },
-  { id: 'fresh', label: '从底模重训' }
+  { id: 'incremental', label: '增量微调' },
+  { id: 'fresh', label: '全量重训' }
 ]
 
 /** 左侧四步：环境 → 数据 → 训练 → 现役。它同时是状态机的导航。 */
@@ -68,9 +69,15 @@ export function AsrTrainPage(): React.ReactElement {
   // 现役引擎名（设置里的 id 是 `<engine>:<rel>`）：训练目标与它不同时，页面上要说清「训完才切」。
   const activeEngineLabel = ASR_ENGINES[settings?.asrActiveModel.split(':')[0] as AsrEngineId]?.label ?? ''
   const save = useSaveFlash()
-  // 开训方式：接着上次权重 / 从底模重训。默认接上一轮（常态是「补新录的错」），
+  // 开训方式：增量微调 / 全量重训。默认接上一轮（常态是「补新录的错」），
   // 只有上一轮权重不在时才落回重训——那是没得选，不是替用户改主意。
   const [mode, setMode] = React.useState<AsrFtMode>('incremental')
+  // 两种模式的代价都摆出来：选了增量也看得见全量要多久（反过来同理），
+  // 不然「只补这几条」会让人以为另一条路更省事，其实它贵一个数量级。
+  const costOf = (target: AsrFtMode): string => {
+    const cost = status?.estimate[target]
+    return cost && cost.steps > 0 ? `${cost.steps} 步 / ${cost.minutes} 分钟` : '还没法估算'
+  }
   const modeTouched = React.useRef(false)
   React.useEffect(() => {
     if (modeTouched.current || !facts || facts.incremental) return
@@ -657,8 +664,8 @@ export function AsrTrainPage(): React.ReactElement {
                   label="开训方式"
                   hint={
                     mode === 'incremental'
-                      ? '接上一轮的权重：只补这批新录的错，步数看下方「预计耗时」；验证集沿用上一轮，新录的句子只进训练集'
-                      : '从底模重训：轮数按录音量自动算，步数看下方「预计耗时」；换引擎或重录过就用它'
+                      ? `增量微调：接上一轮的权重，只补这批新录的错（换过来全量重训要约 ${costOf('fresh')}）；验证集沿用上一轮，新录的句子只进训练集`
+                      : `全量重训：吃全部录音、从底模重训，轮数按录音量自动算（换过来增量微调只需约 ${costOf('incremental')}）；换引擎或重录过就用它`
                   }
                 >
                   <div className="flex items-center gap-1">
@@ -685,8 +692,8 @@ export function AsrTrainPage(): React.ReactElement {
 
                 {/* 预计耗时（#65）：纯显示，不排程也不拦人；数字来自 shared/train/asr-ft 的 estimateFtCost，面板不自己算。 */}
                 {/* 基准那句是整段说明，不塞进 Row 的标签列（会被压成一条竖线），放成值下面的一整行。 */}
-                <Row label="预计耗时">
-                  <span className="text-sm">{status?.estimate[mode].label ?? '…'}</span>
+                <Row label="预计耗时" stacked>
+                  <span className="text-sm leading-relaxed">{status?.estimate[mode].label ?? '…'}</span>
                 </Row>
                 <p className="py-2 text-xs leading-relaxed text-muted-foreground">
                   {status?.estimateBasis ?? '正在读状态…'}
@@ -706,6 +713,10 @@ export function AsrTrainPage(): React.ReactElement {
                     开始训练
                   </Button>
                 </Row>
+
+                {/* 训练日志：训练中每 2 秒刷一次，跑完再补一次。放在「开训」正下方——
+                    点了按钮就能盯着看它练到哪一步，不用切页面。 */}
+                <TrainLogBox running={taskRunning} />
 
                 {/* 最近三条：再多就是台账了，历史全量还在 runs.db 里。框起来是为了和上面的
                     设置行区分——这几行是「结果」，不是「可以改的设置」。 */}

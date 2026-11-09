@@ -81,6 +81,8 @@ tags: [docs, index]
 | --- | --- |
 | `docs/adr/asr-train-rewrite.md` | 识别训练重写：只训现役引擎（腿退回引擎内部）、三源数据全吃、状态卡驱动页面、迁移只留数据与底模 |
 | `docs/adr/asr-ft-run-retention.md` | 训练目录只留增量起点：换模成功后才清，留当前轮 + 下一轮起点，清目录不删历史行 |
+| `docs/adr/train-crash-reconcile.md` | 训练被中断后的收尾：退出时杀进程树并记失败，启动时把僵住的 running 行改判、删掉没有产物的 .next，脚本开训前从仓库刷新 |
+| `docs/adr/asr-ft-disk-reclaim.md` | 训练残留的统一回收：启动时只留最新一份导出产物与一份能接着训的 run 目录，其余连半成品删掉 |
 | `docs/adr/asr-finetune-leg.md` | 识别微调成为正式训练腿（两引擎、增量、底模保留、转正/回滚）；热词只给支持提示的引擎。取代 `asr-hotwords-not-finetune.md` |
 | `docs/adr/asr-hotwords-not-finetune.md` | 识别个性化走热词注入；两次更正（Qwen3 可微调、后续切 FunASR paraformer）。**已被 `asr-finetune-leg.md` 取代**，留作决策历史 |
 | `docs/adr/overlay-reply-and-send-channels-removed.md` | 移除浮层回复框与两条非原地文出通道 |

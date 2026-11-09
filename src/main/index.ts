@@ -49,6 +49,8 @@ import { runAsrEnginesProbe } from './probes/asr-engines'
 import { runProviderReasoningProbe } from './probes/provider-reasoning'
 import { runZhipuLiveProbe } from './probes/zhipu-live'
 import { runTrainProbe } from './probes/train'
+import { trainManagerIfStarted } from './services/train/manager'
+import { reconcileTrainState } from './services/train/reconcile'
 import { runVoiceRuntimeProbe } from './probes/voice-runtime'
 import { loadSettings } from './services/settings'
 import { hotkeysState, installHotkeys, releaseHotkeys } from './services/hotkeys'
@@ -182,6 +184,13 @@ app.whenReady().then(() => {
     callback(permission === 'media')
   )
   registerIpc()
+  // 上一次进程没跑完（强杀/崩溃）会留下「running」的假记录和几 GB 的 .next 中间目录；
+  // 面板要显示什么之前先对一遍账，否则「训练中」会一直挂着，按钮永远灰着。
+  try {
+    reconcileTrainState()
+  } catch (error) {
+    console.log('TRAIN_RECONCILE_FAILED', JSON.stringify({ error: errorMessage(error) }))
+  }
   createDashboard()
   createTray({
     showDashboard,
@@ -331,6 +340,8 @@ app.on('window-all-closed', () => {})
 
 app.on('will-quit', () => {
   quitting = true
+  // 训练进程是 python 子进程，父进程退出不会带走它：先杀树再记账，别留一个跑到天亮的孤儿。
+  trainManagerIfStarted()?.shutdown()
   releaseHotkeys()
   stopGsi()
   stopSovitsServer()

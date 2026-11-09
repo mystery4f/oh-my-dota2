@@ -7,7 +7,7 @@ import type { VoiceRuntimeState } from '@shared/voice-runtime'
 import type { VoiceOutReadiness } from '@shared/voice-out-readiness'
 import type { FtDatasetPrepareResult } from '@shared/train/dataset'
 import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@shared/train/gv'
-import type { TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
+import type { TrainLogPage, TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
 import type { TrainRunRecord } from '@shared/train/run'
 import type { AsrState } from '@shared/asr/models'
 import type { FtScriptGroup, FtScriptState } from '@shared/train/recording'
@@ -780,6 +780,8 @@ export const IPC = {
   /** 训练记录（run）列表与单条详情：面板两页从磁盘读，重启后仍在。 */
   TRAIN_RUNS: 'train:runs',
   TRAIN_RUN: 'train:run',
+  /** 训练日志文件（logs/train.log）的尾巴：训练过程到底跑到哪一步、崩在哪一行，面板只读这一份。 */
+  TRAIN_LOG: 'train:log',
   // GV（GPT-SoVITS）微调（T3）：备料清单 / webui 开关 / 产物登记。
   TRAIN_GV_DATASETS: 'train:gv-datasets',
   TRAIN_GV_WEBUI: 'train:gv-webui',
@@ -1072,6 +1074,7 @@ export const ipcContract = {
   trainSnapshot: invoke<[], TrainSnapshot>(IPC.TRAIN_SNAPSHOT),
   trainRuns: invoke<[], TrainRunRecord[]>(IPC.TRAIN_RUNS),
   trainRun: invoke<[string], TrainRunRecord | null>(IPC.TRAIN_RUN),
+  trainLog: invoke<[{ limit?: number }], TrainLogPage>(IPC.TRAIN_LOG),
   onTrainState: listen<TrainSnapshot>(IPC.TRAIN_STATE),
   trainGvDatasets: invoke<[], GvDatasetJudgement[]>(IPC.TRAIN_GV_DATASETS),
   trainGvWebui: invoke<[{ open: boolean }], { ok: boolean; running: boolean; error?: string }>(IPC.TRAIN_GV_WEBUI),

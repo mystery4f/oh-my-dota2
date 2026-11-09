@@ -63,6 +63,18 @@ export interface TrainSnapshot {
   logs: TrainLogLine[]
 }
 
+/** 训练日志文件的一页尾巴：面板「训练日志」只读它，训练本身不依赖这份展示。 */
+export interface TrainLogPage {
+  /** 文件绝对路径：面板原样显示，方便用户自己拿编辑器打开。 */
+  path: string
+  /** 文件总字节数（0 = 还没写过）。 */
+  bytes: number
+  /** 尾部若干行，按原始顺序；每行带写盘时的 ISO 时间戳前缀。 */
+  lines: string[]
+  /** 前面还有没返回的行（只看尾巴时用来提示「还有更早的」）。 */
+  truncated: boolean
+}
+
 export interface TrainStartRequest {
   kind: TrainTaskKind
   dataset: string

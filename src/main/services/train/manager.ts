@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { app, Notification } from 'electron'
-import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { Notification } from 'electron'
+import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   canStartTrain,
@@ -21,6 +21,7 @@ import {
 import { parseTrainProgress } from '@shared/train/progress'
 import { ensureSovitsServer, pauseSovitsForTraining, setInferenceHold } from '../voice/sovits-server'
 import { applyAsrFtModel, markRunStatus, pruneAsrFtRunDirs } from './asr-ft'
+import { ftWavDurationMs, summarizePendingTakes } from '@shared/train/asr-ft'
 import {
   buildTrainRun,
   finishTrainRun,
@@ -29,8 +30,9 @@ import {
   type TrainRunParams,
   type TrainRunRecord
 } from '@shared/train/run'
-import { loadTrainRun, markDatasetEntriesTrained, saveDatasetLedger, saveTrainRun } from './run-store'
+import { listDatasetEntries, loadTrainRun, markDatasetEntriesTrained, saveDatasetLedger, saveTrainRun } from './run-store'
 import { readAsrMetrics, readGvMetrics } from './run-metrics'
+import { appendTrainLog } from './log-file'
 
 /**
  * 训练任务管理器：同一时刻只允许一个训练进程（编排器约定）。
@@ -46,9 +48,6 @@ const BROADCAST_MIN_MS = 250
 const OOM_RE = /CUDA out of memory|OutOfMemoryError|out of memory/i
 /** Python 收场那行：`RuntimeError: …` / `some.module.Error: …`，用来把 exit code 变成一句人话。 */
 const ERROR_LINE_RE = /(?:^|\s)(?:[A-Za-z_][\w.]*Error|Exception):\s*\S/
-/** 训练日志落盘上限：一圈环形日志挡不住崩溃现场，磁盘这份才是事后唯一证据。 */
-const TRAIN_LOG_MAX_BYTES = 4 * 1024 * 1024
-let trainLogSize = -1
 
 /** 请求 → run 参数：ASR 的轮数/lr/续训点与 GV 的版本/批大小/轮数都在这里定案。 */
 function runParamsOf(kind: TrainTaskKind, request: TrainStartRequest): TrainRunParams {
@@ -107,27 +106,6 @@ function notifyRunEnd(run: TrainRunRecord): void {
   }
 }
 
-/**
- * 训练子进程输出落盘（logs/train.log）：窗口里的环形日志一关就没，
- * 崩在加载模型还是第一步只能看这份。写不进去不能反过来影响训练。
- */
-function appendTrainLog(text: string): void {
-  try {
-    const dir = join(app.getPath('userData'), 'logs')
-    mkdirSync(dir, { recursive: true })
-    const file = join(dir, 'train.log')
-    if (trainLogSize < 0) trainLogSize = statSync(file, { throwIfNoEntry: false })?.size ?? 0
-    if (trainLogSize > TRAIN_LOG_MAX_BYTES) {
-      writeFileSync(file, '')
-      trainLogSize = 0
-    }
-    const line = `[${new Date().toISOString()}] ${text}\n`
-    appendFileSync(file, line, 'utf8')
-    trainLogSize += Buffer.byteLength(line)
-  } catch {
-    // 日志失败不影响训练
-  }
-}
 
 class TrainManager {
   private task: TrainTaskInfo | null = null
@@ -161,6 +139,31 @@ class TrainManager {
     this.logs.push({ at: Date.now(), text })
     if (this.logs.length > LOG_RING_LIMIT) this.logs.splice(0, this.logs.length - LOG_RING_LIMIT)
     appendTrainLog(text)
+  }
+
+  /**
+   * 开训头几行（asr-ft 专用）：这次吃多少条、从哪条开始、到哪条结束、轮数/lr/起点。
+   * 用户按这份日志判断「练的是什么」——只有阶段名的话，事后根本分不清哪一轮吃了哪批录音。
+   */
+  private recordAsrFtOpening(request: TrainStartRequest): void {
+    const ledger = request.asrFt?.ledger ?? []
+    if (ledger.length === 0) return
+    const train = ledger.filter((entry) => entry.split === 'train')
+    const evalCount = ledger.length - train.length
+    const audioMs = ledger.reduce((sum, entry) => sum + ftWavDurationMs(entry.bytes), 0)
+    const mode = request.mode === 'incremental' ? '增量微调' : '全量重训'
+    this.record(
+      `—— 开始训练：${mode} · ${train.length} 条进训练 + ${evalCount} 条留验证（共 ${ledger.length} 条，${Math.max(1, Math.round(audioMs / 1000))} 秒音频）——`
+    )
+    const first = train[0]
+    const last = train[train.length - 1]
+    if (first) this.record(`第 1 条：${first.key}「${first.text}」`)
+    if (last && last !== first) this.record(`最后一条：${last.key}「${last.text}」`)
+    const tuning = request.asrFt?.tuning
+    if (tuning) {
+      const start = tuning.resumeFrom ?? tuning.initFrom ?? '底模'
+      this.record(`轮数 ${tuning.epochs ?? '自动'} · 学习率 ${tuning.lr ?? '引擎默认'} · 起点 ${start}`)
+    }
   }
 
   private emit(force = false): void {
@@ -201,6 +204,7 @@ class TrainManager {
     this.logs = []
     // 显存预检的提示（只提示不拦）：放在第一行，用户点完就能看见「现在有多少、差多少」。
     if (warning) this.record(warning)
+    if (kind === 'asr-ft') this.recordAsrFtOpening(request)
     this.emit(true)
     if (shouldPauseInference(this.status()) && this.task) {
       const outcome = pauseSovitsForTraining()
@@ -330,6 +334,41 @@ class TrainManager {
     return { ok: true, error: null }
   }
 
+  /**
+   * 应用退出前收尾：杀掉训练进程树，并把这一轮记成失败。
+   *
+   * 不走 finish()：那里会广播快照、弹系统通知、把朗读拉回来，退出途中窗口正在销毁，
+   * 副作用只会换来一串 "Object has been destroyed"。启动对账兜的是进程被强杀的情况，
+   * 这里兜的是正常退出（用户点退出时训练还在跑）。
+   */
+  shutdown(): void {
+    const child = this.child
+    const run = this.run
+    if (!child && !run) return
+    if (child) {
+      const pid = child.pid
+      // Windows 下杀进程树：python 训练栈常带出自己的孙进程（dataloader）。
+      if (pid) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { timeout: 8000, windowsHide: true })
+      else child.kill()
+    }
+    this.child = null
+    if (this.task) this.task = { ...this.task, status: 'failed', endedAt: Date.now(), stage: '应用退出，训练被中断' }
+    if (run && run.status === 'running') {
+      this.record('应用退出，训练被中断（这一轮没有跑完）')
+      const saved = finishTrainRun(run, {
+        status: 'failed',
+        error: '应用退出，训练被中断（这一轮没有跑完）',
+        metrics:
+          run.kind === 'asr-ft'
+            ? readAsrMetrics(run.artifacts.runDir)
+            : readGvMetrics(this.request?.gvResolved?.home, run.experiment)
+      })
+      saveTrainRun(saved)
+      this.run = saved
+    }
+    setInferenceHold(false)
+  }
+
   /** 日志环最近一段有没有 OOM 原文：失败收场要说人话，别只丢一个 exit code。 */
   private sawOom(): boolean {
     return this.logs.slice(-60).some((line) => OOM_RE.test(line.text))
@@ -402,7 +441,14 @@ class TrainManager {
       }
       // 训练腿成功才算「这些录音训过了」：失败的 run 不动覆盖标记，下次还会进训练集。
       const ledger = this.request?.asrFt?.ledger
-      if (status === 'done' && ledger) markDatasetEntriesTrained(saved.id, ledger)
+      if (status === 'done' && ledger) {
+        markDatasetEntriesTrained(saved.id, ledger)
+        // 收场也要回答同一个问题：这一轮吃掉了什么、账本里还剩多少（用户按这个决定要不要马上再训一轮）。
+        const left = summarizePendingTakes({ entries: listDatasetEntries(), hasRun: true }).count
+        this.record(
+          `本轮训练 ${ledger.filter((entry) => entry.split === 'train').length} 条 + 验证 ${ledger.filter((entry) => entry.split === 'eval').length} 条；账本里还剩 ${left} 条待训`
+        )
+      }
       this.run = saved
       notifyRunEnd(saved)
     }
@@ -428,6 +474,11 @@ let manager: TrainManager | null = null
 
 export function getTrainManager(): TrainManager {
   if (!manager) manager = new TrainManager()
+  return manager
+}
+
+/** 已经有过任务的实例；退出收尾用，别为了「什么也没发生过」把单例凭空建出来。 */
+export function trainManagerIfStarted(): TrainManager | null {
   return manager
 }
 

@@ -158,6 +158,12 @@ it and nothing happened". The overlay and the pause hint print key names from th
   swap prunes every dir except the current run and the next incremental source
   (`pruneAsrFtRunDirs`, `docs/adr/asr-ft-run-retention.md`); the row keeps its metrics but
   loses `artifacts.runDir`. Nothing is deleted when the source cannot be computed),
+  Nothing survives a kill either: `will-quit` calls `trainManagerIfStarted()?.shutdown()` (kill the
+  process tree, write the run as failed) and `reconcileTrainState()` runs once at startup — a
+  `running` row left by a hard kill becomes `failed`, and a `<model>.next` without any export
+  artifact is a staging copy that gets deleted (`docs/adr/train-crash-reconcile.md`). The same ADR
+  makes the repo the source of truth for the training scripts: `resolveAsrFtTrainRequest` copies
+  `resources/asr-ft/*` into the env before every start, so a hand-edited env copy is overwritten),
   `train-runs/` (legacy archive: the pre-SQLite one-JSON-per-run files, imported once on first
   open of the database and never written again),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB

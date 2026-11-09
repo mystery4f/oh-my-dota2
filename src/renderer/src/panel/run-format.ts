@@ -40,9 +40,9 @@ export function runStamp(run: TrainRunRecord): string {
 
 export function runHint(run: TrainRunRecord): string {
   const parts: string[] = [runStamp(run)]
-  // ASR 微调的一行摘要先说开训口径：「接着上次权重」与「从底模重训」的字数差本身就是事后对账的线索。
+  // ASR 微调的一行摘要先说开训口径：与面板上「增量微调 / 全量重训」两个按钮同名，扫历史时对得上。
   if (run.kind === 'asr-ft' && run.params.mode) {
-    parts.push(run.params.mode === 'incremental' ? '接着上次权重' : '从底模重训')
+    parts.push(run.params.mode === 'incremental' ? '增量微调' : '全量重训')
   }
   if (run.data.files > 0) parts.push(`${run.data.files} 条`)
   if (run.metrics) {

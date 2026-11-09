@@ -91,11 +91,11 @@ function incrementalItemOf(input: AsrPreflightInput): PreflightItem {
           id: 'incremental',
           level: 'block',
           label: '增量起点',
-          detail: '没有可接的上一轮权重：先从底模重训一次，或把开训方式改回「从底模重训」'
+          detail: '没有可接的上一轮权重：先把开训方式改成「全量重训」，先跑一轮'
         }
   }
   return input.incrementalAvailable
-    ? { id: 'incremental', level: 'ok', label: '增量起点', detail: '上一轮的权重还在：想省时间可以改成「接着上次权重」' }
+    ? { id: 'incremental', level: 'ok', label: '增量起点', detail: '上一轮的权重还在：想省时间可以改成「增量微调」' }
     : { id: 'incremental', level: 'ok', label: '增量起点', detail: '还没有上一轮：第一次从底模训' }
 }
 

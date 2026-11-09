@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import argparse
+import importlib
 import os
 import re
 import shutil
@@ -26,6 +27,36 @@ from datasets import load_dataset
 from qwen_asr import Qwen3ASRModel
 from transformers import (GenerationConfig, Trainer, TrainerCallback,
                           TrainingArguments)
+
+
+def allow_local_optimizer_resume():
+    """Lift transformers' torch.load guard so a local resume can read optimizer state.
+
+    Resuming on torch<2.6 reads optimizer.pt / scheduler.pt from the checkpoint directory;
+    those exist only as torch.save pickles, so the CVE-2025-32434 guard makes resume
+    impossible. Both files were written by this machine's own previous run, so the
+    "load a stranger's pickle" path the guard exists for is not taken here. torch>=2.6
+    no longer raises at that call, which keeps this harmless after an env upgrade.
+    """
+    try:
+        from transformers.utils import import_utils as _import_utils
+    except Exception as err:
+        # A missing piece must not abort training: say so and let the trainer report.
+        print(f"[resume] torch.load guard NOT lifted: {err}")
+        return False
+    if getattr(_import_utils, "_omd2_guard_patched", False):
+        return True
+    _import_utils.check_torch_load_is_safe = lambda: None
+    _import_utils._omd2_guard_patched = True
+    for name in ("modeling_utils", "trainer"):
+        try:
+            module = importlib.import_module(f"transformers.{name}")
+        except Exception:
+            continue
+        if hasattr(module, "check_torch_load_is_safe"):
+            module.check_torch_load_is_safe = _import_utils.check_torch_load_is_safe
+    print("[resume] torch.load guard lifted for local optimizer state (torch<2.6)")
+    return True
 
 
 def patch_outer_forward(model):
@@ -318,6 +349,7 @@ def main():
     if resume_from:
         if trainer.args.process_index == 0:
             print(f"[resume] resume_from_checkpoint = {resume_from}")
+        allow_local_optimizer_resume()
         trainer.train(resume_from_checkpoint=resume_from)
     else:
         trainer.train()

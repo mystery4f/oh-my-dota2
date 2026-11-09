@@ -143,6 +143,8 @@ export interface FtCostEstimate {
   minutes: number
   /** 进训练的条数 = 总条数 − 这次真正留作验证的条数（增量按上一轮 evalKeys 算，不是默认 holdout）。 */
   trainTakes: number
+  /** 这次新录的条数（增量文案要用：新增几条 ≠ 要过多少数据）。 */
+  pendingTakes: number
   /** 面板直接显示的那一句：约 N 步 / 约 X 分钟。 */
   label: string
   /** 数字从哪来（哪条腿、多少秒/步），估偏了能追到来源。 */
@@ -175,14 +177,16 @@ export function estimateFtCost(input: {
   evalTakes?: number
   /** 续训起点已到第几步（qwen3 增量用它算「这次还要跑多少」）。 */
   lastStep?: number
+  /** 这次是新录了几条（账本里 run_id 为空的条数）：只进文案，增量要解释「为什么一条新录音也要跑几十步」。 */
+  pendingTakes?: number
 }): FtCostEstimate {
   const takes = Math.max(0, Math.floor(input.takes))
   const cost = ftCostBasis(input.trainer)
   if (cost === null) {
-    return { steps: 0, minutes: 0, trainTakes: 0, label: '这条训练腿没有每步耗时基准，估算不了', basis: '引擎表的微调段里没写 secPerStep' }
+    return { steps: 0, minutes: 0, trainTakes: 0, pendingTakes: 0, label: '这条训练腿没有每步耗时基准，估算不了', basis: '引擎表的微调段里没写 secPerStep' }
   }
   const basis = `按 ${cost.engineLabel} ${cost.secPerStep} 秒/步（4060 实测基准，见 docs/BENCH.md）估算：含校验与存盘，机器 / 显存 / 数据量一变就会差几成到倍数`
-  if (takes === 0) return { steps: 0, minutes: 0, trainTakes: 0, label: '还没录训练集：先录几条再估', basis }
+  if (takes === 0) return { steps: 0, minutes: 0, trainTakes: 0, pendingTakes: 0, label: '还没录训练集：先录几条再估', basis }
   const evalTakes = Math.min(takes, Math.max(0, Math.floor(input.evalTakes ?? holdoutTakes(takes))))
   const trainCount = takes - evalTakes
   // 轮数必须带 lastStep：qwen3 续训的轮数是「(lastStep + 200) / 每轮步数」向上取整，不带就少算。
@@ -194,11 +198,22 @@ export function estimateFtCost(input: {
   const steps = Math.max(0, budget - done)
   const minutes = steps === 0 ? 0 : Math.max(1, Math.round((steps * cost.secPerStep) / 60))
   const audio = ftAudioLabel(input.audioMs ?? 0)
+  const pending = Math.max(0, Math.floor(input.pendingTakes ?? 0))
+  // 一句话要同时回答「多久」和「值不值」：全量说清训练/验证条数，增量说清新增几条、
+  // 以及为什么一条新录音也要跑几十步（增量要把全部数据再过几遍，不复习就会忘）。
+  const detail =
+    input.mode === 'incremental'
+      ? `新增 ${pending} 条，增量要把全部 ${trainCount} 条再过 ${epochs} 轮`
+      : `${trainCount} 条进训练、${evalTakes} 条留验证，从底模重训 ${epochs} 轮`
   return {
     steps,
     minutes,
     trainTakes: trainCount,
-    label: `约 ${steps} 步 / 约 ${minutes} 分钟（${takes} 条${audio === '' ? '' : ` / ${audio}音频`}，估算）`,
+    pendingTakes: pending,
+    label:
+      steps === 0
+        ? '约 0 步 / 不用跑（账本里没有新录音）'
+        : `约 ${steps} 步 / 约 ${minutes} 分钟（${detail}${audio === '' ? '' : `，${audio}音频`}，估算）`,
     basis
   }
 }
@@ -210,16 +225,19 @@ function ftAudioLabel(ms: number): string {
   return `${Math.round(ms / 60_000)} 分钟`
 }
 
-/** 续训在旧 checkpoint 之上固定补训的步数（4060 实测 3.6s/步 ≈ 12 分钟）。 */
-export const FT_RESUME_EXTRA_STEPS = 200
+/** 续训在旧 checkpoint 之上多跑的轮数：两遍新数据（2026-11-09 由固定 200 步改来）。 */
+export const FT_RESUME_EXTRA_EPOCHS = 2
 
 /**
  * 续训轮数：HF Trainer 拿 resume_from_checkpoint 恢复 global_step，max_steps（轮数×步/轮）一旦
  * 不大于已到的步数就整轮直接跳过（一行日志都没有）。所以轮数必须保证
- * 总步数 > 上次 checkpoint 步数，这里固定再补 200 步（4060 实测约 12 分钟）再按新数据量折算。
+ * 总步数 > 上次 checkpoint 步数——ceil 之后再 +2 一定满足。
+ *
+ * 补多少只看「新数据看几遍」，不按固定步数补：固定 200 步时，只加一条录音也要重跑近一小时
+ * （2026-11-09 实测 352 步 / 17 分钟，用户当场提出）。两轮是下限档，与 FT_TARGET_STEPS 的口径一致。
  */
 export function deriveFtResumeEpochs(trainCount: number, lastStep: number): number {
-  return Math.ceil((lastStep + FT_RESUME_EXTRA_STEPS) / ftStepsPerEpoch('qwen3-sft', trainCount))
+  return Math.ceil(lastStep / ftStepsPerEpoch('qwen3-sft', trainCount)) + FT_RESUME_EXTRA_EPOCHS
 }
 
 /** 训练超参覆盖：不传 = 冻结的试点参数（lr 2e-5、66 轮、不续训）。 */

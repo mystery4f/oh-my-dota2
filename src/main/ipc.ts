@@ -50,6 +50,7 @@ import { broadcastToWindows as broadcast } from './windows/broadcast'
 import { listTrainRuns, loadTrainRun } from './services/train/run-store'
 import { backfillRunMetrics } from './services/train/run-metrics'
 import { getTrainManager } from './services/train/manager'
+import { readTrainLogTail } from './services/train/log-file'
 import {
   ftRecDelete,
   ftRecList,
@@ -269,6 +270,7 @@ const handlers: MainHandlers = {
   // 训练管理（v3）：记录落盘，面板两页从磁盘读；互斥与计划推导都在 manager/纯缝里。
   trainRuns: () => backfillRunMetrics(listTrainRuns()),
   trainRun: (id) => loadTrainRun(id),
+  trainLog: ({ limit }) => readTrainLogTail(limit),
   trainStart: async (request) => {
     const kind = normalizeTrainKind(request.kind)
     // gv-*：先把引擎包/底模/数据集/配置文件备齐，缺口在这里就报出来，不进 manager。

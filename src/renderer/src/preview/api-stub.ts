@@ -380,6 +380,20 @@ const implemented = {
   trainRuns: async () => stubTrainRuns,
   trainRun: async (id) => stubTrainRuns.find((run) => run.id === id) ?? null,
   trainSnapshot: async () => stubTrainSnapshot,
+  // 训练日志：预览里给一段真格式的样例，只有当天的行会被压成 HH:mm:ss。
+  trainLog: async ({ limit }) => {
+    const lines = [
+      '[2026-11-09T13:40:48.101Z] —— 开始训练：增量微调 · 41 条进训练 + 2 条留验证（共 43 条，132 秒音频）——',
+      '[2026-11-09T13:40:48.104Z] 第 1 条：G14-L01「我的跳刀还没好」',
+      '[2026-11-09T13:40:48.106Z] 最后一条：G20-L12「对面在偷盾，快回来」',
+      '[2026-11-09T13:40:48.109Z] 轮数 18 · 学习率 1e-5 · 起点 data/asr-ft-runs/ft-20261109133221/checkpoint-176',
+      '[2026-11-09T13:41:02.412Z] {"loss": 0.0004, "grad_norm": 0.037, "learning_rate": 9.9e-06, "epoch": 6.61}',
+      '[2026-11-09T13:41:08.918Z] {"loss": 0.0003, "grad_norm": 0.041, "learning_rate": 9.4e-06, "epoch": 11.39}',
+      '[2026-11-09T13:43:52.503Z] 完成（已换上新模型）',
+      '[2026-11-09T13:43:52.510Z] 本轮训练 41 条 + 验证 2 条；账本里还剩 0 条待训'
+    ]
+    return { path: 'data/logs/train.log', bytes: lines.join('\n').length, lines: lines.slice(-(limit ?? 400)), truncated: false }
+  },
   trainStart: async () => ({ ok: true, error: null }),
   trainStop: async () => ({ ok: true, error: null }),
   onTrainState: () => () => {},
@@ -441,11 +455,23 @@ const implemented = {
     const finetune = engine.finetune as NonNullable<AsrEngineSpec['finetune']>
     // 账本只含逐句组录音：录/删一条，步数与分钟都动（与真实现共用 estimateFtCost）。
     const lineRecs = stubLineRecs()
+    // 待训数字跟着预览里的录音集走：录一条（ftRecSave）这里就涨，删一条就掉。
+    // 与真账本同口径：自由说组没有标准答案，不进账本也不进待训。
+    const pending = summarizePendingTakes({
+      entries: lineRecs.map((rec) => ({
+        key: rec.key,
+        revision: 1,
+        bytes: rec.bytes,
+        runId: null as string | null
+      })),
+      hasRun: true
+    })
     const costInput = {
       trainer: finetune.trainer,
       takes: lineRecs.length,
       audioMs: lineRecs.reduce((sum, rec) => sum + rec.durationMs, 0),
-      lastStep: 0
+      lastStep: 0,
+      pendingTakes: pending.count
     }
     const estimate = {
       fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),
@@ -463,17 +489,7 @@ const implemented = {
       },
       swap: { activeExists: true, bakExists: true, nextExists: false, lastExportDir: 'ft-stub' },
       coverage: { G14: { done: 3, total: 6, stale: 0 }, G15: { done: 1, total: 8, stale: 1 } },
-      // 待训数字跟着预览里的录音集走：录一条（ftRecSave）这里就涨，删一条就掉。
-      pending: summarizePendingTakes({
-        // 与真账本同口径：自由说组没有标准答案，不进账本也不进待训。
-        entries: lineRecs.map((rec) => ({
-          key: rec.key,
-          revision: 1,
-          bytes: rec.bytes,
-          runId: null as string | null
-        })),
-        hasRun: true
-      }),
+      pending,
       estimate,
       estimateBasis: estimate.fresh.basis,
       // 纠错样本（#66）：预览里点「存」假存一条，这一行跟着涨（真的写盘只有 Electron 里才有）。

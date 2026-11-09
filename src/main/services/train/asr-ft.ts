@@ -53,6 +53,7 @@ import { locateWorkerScript } from '../voice/runtime'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList, readFtScript } from './ft-record'
+import { copyAsrFtScripts } from './asr-ft-install'
 import { correctionSamplesStatus } from '../voice/corrections'
 import {
   asrRunDirsRoot,
@@ -145,7 +146,7 @@ export function detectAsrFtEnv(): { ok: boolean; gaps: string[]; paths: Partial<
   return { ok: gaps.length === 0, gaps, paths, envRoot }
 }
 
-function asrModelsRoot(): string {
+export function asrModelsRoot(): string {
   return join(app.getPath('userData'), 'asr-models')
 }
 
@@ -248,11 +249,17 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
   // 估时要用同一份切分，否则上一轮只留 1 条验证时步数会少算一条数据。
   const evalKeys = source.ok ? new Set(source.source.evalKeys) : null
   const incrementalEvalTakes = evalKeys === null ? undefined : ledger.filter((entry) => evalKeys.has(entry.key)).length
+  // 待训数据：账本里最新修订但 run_id 为空的那些（录了还没训），条数与时长都从账本推。
+  const pending = summarizePendingTakes({
+    entries: listDatasetEntries(),
+    hasRun: listTrainRuns().some((run) => run.kind === 'asr-ft')
+  })
   const costInput = {
     trainer,
     takes: ledger.length,
     audioMs: ledger.reduce((sum, entry) => sum + ftWavDurationMs(entry.bytes), 0),
-    lastStep: source.ok ? source.source.lastStep : 0
+    lastStep: source.ok ? source.source.lastStep : 0,
+    pendingTakes: pending.count
   }
   const estimate = {
     fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),
@@ -278,10 +285,7 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
     // 纠错样本（#66）：同一份事实既给面板的状态行，也给到顶提示。
     corrections: await correctionSamplesStatus(),
     // 待训数据：账本里最新修订但 run_id 为空的那些（录了还没训），条数与时长都从账本推。
-    pending: summarizePendingTakes({
-      entries: listDatasetEntries(),
-      hasRun: listTrainRuns().some((run) => run.kind === 'asr-ft')
-    }),
+    pending,
     estimate,
     estimateBasis: estimate.fresh.basis,
     // 需要重录的句子：稿子文本和账本里落的不一致，就是「改了稿但没重录」。
@@ -542,21 +546,21 @@ export function findIncrementalSource(
     }
   }
   if (!sawRun) {
-    return { ok: false, error: '增量微调要从上一轮的权重接着跑，但还没有任何一轮训练记录——先做一次「从底模重训」' }
+    return { ok: false, error: '增量微调要从上一轮的权重接着跑，但还没有任何一轮训练记录——先做一次「全量重训」' }
   }
   if (!sawMatched) {
-    return { ok: false, error: `上一轮的录音和现在对不上（${sawDrift || '有重录或删除'}）：增量会把旧错带进新权重——先做一次「从底模重训」` }
+    return { ok: false, error: `上一轮的录音和现在对不上（${sawDrift || '有重录或删除'}）：增量会把旧错带进新权重——先做一次「全量重训」` }
   }
   return {
     ok: false,
     error:
       trainer === 'funasr-paraformer'
         ? sawBroken.length > 0
-          ? `上一轮的权重是半成品（${sawBroken} 末尾缺 Central Directory，多半是训练中途被停止时正在写）：torch 读不了它，先做一次「从底模重训」`
-          : '上一轮的权重文件不在了（找过 model.pt.avg1 / model.pt.best / model.pt）：没法接着训，先做一次「从底模重训」'
+          ? `上一轮的权重是半成品（${sawBroken} 末尾缺 Central Directory，多半是训练中途被停止时正在写）：torch 读不了它，先做一次「全量重训」`
+          : '上一轮的权重文件不在了（找过 model.pt.avg1 / model.pt.best / model.pt）：没法接着训，先做一次「全量重训」'
         : sawBroken.length > 0
-          ? `上一轮的 checkpoint 是半成品（${sawBroken}）：先做一次「从底模重训」`
-          : '上一轮的 checkpoint 不在了（训练目录里没有 checkpoint-<步数>）：没法接着训，先做一次「从底模重训」'
+          ? `上一轮的 checkpoint 是半成品（${sawBroken}）：先做一次「全量重训」`
+          : '上一轮的 checkpoint 不在了（训练目录里没有 checkpoint-<步数>）：没法接着训，先做一次「全量重训」'
   }
 }
 
@@ -614,7 +618,7 @@ export function stageIncrementalSource(
     }
     if (!statSync(to).isDirectory() && !torchArchiveIntact(to)) {
       rmSync(to, { force: true })
-      return { ok: false, error: `要接的权重是半成品（${from} 末尾缺 Central Directory）：训练中途停止会留下这种文件，先做一次「从底模重训」` }
+      return { ok: false, error: `要接的权重是半成品（${from} 末尾缺 Central Directory）：训练中途停止会留下这种文件，先做一次「全量重训」` }
     }
     return { ok: true, stagedPath: to }
   } catch (err) {
@@ -678,6 +682,15 @@ export async function resolveAsrFtTrainRequest(mode: AsrFtMode): Promise<{
   const env = detectAsrFtEnv()
   if (!env.ok || !env.paths.pythonExe) {
     return { ok: false, error: `微调环境没就绪：${env.gaps.join('；')}` }
+  }
+  // 脚本以仓库里这份为准：环境里的副本是「装好就不再动」的，脚本改了不刷新就等于没改
+  // （2026-11-09 实测：一份只存在于环境副本里的补丁，重装环境后就丢了）。刷新失败直接拒启动。
+  if (env.paths.trainer !== 'funasr-paraformer') {
+    try {
+      copyAsrFtScripts(env.envRoot)
+    } catch (err) {
+      return { ok: false, error: `刷新训练脚本失败：${errorMessage(err)}` }
+    }
   }
   const missingPkgs = missingPythonPackages(env.paths.pythonExe, finetuneSpec().pythonExtra)
   if (missingPkgs.length > 0) {
