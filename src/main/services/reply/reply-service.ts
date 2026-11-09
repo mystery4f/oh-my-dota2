@@ -40,7 +40,8 @@ export async function voiceReply(transcript: string): Promise<VoiceReplyResult> 
             stage: result.stage,
             engine: settings.ttsOutEngine,
             chars: result.translated?.length ?? 0,
-            segments
+            segments,
+            mic: timer.mic
           })
         }
       : result

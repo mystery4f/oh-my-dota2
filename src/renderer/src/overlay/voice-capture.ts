@@ -3,7 +3,7 @@ import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
-import { openMicStream } from '../lib/mic'
+import { describeCaptureDevice, openMicStream } from '../lib/mic'
 
 /** 录音上限：一条对讲顶多 20 秒，超时自动停——忘记停也不会一直占着麦克风。 */
 const RECORD_MAX_MS = 20_000
@@ -40,6 +40,8 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
   let recording = false
   let recordCtx: AudioContext | null = null
   let recordStream: MediaStream | null = null
+  /** 本次录音实际用的输入设备（label|id 前 8 位），随转写一起交给主进程进日志。 */
+  let recordDevice = ''
   let recordNode: ScriptProcessorNode | null = null
   let recordChunks: Float32Array[] = []
   let recordTimer: ReturnType<typeof setTimeout> | null = null
@@ -47,7 +49,10 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
   async function start(): Promise<void> {
     if (recording) return
     try {
-      recordStream = await openMicStream()
+      const opened = await openMicStream()
+      recordStream = opened
+      // 记下「这次到底开了哪台」：断声、串音这类问题，日志里没有设备名就只能猜。
+      recordDevice = await describeCaptureDevice(opened).catch(() => '')
     } catch (err) {
       const micError = '麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）'
       sink.pushRow({ id: `voice-err-${Date.now()}`, ts: Date.now(), original: '🎤 ' + micError, translated: null })
@@ -102,7 +107,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       return
     }
     sink.stage('识别中…')
-    const result = await window.api.transcribeAudio(encodeWav16k(chunks, rate))
+    const result = await window.api.transcribeAudio(encodeWav16k(chunks, rate), recordDevice)
     const transcript = result.text.trim()
     if (!result.ok || !transcript) {
       const transcriptError = result.error ?? '未识别到语音'

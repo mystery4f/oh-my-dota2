@@ -97,3 +97,17 @@ export function warmMic(preferred?: string): void {
     .then((stream) => stream.getTracks().forEach((track) => track.stop()))
     .catch(() => undefined)
 }
+
+/**
+ * 这条流实际开在哪台设备上：`label|deviceId 前 8 位`。
+ * 日志里认 id 没有意义（它按 origin 加盐，和 settings 里存的那串对不上），人眼认的是名字。
+ */
+export async function describeCaptureDevice(stream: MediaStream): Promise<string> {
+  const track = stream.getAudioTracks()[0]
+  const id = track?.getSettings().deviceId ?? ''
+  const fallback = track?.label ?? ''
+  if (!id) return fallback
+  const all = await navigator.mediaDevices.enumerateDevices().catch(() => [] as MediaDeviceInfo[])
+  const hit = all.find((device) => device.deviceId === id)
+  return `${hit?.label || fallback || '未知设备'}|${id.slice(0, 8)}`
+}

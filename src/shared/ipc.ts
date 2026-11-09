@@ -26,7 +26,7 @@ export interface FtRecInfo {
   /** 文件修改时间（续训对账/已训标记的指纹之一）。 */
   mtimeMs: number
 }
-export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'zhipu' | 'custom'
+export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'zhipu' | 'ark' | 'custom'
 
 export interface ProviderConfig {
   id: ProviderId
@@ -85,6 +85,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'GLM (智谱 BigModel · 免费)',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     model: 'glm-4-flash-250414',
+    needsKey: true
+  },
+  {
+    id: 'ark',
+    label: '豆包 (火山方舟)',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    model: 'doubao-seed-2-0-mini-260428',
     needsKey: true
   },
   {
@@ -1065,6 +1072,8 @@ export const ipcContract = {
   onVoiceRecordState: listen<{ recording: boolean }>(IPC.VOICE_RECORD_STATE),
   onVoiceChainResult: listen<VoiceChainSummary>(IPC.VOICE_CHAIN_RESULT),
   onVoiceRuntimeState: listen<VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATE),
+  // 第二个参数是录音设备（`label|deviceId 前 8 位`），只进日志：deviceId 按 origin 加盐，
+  // 和 settings 里存的那串对不上，人眼认名字。
   transcribeAudio: invoke<[string, string?], VoiceTranscribeResult>(IPC.VOICE_TRANSCRIBE),
   voiceCorrection: invoke<[FtCorrectionInput], FtCorrectionSaveResult>(IPC.VOICE_CORRECTION),
   ttsPreview: invoke<[string], VoicePreviewResult>(IPC.VOICE_TTS_PREVIEW),

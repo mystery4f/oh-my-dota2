@@ -14,18 +14,18 @@ import { appendCappedJsonl } from '../logs/jsonl'
  * （例如识别训练那边也在转写），宁可缺段也不张冠李戴。
  */
 const ASR_TTL_MS = 60_000
-let pendingAsr: { startedAt: number; ms: number; measuredAt: number } | null = null
+let pendingAsr: { startedAt: number; ms: number; mic: string; measuredAt: number } | null = null
 
-export function noteAsrRun(startedAt: number, ms: number): void {
-  pendingAsr = { startedAt, ms, measuredAt: Date.now() }
+export function noteAsrRun(startedAt: number, ms: number, mic = ''): void {
+  pendingAsr = { startedAt, ms, mic, measuredAt: Date.now() }
 }
 
 /** 领走最近一次识别；`now` 只为探针可测（TTL 判定），正常调用不用传。 */
-export function takeAsrRun(now = Date.now()): { startedAt: number; ms: number } | null {
+export function takeAsrRun(now = Date.now()): { startedAt: number; ms: number; mic: string } | null {
   const hit = pendingAsr
   pendingAsr = null
   if (!hit || now - hit.measuredAt > ASR_TTL_MS) return null
-  return { startedAt: hit.startedAt, ms: hit.ms }
+  return { startedAt: hit.startedAt, ms: hit.ms, mic: hit.mic }
 }
 
 export class ChainTimer {
@@ -35,7 +35,12 @@ export class ChainTimer {
   private playStartedAt: number | null = null
   private speakEndedAt: number | null = null
 
-  constructor(private readonly asr: { startedAt: number; ms: number } | null) {}
+  /** 这句是从哪台输入设备录的（label|id 前 8 位）：断声、串音只有它能解释。 */
+  readonly mic: string
+
+  constructor(private readonly asr: { startedAt: number; ms: number; mic: string } | null) {
+    this.mic = asr?.mic ?? ''
+  }
 
   /** 译文到手：翻译段的终点，也是首音段的起点。 */
   noteTranslated(): void {
@@ -79,6 +84,8 @@ export interface VoiceChainMeta {
   engine: string | null
   chars: number
   segments: number
+  /** 实际打开的那台输入设备；识别不是从对讲来的、或没量到时为空串。 */
+  mic: string
 }
 
 /**

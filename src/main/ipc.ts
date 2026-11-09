@@ -183,7 +183,7 @@ const handlers: MainHandlers = {
   reportVoiceChain: (result) => {
     broadcast(IPC.VOICE_CHAIN_RESULT, result)
   },
-  transcribeAudio: async (wavBase64) => {
+  transcribeAudio: async (wavBase64, micLabel) => {
     const base64 = String(wavBase64 ?? '')
     if (!base64) return { ok: false, text: '', error: '音频为空' }
     const dir = join(app.getPath('userData'), 'voice')
@@ -195,7 +195,7 @@ const handlers: MainHandlers = {
     // 对讲计时：这一段就是「识别耗时」；紧接着的 voiceReply 会把它领走（60 秒内有效）。
     const startedAt = Date.now()
     const result = await transcribeWav(wavPath)
-    if (result.ok) noteAsrRun(startedAt, Date.now() - startedAt)
+    if (result.ok) noteAsrRun(startedAt, Date.now() - startedAt, String(micLabel ?? ''))
     // #66：这句的原音留在内存里，并把票据（utteranceId）随结果交给渲染层——语音页纠错在
     // 另一个窗口、时间也更晚，而 utterance.wav 下一句就被覆盖了。票据而不是文本：同一句说两遍
     // 文本一样、录音不同，按文本找会把较新那段音配到较旧那一行上。

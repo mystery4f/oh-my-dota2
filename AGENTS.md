@@ -184,11 +184,13 @@ it and nothing happened". The overlay and the pause hint print key names from th
   checked against what is actually on screen.
   Dota pushes each chat message about 26 times in a row, so the writer keeps a bounded dedupe set
   keyed by game time + player + channel + slot + text.
-- Voice reply timing: `logs/voice-chain.jsonl`, one line per 对讲 (`at`/`spoken`/`stage`/`engine`/`chars`/`segments` +
+- Voice reply timing: `logs/voice-chain.jsonl`, one line per 对讲 (`at`/`spoken`/`stage`/`engine`/`chars`/`segments`/`mic` +
   `asrMs`/`translateMs`/`firstAudioMs`/`playStartMs`/`speakMs`/`totalMs`), hard-capped at 256 KB through the same
   `appendCappedJsonl` the capped writer uses. A leg that was never measured is `null`, never 0; `totalMs` counts from the
   ASR start to the first sound, so it is the number the operator actually feels. The console twin is the
   `VOICE_CHAIN_TIMING` line; the overlay prints `已播 · 起播共 X` and the panel's 识别记录 row prints the full breakdown.
+  `mic` is the input device that actually opened (`label|` plus the first 8 chars of the deviceId): the raw id is salted
+  per origin, so it means nothing outside the app — read the label, not the id.
   Read it before claiming any leg is fast or slow — the ASR receipt in `chain-timing.ts` is single-use within 60 s.
 - GSI frame summary: `logs/gsi-summary.json`, written by the app itself every 5 s while frames arrive
   (atomic replace, per-match reset when `map.matchid` changes, final flush on `POST_GAME`). It answers what
@@ -265,6 +267,10 @@ it and nothing happened". The overlay and the pause hint print key names from th
   every screenshot and ignores the mouse. Never conclude "the overlay is not showing" from a desktop
   capture — read the panel badge or the `overlay:status` payload instead. Both rules (ignore clicks,
   content protection) come from one function, `shouldIgnoreMouse(locked, replyOpen)`.
+- Hiding the overlay is not an A/B for "the overlay repaint is the cost": `startVoiceCapture()` and
+  `toggleVoiceCapture()` both call `show()` when the window is hidden, so it reappears the moment you speak
+  (`overlayCollapsed` is ignored by that path too — set it through the panel, then check the settings file).
+  Collapse (`overlayCollapse`) is the variant that survives, because `show()` honours `s.collapsed`.
 - Docs/notes edits: a heredoc or `node -e "..."` line carrying backticks gets those backticks executed
   by bash before the file is written; markdown table rows and inline code vanished that way twice.
   Use the file-edit tool for anything containing backticks, template literals or `$(...)`.
@@ -316,6 +322,9 @@ it and nothing happened". The overlay and the pause hint print key names from th
   once per process (~3 s/clip CPU warm vs ~10 s with cold load) and write resumable
   `path|speaker|LANG|text` lists.
 - Never commit `.tmp/` or `.pi/`.
+- Stage exactly the paths you touched: several pi sessions can share this worktree (intercom), and a plain
+  `git add -A` sweeps someone else's half-finished refactor into your commit. Check `git status -s` for files you
+  cannot explain before committing, and say so in the reply instead of silently including or reverting them.
 - App-owned data — including non-dependency artifacts the app produces (recordings, exports, reports, logs) — stays inside the portable data directory (`userData`), never scattered onto other drives. Never hardcode external paths (`D:\work\...`) as runtime dependencies: the installed build's data lives in the `<install>-data` sibling directory, and a fresh install must work with zero external paths.
 - Developer-only tooling (e.g. the `D:\work\ft-qwen3` fine-tune workspace: training env, cloned upstream repos, base model weights) stays outside the repo, and app code must have ZERO references to it — no hardcoded paths, no imports, no spawn targets, no "it exists on this machine" assumptions. Before an app feature can use something that lives in a developer workspace, copy it into the project first: bundled resource under `resources/`, or generated into `userData`.
 

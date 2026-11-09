@@ -30,7 +30,7 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 export async function runVoiceChainProbe(): Promise<void> {
   // —— 计时形状：缺段是 null，不是 0 ——
-  noteAsrRun(Date.now() - 500, 120)
+  noteAsrRun(Date.now() - 500, 120, '麦克风阵列|9675a266')
   const partial = new ChainTimer(takeAsrRun()).timing()
   push(
     '只记了识别：其余段全 null（没量到不等于 0 毫秒），总计也还不存在',
@@ -43,6 +43,12 @@ export async function runVoiceChainProbe(): Promise<void> {
     JSON.stringify(partial)
   )
   push('领一次就没了：同一句不会被下一句抢走票据', takeAsrRun() === null, 'second take')
+  push(
+    '设备名跟着识别票走：日志里认得出这句是哪台麦录的',
+    new ChainTimer({ startedAt: Date.now(), ms: 1, mic: '麦克风阵列|9675a266' }).mic === '麦克风阵列|9675a266' &&
+      new ChainTimer({ startedAt: Date.now(), ms: 1, mic: '' }).mic === '',
+    'mic carries through, empty when unmeasured'
+  )
 
   // —— 五段都量到 ——
   noteAsrRun(Date.now() - 4000, 700)
@@ -130,10 +136,10 @@ export async function runVoiceChainProbe(): Promise<void> {
     logged.noteTranslated()
     logged.noteFirstAudio()
     logged.notePlayStart()
-    const returned = reportChainTiming(logged, { spoken: true, stage: null, engine: 'probe-marker', chars: 3, segments: 1 })
+    const returned = reportChainTiming(logged, { spoken: true, stage: null, engine: 'probe-marker', chars: 3, segments: 1, mic: logged.mic })
     const logFile = join(app.getPath('userData'), 'logs', 'voice-chain.jsonl')
     writeFileSync(logFile, '')
-    reportChainTiming(logged, { spoken: true, stage: null, engine: 'probe-marker', chars: 3, segments: 1 })
+    reportChainTiming(logged, { spoken: true, stage: null, engine: 'probe-marker', chars: 3, segments: 1, mic: logged.mic })
     const written = readFileSync(logFile, 'utf8')
     push(
       'reportChainTiming: 落一行带引擎/段数与五段计时的 jsonl',
