@@ -169,6 +169,12 @@ export interface AppSettings {
    * 引擎不再单独存（旧 `asrEngine` 字段已在 #67 退役）：模型属于哪个引擎由这个 id 的前缀决定。
    */
   asrActiveModel: string
+  /**
+   * 微调目标引擎 id（`qwen3` / `paraformer`）；空 = 跟着现役模型所属引擎走。
+   * 与 `asrActiveModel` 分开：训练只要引擎在表里声明了 finetune 就能选，运行时模型还没装也行
+   * （删掉旧权重、只留底模的场景）；训练成功转正时才把现役切过去。
+   */
+  asrTrainEngine: string
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
   /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
   asrHotwords: string
@@ -326,6 +332,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voiceTranscribeOnly: false,
   /** 现役模型空 = 由注册表按可用性自动选（#67 起引擎跟着这个 id 走，不再单独存）。 */
   asrActiveModel: '',
+  /** 训练目标引擎空 = 跟现役模型走；填了就固定训这个引擎（运行时模型没装也能选）。 */
+  asrTrainEngine: '',
   trainKind: 'demo',
   trainDataset: '',
   asrFtEnvDir: '',

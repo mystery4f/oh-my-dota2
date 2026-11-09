@@ -11,8 +11,7 @@ import {
   splitTrainEval,
   type FtDatasetPrepareResult
 } from '@shared/train/dataset'
-import { ASR_ENGINES } from '@shared/asr/engines'
-import { activeAsrModel } from '../voice/asr-model'
+import { finetuneSpec } from './target-engine'
 import type { FtLedgerEntry } from '@shared/train/asr-ft'
 import type { FtDatasetEntry } from '@shared/train/dataset'
 import { ftRecList, ftRecPath, readFtScript } from './ft-record'
@@ -83,15 +82,18 @@ export async function currentFtLedger(): Promise<FtLedgerEntry[]> {
   return buildLedger(train, evalSet)
 }
 
-/** 训练数据格式跟着现役引擎走：微调的就是正在用的那份模型所属的引擎。 */
-function activeFtDatasetFormat(): 'qwen3-jsonl' | 'funasr-jsonl' {
-  const engineId = activeAsrModel()?.engineId ?? 'qwen3'
-  return ASR_ENGINES[engineId].finetune?.dataset ?? 'qwen3-jsonl'
+/**
+ * 训练数据格式跟着「训练目标」走，不是跟着现役模型走——两者早就可以不同（见 ADR）。
+ * 曾经这里读 activeAsrModel()：切到 qwen3 训练，打包却出了 funasr 的 jsonl，
+ * 于是 qwen3 脚本第 106 行 KeyError: 'audio'（41 条数据一条没吃到，11 秒就退出）。
+ */
+function ftDatasetFormat(): 'qwen3-jsonl' | 'funasr-jsonl' {
+  return finetuneSpec().dataset
 }
 
 /** 两种格式的差别都收在共享缝里，这里只补磁盘真值（wav 字节数）。 */
 function buildJsonlText(entries: FtDatasetEntry[]): string {
-  if (activeFtDatasetFormat() === 'funasr-jsonl') {
+  if (ftDatasetFormat() === 'funasr-jsonl') {
     return buildFtFunasrJsonlText(entries.map((entry) => ({ ...entry, wavBytes: statSync(entry.wavPath).size })))
   }
   return buildFtJsonlText(entries)

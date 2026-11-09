@@ -66,11 +66,19 @@ deviations: `docs/DESIGN-panel-v2.md`, `docs/ARCH-notes.md`.
 
 ## Training (音色训练 / 识别训练)
 
-Two sections, one shape: 数据 → 运行 → 产物; no training window, no `train:open` channel. A run is
+Two sections, two shapes. 音色训练 keeps 数据 → 运行 → 产物. 识别训练 is a left rail of four steps
+(环境 / 数据 / 训练 / 现役) with one six-state headline above the selected step (缺环境 / 数据不足 /
+可开训 / 训练中 / 现役 / 上次失败): the headline says where you are and carries that state's one primary
+action, every other mutation lives in the step that owns it. Only the active engine is trainable
+(`finetune` in the engine table), 全量 retrains from the base model over all data while 增量 continues from
+the fine-tuned model over takes no run has consumed, training success promotes the model automatically
+(`applyAsrFtModel` in the manager's terminal path), and 自定义录音 is just the `G99` script group — text
+first, then record. No training window, no `train:open` channel. A run is
 `src/shared/train/run.ts` (one row in `userData/train/runs.db`, plus one `dataset_entries` row per
 recorded take; metrics read back from the artifacts), the gate is `src/shared/train/preflight.ts`
 (only `block` disables 开始训练), and mic capture stays in `panel/use-recorder.ts`. File list,
 artifact paths and parser details: `docs/ARCH-notes.md`, `docs/PLAN-train-v3.md`.
+
 
 ## Hotkeys
 
@@ -138,6 +146,10 @@ it and nothing happened". The overlay and the pause hint print key names from th
   data, and where the artifacts went; metrics are read back from the run's own
   `checkpoint-*/trainer_state.json` or GV `logs/<exp>/train.log`, copied onto the run row as
   `runs.metrics` for the panel while the artifact stays the trainer's own record),
+  `asr-ft-runs/` (one `ft-<stamp>` dir per attempt, ~15 GB of weights each). A successful
+  swap prunes every dir except the current run and the next incremental source
+  (`pruneAsrFtRunDirs`, `docs/adr/asr-ft-run-retention.md`); the row keeps its metrics but
+  loses `artifacts.runDir`. Nothing is deleted when the source cannot be computed),
   `train-runs/` (legacy archive: the pre-SQLite one-JSON-per-run files, imported once on first
   open of the database and never written again),
 - Auto-capture telemetry: `logs/capture-ticks.jsonl`, one line per polling tick, hard-capped at 1 MB

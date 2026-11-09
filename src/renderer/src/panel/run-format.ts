@@ -25,8 +25,21 @@ export function formatDuration(ms: number): string {
 }
 
 /** 一行能看完的摘要：数据量、步数、损失、耗时。 */
+/**
+ * 记录是快照，不会随新的一轮成功而改口：一小时的失败和刚刚的失败长得一模一样，
+ * 所以摘要第一段必须是发生时间（当天只给时分，隔天补日期）。
+ */
+export function runStamp(run: TrainRunRecord): string {
+  const at = new Date(run.startedAt)
+  const now = new Date()
+  const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+  const sameDay =
+    at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate()
+  return sameDay ? hhmm : `${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')} ${hhmm}`
+}
+
 export function runHint(run: TrainRunRecord): string {
-  const parts: string[] = []
+  const parts: string[] = [runStamp(run)]
   // ASR 微调的一行摘要先说开训口径：「接着上次权重」与「从底模重训」的字数差本身就是事后对账的线索。
   if (run.kind === 'asr-ft' && run.params.mode) {
     parts.push(run.params.mode === 'incremental' ? '接着上次权重' : '从底模重训')

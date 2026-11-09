@@ -202,3 +202,8 @@ export function requiredPathsAll(): string[] {
 export function downloadableEngines(): AsrEngineSpec[] {
   return ASR_ENGINE_LIST.filter((spec) => spec.download !== null)
 }
+
+/** 可微调的引擎（引擎表里声明了 finetune 的）：面板训练目标只在这几个里选。 */
+export function finetunableEngines(): AsrEngineSpec[] {
+  return ASR_ENGINE_LIST.filter((spec) => spec.finetune !== null)
+}

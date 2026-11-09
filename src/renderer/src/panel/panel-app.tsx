@@ -34,6 +34,7 @@ export function PanelApp(): React.ReactElement {
     window.history.replaceState(null, '', url)
   }
 
+
   const [searchOpen, setSearchOpen] = React.useState(false)
   // 音色包弹窗由壳持有：朗读页和声出页各给一个按钮，打开的永远是同一个弹窗。
   const [packsOpen, setPacksOpen] = React.useState(false)

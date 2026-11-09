@@ -219,6 +219,48 @@ export function parseGvTrainLog(text: string): { epochs: number; checkpoints: st
   return { epochs, checkpoints, series: compactMetricSeries(series) }
 }
 
+/**
+ * FunASR 的 train.log（`outputs/<date>/<time>/train.log`）：每步一行 train、每轮两行 val。
+ * paraformer 不写 trainer_state.json，这是它唯一的指标来源。
+ * 行格式：`[时间][root][INFO] - train, rank: 0, epoch: 0/15, …, total step: 1, (loss_avg_epoch: 2.028), …`
+ */
+export function parseFunasrTrainLog(text: string): TrainRunMetrics | null {
+  const points: TrainRunPoint[] = []
+  let steps = 0
+  let epochs = 0
+  let lastTrainLoss: number | null = null
+  let bestValLoss: number | null = null
+  let lastValLoss: number | null = null
+  for (const raw of text.split(/\r?\n/)) {
+    const hit =
+      /^\[[^\]]+\]\[root\]\[INFO\] - (train|val), rank: \d+, epoch: (\d+)\/(\d+),.*?\(loss_avg_epoch: (-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\)/.exec(
+        raw
+      )
+    if (!hit) continue
+    const loss = Number(hit[4])
+    if (!Number.isFinite(loss)) continue
+    const stepHit = /total step: (\d+)/.exec(raw)
+    const step = stepHit ? Number(stepHit[1]) : points.length + 1
+    steps = Math.max(steps, step)
+    epochs = Math.max(epochs, Number(hit[3]))
+    points.push({ step, epoch: Number(hit[2]), loss })
+    if (hit[1] === 'val') {
+      lastValLoss = loss
+      if (bestValLoss === null || loss < bestValLoss) bestValLoss = loss
+    } else {
+      lastTrainLoss = loss
+    }
+  }
+  if (points.length === 0) return null
+  return {
+    steps,
+    epochs,
+    bestLoss: bestValLoss ?? lastTrainLoss,
+    lastLoss: lastValLoss ?? lastTrainLoss,
+    series: compactMetricSeries(points)
+  }
+}
+
 const RUN_STATUS_LABELS: Record<TrainRunStatus, string> = {
   running: '进行中',
   trained: '已训练',

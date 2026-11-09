@@ -7,9 +7,18 @@ import { Row, StatusPill } from './primitives'
  * 运行段的任务行：两个训练页共用。
  * 文案、颜色、停止键只该有一份——它们描述的是同一件事，两处各写一遍就会各说各话。
  */
-export function TrainTaskRow({ task, running }: { task: TrainTaskInfo | null; running: boolean }): React.ReactElement {
+export function TrainTaskRow({
+  task,
+  running,
+  flush
+}: {
+  task: TrainTaskInfo | null
+  running: boolean
+  flush?: boolean
+}): React.ReactElement {
   return (
     <Row
+      flush={flush}
       label={task ? `当前任务 · ${task.kind}` : '当前任务'}
       hint={
         task

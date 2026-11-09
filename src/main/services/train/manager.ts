@@ -20,7 +20,7 @@ import {
 } from '@shared/train/task'
 import { parseTrainProgress } from '@shared/train/progress'
 import { ensureSovitsServer, pauseSovitsForTraining, setInferenceHold } from '../voice/sovits-server'
-import { markRunStatus } from './asr-ft'
+import { applyAsrFtModel, markRunStatus, pruneAsrFtRunDirs } from './asr-ft'
 import {
   buildTrainRun,
   finishTrainRun,
@@ -29,7 +29,7 @@ import {
   type TrainRunParams,
   type TrainRunRecord
 } from '@shared/train/run'
-import { markDatasetEntriesTrained, saveDatasetLedger, saveTrainRun } from './run-store'
+import { loadTrainRun, markDatasetEntriesTrained, saveDatasetLedger, saveTrainRun } from './run-store'
 import { readAsrMetrics, readGvMetrics } from './run-metrics'
 
 /**
@@ -261,7 +261,10 @@ class TrainManager {
         this.finish('stopped', code)
         return
       }
-      if (code === 0 && this.chain) {
+      // funasr 收尾的权重平均可能死在「挑中的文件已被淘汰」上，训练本身却是成功的：救回来继续导出，
+      // 别为了一句日志把几十分钟的卡白烧。
+      const ok = code === 0 || this.salvageFunasrAverage()
+      if (ok && this.chain) {
         const next = this.chain()
         this.chain = null
         if (next) {
@@ -272,9 +275,31 @@ class TrainManager {
         this.finish('failed', code)
         return
       }
-      if (code === 0) this.finish('done', code)
+      if (ok) this.finish('done', code)
       else this.finish('failed', code)
     })
+  }
+
+  /**
+   * funasr 收尾的 `average_checkpoints` 先按 val 表挑最优文件名、再去开那个文件；acc 并列时它挑中的
+   * 正是 keep_nbest 窗口刚淘汰掉的那个，于是 `RuntimeError: No checkpoints found for averaging`
+   * 把一次已经跑完的训练记成失败（实测 2026-11-09：15 epoch / 585 步跑完，目录只剩 ep13/14/15）。
+   * 权重本身在 `model.pt.best`，导出腿也认它：日志里有这一句、磁盘上还有可用权重，就继续走。
+   */
+  private salvageFunasrAverage(): boolean {
+    if (this.run?.kind !== 'asr-ft' || !this.chain) return false
+    if (!this.logs.some((line) => line.text.includes('No checkpoints found for averaging'))) return false
+    const dir = this.run.artifacts.runDir ?? ''
+    const weight = ['model.pt.avg1', 'model.pt.best', 'model.pt'].find((name) => {
+      try {
+        return statSync(join(dir, name)).isFile()
+      } catch {
+        return false
+      }
+    })
+    if (!weight) return false
+    this.record(`权重平均没做成（并列挑到了已淘汰的 checkpoint），改用 ${weight} 直接导出`)
+    return true
   }
 
   private onChunk(chunk: string): void {
@@ -327,37 +352,59 @@ class TrainManager {
   private finish(status: Extract<TrainTaskStatus, 'done' | 'failed' | 'stopped'>, code: number | null): void {
     // asr-ft 失败收场回写 run.json（成功标 trained 走链回调、转正标 applied 走 apply）；缺账本就跳过。
     if (status === 'failed' && this.request?.asrFt) markRunStatus(this.request.asrFt.data.runDir, 'failed')
-    const stage =
-      status === 'done'
-        ? this.chained
-          ? '完成（可应用新模型）'
-          : '完成'
-        : status === 'stopped'
-          ? '已停止'
-          : this.sawOom()
-            ? '失败：显存不足（CUDA OOM），关掉占卡程序再点一次'
-            : this.lastErrorLine() === null
-              ? `失败 (exit ${code ?? '?'})`
-              : `失败 (exit ${code ?? '?'})：${this.lastErrorLine()}`
-    if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
-    // 记录收场：终态 + 失败原因 + 从磁盘取指标（训练框架自己写的文件，比 stdout 可靠）。
+    const failure =
+      status === 'failed'
+        ? this.sawOom()
+          ? '失败：显存不足（CUDA OOM），关掉占卡程序再点一次'
+          : this.lastErrorLine() === null
+            ? `失败 (exit ${code ?? '?'})`
+            : `失败 (exit ${code ?? '?'})：${this.lastErrorLine()}`
+        : null
+    // 先落库再换模：applyAsrFtModel 是按导出目录回库里找回这一轮记 applied 的，行还没写就翻不到牌。
+    let saved: TrainRunRecord | null = null
     if (this.run) {
       const run = this.run
       const metrics =
         run.kind === 'asr-ft'
           ? readAsrMetrics(run.artifacts.runDir)
           : readGvMetrics(this.request?.gvResolved?.home, run.experiment)
-      const next = finishTrainRun(run, {
+      saved = finishTrainRun(run, {
         status: status === 'done' ? 'trained' : status === 'stopped' ? 'stopped' : 'failed',
-        error: status === 'failed' ? stage : null,
+        error: failure,
         metrics
       })
-      saveTrainRun(next)
+      saveTrainRun(saved)
+    }
+    // 训练 + 导出都成功就直接换上去：磁盘上只留一份微调模型，用户不必再点第二个按钮。
+    const promoted = status === 'done' && this.chained && this.run?.kind === 'asr-ft' ? applyAsrFtModel() : null
+    // 换模自己会把那一轮翻成 applied；重读一次让内存里的记录与库一致。
+    if (promoted?.ok && saved) saved = loadTrainRun(saved.id) ?? saved
+    const stage =
+      status === 'done'
+        ? promoted
+          ? promoted.ok
+            ? '完成（已换上新模型）'
+            : `完成，但换模失败：${promoted.error ?? '未知错误'}`
+          : '完成'
+        : (failure ?? '已停止')
+    if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
+    // 收场结论也进日志文件：换模失败、权重平均兜底这类只有一行的判断，事后只能靠这一句复盘。
+    this.record(stage)
+    if (saved) {
+      // 换模成功才清盘：只留当前这轮与下一轮的增量起点（见 docs/adr/asr-ft-run-retention.md）。
+      // 异步做，不占收场这一步；清不掉也只是多占点盘，不影响已经换上的模型。
+      if (promoted?.ok) {
+        void pruneAsrFtRunDirs(saved.id)
+          .then((removed) => {
+            if (removed.length > 0) console.log('TRAIN_RUN_DIRS_PRUNED', removed.length)
+          })
+          .catch((err: unknown) => console.log('TRAIN_RUN_DIRS_PRUNE_FAILED', String(err)))
+      }
       // 训练腿成功才算「这些录音训过了」：失败的 run 不动覆盖标记，下次还会进训练集。
       const ledger = this.request?.asrFt?.ledger
-      if (status === 'done' && ledger) markDatasetEntriesTrained(next.id, ledger)
-      this.run = next
-      notifyRunEnd(next)
+      if (status === 'done' && ledger) markDatasetEntriesTrained(saved.id, ledger)
+      this.run = saved
+      notifyRunEnd(saved)
     }
     this.child = null
     this.emit(true)

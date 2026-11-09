@@ -46,6 +46,7 @@ import {
 import { getOverlayManager } from './windows/overlay'
 import { broadcastToWindows as broadcast } from './windows/broadcast'
 import { listTrainRuns, loadTrainRun } from './services/train/run-store'
+import { backfillRunMetrics } from './services/train/run-metrics'
 import { getTrainManager } from './services/train/manager'
 import {
   ftRecDelete,
@@ -248,7 +249,7 @@ const handlers: MainHandlers = {
     return sovitsStatusSnapshot()
   },
   // 训练管理（v3）：记录落盘，面板两页从磁盘读；互斥与计划推导都在 manager/纯缝里。
-  trainRuns: () => listTrainRuns(),
+  trainRuns: () => backfillRunMetrics(listTrainRuns()),
   trainRun: (id) => loadTrainRun(id),
   trainStart: async (request) => {
     const kind = normalizeTrainKind(request.kind)

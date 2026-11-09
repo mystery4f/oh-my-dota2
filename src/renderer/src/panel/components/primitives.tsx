@@ -72,12 +72,14 @@ export function Row({
   hint,
   htmlFor,
   stacked,
+  flush,
   children
 }: {
   label: string
   hint?: string
   htmlFor?: string
   stacked?: boolean
+  flush?: boolean
   children?: React.ReactNode
 }): React.ReactElement {
   const Label = htmlFor ? 'label' : 'span'
@@ -92,15 +94,15 @@ export function Row({
 
   if (stacked)
     return (
-      <div className="px-4 py-3">
+      <div className={cn('py-3', !flush && 'px-4')}>
         <div>{name}</div>
         <div className="mt-2">{children}</div>
       </div>
     )
 
   return (
-    <div className="flex min-h-11 items-center justify-between gap-4 px-4 py-2">
-      <div className="min-w-0">{name}</div>
+    <div className={cn('flex min-h-11 items-center justify-between gap-4 py-2', !flush && 'px-4')}>
+      <div className="min-w-0 flex-1">{name}</div>
       <div className="flex shrink-0 items-center gap-2">{children}</div>
     </div>
   )

@@ -8,13 +8,15 @@ import { runHint, runTone, runTitle } from '../run-format'
 /** 一条训练记录：标题是「种类 · 实验」，说明是数据/步数/损失/耗时。 */
 export function RunRow({
   run,
+  flush,
   action
 }: {
   run: TrainRunRecord
   action?: React.ReactNode
+  flush?: boolean
 }): React.ReactElement {
   return (
-    <Row label={runTitle(run)} hint={runHint(run)}>
+    <Row flush={flush} label={runTitle(run)} hint={runHint(run)}>
       <StatusPill tone={runTone(run.status)}>{runStatusLabel(run.status)}</StatusPill>
       {action}
     </Row>
@@ -25,7 +27,13 @@ export function RunRow({
  * 损失曲线：纯 SVG，不用图表库——一条折线不值得多一个依赖，也不该带自己的色板。
  * 只有一个点时不画（一个点说明不了趋势）。
  */
-export function Sparkline({ run }: { run: TrainRunRecord }): React.ReactElement | null {
+export function Sparkline({
+  run,
+  flush
+}: {
+  run: TrainRunRecord
+  flush?: boolean
+}): React.ReactElement | null {
   const points = (run.metrics?.series ?? [])
     .map((point) => point.loss)
     .filter((loss): loss is number => typeof loss === 'number')
@@ -37,7 +45,7 @@ export function Sparkline({ run }: { run: TrainRunRecord }): React.ReactElement 
     .map((loss, index) => `${(index / (points.length - 1)) * 100},${100 - ((loss - min) / span) * 100}`)
     .join(' ')
   return (
-    <div className="px-4 py-3">
+    <div className={flush ? 'py-3' : 'px-4 py-3'}>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-16 w-full text-primary" aria-hidden>
         <polyline
           points={polyline}
@@ -58,11 +66,17 @@ export function Sparkline({ run }: { run: TrainRunRecord }): React.ReactElement 
  * 开训体检清单：一行一条，「阻断」红、「注意」黄、「就绪」绿。
  * 只有阻断会禁用开训按钮——体检不是让用户点确认的弹窗。
  */
-export function PreflightList({ items }: { items: PreflightItem[] }): React.ReactElement {
+export function PreflightList({
+  items,
+  flush
+}: {
+  items: PreflightItem[]
+  flush?: boolean
+}): React.ReactElement {
   return (
     <>
       {items.map((item) => (
-        <Row key={item.id} label={item.label} hint={item.detail}>
+        <Row flush={flush} key={item.id} label={item.label} hint={item.detail}>
           <StatusPill tone={item.level === 'block' ? 'bad' : item.level === 'warn' ? 'warn' : 'ready'}>
             {item.level === 'block' ? '阻断' : item.level === 'warn' ? '注意' : '就绪'}
           </StatusPill>

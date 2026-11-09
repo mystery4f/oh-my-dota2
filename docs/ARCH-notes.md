@@ -47,8 +47,9 @@ deliberate deviations are written down there (no extra token layer — the HSL v
 
 ## Training (音色训练 / 识别训练)
 
-Two sections, one shape: 数据 → 运行 → 产物. There is no training window and no
-`train:open` channel — the standalone BrowserWindow was deleted in v3.
+Two sections, two shapes. 音色训练 keeps 数据 → 运行 → 产物; 识别训练 is a four-step rail (环境 /
+数据 / 训练 / 现役) under one six-state headline, and only the active engine is trainable. There is no
+training window and no `train:open` channel — the standalone BrowserWindow was deleted in v3.
 
 - `src/shared/train/run.ts` is the run model: `TrainRunRecord` plus the builders
   (`buildTrainRun`, `finishTrainRun`) and metric parsers (`parseAsrTrainerState`,
@@ -70,6 +71,10 @@ Two sections, one shape: 数据 → 运行 → 产物. There is no training wind
 - `src/shared/train/preflight.ts` is the gate: `judgeAsrPreflight` / `judgeGvPreflight`
   return `PreflightItem[]` where only `block` disables 开始训练; `warn` explains risk.
   Add a new gate there, never inline in a page.
+- Promotion is part of the run, not a button: `services/train/manager.ts` `finish()` calls
+  `applyAsrFtModel()` on the done + asr-ft + export-leg path, marks the run `applied` when the swap
+  lands and `trained` when only training succeeded; the panel's 现役 step only reports the result.
+  The model ledger and the swap itself still live in `shared/train/asr-ft.ts`.
 - `panel/use-recorder.ts` owns mic capture (getUserMedia → ScriptProcessor → rms →
   `advanceRecording` → `shouldKeepTake` → `encodeWav16k` → `ftRecSave`). Page-level
   components stay free of audio plumbing. The save callback fires only after a successful

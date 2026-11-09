@@ -251,11 +251,19 @@ const stubAsrModels = [
   { id: 'paraformer:asr-models/paraformer-zh', engineId: 'paraformer', label: 'Paraformer 中文', rel: 'asr-models/paraformer-zh', ready: true, bytes: 895000000, origin: 'download' }
 ] as const
 let stubAsrActiveId = query.get('asrModel') === 'paraformer' ? 'paraformer:asr-models/paraformer-zh' : 'qwen3:asr-models/qwen3-asr'
+// 设置里的现役 id 是页面判断「训练目标和现役不是同一个引擎」的唯一来源，stub 也要跟着走这条。
+settings.asrActiveModel = stubAsrActiveId
 /**
  * 现役模型的微调腿：与主进程 finetuneEngine 同一判据（activeId 的引擎 → 引擎表 finetune），
  * 目标行与估时都读它——换一条腿，预览里的 trainer / 步数 / 分钟跟着换。
  */
 function stubFinetuneEngine(): AsrEngineSpec {
+  // 与主进程 finetuneEngine 同一条规则：显式训练目标优先，其次现役引擎，最后表里第一个可微调的。
+  const pinned = settings.asrTrainEngine
+  if (pinned) {
+    const spec = ASR_ENGINE_LIST.find((item) => item.id === pinned && item.finetune !== null)
+    if (spec) return spec
+  }
   const picked = ASR_ENGINE_LIST.find((spec) => stubAsrActiveId.startsWith(`${spec.id}:`))
   if (picked?.finetune != null) return picked
   const fallback = ASR_ENGINE_LIST.find((spec) => spec.finetune !== null)
@@ -349,6 +357,7 @@ const implemented = {
   asrModels: async () => ({ activeId: stubAsrActiveId, pinned: true, models: [...stubAsrModels] }),
   asrActiveSet: async (id) => {
     stubAsrActiveId = id
+    settings.asrActiveModel = id
     return { activeId: id, pinned: true, models: [...stubAsrModels] }
   },
   voiceRuntimeStatus: async () => ({ state: 'ready', nodePath: 'stub-node.exe', installing: false, installError: null }),

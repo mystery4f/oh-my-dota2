@@ -19,7 +19,7 @@ export interface AsrPreflightInput {
   recordedLines: number
   /** 上一次打包的条数；null = 这次会话还没打过包。 */
   packed: { train: number; eval: number } | null
-  /** 生效模型在不在（不在就没法「应用」，也没法回滚）。 */
+  /** 生效模型在不在。不在不拦训练：全量训完会新建一份，增量靠的是上一轮权重。 */
   activeModel: boolean
   /** 本次开训口径：从底模重训 / 接着上一轮权重（增量）。 */
   mode: AsrFtMode
@@ -64,8 +64,13 @@ export function judgeAsrPreflight(input: AsrPreflightInput): PreflightItem[] {
 
   items.push(
     input.activeModel
-      ? { id: 'model', level: 'ok', label: '生效模型', detail: '已就位；训完在这里一键换上' }
-      : { id: 'model', level: 'block', label: '生效模型', detail: '缺 active 模型：先装一次环境或找到模型文件' }
+      ? { id: 'model', level: 'ok', label: '生效模型', detail: '已就位；训完自动换成它' }
+      : {
+          id: 'model',
+          level: 'warn',
+          label: '生效模型',
+          detail: '还没有现役模型：训完会新建一份（词表从底模借）'
+        }
   )
 
   items.push(incrementalItemOf(input))

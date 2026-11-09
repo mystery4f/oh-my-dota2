@@ -26,8 +26,13 @@ export interface AsrFtDatasetPlan {
   evalJsonl: string
   runDir: string
 }
-/** 目标总步数≈800：G14 实测 38 条 × 66 轮 = 660 步 ≈ 65 分钟，步数与数据量线性；轮数按数据量自适应，封顶 66、保底 10。 */
-export const FT_TARGET_STEPS = 800
+/**
+ * 目标总步数≈110：只决定「同一批录音看几遍」，不影响打包进数据的条数（每条都吃，轮数是整批的重复次数）。
+ * 43 条时每轮 11 步 ⇒ 10 轮 ≈ 110 步 ≈ 6 分钟。2026-11-09 由 400（36 轮）再降到 110：公开做法是音频
+ * 少于一小时训 5–10 遍，同脚本的公开配方只跑 3 轮；再往上加，val 只有 2 条同源句子，看不出到底学会了还是背题。
+ * 要更久就调这里，别在调用点拼轮数（面板估时与真开跑都读它）。
+ */
+export const FT_TARGET_STEPS = 110
 /**
  * 一步吃几条：引擎表微调段的 `samplesPerStep` 是唯一一份（qwen3 batch 1 × grad_acc 4、funasr batch 1），
  * 训练 argv 也读它——改批大小只改表，轮数折算与估算的步数自动跟上。
@@ -44,7 +49,16 @@ function ftStepsPerEpoch(trainer: AsrFtTrainer, trainCount: number): number {
   return Math.max(1, Math.ceil(trainCount / ftSamplesPerStep(trainer)))
 }
 
-/** 自适应轮数：步/轮 = ceil(训练条数 / 每步吃几条)，轮 = clamp(round(目标步数 / 步每轮), 10, 66)。数据为 0 回 66（不会发生，防御）。 */
+/**
+ * 冒烟开关：环境变量 `OMD2_FT_EPOCHS=1` 把轮数钉死成指定值。只为一件事——把「打包 → 训练 → 导出 → 换模」
+ * 这条链快速跑通（1 轮 = 每轮几步就跑几步，43 条约 11 步）。渲染层没有 process，取不到就当没设。
+ */
+function smokeEpochs(): number {
+  const raw = typeof process === 'undefined' ? undefined : process.env?.OMD2_FT_EPOCHS
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 0
+}
+/** 自适应轮数：步/轮 = ceil(训练条数 / 每步吃几条)，轮 = clamp(round(目标步数 / 步每轮), 3, 66)。数据为 0 回 66（不会发生，防御）。 */
 export function deriveFtEpochs(trainCount: number): number {
   return deriveFtEpochsFor('qwen3-sft', trainCount)
 }
@@ -52,15 +66,21 @@ export function deriveFtEpochs(trainCount: number): number {
 /** funasr 目标定 600 步（比 qwen3 的 800 短）：一步 = 1 条（表里的 samplesPerStep）时，40 条约 15 轮。 */
 export const FT_FUNASR_TARGET_STEPS = 600
 
-/** 按 trainer 折算轮数：两条腿只有目标步数与上下限不同，每轮几步一律走 `ftStepsPerEpoch`。 */
+/**
+ * 按 trainer 折算轮数：两条腿只有目标步数与上下限不同，每轮几步一律走 `ftStepsPerEpoch`。
+ * qwen3 的保底从 10 轮降到 3 轮（2026-11-09）：数据一多，10 遍就成了硬性下限量——400 条也要跑 1000 步、
+ * 近一小时，是「背题」最容易发生的那一侧。3 遍是「至少把数据看过几眼」的下线，够不着目标步数时别再往上顶。
+ */
 export function deriveFtEpochsFor(trainer: AsrFtTrainer, trainCount: number): number {
   const funasr = trainer === 'funasr-paraformer'
   if (trainCount <= 0) return funasr ? 20 : 66
+  const smoke = smokeEpochs()
+  if (smoke) return smoke
   const stepsPerEpoch = ftStepsPerEpoch(trainer, trainCount)
   const target = funasr ? FT_FUNASR_TARGET_STEPS : FT_TARGET_STEPS
   return funasr
     ? Math.min(40, Math.max(4, Math.round(target / stepsPerEpoch)))
-    : Math.min(66, Math.max(10, Math.round(target / stepsPerEpoch)))
+    : Math.min(66, Math.max(3, Math.round(target / stepsPerEpoch)))
 }
 
 /** 增量起点：上一个 run 留下的 pytorch 权重（导出产物只有 int8 onnx，接不上）。优先平均权重。 */
@@ -265,10 +285,12 @@ function planFunasrTrainArgv(paths: AsrFtPaths, data: AsrFtDatasetPlan, tuning?:
     //    （实测选中 model.pt.ep0.10），于是 RuntimeError: No checkpoints found for averaging。
     '++train_conf.validate_interval=20',
     '++train_conf.save_checkpoint_interval=20',
-    // 至少留 2 个还不够：keep 的窗口是「保存时看 acc」，但 avg 挑名是「收尾按 val 表挑最优」——
-    // 8 epoch 的增量跑里 val 表首位（model.pt.ep0.20）早被窗口淘汰（实测 2026-11-09：
-    // 收尾 RuntimeError: No checkpoints found for averaging，saved_ckpts 只剩 ep7/ep7.20）。
-    // 留 4 个才能盖住「最优名在窗口外」的错位；窗口再大也只是磁盘，无语义影响。
+    // 窗口只影响磁盘，不管窗口多大都盖不住「虎口」：trainer 收尾按 val_acc 排序取第一名，
+    // 淘汰却按 val_acc 取最差那名，两个方向在**并列**时正好撞在一起——val 只有 2 条时 acc 是
+    // 0/0.5/1 这类离散值，并列极常见，于是挑中的名字（常是最早那条 model.pt.ep0.20）早被淘汰
+    // （实测 2026-11-09：15 epoch / 585 步跑完，收尾 RuntimeError: No checkpoints found for
+    // averaging，目录只剩 ep13.20/ep14/ep14.20/ep15）。所以训练栈这边留 4 个只为省磁盘，
+    // 收尾失败由 manager.salvageFunasrAverage() 兜住：权重在 model.pt.best，导出腿认它。
     '++train_conf.keep_nbest_models=4',
     '++train_conf.avg_nbest_model=1',
     '++train_conf.use_deepspeed=false',

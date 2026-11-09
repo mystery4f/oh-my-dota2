@@ -1218,8 +1218,8 @@ export async function runTrainProbe(): Promise<void> {
     vramNote: null
   })
   push(
-    '体检：缺环境阻断',
-    preflightBlocks(blocked).map((item) => item.id).join(',') === 'env,rec,model',
+    '体检：缺环境阻断（缺现役只 warn，全量能自己建）',
+    preflightBlocks(blocked).map((item) => item.id).join(',') === 'env,rec',
     preflightBlocks(blocked).map((item) => item.id).join(',')
   )
   const healthy = judgeAsrPreflight({

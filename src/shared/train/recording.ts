@@ -264,6 +264,18 @@ export function addScriptGroup(groups: readonly FtScriptGroup[], title: string):
   return { ok: true, groups: [...groups, { id, title: title.trim(), mode: 'lines', lines: [], note: '' }] }
 }
 
+/**
+ * 面板「自定义录音」专用的那一组：固定 G99。
+ * 句子由人手填一句、录一句——文本先行是硬规矩，没有文本的录音进不了训练集。
+ */
+export const CUSTOM_GROUP = 'G99'
+
+/** 没有 G99 就补一个空组；已有就原样返回（用户自己建的 G99 也认）。 */
+export function ensureCustomGroup(groups: readonly FtScriptGroup[]): FtScriptGroup[] {
+  if (groups.some((group) => group.id === CUSTOM_GROUP)) return [...groups]
+  return [...groups, { id: CUSTOM_GROUP, title: '自定义录音', mode: 'lines', lines: [], note: '' }]
+}
+
 /** 改组标题：自由说组也能改标题（它的 wav 不按行号命名，标题只是给人看的）。 */
 export function renameScriptGroup(
   groups: readonly FtScriptGroup[],

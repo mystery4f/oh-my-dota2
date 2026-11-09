@@ -15,7 +15,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import {
   asrFtRollbackSteps,
   asrFtSwapSteps,
@@ -48,16 +48,24 @@ import {
   scriptStaleKeys,
 } from '@shared/train/asr-ft'
 import type { TrainPlan, TrainStartRequest } from '@shared/train/task'
-import { loadSettings } from '../settings'
-import { activeAsrModel } from '../voice/asr-model'
+import { loadSettings, saveSettings } from '../settings'
 import { locateWorkerScript } from '../voice/runtime'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList, readFtScript } from './ft-record'
 import { correctionSamplesStatus } from '../voice/corrections'
-import { listDatasetEntries, listTrainRuns, packedLedgerForRun, patchTrainRun, trainedDatasetEntries } from './run-store'
+import {
+  asrRunDirsRoot,
+  listDatasetEntries,
+  listTrainRuns,
+  loadTrainRun,
+  packedLedgerForRun,
+  patchTrainRun,
+  trainedDatasetEntries
+} from './run-store'
 import { sovitsChildPid } from '../voice/sovits-server'
-import { ASR_ENGINE_LIST, type AsrEngineId, type AsrEngineSpec } from '@shared/asr/engines'
+import { type AsrEngineId } from '@shared/asr/engines'
+import { finetuneEngine, finetuneSpec } from './target-engine'
 
 /**
  * ASR 微调闭环（T5）的环境与换模：
@@ -79,22 +87,7 @@ export function asrFtEnvRoot(): string {
   return loadSettings().asrFtEnvDir.trim() || join(app.getPath('userData'), 'asr-ft-env')
 }
 
-/**
- * 微调腿挂在哪个引擎上：先看现役模型所属的引擎（它有 finetune 时），否则表里第一个声明 finetune 的引擎。
- * 必须跟着现役走——否则面板显示现役 paraformer、权重却写进 qwen3 的目录。
- */
-function finetuneEngine(): AsrEngineSpec {
-  const active = activeAsrModel()
-  const spec = active ? ASR_ENGINE_LIST.find((item) => item.id === active.engineId) : undefined
-  if (spec?.finetune != null) return spec
-  const fallback = ASR_ENGINE_LIST.find((item) => item.finetune !== null)
-  if (fallback === undefined) throw new Error('引擎表里没有任何引擎声明 finetune')
-  return fallback
-}
-
-function finetuneSpec(): NonNullable<AsrEngineSpec['finetune']> {
-  return finetuneEngine().finetune as NonNullable<AsrEngineSpec['finetune']>
-}
+// 训练目标的解析（pinned ＞ 现役 ＞ 表内第一个）收在 ./target-engine，打包格式也读同一份。
 
 /**
  * 脚本路径全部来自引擎表（应用内布局在前，手动开发布局在后）。
@@ -309,8 +302,9 @@ function ensureTokenizerFiles(into: string, fallbackDirs: string[]): string | nu
     if (existsSync(target)) continue
     let borrowed = false
     for (const src of fallbackDirs) {
-      const source = join(src, 'tokenizer', f)
-      if (existsSync(source)) {
+      // 两种布局都认：运行时模型把词表放在 tokenizer/ 下，HF 底模（训练环境里的那份）平铺在根目录。
+      const source = [join(src, 'tokenizer', f), join(src, f)].find((path) => existsSync(path))
+      if (source) {
         mkdirSync(dir, { recursive: true })
         cpSync(source, target)
         borrowed = true
@@ -333,7 +327,9 @@ export function applyAsrFtModel(): AsrFtSwapResult {
   // 导出腿中途断掉时目录里已经有 conv_frontend/encoder，唯独缺 decoder.int8——
   // 那时转正会让识别 worker 加载失败，所以先点名缺件，不碰现役模型。
   if (swap.lastExportDir) {
-    const missing = missingFtExportFiles(safeReaddir(swap.lastExportDir))
+    // 引擎 id 必须显式传：`missingFtExportFiles` 不带参数时按 qwen3 的三件 onnx 查，
+    // 拿去查 paraformer 的导出目录会把「模型.int8.onnx + tokens.txt」判成缺件（实测 2026-11-09）。
+    const missing = missingFtExportFiles(safeReaddir(swap.lastExportDir), finetuneEngine().id)
     if (missing.length > 0) {
       return { ok: false, error: `导出没跑完（缺 ${missing.join('、')}）：重新点一次「开始训练」，等导出完成再应用` }
     }
@@ -356,12 +352,22 @@ export function applyAsrFtModel(): AsrFtSwapResult {
           for (const artifact of finetune.artifacts) {
             cpSync(join(swap.lastExportDir, artifact.from), join(next, artifact.to))
           }
-          // 兜底顺序：刚进备份的上一版 → asr-models 下任何目录 → 对讲下载的官方模型。
-          const fallbacks = [bak, ...safeReaddir(asrModelsRoot()).map((d) => join(asrModelsRoot(), d)), shippedModelDir()]
+          // 兜底顺序：刚进备份的上一版 → asr-models 下任何目录 → 对讲下载的官方模型 → 训练底模。
+          // 最后一项是「权重被删光、只剩底模」的场景：全量重训完要能一次转正，不能再回头找运行时模型。
+          const baseModelDir = detectAsrFtEnv().paths.baseModelDir ?? ''
+          const fallbacks = [
+            bak,
+            ...safeReaddir(asrModelsRoot()).map((d) => join(asrModelsRoot(), d)),
+            shippedModelDir(),
+            ...(baseModelDir ? [baseModelDir] : [])
+          ]
           // 借件：导出目录里没有、sherpa 又要的文件（qwen3 的 tokenizer/、paraformer 的 tokens.txt）。
           for (const item of finetune.borrow) {
             const target = join(next, item.path)
             if (existsSync(target)) continue
+            // tokenizer 单独交给 ensureTokenizerFiles：它可以从平铺布局（HF 底模根目录）逐件拼，
+            // 这里按目录找会直接判死——「删光权重只留底模」那次就是这么卡住的。
+            if (item.path === 'tokenizer') continue
             const source = fallbacks.map((dir) => join(dir, item.path)).find((path) => existsSync(path))
             if (source === undefined) {
               throw new Error(`导出产物缺 ${item.path}，备份和原始模型目录里也没得借`)
@@ -378,9 +384,15 @@ export function applyAsrFtModel(): AsrFtSwapResult {
       }
     }
   } catch (err) {
-    return { ok: false, error: `换模失败：${errorMessage(err)}（模型目录可能停在中间态，按「回滚上一版」恢复）` }
+    // 失败时目录可能停在中间态（现役已挪去 .bak、.next 没换上来）：说清上一版在哪，
+    // 别再提一个已经不存在的「回滚」按钮。
+    return { ok: false, error: `换模失败：${errorMessage(err)}（上一版留在备份目录，重新训一轮即可）` }
   }
   markAppliedForExport(swap.lastExportDir ?? '')
+  // 转正之后现役必须指到新目录：训练目标可以和现役分开选（见 finetuneEngine），
+  // 换完权重却还让识别跑旧引擎，用户看到的就是「提示已换上新模型、说话还在用旧模型」。
+  const engine = finetuneEngine()
+  saveSettings({ asrActiveModel: `${engine.id}:${engine.canonicalRel}` })
   resetSherpaWorker()
   return { ok: true, error: null, model: swap.lastExportDir ? basename(swap.lastExportDir) : null }
 }
@@ -548,6 +560,37 @@ export function findIncrementalSource(
   }
 }
 
+
+/**
+ * 换模成功后的清场（口径见 `docs/adr/asr-ft-run-retention.md`）：只留当前这轮与下一轮的增量起点，
+ * 其余 `asr-ft-runs/<stem>` 整目录删掉，并把 run 行的 runDir 置空——历史行留着，指标在收场时
+ * 已经抄成快照，不会因为目录没了就变空。
+ *
+ * 起点算不出来（权重末尾不完整 / 账本谱系对不上）就一个字节都不删：失败现场比磁盘值钱。
+ */
+export async function pruneAsrFtRunDirs(currentRunId: string): Promise<string[]> {
+  const currentDir = loadTrainRun(currentRunId)?.artifacts.runDir ?? ''
+  if (currentDir.length === 0) return []
+  const source = findIncrementalSource(await currentFtLedger(), finetuneSpec().trainer)
+  if (!source.ok) return []
+  const keep = new Set([currentDir, source.source.runDir])
+  const root = `${asrRunDirsRoot()}${sep}`
+  const removed: string[] = []
+  for (const run of listTrainRuns()) {
+    const dir = run.artifacts.runDir ?? ''
+    // 只删本应用管的这一层：前缀相同时还要挡住 `asr-ft-runs-old/` 这种兄弟目录。
+    if (dir.length === 0 || keep.has(dir) || !dir.startsWith(root)) continue
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch (err) {
+      console.log('TRAIN_RUN_DIR_PRUNE_FAILED', dir, errorMessage(err))
+      continue
+    }
+    patchTrainRun(run.id, (item) => ({ ...item, artifacts: { ...item.artifacts, runDir: undefined } }))
+    removed.push(dir)
+  }
+  return removed
+}
 /**
  * 接续点落盘：把上一轮的权重抄进 `<asr-models>/<现役目录名>.next`（`qwen3-asr.next` / `paraformer-zh.next`）再拼训练命令。
  * 训练只读这份副本（funasr 的 init_param 会按它重建优化器，qwen3 的 resume_from 会读 trainer_state）——
@@ -732,10 +775,13 @@ export function buildAsrFtExportPlan(request: TrainStartRequest): TrainPlan | nu
   // 走到这里 = 训练腿 exit 0（manager 的链回调）：账本标 trained；导出腿接着跑，转正再标 applied。
   markRunStatus(asr.data.runDir, 'trained')
   // funasr 的 run 目录本身就是 checkpoint 目录（config.yaml + 权重同层，没有 checkpoint-<n> 子目录）。
-  // 权重优先取 trainer 收尾平均出来的 model.pt.avg1（= 验证最好的那个），再退 best，最后才是最后一个 epoch。
+  // qwen3 的 checkpoint 必须给绝对路径：导出进程的 cwd 在导出脚本目录，裸名 `checkpoint-110` 会被
+  // transformers 当成 Hub 仓库 id 去联网找（2026-11-09 实测 `connect to huggingface.co timed out`）。
+  const checkpointName =
+    asr.paths.trainer === 'funasr-paraformer' ? '' : pickLastCheckpointName(safeReaddir(asr.data.runDir))
   const checkpointDir =
-    asr.paths.trainer === 'funasr-paraformer' ? asr.data.runDir : pickLastCheckpointName(safeReaddir(asr.data.runDir))
-  // ranking 只看最后一个 epoch 会跳过验证最好的那份：训完 trainer 会把最好的权重平均成 model.pt.avg1。
+    asr.paths.trainer === 'funasr-paraformer' ? asr.data.runDir : checkpointName ? join(asr.data.runDir, checkpointName) : ''
+  // 权重优先取 trainer 收尾平均出来的 model.pt.avg1（= 验证最好的那个），再退 best，最后才是最后一个 epoch。
   const weightsFile =
     ['model.pt.avg1', 'model.pt.best', 'model.pt'].find((name) => existsSync(join(asr.data.runDir, name))) ??
     'model.pt'

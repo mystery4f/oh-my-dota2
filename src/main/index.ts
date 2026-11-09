@@ -40,6 +40,7 @@ import { runInPlaceProbe, runReplyLatencyProbe } from './probes/latency'
 import { runOverlayGeometryProbe } from './probes/overlay-geometry'
 import { runHotkeyProbe } from './probes/hotkeys'
 import { runVoiceOutProbe } from './probes/voice-out'
+import { runAsrSwapProbe } from './probes/asr-swap'
 import { runInPlaceGuardProbe } from './probes/inplace-guard'
 import { runAsrHotwordsProbe } from './probes/asr-hotwords'
 import { runAsrEnginesProbe } from './probes/asr-engines'
@@ -209,6 +210,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--voice-runtime-probe')) void runVoiceRuntimeProbe()
   if (process.argv.includes('--asr-engines-probe')) void runAsrEnginesProbe()
   if (process.argv.includes('--inplace-guard-probe')) void runInPlaceGuardProbe()
+  if (process.argv.includes('--asr-swap-probe')) void runAsrSwapProbe()
 
   const startup = loadSettings()
   // 进对局自动开始处理聊天：GSI 报 GAME_IN_PROGRESS 时会再拉一次，这里覆盖「启动时已在局内」。
