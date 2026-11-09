@@ -116,6 +116,7 @@ export class SegmentPlayer {
   async play(requestId: number, audio: Buffer, mime: string): Promise<SegmentOutcome> {
     const window = getVoiceOutWindow()
     const readyPromise = waitReady(requestId, READY_TIMEOUT_MS)
+    const queuedAt = Date.now()
     await window.play({
       requestId,
       audioBase64: audio.toString('base64'),
@@ -132,7 +133,19 @@ export class SegmentPlayer {
     const hold = pttWindow(ready.durationMs ?? MIN_SPEAK_MS)
     this.releaseMs = hold.releaseMs
     // 通道开了再报「要播了」：日志里的 keyHeld 是那一刻的事实（hold = 键按着，toggle = 麦已开），不是意图。
+    const pressedAt = Date.now()
     await this.pressKeyOnce(requestId)
+    // 起播那 1.9 s 的账：窗口准备（枚举/绑定/解码）+ 按键 + 首段余量各占多少。
+    console.log(
+      'VOICE_OUT_PREP',
+      JSON.stringify({
+        requestId,
+        readyMs: pressedAt - queuedAt,
+        keyMs: Date.now() - pressedAt,
+        leadMs: this.startedAny ? 0 : hold.leadMs,
+        prep: ready.prep ?? null
+      })
+    )
     this.options.onSpeak?.({
       requestId,
       bytes: audio.length,

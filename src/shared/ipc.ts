@@ -473,6 +473,8 @@ export interface VoiceOutReadyReport {
   fallback: boolean
   hint: string | null
   error?: string
+  /** 起播准备的分段（ms）：枚举设备 / 绑定输出（含 base64→blob）/ 等解码起步。 */
+  prep?: { devicesMs: number; sinkMs: number; metaMs: number }
 }
 
 /** 声出窗口 → 主进程：播放结束/失败；主进程据此松开说话键。 */

@@ -66,10 +66,12 @@ async function handlePlay(payload: {
   cleanup()
   const { requestId, audioBase64, audioMime, requestedDevice } = payload
   try {
+    const queuedAt = Date.now()
     const devices = (await navigator.mediaDevices.enumerateDevices())
       .filter((device) => device.kind === 'audiooutput')
       .map((device) => ({ deviceId: device.deviceId, label: device.label }) satisfies AudioOutputDevice)
     const choice = resolveOutputSink(requestedDevice, devices)
+    const devicesMs = Date.now() - queuedAt
     console.log('VOICE_OUT_SINK', JSON.stringify({ requestId, ...choice, devices: devices.length }))
 
     // Blob URL 而不是 data:URL：几 MB 的 base64 塞进 src 会让解码起步变慢。
@@ -91,6 +93,7 @@ async function handlePlay(payload: {
         if (!choice.hint) choice.hint = '输出设备绑定失败，已回退系统默认输出'
       }
     }
+    const sinkMs = Date.now() - queuedAt - devicesMs
 
     // 调试监听：同一份音频再开一路到系统默认输出。结束/失败只报主路——
     // 监听路哑掉不该把「已播到虚拟声卡」判成失败。
@@ -101,6 +104,8 @@ async function handlePlay(payload: {
     }
 
     await waitForMetadata(player, 8000)
+    const metaMs = Date.now() - queuedAt - devicesMs - sinkMs
+    console.log('VOICE_OUT_PREP', JSON.stringify({ requestId, devicesMs, sinkMs, metaMs }))
     const durationMs = Number.isFinite(player.duration) ? Math.round(player.duration * 1000) : null
 
     player.onended = () => {
@@ -130,7 +135,8 @@ async function handlePlay(payload: {
       sinkId: choice.sinkId,
       sinkLabel: choice.label,
       fallback: choice.fallback,
-      hint: choice.hint
+      hint: choice.hint,
+      prep: { devicesMs, sinkMs, metaMs }
     })
   } catch (err) {
     cleanup()
