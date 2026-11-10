@@ -8,7 +8,7 @@ import {
 } from '@shared/ipc'
 import { broadcastToWindows } from './broadcast'
 import { loadSettings, saveSettings } from '../services/settings'
-import { clampGeometry, miniGeometry, shouldIgnoreMouse, snapToEdges } from '@shared/overlay-geometry'
+import { clampGeometry, shouldIgnoreMouse, snapToEdges, windowBoundsFor } from '@shared/overlay-geometry'
 import { overlayStateFromSettings, reduceOverlay, type OverlayEvent, type OverlayState } from '@shared/overlay-state'
 import { formatAccelerator } from '@shared/hotkeys'
 
@@ -118,13 +118,14 @@ class OverlayManager {
       const win = this.win
       const at = this.currentGeometry()
       this.commit({ type: 'collapse', geometryAtCollapse: at }, () => {
-        win.setBounds(miniGeometry(this.s.expandedBounds ?? at, this.workArea()))
+        win.setBounds(windowBoundsFor(this.s, at, this.workArea()) ?? at)
       })
     } else {
       const win = this.win
       this.commit({ type: 'expand' }, () => {
         // 展开也要夹：收起期间可能换了分辨率，直接回首旧坐标会落到屏幕外。
-        if (this.s.custom) win.setBounds(clampGeometry(this.s.custom, this.workArea()))
+        const bounds = windowBoundsFor(this.s, this.currentGeometry(), this.workArea())
+        if (bounds) win.setBounds(bounds)
         else this.reposition()
       })
     }
@@ -214,7 +215,7 @@ class OverlayManager {
       return this.commit(
         { type: 'move-collapsed-origin', origin, expandedBounds: base, custom: this.s.custom },
         () => {
-          win.setBounds(miniGeometry(this.s.expandedBounds ?? base, this.workArea()))
+          win.setBounds(windowBoundsFor(this.s, base, this.workArea()) ?? base)
         }
       )
     }
@@ -302,10 +303,12 @@ class OverlayManager {
     if (!this.win) this.win = this.createWindow()
     this.reposition()
     // 上次以「收起的小图标」退出：这次见面也应该是小图标，不该突然整块砸出来。
+    // 上次以「收起的小图标」退出：这次见面也应该是小图标，不该突然整块砸出来。
     if (this.s.collapsed) {
-      const collapsedAt = this.s.expandedBounds ?? this.currentGeometry()
-      this.s = { ...this.s, expandedBounds: collapsedAt }
-      this.win.setBounds(miniGeometry(collapsedAt, this.workArea()))
+      // 以收起态冷启动后第一次 show 时展开记忆还没建；锚点归 reducer，不再手改状态。
+      const anchor = this.currentGeometry()
+      this.commit({ type: 'record-collapsed-anchor', geometry: anchor })
+      this.win.setBounds(windowBoundsFor(this.s, anchor, this.workArea()) ?? anchor)
     }
     this.applyClickThrough()
     // Windows 上透明窗口在某些路径（show / setBounds 之后）会退回不透明底，

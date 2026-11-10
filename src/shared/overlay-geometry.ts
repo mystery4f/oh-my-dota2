@@ -22,6 +22,19 @@ export function miniGeometry(from: OverlayGeometry, workArea: Area): OverlayGeom
   }
 }
 
+
+/**
+ * 窗口此刻该有的几何：收起 = 小图标（锚在展开记忆上），展开 = 用户拖过的几何夹回工作区。
+ * 没拖过返回 null —— 调用方自己走默认摆放（跟捕获区域走），这里不猜。
+ */
+export function windowBoundsFor(
+  state: { collapsed: boolean; expandedBounds: OverlayGeometry | null; custom: OverlayGeometry | null },
+  current: OverlayGeometry,
+  workArea: Area
+): OverlayGeometry | null {
+  if (state.collapsed) return miniGeometry(state.expandedBounds ?? current, workArea)
+  return state.custom ? clampGeometry(state.custom, workArea) : null
+}
 type Area = OverlayGeometry
 
 function clamp(value: number, min: number, max: number): number {

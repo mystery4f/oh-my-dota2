@@ -38,6 +38,7 @@ export type OverlayEvent =
   | { type: 'reset-custom-geometry' }
   /** 收起状态下拖小图标：只挪展开记忆的原点，尺寸绝不过 clamp。 */
   | { type: 'move-collapsed-origin'; origin: { x: number; y: number }; expandedBounds: OverlayGeometry; custom: OverlayGeometry | null }
+  | { type: 'record-collapsed-anchor'; geometry: OverlayGeometry }
 
 /** 这次归约要写进设置文件的字段；空对象 = 不写盘。 */
 export type OverlayPersistPatch = Partial<
@@ -103,6 +104,15 @@ export function reduceOverlay(event: OverlayEvent, state: OverlayState): Overlay
         state: { ...state, collapsed: false },
         persist: { overlayCollapsed: false },
         changed: state.collapsed,
+        clickThrough: false,
+        idle: 'keep'
+      }
+    case 'record-collapsed-anchor':
+      // 只补空锚点：已有展开记忆绝不被当前几何覆盖。
+      return {
+        state: { ...state, expandedBounds: state.expandedBounds ?? event.geometry },
+        persist: {},
+        changed: false,
         clickThrough: false,
         idle: 'keep'
       }
