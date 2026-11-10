@@ -18,3 +18,8 @@ data/
 
 # tsc --noEmit still writes this next to tsconfig files; it is a build artifact, not source
 *.tsbuildinfo
+
+# 全局 ~/.gitignore_global 有一条裸 `docs` 规则，会拦掉本仓库 docs/ 下新文件的 add——
+# 本仓库 45 份文档全部受跟踪、且每份都要登记进 docs/INDEX.md。仓库级 .gitignore 优先于全局
+# 排除文件，用再包含规则覆盖它，只影响本仓库；其他仓库的全局行为不变。
+!docs/
