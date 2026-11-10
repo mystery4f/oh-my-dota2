@@ -714,4 +714,6 @@
 - 根因：`src/main/services/voice/speech-pipeline.ts` 的 sovits 表项原来是 `synthAhead: 1`——当前段的合成**一返回**就发下一段的推理请求，而这个时刻正好是当前段开始播放的时刻。本机 sovits 一句 20 字要 2–5 s，GPU 与显存一起被按住，而这块 8 GB 卡上 dwm 3.8 GB + sovits 服务常驻 2.8 GB + dota2 1.5 GB 已经占满，起播时再要显存就得换页，游戏跟着掉帧，音频引擎一并打嗝。
 - 修法：sovits 改成 `synthAhead: 0`（播放期间不再发任何推理），代价是每段之间多等一次合成；`src/main/probes/tts-pipeline.ts` 的「段间预取」那块断言同步改成「本段出声时不发下一段的合成」。
 - 怎么确认是这个原因：`data/logs/voice-chain.jsonl` 里看带 `seg>1` 的条目，改前改后 `firstAudioMs` 与 `speakMs` 的差值会明显变大（等待从段中挪到了段间），而 `logs/` 下 Dota 侧的卡顿不再出现。
+- 真凶（2026-11-10 晚定位）：不是合成也不是往虚拟声卡播放，而是**按住 F6 时 Dota 自己开麦**——面板「测试模式」（只放音频、不按说话键）下完全不卡，一开正常模式就卡。Dota 的 `G:\steam\userdata\<id>\570\local\cfg\machine_convars.vcfg` 里 `snd_mixahead` 是 `0.001`（1 毫秒缓冲），开麦那一下的设备初始化就足以让音频线程欠载，表现就是整片静音再回来；同文件还有 `snd_ducktovolume 0.55` + `snd_duckerreleasetime 2.5`（语音活跃时把游戏音量压到 55%，2.5 秒才恢复）。
+- 修法（游戏侧，不需要改 app）：`D:\SteamLibrary\steamapps\common\dota 2 beta\game\dota\cfg\autoexec.cfg` 末尾加 `snd_mixahead "0.05"`、`snd_ducktovolume "1"`、`snd_duckerreleasetime "2.5"`。用户在控制台先试 `snd_mixahead 0.05`，回「好像可以了」。
 - 还可以再省一大笔：sovits 的 api_v2 常驻 2.8 GB 显存，不在说话时也不还；`dwm.exe` 3.8 GB 需要单独查（浮层收起后是否回落）。

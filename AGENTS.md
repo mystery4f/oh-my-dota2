@@ -221,6 +221,11 @@ it and nothing happened". The overlay and the pause hint print key names from th
 - Every main build prints `BUILD_STAMP {at,bytes}` at startup. When a change seems to have no effect,
   compare that timestamp with `out/main/index.js` before debugging the code: a `bg_run` dev task dies
   together with electron, and the watcher stops rebuilding without any error.
+- Game audio vanishing for a moment while the app talks is almost never the app: the speak key makes Dota
+  open its own mic, and Dota ships `snd_mixahead 0.001` (a 1 ms audio buffer) in its own convar file. Panel
+  `测试模式` (play only, no key press) is the one-click split — if that does not hitch, the pipeline is
+  innocent. Fix lives in the game's `autoexec.cfg`; the detail and values are in `docs/NOTES.md`
+  (「起播那一下游戏静音又掉帧」).
 
 - Batch scripts that call an external API per item (LLM review, ASR, downloads) must give every
   request its own timeout plus retries and append results as they arrive. Bare `Promise.allSettled`
