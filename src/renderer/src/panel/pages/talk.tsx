@@ -29,6 +29,7 @@ import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../c
 import { selectClass } from '../components/select-class'
 import { Modal } from '../components/modal'
 import { errorMessage } from '@shared/errors'
+import { HotwordEditor } from '../components/hotword-editor'
 import { useSaveFlash, useSettings } from '../use-settings'
 import { useVoicePacks } from '../use-voice-packs'
 import { VoicePackDisplay } from '../components/voice-pack-display'
@@ -262,6 +263,8 @@ export function TalkPage({
           activeEngine.finetune === null ? '不可微调' : '可微调',
         ].join('；')
 
+  // 热词只在吃得下的引擎上开放编辑：paraformer 忽略热词，编辑了也是空转（词表保留，切回来就生效）。
+  const hotwordsEditable = activeEngine !== null && activeEngine.hotwords === 'prompt'
   return (
     <>
       <Panel>
@@ -353,15 +356,19 @@ export function TalkPage({
           </Row>
           <Row
             label="热词"
-            htmlFor="v2-hotwords"
             stacked
-            hint="填容易认错的词，下一句录音就生效；识别记录里点「纠错」，差异词会自动并进这里。"
+            hint={
+              activeEngine === null
+                ? '还没有现役识别模型：先在上方选一个，再回来编辑热词'
+                : hotwordsEditable
+                  ? '填容易认错的词，下一句录音就生效；识别记录里点「纠错」，差异词会自动并进这里。'
+                  : '当前引擎忽略热词：词表原样保留，换回支持热词的引擎就恢复编辑与生效。'
+            }
           >
-            <Input
-              id="v2-hotwords"
+            <HotwordEditor
               value={settings.asrHotwords}
-              onChange={(e) => update({ asrHotwords: e.target.value })}
-              placeholder="肉山, 买活, 风暴之灵"
+              disabled={!hotwordsEditable}
+              onChange={(next) => void update({ asrHotwords: next })}
             />
           </Row>
           <Row label="识别模型" hint="现役模型的下载与删除：底模从 hf-mirror 按文件下载（断点续传 + 校验）；微调转正的模型优先生效">

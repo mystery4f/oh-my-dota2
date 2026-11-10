@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { extractHotwordDiff, joinHotwords, mergeHotwords, parseHotwords } from '@shared/asr-hotwords'
+import { HOTWORD_LIMIT, extractHotwordDiff, joinHotwords, mergeHotwords, parseHotwords } from '@shared/asr-hotwords'
 
 /**
  * `--asr-hotwords-probe`：热词纯函数缝的全量行为锁（解析/差异提取/合并）。
@@ -44,6 +44,12 @@ export function runAsrHotwordsProbe(): void {
   push('新词追加到表尾', mergeHotwords('肉山', ['买活', '高地']) === '肉山,买活,高地', mergeHotwords('肉山', ['买活', '高地']))
   push('已在表里的词不重复', mergeHotwords('肉山,买活', ['买活', '帕克']) === '肉山,买活,帕克', mergeHotwords('肉山,买活', ['买活', '帕克']))
   push('空表现接新词', mergeHotwords('', ['肉山']) === '肉山', mergeHotwords('', ['肉山']))
+
+  // —— 容量：HOTWORD_LIMIT 封顶 ——
+  const fullWords = Array.from({ length: HOTWORD_LIMIT }, (_, i) => `词${i}`)
+  const full = joinHotwords(fullWords)
+  push(`表满 ${HOTWORD_LIMIT} 词后新词丢弃、现役词原样`, mergeHotwords(full, ['新词']) === full, '')
+  push('表满时并入已存词 → 原样返回', mergeHotwords(full, [fullWords[0]]) === full, '')
 
   let failed = 0
   for (const item of cases) {

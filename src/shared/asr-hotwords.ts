@@ -49,12 +49,17 @@ export function extractHotwordDiff(oldText: string, newText: string): string[] {
   return [...new Set(words)].slice(0, 8)
 }
 
+/** 热词表容量上限：sherpa 热词是构造期配置，词太多拖慢识别也稀释效果；面板编辑与纠错并入共用这一条。 */
+export const HOTWORD_LIMIT = 50
+
 /**
  * 把新词并入现有词表串，返回规范化后的新串；已在表里的词不重复。
+ * 表满后不再追加：现役词优先，新词直接丢弃（面板在提交前拦人，纠错并入在这里兜底）。
  */
 export function mergeHotwords(existing: string, additions: string[]): string {
   const merged = parseHotwords(existing)
   for (const word of additions) {
+    if (merged.length >= HOTWORD_LIMIT) break
     if (!merged.includes(word)) merged.push(word)
   }
   return joinHotwords(merged)
