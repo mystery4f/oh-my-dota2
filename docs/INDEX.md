@@ -36,6 +36,7 @@ tags: [docs, index]
 | `docs/IDEAS.md` | 功能想法池（未排期） | 现行 |
 | `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 那一轮的待验收项 | 历史快照 |
 | `docs/HANDOFF-2026-11-02.md` | 语音管线会话交接 | 历史快照 |
+| `docs/HANDOFF-2026-11-10.md` | 架构走查实施交接：待跑的三个探针、探针盖不到的手测项、环境坑 | 现行 |
 
 ## 设计与规范
 
