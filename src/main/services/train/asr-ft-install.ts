@@ -1,10 +1,10 @@
 import { ASR_ENGINE_LIST } from '@shared/asr/engines'
 import { spawn } from 'node:child_process'
-import { errorMessage } from '@shared/errors'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { asrFtEnvRoot } from './asr-ft'
+import { createInstallJob } from '../install-job'
 import { downloadPackFile } from '../voice/sovits-voicepack'
 import type { AsrFtInstallState } from '@shared/train/asr-ft'
 
@@ -234,8 +234,11 @@ const MODEL_SNIPPET = [
 ].join('\n')
 
 /** 一键安装：按缺啥补啥串行执行；并发触发直接拒。 */
+const ftInstallJob = createInstallJob()
+
+/** 一键安装：按缺啥补啥串行执行；并发触发直接拒。 */
 export async function installAsrFtEnv(): Promise<AsrFtInstallState> {
-  if (run.running) return { ...run, error: '安装已在进行中' }
+  if (ftInstallJob.running()) return { ...run, error: '安装已在进行中' }
   const envRoot = asrFtEnvRoot()
   const venvDir = join(envRoot, 'venv')
   const pythonExe = join(venvDir, 'Scripts', 'python.exe')
@@ -258,60 +261,65 @@ export async function installAsrFtEnv(): Promise<AsrFtInstallState> {
     run = { running: false, stage: '环境已就绪', progress: 100, error: null }
     return { ...run }
   }
-  run = { running: true, stage: steps[0], progress: 0, error: null }
-  mkdirSync(envRoot, { recursive: true })
-  try {
-    for (let i = 0; i < steps.length; i++) {
-      setStage(steps[i], Math.round((i / steps.length) * 100))
-      if (steps[i] === '复制训练脚本') {
-        copyAsrFtScripts(envRoot)
-      } else if (steps[i] === '下载 uv') {
-        const res = await fetch(UV_WHEEL_INDEX)
-        if (!res.ok) throw new Error(`uv 索引 HTTP ${res.status}`)
-        const candidates = uvWheelCandidates(await res.text())
-        const asset = pickLatestUvAsset(candidates)
-        if (!asset) throw new Error('uv 索引里没有 win_amd64 wheel')
-        const href = candidates.find((c) => c.name === asset)?.href ?? asset
-        const zip = join(envRoot, 'uv.zip')
-        await downloadZip(resolveUvWheelUrl(href), zip, `下载 uv (${asset})`)
-        await extractZip(zip, envRoot)
-        if (!existsSync(uvExe)) {
-          const found = findFileShallow(envRoot, 'uv.exe', 4)
-          if (!found) throw new Error('解压后没找到 uv.exe')
-          copyFileSync(found, uvExe)
+  await ftInstallJob.run({
+    busyError: '安装已在进行中',
+    onStart: () => {
+      run = { running: true, stage: steps[0], progress: 0, error: null }
+      mkdirSync(envRoot, { recursive: true })
+    },
+    onSettled: (ok, error) => {
+      run = ok ? { running: false, stage: '安装完成', progress: 100, error: null } : { running: false, stage: '', progress: 0, error }
+    },
+    work: async () => {
+      for (let i = 0; i < steps.length; i++) {
+        setStage(steps[i], Math.round((i / steps.length) * 100))
+        if (steps[i] === '复制训练脚本') {
+          copyAsrFtScripts(envRoot)
+        } else if (steps[i] === '下载 uv') {
+          const res = await fetch(UV_WHEEL_INDEX)
+          if (!res.ok) throw new Error(`uv 索引 HTTP ${res.status}`)
+          const candidates = uvWheelCandidates(await res.text())
+          const asset = pickLatestUvAsset(candidates)
+          if (!asset) throw new Error('uv 索引里没有 win_amd64 wheel')
+          const href = candidates.find((c) => c.name === asset)?.href ?? asset
+          const zip = join(envRoot, 'uv.zip')
+          await downloadZip(resolveUvWheelUrl(href), zip, `下载 uv (${asset})`)
+          await extractZip(zip, envRoot)
+          if (!existsSync(uvExe)) {
+            const found = findFileShallow(envRoot, 'uv.exe', 4)
+            if (!found) throw new Error('解压后没找到 uv.exe')
+            copyFileSync(found, uvExe)
+          }
+        } else if (steps[i] === '创建虚拟环境') {
+          await runStep(
+            uvExe,
+            ['venv', 'venv', '--python', '3.11'],
+            envRoot,
+            { UV_PYTHON_INSTALL_MIRROR: PYTHON_MIRROR, UV_HTTP_TIMEOUT: '120' },
+            'uv venv'
+          )
+        } else if (steps[i] === '安装依赖（约 4GB，含 CUDA 版 torch）') {
+          await runStep(
+            uvExe,
+            [
+              'pip', 'install', '--python', pythonExe,
+              '--index-strategy', 'unsafe-best-match',
+              '--index-url', PYPI_MIRROR,
+              '--find-links', TORCH_CU121_MIRROR,
+              // 冻结清单 + 各引擎自己的包（如 funasr），一次装完两条腿都能训。
+              ...ASR_FT_PIP_SPEC,
+              ...enginePips()
+            ],
+            envRoot,
+            { UV_HTTP_TIMEOUT: '600' },
+            'pip install'
+          )
+        } else if (steps[i] === '下载底模（约 1.2GB）') {
+          mkdirSync(join(envRoot, 'models'), { recursive: true })
+          await runStep(pythonExe, ['-c', MODEL_SNIPPET], envRoot, { ASR_FT_MODEL_DIR: modelDir, HF_ENDPOINT: HF_MIRROR }, '底模下载')
         }
-      } else if (steps[i] === '创建虚拟环境') {
-        await runStep(
-          uvExe,
-          ['venv', 'venv', '--python', '3.11'],
-          envRoot,
-          { UV_PYTHON_INSTALL_MIRROR: PYTHON_MIRROR, UV_HTTP_TIMEOUT: '120' },
-          'uv venv'
-        )
-      } else if (steps[i] === '安装依赖（约 4GB，含 CUDA 版 torch）') {
-        await runStep(
-          uvExe,
-          [
-            'pip', 'install', '--python', pythonExe,
-            '--index-strategy', 'unsafe-best-match',
-            '--index-url', PYPI_MIRROR,
-            '--find-links', TORCH_CU121_MIRROR,
-            // 冻结清单 + 各引擎自己的包（如 funasr），一次装完两条腿都能训。
-            ...ASR_FT_PIP_SPEC,
-            ...enginePips()
-          ],
-          envRoot,
-          { UV_HTTP_TIMEOUT: '600' },
-          'pip install'
-        )
-      } else if (steps[i] === '下载底模（约 1.2GB）') {
-        mkdirSync(join(envRoot, 'models'), { recursive: true })
-        await runStep(pythonExe, ['-c', MODEL_SNIPPET], envRoot, { ASR_FT_MODEL_DIR: modelDir, HF_ENDPOINT: HF_MIRROR }, '底模下载')
       }
     }
-    run = { running: false, stage: '安装完成', progress: 100, error: null }
-  } catch (err) {
-    run = { running: false, stage: '', progress: 0, error: errorMessage(err) }
-  }
+  })
   return { ...run }
 }

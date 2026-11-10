@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
+import { createInstallJob } from '../install-job'
 import { app } from 'electron'
 import type { OfflineStatus } from '../../../shared/ipc'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
@@ -189,53 +190,60 @@ function untar(archive: string, into: string): Promise<void> {
  * 下载并解压模型。重复调用会复用同一次下载（`downloading` 期间直接返回现状）。
  * 失败只把错误写进状态，不抛给调用方——朗读功能可以降级，不能因此崩掉主进程。
  */
+const offlineInstallJob = createInstallJob()
+
 export async function ensureOfflineModel(voice: OfflineVoiceId = 'baker'): Promise<OfflineStatus> {
   const files = modelFiles(voice)
   if (offlineReady(voice)) return offlineStatus(voice)
-  if (state.downloading) return state
-  state = { ...state, downloading: true, error: null, progress: 0 }
-  const dir = offlineModelDir()
-  const staging = join(dir, '..', `${files.dir}.download`)
-  try {
-    mkdirSync(staging, { recursive: true })
-    const archive = join(staging, 'model.tar.bz2')
-    console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archives[0], mirrors: GITHUB_MIRRORS.length - 1 }))
-    await download(files.archives[0], archive, (ratio) => {
-      state = { ...state, progress: ratio * 0.9 }
-    })
-    console.log('TTS_OFFLINE_DOWNLOAD_SAVED', JSON.stringify({ bytes: statSync(archive).size }))
-    await untar(archive, staging)
-    const extracted = join(staging, files.dir)
-    if (!existsSync(extracted)) throw new Error('archive layout unexpected')
-    // matcha 的声码器是独立文件，官方单独发在 vocoder-models 下。
-    if (files.vocoder && !existsSync(vocoderFile(files.vocoder))) {
-      const target = vocoderFile(files.vocoder)
-      mkdirSync(join(target, '..'), { recursive: true })
-      await download(`${VOCODERS}/${files.vocoder}`, target, (ratio) => {
-        state = { ...state, progress: 0.9 + ratio * 0.05 }
+  await offlineInstallJob.run({
+    busyError: '模型正在下载，等这一轮结束',
+    onStart: () => {
+      state = { ...state, downloading: true, error: null, progress: 0 }
+    },
+    onProgress: (progress) => {
+      state = { ...state, progress }
+    },
+    onSettled: (ok, error) => {
+      if (ok) {
+        state = { ...state, downloading: false, progress: 1, error: null, ready: offlineReady(voice), bytes: dirBytes(offlineModelDir()) }
+        console.log('TTS_OFFLINE_READY', JSON.stringify({ dir: offlineModelDir(), bytes: state.bytes }))
+      } else {
+        state = { ...state, downloading: false, error }
+        console.log('TTS_OFFLINE_DOWNLOAD_FAILED', JSON.stringify({ err: error }))
+      }
+    },
+    work: async (report) => {
+      const dir = offlineModelDir()
+      const staging = join(dir, '..', `${files.dir}.download`)
+      mkdirSync(staging, { recursive: true })
+      const archive = join(staging, 'model.tar.bz2')
+      console.log('TTS_OFFLINE_DOWNLOAD_START', JSON.stringify({ url: files.archives[0], mirrors: GITHUB_MIRRORS.length - 1 }))
+      await download(files.archives[0], archive, (ratio) => report(ratio * 0.9))
+      console.log('TTS_OFFLINE_DOWNLOAD_SAVED', JSON.stringify({ bytes: statSync(archive).size }))
+      await untar(archive, staging)
+      const extracted = join(staging, files.dir)
+      if (!existsSync(extracted)) throw new Error('archive layout unexpected')
+      // matcha 的声码器是独立文件，官方单独发在 vocoder-models 下。
+      if (files.vocoder && !existsSync(vocoderFile(files.vocoder))) {
+        const target = vocoderFile(files.vocoder)
+        mkdirSync(join(target, '..'), { recursive: true })
+        await download(`${VOCODERS}/${files.vocoder}`, target, (ratio) => report(0.9 + ratio * 0.05))
+        console.log('TTS_OFFLINE_VOCODER_SAVED', JSON.stringify({ file: target, bytes: statSync(target).size }))
+      }
+      mkdirSync(join(dir, '..'), { recursive: true })
+      // 解压结果复制到正式目录：robocopy 只在目录之间工作，退出码 0–7 都算正常。
+      await new Promise<void>((resolve, reject) => {
+        const copy = spawn(
+          join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'robocopy.exe'),
+          [extracted, dir, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS'],
+          { windowsHide: true }
+        )
+        copy.on('error', reject)
+        copy.on('close', (code) => (code !== null && code <= 7 ? resolve() : reject(new Error('robocopy exit ' + String(code)))))
       })
-      console.log('TTS_OFFLINE_VOCODER_SAVED', JSON.stringify({ file: target, bytes: statSync(target).size }))
     }
-    mkdirSync(join(dir, '..'), { recursive: true })
-    // 解压结果复制到正式目录：robocopy 只在目录之间工作，退出码 0–7 都算正常。
-    await new Promise<void>((resolve, reject) => {
-      const copy = spawn(
-        join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'robocopy.exe'),
-        [extracted, dir, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS'],
-        { windowsHide: true }
-      )
-      copy.on('error', reject)
-      copy.on('close', (code) => (code !== null && code <= 7 ? resolve() : reject(new Error('robocopy exit ' + String(code)))))
-    })
-    state = { ...state, downloading: false, progress: 1, error: null, ready: offlineReady(voice), bytes: dirBytes(dir) }
-    console.log('TTS_OFFLINE_READY', JSON.stringify({ dir, bytes: state.bytes }))
-    return state
-  } catch (err) {
-    const message = errorMessage(err)
-    state = { ...state, downloading: false, error: message }
-    console.log('TTS_OFFLINE_DOWNLOAD_FAILED', JSON.stringify({ err: message }))
-    return state
-  }
+  })
+  return state
 }
 
 /**

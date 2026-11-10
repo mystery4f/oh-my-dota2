@@ -1,8 +1,8 @@
 import { app } from 'electron'
-import { errorMessage } from '@shared/errors'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { downloadResumable } from '../net/download'
+import { createInstallJob, type InstallJob } from '../install-job'
 import { SOVITS_SEED_REF_DIR, type SovitsVoicePack } from '@shared/ipc'
 import { loadSettings } from '../settings'
 import {
@@ -389,53 +389,75 @@ export async function downloadPackFile(
  * 安装一个音色包：三个文件下载 → refs.json 落条目 → 自动选中（当前没选别的音色时）
  * → 切权重 + 预热。已在盘上就只做落条目/激活，不重下。
  */
+/** 音色包按包 id 键控：不同包可以同时装，同一个包内还是单飞。 */
+const packJobs = new Map<string, InstallJob>()
+function jobFor(id: string): InstallJob {
+  const found = packJobs.get(id)
+  if (found) return found
+  const job = createInstallJob()
+  packJobs.set(id, job)
+  return job
+}
+
+/**
+ * 安装一个音色包：三个文件下载 → refs.json 落条目 → 自动选中（当前没选别的音色时）
+ * → 切权重 + 预热。已在盘上就只做落条目/激活，不重下。
+ */
 export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
   const pack = (await resolveVoicePacks()).find((item) => item.id === id)
   if (!pack) throw new Error(`unknown voicepack: ${id}`)
   const refsRoot = sovitsRefsRoot(app.getPath('userData'))
   const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
   const run = packRuns.get(pack.id) ?? { downloading: false, progress: 0, error: null }
-  if (run.downloading) return sovitsVoicePacks()
-  run.downloading = true
-  run.error = null
-  run.progress = voicePackInstalled(pack, refsRoot, weightsRoot) ? 1 : 0
-  packRuns.set(pack.id, run)
-  try {
-    const plan = planVoicePackFiles(pack, refsRoot, weightsRoot)
-    const totalBytes = plan.reduce((sum, file) => sum + file.bytes, 0)
-    let doneBytes = 0
-    for (const file of plan) {
-      const present = existsSync(file.dest) && statSync(file.dest).size === file.bytes
-      if (!present) {
-        await downloadPackFile(file.url, file.dest, file.bytes, (done) => {
-          run.progress = (doneBytes + done) / totalBytes
-        })
+  await jobFor(pack.id).run({
+    busyError: '这个音色包正在下载，等它结束',
+    onStart: () => {
+      run.downloading = true
+      run.error = null
+      run.progress = voicePackInstalled(pack, refsRoot, weightsRoot) ? 1 : 0
+      packRuns.set(pack.id, run)
+    },
+    onProgress: (progress) => {
+      run.progress = progress
+    },
+    onSettled: (ok, error) => {
+      run.downloading = false
+      if (!ok) {
+        run.error = error
+        recordSovitsLog('TTS_SOVITS_PACK_FAIL', { id: pack.id, err: error })
       }
-      doneBytes += file.bytes
-      run.progress = doneBytes / totalBytes
-    }
-    run.progress = 1
-    // refs.json 落条目：换版时同名/同路径的旧条目先剔掉（包拥有自己的名字），旧参考音频记下来给清理步骤。
-    const merged = packRefsMerge(readRefsRaw(refsRoot), pack)
-    writeRefsRaw(refsRoot, merged.list)
-    const stale = cleanupStalePackFiles(pack, merged.staleAudio, refsRoot, weightsRoot)
-    if (stale.length > 0) recordSovitsLog('TTS_SOVITS_PACK_CLEANUP', { id: pack.id, files: stale })
-    recordSovitsLog('TTS_SOVITS_PACK_READY', { id: pack.id, name: pack.name })
-    // 自动选中：当前没配参考（或配的还是空）就选它；用户已经挑了别的音色则不动。
-    const settings = loadSettings()
-    if (!settings.ttsSovitsRefAudio.trim()) {
-      const entry = listSovitsRefs(refsRoot, weightsRoot).find((item) => item.audio === pack.refAudio.relPath)
-      if (entry) {
-        recordSovitsLog('TTS_SOVITS_PACK_AUTO_SELECT', { id: pack.id })
-        await activateSovitsRef(entry)
+    },
+    work: async (report) => {
+      const plan = planVoicePackFiles(pack, refsRoot, weightsRoot)
+      const totalBytes = plan.reduce((sum, file) => sum + file.bytes, 0)
+      let doneBytes = 0
+      for (const file of plan) {
+        const present = existsSync(file.dest) && statSync(file.dest).size === file.bytes
+        if (!present) {
+          await downloadPackFile(file.url, file.dest, file.bytes, (done) => {
+            report((doneBytes + done) / totalBytes)
+          })
+        }
+        doneBytes += file.bytes
+        report(doneBytes / totalBytes)
+      }
+      // refs.json 落条目：换版时同名/同路径的旧条目先剔掉（包拥有自己的名字），旧参考音频记下来给清理步骤。
+      const merged = packRefsMerge(readRefsRaw(refsRoot), pack)
+      writeRefsRaw(refsRoot, merged.list)
+      const stale = cleanupStalePackFiles(pack, merged.staleAudio, refsRoot, weightsRoot)
+      if (stale.length > 0) recordSovitsLog('TTS_SOVITS_PACK_CLEANUP', { id: pack.id, files: stale })
+      recordSovitsLog('TTS_SOVITS_PACK_READY', { id: pack.id, name: pack.name })
+      // 自动选中：当前没配参考（或配的还是空）就选它；用户已经挑了别的音色则不动。
+      const settings = loadSettings()
+      if (!settings.ttsSovitsRefAudio.trim()) {
+        const entry = listSovitsRefs(refsRoot, weightsRoot).find((item) => item.audio === pack.refAudio.relPath)
+        if (entry) {
+          recordSovitsLog('TTS_SOVITS_PACK_AUTO_SELECT', { id: pack.id })
+          await activateSovitsRef(entry)
+        }
       }
     }
-  } catch (err) {
-    run.error = errorMessage(err)
-    recordSovitsLog('TTS_SOVITS_PACK_FAIL', { id: pack.id, err: run.error })
-  } finally {
-    run.downloading = false
-  }
+  })
   return sovitsVoicePacks()
 }
 

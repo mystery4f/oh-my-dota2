@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process'
-import { errorMessage } from '@shared/errors'
 import { app } from 'electron'
 import { existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs'
 import { statfs } from 'node:fs/promises'
 import { join } from 'node:path'
 import { downloadResumable } from '../net/download'
+import { createInstallJob } from '../install-job'
 
 /**
  * GPT-SoVITS 引擎包的应用内安装（一键下载 / 手动放置）。
@@ -62,7 +62,6 @@ function archivePresent(): boolean {
 }
 
 let state: SovitsInstallState = { phase: 'idle', progress: 0, error: null }
-let running = false
 
 export function sovitsInstallState(): SovitsInstallState & { installed: boolean; archivePresent: boolean } {
   return { ...state, installed: sovitsInstalled(), archivePresent: archivePresent() }
@@ -137,42 +136,45 @@ function extractArchive(): Promise<void> {
   })
 }
 
+const sovitsInstallJob = createInstallJob()
+
 /** 入口：已装好 → ready；.7z 在 → 只解压；都没有 → 下载再解压。重复调用复用同一轮。 */
 export async function ensureSovitsInstall(): Promise<SovitsInstallState> {
   if (sovitsInstalled()) {
     state = { phase: 'ready', progress: 1, error: null }
     return state
   }
-  if (running) return state
-  running = true
-  state = { phase: archivePresent() ? 'extracting' : 'downloading', progress: 0, error: null }
-  try {
-    mkdirSync(sovitsInstallRoot(), { recursive: true })
-    if (!archivePresent()) {
-      const shortage = await checkDiskSpace()
-      if (shortage) throw new Error(shortage)
-      console.log('TTS_SOVITS_INSTALL_DOWNLOAD', JSON.stringify({ url: DOWNLOAD_URL }))
-      await downloadArchive((ratio) => {
-        state = { ...state, progress: ratio }
-      })
+  await sovitsInstallJob.run({
+    busyError: '正在安装，等这一轮结束再点',
+    onStart: () => {
+      state = { phase: archivePresent() ? 'extracting' : 'downloading', progress: 0, error: null }
+    },
+    onProgress: (progress) => {
+      state = { ...state, progress }
+    },
+    onSettled: (ok, error) => {
+      state = ok ? { phase: 'ready', progress: 1, error: null } : { phase: 'error', progress: 0, error }
+      if (!ok) console.log('TTS_SOVITS_INSTALL_FAILED', JSON.stringify({ err: error }))
+    },
+    work: async (report) => {
+      mkdirSync(sovitsInstallRoot(), { recursive: true })
+      if (!archivePresent()) {
+        const shortage = await checkDiskSpace()
+        if (shortage) throw new Error(shortage)
+        console.log('TTS_SOVITS_INSTALL_DOWNLOAD', JSON.stringify({ url: DOWNLOAD_URL }))
+        await downloadArchive((ratio) => report(ratio))
+      }
+      state = { phase: 'extracting', progress: 0, error: null }
+      console.log('TTS_SOVITS_INSTALL_EXTRACT', JSON.stringify({ archive: join(sovitsInstallRoot(), ARCHIVE_NAME) }))
+      await extractArchive()
+      if (!sovitsInstalled()) throw new Error('archive layout unexpected')
+      try {
+        unlinkSync(join(sovitsInstallRoot(), ARCHIVE_NAME))
+      } catch {
+        // 解压完的压缩包删不掉不碍事，用户可手删。
+      }
+      console.log('TTS_SOVITS_INSTALL_READY', JSON.stringify({ home: sovitsInstallHome() }))
     }
-    state = { phase: 'extracting', progress: 0, error: null }
-    console.log('TTS_SOVITS_INSTALL_EXTRACT', JSON.stringify({ archive: join(sovitsInstallRoot(), ARCHIVE_NAME) }))
-    await extractArchive()
-    if (!sovitsInstalled()) throw new Error('archive layout unexpected')
-    try {
-      unlinkSync(join(sovitsInstallRoot(), ARCHIVE_NAME))
-    } catch {
-      // 解压完的压缩包删不掉不碍事，用户可手删。
-    }
-    state = { phase: 'ready', progress: 1, error: null }
-    console.log('TTS_SOVITS_INSTALL_READY', JSON.stringify({ home: sovitsInstallHome() }))
-  } catch (err) {
-    const message = errorMessage(err)
-    state = { phase: 'error', progress: 0, error: message }
-    console.log('TTS_SOVITS_INSTALL_FAILED', JSON.stringify({ err: message }))
-  } finally {
-    running = false
-  }
+  })
   return state
 }

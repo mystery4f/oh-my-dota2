@@ -8,30 +8,24 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync
 } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { errorMessage } from '@shared/errors'
 import {
   NODE_RUNTIME_ZIP,
-  QWEN3_MODEL_FILES,
   SHERPA_PACKAGES,
   VOICE_RUNTIME_DIR_NAME,
-  VOICE_RUNTIME_MODELS_DIR,
   VOICE_RUNTIME_NODE_MODULES,
   VOICE_RUNTIME_RUNTIME_JSON,
-  hfMirrorFileUrl,
   joinNodePath,
   nodeCandidates,
   parseRuntimeJson,
-  pendingModelFiles,
   runtimeStateFromDisk,
-  type ModelFileSizes,
   type VoiceRuntimeJson,
   type VoiceRuntimeState
 } from '@shared/voice-runtime'
 import { downloadResumable } from '../net/download'
+import { createInstallJob } from '../install-job'
 
 /**
  * 语音运行时的副作用：装 node.exe、拷 sherpa 插件、按文件下 Qwen3 模型。
@@ -147,11 +141,11 @@ export function sha256File(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
-let installing = false
+const runtimeInstallJob = createInstallJob()
 let installError: string | null = null
 
 export function voiceRuntimeInstallState(): { installing: boolean; installError: string | null } {
-  return { installing, installError }
+  return { installing: runtimeInstallJob.running(), installError }
 }
 
 /**
@@ -159,203 +153,77 @@ export function voiceRuntimeInstallState(): { installing: boolean; installError:
  * 失败保留现场可重试；重装整体覆盖（插件 cpSync 幂等，node.exe 原子改名）。
  */
 export async function installVoiceRuntime(): Promise<{ ok: boolean; error: string | null }> {
-  if (installing) return { ok: false, error: '正在安装，等这一轮结束再点' }
-  installing = true
-  installError = null
-  mkdirSync(voiceRuntimeDir(), { recursive: true })
-  try {
-    emit({ stage: 'packages', progress: 0.05 })
-    const sources = sherpaPackageSources()
-    const missingPackages = SHERPA_PACKAGES.filter((name) => !sources[name])
-    if (missingPackages.length > 0) {
-      throw new Error(`应用包里缺 sherpa 插件（${missingPackages.join('、')}）：这个安装包构建坏了，请反馈`)
-    }
-    mkdirSync(voiceRuntimeNodeModules(), { recursive: true })
-    for (const name of SHERPA_PACKAGES) cpSync(sources[name] as string, join(voiceRuntimeNodeModules(), name), { recursive: true })
-
-    const zipDest = join(voiceRuntimeDir(), 'node.zip')
-    emit({ stage: 'node-download', progress: 0.1 })
-    await downloadResumable({
-      url: NODE_RUNTIME_ZIP.url,
-      dest: zipDest,
-      expectedBytes: NODE_RUNTIME_ZIP.bytes,
-      stallMs: 30_000,
-      onProgress: (done, total) => emit({ stage: 'node-download', progress: 0.1 + 0.55 * (done / Math.max(1, total)) }),
-      onLog: (tag, detail) => console.log('VOICE_RUNTIME_NODE_DL', JSON.stringify({ tag, ...detail }))
-    })
-    emit({ stage: 'node-verify', progress: 0.7 })
-    const actualSha = sha256File(zipDest)
-    if (actualSha !== NODE_RUNTIME_ZIP.sha256) {
-      rmSync(zipDest, { force: true })
-      throw new Error(`node.zip 哈希不符（${actualSha.slice(0, 12)}…），已删除，可重试`)
-    }
-
-    emit({ stage: 'node-extract', progress: 0.8 })
-    // 7zr 只认 .7z（喂 zip 直接退出码 2）；Windows 自带的 bsdtar 原生读 zip，
-    // --include 按路径过滤，只解 node.exe 这一个文件，不铺 100 MB 的 npm 全家桶。
-    const tarPath = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
-    const extract = spawnSync(tarPath, ['-xf', zipDest, '-C', voiceRuntimeDir(), '--include', `*/${basename(NODE_RUNTIME_ZIP.inner)}`], {
-      encoding: 'utf8',
-      windowsHide: true
-    })
-    const extractedNode = join(voiceRuntimeDir(), NODE_RUNTIME_ZIP.inner)
-    if (extract.status !== 0 || !existsSync(extractedNode)) {
-      const tail = (extract.stderr ?? '').slice(-200)
-      throw new Error(`解压 node.exe 失败（tar 退出码 ${extract.status}${tail ? `：${tail}` : ''}）`)
-    }
-    renameSync(extractedNode, voiceRuntimeNode())
-    // --include 过滤后，版本目录里只剩这一个文件，搬空即删。
-    rmSync(dirname(extractedNode), { recursive: true, force: true })
-    rmSync(zipDest, { force: true })
-
-    const meta: VoiceRuntimeJson = {
-      nodeVersion: NODE_RUNTIME_ZIP.version,
-      installedAt: Date.now(),
-      nodeZipSha256: NODE_RUNTIME_ZIP.sha256
-    }
-    writeFileSync(join(voiceRuntimeDir(), VOICE_RUNTIME_RUNTIME_JSON), JSON.stringify(meta, null, 2), 'utf8')
-    resetNodeProbe()
-    emit({ stage: 'done', progress: 1 })
-    console.log('VOICE_RUNTIME_READY', JSON.stringify({ node: voiceRuntimeNode() }))
-    return { ok: true, error: null }
-  } catch (err) {
-    installError = errorMessage(err)
-    console.log('VOICE_RUNTIME_INSTALL_FAILED', JSON.stringify({ err: installError }))
-    return { ok: false, error: installError }
-  } finally {
-    installing = false
-  }
-}
-
-/** 下载的底模落在运行时 models 下（asr-models/qwen3-asr 留给微调转正的现役模型，别互相覆盖）。 */
-export function voiceModelDir(): string {
-  return join(voiceRuntimeDir(), VOICE_RUNTIME_MODELS_DIR, 'qwen3-asr')
-}
-
-function modelFileSizes(): ModelFileSizes {
-  const sizes: ModelFileSizes = {}
-  const root = voiceModelDir()
-  for (const file of QWEN3_MODEL_FILES) {
-    const full = join(root, file.path)
-    sizes[file.path] = existsSync(full) ? statSync(full).size : -1
-  }
-  return sizes
-}
-
-export interface VoiceModelProgress {
-  /** 0–1，按六件套字节数折算。 */
-  progress: number
-  /** 当前文件（相对路径），完成清单里最后一件的名字。 */
-  file: string
-  /** download=字节在走；verify=该件已下完、正在算 sha256（UI 显示「校验中」而不是卡死的 100%）。 */
-  phase: 'download' | 'verify'
-}
-
-export type VoiceModelProgressListener = (progress: VoiceModelProgress) => void
-
-let modelListeners: VoiceModelProgressListener[] = []
-
-export function onVoiceModelProgress(listener: VoiceModelProgressListener): () => void {
-  modelListeners.push(listener)
-  return () => {
-    modelListeners = modelListeners.filter((entry) => entry !== listener)
-  }
-}
-
-function emitModel(progress: VoiceModelProgress): void {
-  lastModelProgress = progress.progress
-  lastModelVerifying = progress.phase === 'verify'
-  for (const listener of modelListeners) listener(progress)
-}
-
-let downloading = false
-let modelError: string | null = null
-/** 最近一次进度（0–1）：面板一秒一问 asrStatus 时不用等字节回调。 */
-let lastModelProgress = 0
-/** 最近一次事件是不是校验阶段：字节到 100% 后还要逐件算哈希，UI 靠它别把 100% 画成下载卡死。 */
-let lastModelVerifying = false
-
-export function voiceModelState(): {
-  downloading: boolean
-  verifying: boolean
-  error: string | null
-  missing: string[]
-  progress: number
-} {
-  const missing = pendingModelFiles(modelFileSizes()).map((file) => file.path)
-  return {
-    downloading,
-    verifying: downloading && lastModelVerifying,
-    error: modelError,
-    missing,
-    progress: downloading ? lastModelProgress : missing.length === 0 ? 1 : 0
-  }
-}
-
-const TOTAL_BYTES = QWEN3_MODEL_FILES.reduce((sum, file) => sum + file.bytes, 0)
-
-/**
- * 按清单逐件下载：字节数已对的直接跳过（重进/断点都不重下），半截 .part 续传，
- * 下完逐件 sha256 校验——不符删掉报错，绝不把坏文件留给识别引擎。
- */
-export async function downloadVoiceModel(): Promise<{ ok: boolean; error: string | null }> {
-  if (downloading) return { ok: false, error: '模型正在下载，等这一轮结束' }
-  downloading = true
-  modelError = null
-  mkdirSync(voiceModelDir(), { recursive: true })
-  try {
-    let doneBytes = 0
-    lastModelProgress = 0
-    for (const file of QWEN3_MODEL_FILES) {
-      const sizes = modelFileSizes()
-      if (sizes[file.path] === file.bytes) {
-        doneBytes += file.bytes
-        continue
+  const result = await runtimeInstallJob.run({
+    busyError: '正在安装，等这一轮结束再点',
+    onStart: () => {
+      installError = null
+    },
+    onProgress: (progress, stage) => emit({ stage: (stage ?? 'packages') as VoiceRuntimeProgress['stage'], progress }),
+    onSettled: (ok, error) => {
+      installError = ok ? null : error
+      if (!ok) console.log('VOICE_RUNTIME_INSTALL_FAILED', JSON.stringify({ err: error }))
+    },
+    work: async (report) => {
+      mkdirSync(voiceRuntimeDir(), { recursive: true })
+      report(0.05, 'packages')
+      const sources = sherpaPackageSources()
+      const missingPackages = SHERPA_PACKAGES.filter((name) => !sources[name])
+      if (missingPackages.length > 0) {
+        throw new Error(`应用包里缺 sherpa 插件（${missingPackages.join('、')}）：这个安装包构建坏了，请反馈`)
       }
-      const dest = join(voiceModelDir(), file.path)
-      mkdirSync(join(dest, '..'), { recursive: true })
+      mkdirSync(voiceRuntimeNodeModules(), { recursive: true })
+      for (const name of SHERPA_PACKAGES) cpSync(sources[name] as string, join(voiceRuntimeNodeModules(), name), { recursive: true })
+
+      const zipDest = join(voiceRuntimeDir(), 'node.zip')
+      report(0.1, 'node-download')
       await downloadResumable({
-        url: hfMirrorFileUrl(file.path),
-        dest,
-        expectedBytes: file.bytes,
-        stallMs: 60_000,
-        onProgress: (done) => emitModel({ progress: (doneBytes + done) / TOTAL_BYTES, file: file.path, phase: 'download' }),
-        onLog: (tag, detail) => console.log('VOICE_MODEL_DL', JSON.stringify({ file: file.path, tag, ...detail }))
+        url: NODE_RUNTIME_ZIP.url,
+        dest: zipDest,
+        expectedBytes: NODE_RUNTIME_ZIP.bytes,
+        stallMs: 30_000,
+        onProgress: (done, total) => report(0.1 + 0.55 * (done / Math.max(1, total)), 'node-download'),
+        onLog: (tag, detail) => console.log('VOICE_RUNTIME_NODE_DL', JSON.stringify({ tag, ...detail }))
       })
-      emitModel({ progress: (doneBytes + file.bytes) / TOTAL_BYTES, file: file.path, phase: 'verify' })
-      const actualSha = sha256File(dest)
-      if (actualSha !== file.sha256) {
-        rmSync(dest, { force: true })
-        throw new Error(`${file.path} 哈希不符（${actualSha.slice(0, 12)}…），已删除，可重试`)
+      report(0.7, 'node-verify')
+      const actualSha = sha256File(zipDest)
+      if (actualSha !== NODE_RUNTIME_ZIP.sha256) {
+        rmSync(zipDest, { force: true })
+        throw new Error(`node.zip 哈希不符（${actualSha.slice(0, 12)}…），已删除，可重试`)
       }
-      doneBytes += file.bytes
+
+      report(0.8, 'node-extract')
+      // 7zr 只认 .7z（喂 zip 直接退出码 2）；Windows 自带的 bsdtar 原生读 zip，
+      // --include 按路径过滤，只解 node.exe 这一个文件，不铺 100 MB 的 npm 全家桶。
+      const tarPath = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+      const extract = spawnSync(tarPath, ['-xf', zipDest, '-C', voiceRuntimeDir(), '--include', `*/${basename(NODE_RUNTIME_ZIP.inner)}`], {
+        encoding: 'utf8',
+        windowsHide: true
+      })
+      const extractedNode = join(voiceRuntimeDir(), NODE_RUNTIME_ZIP.inner)
+      if (extract.status !== 0 || !existsSync(extractedNode)) {
+        const tail = (extract.stderr ?? '').slice(-200)
+        throw new Error(`解压 node.exe 失败（tar 退出码 ${extract.status}${tail ? `：${tail}` : ''}）`)
+      }
+      renameSync(extractedNode, voiceRuntimeNode())
+      // --include 过滤后，版本目录里只剩这一个文件，搬空即删。
+      rmSync(dirname(extractedNode), { recursive: true, force: true })
+      rmSync(zipDest, { force: true })
+
+      const meta: VoiceRuntimeJson = {
+        nodeVersion: NODE_RUNTIME_ZIP.version,
+        installedAt: Date.now(),
+        nodeZipSha256: NODE_RUNTIME_ZIP.sha256
+      }
+      writeFileSync(join(voiceRuntimeDir(), VOICE_RUNTIME_RUNTIME_JSON), JSON.stringify(meta, null, 2), 'utf8')
+      resetNodeProbe()
+      report(1, 'done')
+      console.log('VOICE_RUNTIME_READY', JSON.stringify({ node: voiceRuntimeNode() }))
     }
-    console.log('VOICE_MODEL_READY', JSON.stringify({ dir: voiceModelDir(), bytes: TOTAL_BYTES }))
-    return { ok: true, error: null }
-  } catch (err) {
-    modelError = errorMessage(err)
-    console.log('VOICE_MODEL_FAILED', JSON.stringify({ err: modelError }))
-    return { ok: false, error: modelError }
-  } finally {
-    downloading = false
-  }
+  })
+  if (result.kind === 'busy') return { ok: false, error: '正在安装，等这一轮结束再点' }
+  return result.kind === 'done' ? { ok: true, error: null } : { ok: false, error: result.error }
 }
 
-/** 删除下载的底模（「已就绪 + 删除」的用户故事）；装好的 node 运行时不受影响。 */
-export function removeVoiceModel(): { ok: boolean; error: string | null } {
-  if (downloading) return { ok: false, error: '模型正在下载，先等它结束' }
-  try {
-    rmSync(voiceModelDir(), { recursive: true, force: true })
-    return { ok: true, error: null }
-  } catch (err) {
-    return { ok: false, error: errorMessage(err) }
-  }
-}
-
-/** 探针/状态页用：六件套在磁盘上的字节数快照。 */
-export function voiceModelSizesSnapshot(): ModelFileSizes {
-  return modelFileSizes()
-}
 
 /**
  * worker 脚本定位（识别与离线朗读同一份规则）：探针从 out/main 起（app.getAppPath()

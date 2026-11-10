@@ -12,8 +12,8 @@ import {
 } from '@shared/asr/models'
 import type { OfflineStatus } from '@shared/ipc'
 import { loadSettings, saveSettings } from '../settings'
-import { errorMessage } from '@shared/errors'
 import { hfMirrorRepoFileUrl } from '@shared/voice-runtime'
+import { createInstallJob } from '../install-job'
 import { downloadResumable } from '../net/download'
 import { sha256File } from './runtime'
 import { resetSherpaWorker, sherpaNodeBinary, sherpaTranscribe } from './sherpa-asr'
@@ -42,39 +42,47 @@ function modelDirOf(spec: AsrEngineSpec): string {
  * 按清单逐件下载到引擎的规范目录。字节数已对的直接跳过（断点/重进都不重下），
  * 下完逐件 sha256 校验——不符就删掉报错，绝不把坏文件留给识别器。
  */
+const modelDownloadJob = createInstallJob()
+
 async function downloadAsrModel(spec: AsrEngineSpec): Promise<void> {
   const download = spec.download
-  if (download === null || asrDownload.downloading) return
-  asrDownload = { downloading: true, progress: 0, error: null }
-  const total = download.files.reduce((sum, file) => sum + file.bytes, 0)
-  let doneBytes = 0
-  try {
-    for (const file of download.files) {
-      const dest = join(modelDirOf(spec), file.path)
-      const have = existsSync(dest) ? statSync(dest).size : -1
-      if (have !== file.bytes) {
-        mkdirSync(dirname(dest), { recursive: true })
-        await downloadResumable({
-          url: hfMirrorRepoFileUrl(download.repo, file.path),
-          dest,
-          expectedBytes: file.bytes,
-          stallMs: 60_000,
-          onProgress: (done) => {
-            asrDownload = { ...asrDownload, progress: (doneBytes + done) / total }
-          }
-        })
+  if (download === null) return
+  await modelDownloadJob.run({
+    busyError: '模型正在下载，等这一轮结束',
+    onProgress: (progress) => {
+      asrDownload = { ...asrDownload, progress }
+    },
+    onSettled: (ok, error) => {
+      asrDownload = { downloading: false, progress: ok ? 1 : 0, error: ok ? null : error }
+    },
+    work: async (report) => {
+      asrDownload = { downloading: true, progress: 0, error: null }
+      const total = download.files.reduce((sum, file) => sum + file.bytes, 0)
+      let doneBytes = 0
+      for (const file of download.files) {
+        const dest = join(modelDirOf(spec), file.path)
+        const have = existsSync(dest) ? statSync(dest).size : -1
+        if (have !== file.bytes) {
+          mkdirSync(dirname(dest), { recursive: true })
+          await downloadResumable({
+            url: hfMirrorRepoFileUrl(download.repo, file.path),
+            dest,
+            expectedBytes: file.bytes,
+            stallMs: 60_000,
+            onProgress: (done) => {
+              report((doneBytes + done) / total)
+            }
+          })
+        }
+        if (sha256File(dest) !== file.sha256) {
+          rmSync(dest, { force: true })
+          throw new Error(`${spec.label} 的 ${file.path} 校验不符，已删掉，可重试`)
+        }
+        doneBytes += file.bytes
+        report(doneBytes / total)
       }
-      if (sha256File(dest) !== file.sha256) {
-        rmSync(dest, { force: true })
-        throw new Error(`${spec.label} 的 ${file.path} 校验不符，已删掉，可重试`)
-      }
-      doneBytes += file.bytes
-      asrDownload = { ...asrDownload, progress: doneBytes / total }
     }
-    asrDownload = { downloading: false, progress: 1, error: null }
-  } catch (error) {
-    asrDownload = { downloading: false, progress: 0, error: errorMessage(error) }
-  }
+  })
 }
 function underUserData(rel: string): string {
   return join(app.getPath('userData'), rel)
