@@ -367,6 +367,15 @@ Windows process-check trap: `docs/ARCH-notes.md`.
 English Conventional Commits (`feat:` / `fix:` / `perf:` / `docs:` / `chore:`), author
 `mystery4f <40482524+mystery4f@users.noreply.github.com>`.
 
+## Version control: git only
+
+`core.autocrlf` is `true` and a `.gitattributes` exists, so worktree files carry CRLF while the Git
+blobs hold LF. jj compares raw bytes and ignores both settings, which is why a colocated `.jj` reports
+every text file as modified while `git diff` is empty — the "jj drift" is structural, not a stale
+snapshot. This repo therefore stays pure Git: never `jj git init` here. If a `.jj` shows up, delete it
+(colocated jj stores its objects in `.git/objects`, so nothing else is lost) and commit with git,
+staging exact paths. Nine git worktrees live under `.dev-flow/` and jj cannot operate inside them anyway.
+
 ## Agent skills
 
 ### Issue tracker
