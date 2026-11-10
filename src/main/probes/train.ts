@@ -146,6 +146,7 @@ import {
   sovitsServerLogs
 } from '../services/voice/sovits-server'
 
+import { openTrainFixture } from './train-fixtures'
 /**
  * `--train-probe`：训练决策纯缝的全量行为锁（互斥闸/推理互斥/计划推导/日志行→进度/录音判定/GV 微调配置/存储层）。
  * 纯函数零进程零网络；存储层那一组对着临时库跑（不碰 data/ 里的真库）；
@@ -1860,48 +1861,26 @@ function storeCases(): void {
     // —— 转正记账（复审 P1-B）：点「应用」必须翻 runs.db 的牌；面板的训练记录只读库 ——
     // 换模腿按现役模型所属引擎走：没有现役就落回表里第一条声明 finetune 的（与 finetuneEngine 同一份兜底），
     // 所以样例目录也照它搭。userData 临时指到本次的临时根下，一切路径都从 app.getPath('userData') 现推。
-    const realUserData = app.getPath('userData')
-    const swapRoot = join(root, 'userdata-swap')
-    mkdirSync(swapRoot, { recursive: true })
-    app.setPath('userData', swapRoot)
-    try {
-      const ftEngine = ASR_ENGINE_LIST.find((item) => item.finetune !== null)
-      const ftSpec = ftEngine?.finetune ?? null
-      push(
-        '换模：引擎表里至少有一条声明 finetune 的腿（探针按它搭样例）',
-        ftEngine !== undefined && ftSpec !== null,
-        ftEngine?.id ?? '(none)'
-      )
-      if (ftEngine !== undefined && ftSpec !== null) {
-        // 借件（qwen3 的 tokenizer/、paraformer 的 tokens.txt）真机从官方模型目录借，这里塞进一个「任意目录」。
-        const seedDir = join(swapRoot, 'asr-models', 'seed')
-        mkdirSync(join(seedDir, 'tokenizer'), { recursive: true })
-        for (const file of ['tokenizer_config.json', 'vocab.json', 'merges.txt']) {
-          writeFileSync(join(seedDir, 'tokenizer', file), '{}', 'utf8')
-        }
-        writeFileSync(join(seedDir, 'tokens.txt'), 'token\n', 'utf8')
-        // 导出目录：产物按引擎表的 from / to 各写一份（导出链落 from，转正拷 to；两处同名时就是一份）。
-        const makeExport = (name: string, body: string): string => {
-          const dir = join(swapRoot, 'asr-ft-onnx', name)
-          mkdirSync(dir, { recursive: true })
-          for (const artifact of ftSpec.artifacts) {
-            writeFileSync(join(dir, artifact.from), `${body}|${artifact.to}`, 'utf8')
-            if (artifact.to !== artifact.from) writeFileSync(join(dir, artifact.to), `${body}|${artifact.to}`, 'utf8')
-          }
-          return dir
-        }
-        const makeRun = (experiment: string, exportDir: string, startedAt: number): TrainRunRecord => {
-          const runDir = join(swapRoot, 'asr-ft-runs', experiment)
-          mkdirSync(runDir, { recursive: true })
-          const run = finishTrainRun(buildTrainRun({ kind: 'asr-ft', experiment, artifacts: { runDir, exportDir }, startedAt }), {
-            status: 'trained',
-            endedAt: startedAt + 1000
+    const ftEngine = ASR_ENGINE_LIST.find((item) => item.finetune !== null)
+    push(
+      '换模：引擎表里至少有一条声明 finetune 的腿（探针按它搭样例）',
+      ftEngine !== undefined && ftEngine.finetune !== null,
+      ftEngine?.id ?? '(none)'
+    )
+    const fx =
+      ftEngine !== undefined && ftEngine.finetune !== null
+        ? openTrainFixture(root, {
+            id: ftEngine.id,
+            canonicalRel: ftEngine.canonicalRel,
+            finetune: ftEngine.finetune
           })
-          saveTrainRun(run)
-          return run
-        }
-        const activePath = join(swapRoot, ftEngine.canonicalRel)
-        const firstRun = makeRun('ft-apply-1', makeExport('ft-apply-1', 'export1'), base + 7000)
+        : null
+    try {
+      if (fx !== null) {
+        // 借件（qwen3 的 tokenizer/、paraformer 的 tokens.txt）真机从官方模型目录借，这里塞进一个「任意目录」。
+        fx.seedBorrowFiles()
+        const activePath = join(fx.userData, fx.canonicalRel)
+        const firstRun = fx.makeRun('ft-apply-1', fx.makeExport('ft-apply-1', 'export1'), base + 7000)
         const firstApply = applyAsrFtModel()
         const firstRow = loadTrainRun(firstRun.id)
         push(
@@ -1911,13 +1890,13 @@ function storeCases(): void {
         )
         push(
           '转正：现役目录拿到引擎表点名的那几件',
-          firstApply.ok && ftArtifactTargets(ftEngine.id).every((name) => existsSync(join(activePath, name))),
-          ftArtifactTargets(ftEngine.id).join(',')
+          firstApply.ok && ftArtifactTargets(fx.engineId).every((name) => existsSync(join(activePath, name))),
+          ftArtifactTargets(fx.engineId).join(',')
         )
-        const secondRun = makeRun('ft-apply-2', makeExport('ft-apply-2', 'export2'), base + 8000)
+        const secondRun = fx.makeRun('ft-apply-2', fx.makeExport('ft-apply-2', 'export2'), base + 8000)
         const secondApply = applyAsrFtModel()
         const rollback = rollbackAsrFtModel()
-        const restoredPath = join(activePath, ftSpec.artifacts[0].to)
+        const restoredPath = join(activePath, fx.spec.artifacts[0].to)
         const restored = rollback.ok && existsSync(restoredPath) ? readFileSync(restoredPath, 'utf8') : ''
         push(
           '回滚：把上一版换回现役目录，但两轮的 applied 都留着（转正过是历史事实，不因回滚改写）',
@@ -1930,7 +1909,7 @@ function storeCases(): void {
         )
       }
     } finally {
-      app.setPath('userData', realUserData)
+      fx?.restoreUserData()
     }
   } finally {
     closeTrainStore()
