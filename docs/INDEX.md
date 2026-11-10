@@ -100,6 +100,7 @@ tags: [docs, index]
 | `docs/adr/voice-capture-hold.md` | 语音对讲按住说：`voiceCaptureMode` 默认 hold，松开靠常驻 PowerShell 轮询 GetAsyncKeyState（不挂钩子），失败退回敲一下 |
 | `docs/adr/voice-ndjson-worker.md` | 两个语音子进程的 NDJSON 协议收成一个 harness：脚本名/超时/标签作参数，协议本体只有一份，探针用假 worker 钉住配对、清算、超时 |
 | `docs/adr/voice-readiness-mutation-broadcast.md` | 声出就绪的重算改由语音域变更点广播触发，handler 表不再逐个包刷新（选参考那次漏刷新的事故根因） |
+| `docs/adr/voice-stage-trace.md` | 对讲行的阶段留痕：短段靠标记留存而不是停留（实测翻译 1ms、合成 0–2ms），事件走快照，结算后收掉后缀，起播拆账落盘 |
 
 ## 协作约定
 

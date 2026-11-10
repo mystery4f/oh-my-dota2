@@ -189,6 +189,8 @@ class VoiceOutService {
       onHint: showHint,
       // 起播那一刻（键已按下、窗口开始播）才是计时的「起播」点，不是调用 play 的时刻。
       onSpeak: () => timer?.notePlayStart(),
+      // 起播那 2 秒的拆账跟着这条链一起落盘（voice-chain.jsonl 的 prep 字段）。
+      onPrep: (prep) => timer?.notePrep(prep),
       onKeyError: (error, requestId) => console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, error }))
     })
 

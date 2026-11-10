@@ -159,7 +159,7 @@ const handlers: MainHandlers = {
     clipboard.writeText(String(text ?? ''))
     return true
   },
-  voiceReply: (transcript) => voiceReply(String(transcript ?? '')),
+  voiceReply: (args) => voiceReply({ text: String(args?.text ?? ''), rowId: args?.rowId }),
   // overlay 起录/停录/出结果时上抛，广播给所有窗口（面板按钮与回显行靠它活着）。
   reportVoiceState: (recording) => {
     broadcast(IPC.VOICE_RECORD_STATE, { recording: Boolean(recording) })

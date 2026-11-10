@@ -52,6 +52,20 @@ check('轮数：续训总量恒大于上次步数', deriveFtResumeEpochs(42, 150
 check('轮数：数据为 0 也不返回 0', deriveFtEpochsFor('qwen3-sft', 0) > 0)
 check('目标步数：全量 qwen3 的预算没被改动', FT_TARGET_STEPS === 110, String(FT_TARGET_STEPS))
 
+// —— 对讲行的阶段留痕（voice-stage）：这行字是用户能看见的全部真相，一个字都不许漂 ——
+const { formatStageTrace } = await import('../src/shared/voice-stage.ts')
+check('留痕：一段都没走完就是「翻译中…」', formatStageTrace({ marks: [], current: 'translate' }) === '翻译中…')
+check(
+  '留痕：短段留存为标记，长段显示为进行中',
+  formatStageTrace({ marks: [{ stage: 'translate', ms: 1 }, { stage: 'synth', ms: 2 }], current: 'playStart' }) ===
+    '译 1ms · 合 2ms · 起播中…'
+)
+check(
+  '留痕：播完只留事实，不再挂一个进行中',
+  formatStageTrace({ marks: [{ stage: 'translate', ms: 1 }, { stage: 'play', ms: 1600 }], current: 'done' }) ===
+    '译 1ms · 播 1.6s'
+)
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

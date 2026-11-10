@@ -1,5 +1,6 @@
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
 import type { VoiceChainTiming } from './voice-timing'
+import type { VoiceStageEvent } from './voice-stage'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
@@ -154,6 +155,12 @@ export interface VoiceReplyResult {
   error: string | null
   /** 分段计时：识别/翻译/首音/起播/播完各花了多久（voice-reply-latency）；量不到的段为 null。 */
   timing?: VoiceChainTiming
+}
+
+/** 对讲入参：`rowId` 由渲染端生成，阶段快照靠它才落得到那一条行上。 */
+export interface VoiceReplyArgs {
+  text: string
+  rowId?: string
 }
 
 /** 语音链在面板上的回显：一条摘要覆盖 成功 / 某环失败 / 压根没识别到话。 */
@@ -427,6 +434,7 @@ export const IPC = {
   COPY_TEXT: 'clipboard:copy',
   OVERLAY_TEXT: 'overlay:text',
   VOICE_SPEAK: 'voice:speak',
+  VOICE_STAGE: 'voice:stage',
   TTS_OFFLINE_STATE: 'tts:offline-state',
   TTS_OFFLINE_DOWNLOAD: 'tts:offline-download',
   // 识别模型（Qwen3）状态与解压：和离线朗读同一套「状态 + 获取」面板节奏。
@@ -694,6 +702,8 @@ export const ipcContract = {
   copyText: invoke<[string], boolean>(IPC.COPY_TEXT),
   onOverlayState: listen<OverlayStatus>(IPC.OVERLAY_STATE),
   onVoiceSpeak: listen<SpeakPayload>(IPC.VOICE_SPEAK),
+  // 对讲行的阶段留痕：主进程每完成一段发一份快照（voice-stage），渲染端只画不猜。
+  onVoiceStage: listen<VoiceStageEvent>(IPC.VOICE_STAGE),
   overlaySetGeometry: invoke<[Partial<OverlayGeometry>], OverlayStatus>(IPC.OVERLAY_GEOMETRY),
   overlayResetGeometry: invoke<[], OverlayStatus>(IPC.OVERLAY_GEOMETRY_RESET),
   overlaySetVoice: invoke<[boolean], OverlayStatus>(IPC.OVERLAY_VOICE),
@@ -704,7 +714,7 @@ export const ipcContract = {
   overlaySetLocked: invoke<[boolean], OverlayStatus>(IPC.OVERLAY_LOCK),
   overlaySetOpacity: invoke<[number], OverlayStatus>(IPC.OVERLAY_OPACITY),
   // 语音链：识别 / 翻译 / 声出
-  voiceReply: invoke<[string], VoiceReplyResult>(IPC.VOICE_REPLY),
+  voiceReply: invoke<[VoiceReplyArgs], VoiceReplyResult>(IPC.VOICE_REPLY),
   reportVoiceState: send<[boolean]>(IPC.OVERLAY_VOICE_STATE),
   reportVoiceChain: send<[VoiceChainSummary]>(IPC.OVERLAY_VOICE_RESULT),
   onVoiceRecordToggle: listen<void>(IPC.VOICE_RECORD_TOGGLE),

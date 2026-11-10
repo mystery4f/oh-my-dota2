@@ -132,8 +132,8 @@
 .row.pending .orig {
   color: rgba(255, 255, 255, 0.7);
 }
-.row.pending .orig::after {
-  content: ' · 翻译中…';
+/* 对讲行的阶段留痕（voice-stage）：短段靠留在这里存在，不靠停留抢帧。 */
+.trace {
   font-size: 11px;
   color: rgba(253, 230, 138, 0.75);
 }

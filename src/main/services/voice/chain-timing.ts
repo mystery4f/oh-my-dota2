@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { app } from 'electron'
+import type { VoiceStage, VoiceStageMark, VoiceStageProgress } from '@shared/voice-stage'
 import type { VoiceChainTiming } from '@shared/voice-timing'
 import { appendCappedJsonl } from '../logs/jsonl'
 
@@ -28,38 +29,78 @@ export function takeAsrRun(now = Date.now()): { startedAt: number; ms: number; m
   return { startedAt: hit.startedAt, ms: hit.ms, mic: hit.mic }
 }
 
+/** 起播那 2 秒的三段拆账（窗口准备 / 按说话键 / 首段余量），只进日志，不进计时模型。 */
+export interface ChainPrepMs {
+  readyMs: number
+  keyMs: number
+  leadMs: number
+}
+
+/** 每完成一段就打一次：对讲行拿它画留痕，谁都不许自己另算一套时间。 */
+export interface ChainStageHooks {
+  onStage?: (progress: VoiceStageProgress) => void
+}
 export class ChainTimer {
   private readonly replyStartedAt = Date.now()
   private translatedAt: number | null = null
   private firstAudioAt: number | null = null
   private playStartedAt: number | null = null
   private speakEndedAt: number | null = null
+  /** 已完成各段的耗时（按链上的顺序），预算是给对讲行的留痕用的。 */
+  private readonly marks: VoiceStageMark[] = []
+  private prepMs: ChainPrepMs | null = null
 
   /** 这句是从哪台输入设备录的（label|id 前 8 位）：断声、串音只有它能解释。 */
   readonly mic: string
 
-  constructor(private readonly asr: { startedAt: number; ms: number; mic: string } | null) {
+  constructor(
+    private readonly asr: { startedAt: number; ms: number; mic: string } | null,
+    private readonly hooks?: ChainStageHooks
+  ) {
     this.mic = asr?.mic ?? ''
+  }
+
+  /** 完成一段：先记下真实耗时再回调——回调里拿到的一定是已经更新的快照。 */
+  private complete(stage: VoiceStageMark['stage'], ms: number, current: VoiceStage): void {
+    this.marks.push({ stage, ms })
+    this.hooks?.onStage?.({ marks: [...this.marks], current })
   }
 
   /** 译文到手：翻译段的终点，也是首音段的起点。 */
   noteTranslated(): void {
-    this.translatedAt ??= Date.now()
+    if (this.translatedAt !== null) return
+    this.translatedAt = Date.now()
+    this.complete('translate', this.translatedAt - this.replyStartedAt, 'synth')
   }
 
   /** 第一段音频到手（合成段里第一个非空音频）。 */
   noteFirstAudio(): void {
-    this.firstAudioAt ??= Date.now()
+    if (this.firstAudioAt !== null) return
+    this.firstAudioAt = Date.now()
+    if (this.translatedAt !== null) this.complete('synth', this.firstAudioAt - this.translatedAt, 'playStart')
   }
 
   /** 真正出声（说话键已按下、播放窗口开始播）。 */
   notePlayStart(): void {
-    this.playStartedAt ??= Date.now()
+    if (this.playStartedAt !== null) return
+    this.playStartedAt = Date.now()
+    if (this.firstAudioAt !== null) this.complete('playStart', this.playStartedAt - this.firstAudioAt, 'play')
   }
 
   /** 整句播完（所有段送完，松键之前）。 */
   noteSpeakEnd(): void {
-    this.speakEndedAt ??= Date.now()
+    if (this.speakEndedAt !== null) return
+    this.speakEndedAt = Date.now()
+    if (this.playStartedAt !== null) this.complete('play', this.speakEndedAt - this.playStartedAt, 'done')
+  }
+
+  /** 起播那 2 秒的拆账：只记不判，落进 logs/voice-chain.jsonl 后才能回答「为什么是 2 秒」。 */
+  notePrep(prep: ChainPrepMs): void {
+    this.prepMs ??= prep
+  }
+
+  prep(): ChainPrepMs | null {
+    return this.prepMs
   }
 
   timing(): VoiceChainTiming {
@@ -94,7 +135,8 @@ export interface VoiceChainMeta {
  */
 export function reportChainTiming(timer: ChainTimer, meta: VoiceChainMeta): VoiceChainTiming {
   const timing = timer.timing()
-  const record = { at: new Date().toISOString(), ...meta, ...timing }
+  const prep = timer.prep()
+  const record = { at: new Date().toISOString(), ...meta, ...timing, ...(prep === null ? {} : { prep }) }
   console.log('VOICE_CHAIN_TIMING', JSON.stringify(record))
   appendCappedJsonl(join(app.getPath('userData'), 'logs', 'voice-chain.jsonl'), record)
   return timing

@@ -93,11 +93,12 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       fail('🎤 ' + transcriptError, transcriptError, 2200)
       return
     }
-    // 一键到底：识别文本先落一行（pending 压暗 + 「翻译中…」），译文与已播状态就地补进同一行。
+    // 一键到底：识别文本先落一行，这条链的进度由行自己的留痕报（译/合/起/播），
+    // 底部阶段行只留链两端：识别中的「识别中…」和结束时的「已播/未播」——中间再报一遍就是两句状态打架。
     const rowId = `voice-${Date.now()}`
     sink.pushRow({ id: rowId, ts: Date.now(), original: '🎤 ' + transcript, translated: null, pending: true })
-    sink.stage('翻译声出中…')
-    const reply = await window.api.voiceReply(transcript)
+    sink.stage(null)
+    const reply = await window.api.voiceReply({ text: transcript, rowId })
     if (reply.translated) {
       sink.patchRow({
         id: rowId,

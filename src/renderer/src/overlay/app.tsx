@@ -3,6 +3,7 @@ import type React from 'react'
 import type { CaptureEntry, OverlayStatus, VoiceChainSummary } from '@shared/ipc'
 import { fadeRows, nextUnread, pushEntry, type LedgerRow } from '@shared/overlay-ledger'
 import type { SpokenStatus } from '@shared/voice-out'
+import { formatStageTrace } from '@shared/voice-stage'
 import { ChatRows } from './chat-rows'
 import { beginDrag } from './drag'
 import { MiniIcon } from './mini-icon'
@@ -22,11 +23,26 @@ export function App(): JSX.Element {
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [unread, setUnread] = useState(0)
   const [spokenById, setSpokenById] = useState<Record<string, SpokenStatus>>({})
+  /** 对讲行的阶段留痕：主进程每完成一段发一份快照，这里只格式化，渲染端不自己算时间。 */
+  const [traceById, setTraceById] = useState<Record<string, string>>({})
   const [stage, setStageText] = useState<string | null>(null)
 
   useEffect(() => {
     bindStage(setStageText)
     return () => bindStage(null)
+  }, [])
+
+  useEffect(() => {
+    // 快照式事件：掉一条只是少画一次，行上始终是最近一次的完整状态。
+    return window.api.onVoiceStage((event) => {
+      setTraceById((current) => {
+        const next = { ...current }
+        // 播完也不清：清掉会让这行在 patch 到达前退回「翻译中…」，正是它刚刚走过的阶段。
+        // 走完的那份快照只剩各段耗时（current 为 done 时 formatStageTrace 不画进行中标签）。
+        next[event.rowId] = formatStageTrace(event)
+        return next
+      })
+    })
   }, [])
 
   const onStatus = useCallback((next: OverlayStatus): void => setStatus(next), [])
@@ -103,6 +119,13 @@ export function App(): JSX.Element {
               : row
           )
         )
+        // 这一行已经有结论（译文 / 错误）：阶段后缀收掉，别让它挂着一个过期的「合成中…」。
+        setTraceById((current) => {
+          if (current[patch.id] === undefined) return current
+          const next = { ...current }
+          delete next[patch.id]
+          return next
+        })
         if (patch.spoken !== undefined) {
           const spoken = patch.spoken
           setSpokenById((current) => ({ ...current, [patch.id]: spoken }))
@@ -181,7 +204,7 @@ export function App(): JSX.Element {
       ) : (
         <>
           {!status.locked && <Toolbar status={status} onStatus={onStatus} />}
-          <ChatRows rows={rows} spokenById={spokenById} status={status} />
+          <ChatRows rows={rows} spokenById={spokenById} traceById={traceById} status={status} />
           <StageLine status={status} stage={stage} />
           {!status.locked && (
             <>

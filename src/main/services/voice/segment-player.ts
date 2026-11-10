@@ -40,6 +40,8 @@ export interface SegmentPlayerOptions {
   onSpeak?: (info: SegmentSpeakInfo) => void
   /** 说话键按下失败：话照播，但原因要落到该腿自己的日志里。 */
   onKeyError?: (error: string, requestId: number) => void
+  /** 起播拆账（窗口准备 / 按键 / 首段余量）：只落日志，不改播放时序。 */
+  onPrep?: (prep: { readyMs: number; keyMs: number; leadMs: number }) => void
 }
 
 /** 一次「敲一下」的结果：down 成功但 up 失败时键还按着，收尾必须再试一次。 */
@@ -136,16 +138,14 @@ export class SegmentPlayer {
     const pressedAt = Date.now()
     await this.pressKeyOnce(requestId)
     // 起播那 1.9 s 的账：窗口准备（枚举/绑定/解码）+ 按键 + 首段余量各占多少。
-    console.log(
-      'VOICE_OUT_PREP',
-      JSON.stringify({
-        requestId,
-        readyMs: pressedAt - queuedAt,
-        keyMs: Date.now() - pressedAt,
-        leadMs: this.startedAny ? 0 : hold.leadMs,
-        prep: ready.prep ?? null
-      })
-    )
+    const prepMs = {
+      readyMs: pressedAt - queuedAt,
+      keyMs: Date.now() - pressedAt,
+      leadMs: this.startedAny ? 0 : hold.leadMs
+    }
+    console.log('VOICE_OUT_PREP', JSON.stringify({ requestId, ...prepMs, prep: ready.prep ?? null }))
+    // 只落盘不判断：这条日志是「为什么起播要 2 秒」唯一的事后证据。
+    this.options.onPrep?.(prepMs)
     this.options.onSpeak?.({
       requestId,
       bytes: audio.length,

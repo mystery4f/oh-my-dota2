@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { formatChainOverlay, formatChainTiming, formatMs } from '@shared/voice-timing'
+import type { VoiceStageProgress } from '@shared/voice-stage'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 import { appendCappedJsonl } from '../services/logs/jsonl'
 import { ChainTimer, noteAsrRun, reportChainTiming, takeAsrRun } from '../services/voice/chain-timing'
@@ -157,6 +158,42 @@ export async function runVoiceChainProbe(): Promise<void> {
     const emptyTiming = { asrMs: null, translateMs: null, firstAudioMs: null, playStartMs: null, speakMs: null, totalMs: null }
     push('formatChainOverlay: 一段都没量到就返回 null（那行只写「已播」）', formatChainOverlay(undefined) === null && formatChainOverlay(emptyTiming) === null, '')
     push('voiceShowTiming 默认关（面板里才开）', DEFAULT_SETTINGS.voiceShowTiming === false, `voiceShowTiming=${String(DEFAULT_SETTINGS.voiceShowTiming)}`)
+
+    // —— 阶段留痕与计时同源（voice-stage）：快照按链的顺序到，数字就是 timing() 里那一段 ——
+    const stageSnapshots: VoiceStageProgress[] = []
+    const tracedTimer = new ChainTimer(null, { onStage: (progress) => stageSnapshots.push(progress) })
+    await delay(4)
+    tracedTimer.noteTranslated()
+    await delay(4)
+    tracedTimer.noteFirstAudio()
+    await delay(4)
+    tracedTimer.notePlayStart()
+    await delay(4)
+    tracedTimer.noteSpeakEnd()
+    const stageOrder = stageSnapshots.map((item) => item.current).join(',')
+    push('留痕：四段快照按链的顺序到齐', stageOrder === 'synth,playStart,play,done', stageOrder)
+    const tracedTiming = tracedTimer.timing()
+    const latest = stageSnapshots[stageSnapshots.length - 1]
+    const markMs = (stage: string): number | undefined => latest?.marks.find((mark) => mark.stage === stage)?.ms
+    push(
+      '留痕：每段耗时就是计时器那一段（同一份打点，不另算一遍）',
+      markMs('translate') === tracedTiming.translateMs &&
+        markMs('synth') === tracedTiming.firstAudioMs &&
+        markMs('playStart') === tracedTiming.playStartMs &&
+        markMs('play') === tracedTiming.speakMs,
+      JSON.stringify({ marks: latest?.marks, timing: tracedTiming })
+    )
+    tracedTimer.notePrep({ readyMs: 1900, keyMs: 30, leadMs: 0 })
+    tracedTimer.notePrep({ readyMs: 1, keyMs: 1, leadMs: 1 })
+    push(
+      '起播拆账：只认第一次打点（后写的不会把账改小）',
+      tracedTimer.prep()?.readyMs === 1900 && tracedTimer.prep()?.keyMs === 30,
+      JSON.stringify(tracedTimer.prep())
+    )
+    writeFileSync(logFile, '')
+    reportChainTiming(tracedTimer, { spoken: true, stage: null, engine: 'probe-marker', chars: 3, segments: 1, mic: '' })
+    const prepText = readFileSync(logFile, 'utf8')
+    push('起播拆账：prep 落进 voice-chain.jsonl（为什么 2 秒有据可查）', prepText.includes('"prep":{"readyMs":1900'), prepText.slice(0, 160))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
