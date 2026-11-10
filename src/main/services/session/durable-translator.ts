@@ -12,7 +12,7 @@ import type {
   Harness,
   SettledSubmissionRecord
 } from '@earendil-works/pi-durable'
-import type { ProviderConfig, ReplyTone, TranslateDirection } from '@shared/ipc'
+import type { ProviderConfig, ReplyTone, TranslateDirection, TranslationCacheCounts } from '@shared/ipc'
 import { thinkingCompatFor, thinkingLevelFor } from '@shared/provider-reasoning'
 import { ensureTerminalPunct, latinTokenViolations } from '@shared/translate-fidelity'
 import { loadSettings } from '../settings'
@@ -863,27 +863,6 @@ async function translateBlockwise(
   )
 }
 
-/** Debug only: dump the newest entries of each translator conversation. */
-export async function sessionDump(limit = 6): Promise<unknown[]> {
-  const meta = { userData: app.getPath('userData'), db: sessionPaths(loadSettings().provider).db }
-  const session = await ensureRuntime(loadSettings().provider)
-  if (!session) return []
-  const out: unknown[] = [meta]
-  for (const [slot, conversation] of session.conversations) {
-    const page = await conversation.entries({}, limit, undefined, session.context)
-    for (const entry of page.items) {
-      const model = (entry as { model?: { content?: unknown }[] }).model ?? []
-      out.push({
-        slot,
-        conversationId: conversation.id,
-        entryId: entry.id,
-        type: (entry as unknown as { type: string }).type,
-        text: messageText({ model }).slice(0, 160)
-      })
-    }
-  }
-  return out
-}
 
 export function sessionStatus(): SessionStatus {
   return {
@@ -896,14 +875,7 @@ export function sessionStatus(): SessionStatus {
   }
 }
 
-/** 面板「清空缓存」的数字口径：记账对 + 会话槽；inspect 与 clear 共用，model 供确认框点名。 */
-export interface TranslationCacheCounts {
-  pairs: number
-  conversations: number
-  model: string
-}
-
-function countStateSlots(path: string): number {
+export function countStateSlots(path: string): number {
   try {
     return Object.keys(JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>).length
   } catch {

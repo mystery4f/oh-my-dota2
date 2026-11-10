@@ -2,12 +2,12 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import {
   clearTranslationCache,
-  inspectTranslationCache,
   providerKey,
   sameText,
   sessionPaths,
   translateLines
 } from '../services/session/durable-translator'
+import { inspectTranslationCache } from '../services/session/observe'
 import {
   closeTranslationCache,
   clearTranslationPairs,
