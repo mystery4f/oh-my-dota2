@@ -10,6 +10,7 @@ import { loadSettings, saveSettings } from '../settings'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './sovits-refs'
 import { sovitsInstallHome, sovitsInstallRoot, sovitsInstallState, sovitsInstalled } from './sovits-install'
 import { resetSovitsCache } from './sovits-cache'
+import { notifyVoiceOutMutation } from './mutations'
 
 /**
  * GPT-SoVITS api_v2 的进程托管：选了 sovits 引擎就由应用自己拉起引擎包里的服务，
@@ -73,6 +74,8 @@ function setPhase(next: SovitsServerPhase, detail: string): void {
   phase = next
   phaseDetail = detail
   phaseSince = Date.now()
+  // 相位是就绪判断的输入之一：这里是它唯一的漏斗，广播一次就够，调用点不用各自记得。
+  notifyVoiceOutMutation()
 }
 
 function serverPort(baseUrl: string): number {
@@ -232,6 +235,7 @@ export async function activateSovitsRef(
     ttsSovitsPromptText: entry.promptText,
     ttsSovitsPromptLang: entry.promptLang
   })
+  notifyVoiceOutMutation()
   const port = currentSovitsPort()
   if (!(await ensureSovitsServer())) return false
   await applySovitsVoice(port, entry)

@@ -1,4 +1,17 @@
-/** ASR 微调（T5）纯缝：训练/导出命令拼装、checkpoint 挑选、换模/回滚步骤、环境缺口点名。 */
+/**
+ * ASR 微调（T5）纯缝：训练/导出命令拼装、checkpoint 挑选、换模/回滚步骤、环境缺口点名。
+ *
+ * 五十来个导出，按「谁在调用」认路，别按文件顺序读：
+ *   - 开训口径只有一个门：planFtTuning。轮数与学习率都从它出，调用点不许另拼；
+ *     两条训练腿的差异靠 AsrFtTrainer 一处分支承担。
+ *   - 轮数推导在它下面：deriveFtEpochs / deriveFtEpochsFor / deriveFtIncrementalEpochs；
+ *     运行期只经 planFtTuning，探针（probes/train.ts）才直接调。
+ *   - 命令拼装：planAsrFtTrainArgv / planAsrFtExportArgv，输入都是 AsrFtPaths + AsrFtDatasetPlan。
+ *   - 换模与回滚成对改：asrFtSwapSteps / asrFtRollbackSteps（probes/asr-swap.ts 钉着顺序）。
+ *   - 显存：parseNvidiaComputeApps + judgeFtVram，门槛常量 FT_TRAIN_NEED_MIB。
+ * 不拆成几个文件：它们共享同一对形状（AsrFtPaths / AsrFtDatasetPlan），拆开只会让调用方
+ * 多跳一层，删除测试过不了——删掉任一导出，调用点都得重写同一段规则。
+ */
 import { ASR_ENGINE_LIST, ASR_ENGINES, type AsrEngineId } from '../asr/engines'
 import { WAV_BYTES_PER_MS, WAV_HEADER_BYTES } from '../wav'
 import type { FtCorrectionSamples } from './corrections'

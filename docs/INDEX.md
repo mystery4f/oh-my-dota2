@@ -97,6 +97,8 @@ tags: [docs, index]
 | `docs/adr/tts-repeat-cache.md` | sovits 重复句缓存 |
 | `docs/adr/voice-out-vb-cable.md` | 声出经 VB-Cable 进游戏语音：检测放主进程（驱动层，不靠空 label）、面板四步引导、测试结果报实际设备 |
 | `docs/adr/voice-capture-hold.md` | 语音对讲按住说：`voiceCaptureMode` 默认 hold，松开靠常驻 PowerShell 轮询 GetAsyncKeyState（不挂钩子），失败退回敲一下 |
+| `docs/adr/voice-ndjson-worker.md` | 两个语音子进程的 NDJSON 协议收成一个 harness：脚本名/超时/标签作参数，协议本体只有一份，探针用假 worker 钉住配对、清算、超时 |
+| `docs/adr/voice-readiness-mutation-broadcast.md` | 声出就绪的重算改由语音域变更点广播触发，handler 表不再逐个包刷新（选参考那次漏刷新的事故根因） |
 
 ## 协作约定
 

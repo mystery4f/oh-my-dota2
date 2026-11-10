@@ -53,6 +53,7 @@ import { runTrainProbe } from './probes/train'
 import { trainManagerIfStarted } from './services/train/manager'
 import { reconcileTrainState } from './services/train/reconcile'
 import { runVoiceRuntimeProbe } from './probes/voice-runtime'
+import { runVoiceWorkerProbe } from './probes/voice-worker'
 import { loadSettings } from './services/settings'
 import { hotkeysState, installHotkeys, releaseHotkeys } from './services/hotkeys'
 import { resetSessionsOnBoot, warmTranslator } from './services/session/durable-translator'
@@ -231,6 +232,7 @@ app.whenReady().then(() => {
   if (process.argv.includes('--zhipu-live-probe')) void runZhipuLiveProbe()
   if (process.argv.includes('--train-probe')) void runTrainProbe()
   if (process.argv.includes('--voice-runtime-probe')) void runVoiceRuntimeProbe()
+  if (process.argv.includes('--voice-worker-probe')) void runVoiceWorkerProbe()
   if (process.argv.includes('--asr-engines-probe')) void runAsrEnginesProbe()
   if (process.argv.includes('--inplace-guard-probe')) void runInPlaceGuardProbe()
   if (process.argv.includes('--asr-swap-probe')) void runAsrSwapProbe()

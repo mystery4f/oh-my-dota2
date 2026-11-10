@@ -66,27 +66,13 @@ import {
   applyAsrFtModel,
   asrFtFacts,
   asrFtStatus,
-  buildAsrFtExportPlan,
-  resolveAsrFtTrainRequest,
   rollbackAsrFtModel
 } from './services/train/asr-ft'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
-import { closeGvWebui, openGvWebui, registerGvWeights, resolveGvTrainRequest, scanGvDatasets } from './services/train/gv'
+import { closeGvWebui, openGvWebui, registerGvWeights, scanGvDatasets } from './services/train/gv'
 import { discoverSovitsHome } from './services/voice/sovits-server'
-import { normalizeTrainKind } from '@shared/train/task'
-import { normalizeAsrFtMode } from '@shared/train/asr-ft'
+import { startTrain } from './services/train/start'
 import { gsiStatus } from './services/gsi'
-
-
-
-/** 明确的 GV 动作之后立刻重算就绪：3 秒 tick 只是兜底，点了按钮必须当场翻牌。 */
-function refreshReadinessAfter<T>(job: Promise<T>): Promise<T> {
-  void job.then(
-    () => refreshVoiceOutReadiness(),
-    () => refreshVoiceOutReadiness()
-  )
-  return job
-}
 
 /**
 /** 语音运行时状态快照：handler 表与广播共用同一份拼装，别处不要再各拼一份。 */
@@ -218,7 +204,6 @@ const handlers: MainHandlers = {
     const state = await ensureSovitsInstall()
     void ensureSovitsServer()
     if (state.phase === 'ready') void autoVoicePackSetup()
-    void refreshVoiceOutReadiness()
     return sovitsStatusSnapshot()
   },
   // 参考音频库：读数据根下 tts/sovits-refs/refs.json，坏条目与缺失音频已在纯函数里滤掉。
@@ -226,52 +211,34 @@ const handlers: MainHandlers = {
     listSovitsRefs(sovitsRefsRoot(app.getPath('userData')), sovitsWeightsRoot(app.getPath('userData'))),
   // 音色包：目录 + 本地状态一张表；安装 = 下载三件套 → refs.json 落条目 →（没选过音色）自动选中。
   sovitsVoicepacks: () => sovitsVoicePacks(),
-  sovitsVoicepackInstall: (id) => refreshReadinessAfter(installVoicePack(String(id ?? ''))),
-  sovitsVoicepackDelete: (id) => refreshReadinessAfter(deleteVoicePack(String(id ?? ''))),
+  sovitsVoicepackInstall: (id) => installVoicePack(String(id ?? '')),
+  sovitsVoicepackDelete: (id) => deleteVoicePack(String(id ?? '')),
   // 选音频色包（朗读页同样能直接选）：条目与激活都在主进程里定，渲染层不碰 refs.json。
-  sovitsSelectPack: (id) => refreshReadinessAfter(selectVoicePack(String(id ?? ''))),
+  sovitsSelectPack: (id) => selectVoicePack(String(id ?? '')),
   // 选定一条参考：统一走主进程「写设置 → 切权重 → 预热」，且只认库里真实存在的条目。
   sovitsSelectRef: async (entry) => {
     const known = listSovitsRefs(
       sovitsRefsRoot(app.getPath('userData')),
       sovitsWeightsRoot(app.getPath('userData'))
     ).find((item) => item.audioPath === entry.audioPath)
-    // 这一步正是清掉 refs-missing 的动作，但它在主进程里直接 saveSettings，
-    // 走不到 setSettings 的刷新钩子，所以必须在这里自己补一次。
-    return known ? refreshReadinessAfter(activateSovitsRef(known)) : false
+    // 激活会写设置并广播变更，就绪行由就绪模块自己重算，这里不用补。
+    return known ? activateSovitsRef(known) : false
   },
   // 首启保底：库一条参考都没有时，用 Edge 现场合成一条晓晓参考入库（零分发）。
-  sovitsSeed: () => refreshReadinessAfter(ensureSovitsSeedRef(false)),
+  sovitsSeed: () => ensureSovitsSeedRef(false),
   // #46 就绪行：首屏读一次，之后靠广播（判断只有一份，在 shared 纯缝里）。
   voiceOutReadiness: () => refreshVoiceOutReadiness(),
   // 幂等启动：服务已在跑就直接返回现状。拉起要 15–40 秒，这里不 await——
   // 面板先看到「正在启动」，就绪由广播翻牌，不会卡住一次点击。
   sovitsStartServer: async () => {
     void ensureSovitsServer()
-    void refreshVoiceOutReadiness()
     return sovitsStatusSnapshot()
   },
   // 训练管理（v3）：记录落盘，面板两页从磁盘读；互斥与计划推导都在 manager/纯缝里。
   trainRuns: () => backfillRunMetrics(listTrainRuns()),
   trainRun: (id) => loadTrainRun(id),
   trainLog: ({ limit }) => readTrainLogTail(limit),
-  trainStart: async (request) => {
-    const kind = normalizeTrainKind(request.kind)
-    // gv-*：先把引擎包/底模/数据集/配置文件备齐，缺口在这里就报出来，不进 manager。
-    if (kind === 'gv-gpt' || kind === 'gv-sovits') {
-      const resolved = resolveGvTrainRequest(request)
-      return resolved.ok && resolved.request
-        ? getTrainManager().start(resolved.request)
-        : { ok: false, error: resolved.error ?? 'GV 训练备料失败' }
-    }
-    if (kind !== 'asr-ft') return getTrainManager().start(request)
-    // asr-ft：先把环境/数据/目录备齐，再带着「训练完接导出」的链子交给 manager。
-    // 开训方式（从底模重训 / 接着上次权重）原样落到 run 记录；增量接不上就拒启动，不静默落回重训。
-    const resolved = await resolveAsrFtTrainRequest(normalizeAsrFtMode(request.mode))
-    if (!resolved.ok || !resolved.request) return { ok: false, error: resolved.error ?? '微调任务备料失败' }
-    const exportRequest = resolved.request
-    return getTrainManager().start(exportRequest, () => buildAsrFtExportPlan(exportRequest), resolved.warning)
-  },
+  trainStart: (request) => startTrain(request),
   trainGvDatasets: () => {
     const home = discoverSovitsHome()
     return home ? scanGvDatasets(home) : []

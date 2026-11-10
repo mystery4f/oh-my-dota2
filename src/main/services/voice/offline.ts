@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
 import { createInstallJob } from '../install-job'
 import { app } from 'electron'
@@ -6,8 +6,9 @@ import type { OfflineStatus } from '../../../shared/ipc'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { GITHUB_MIRRORS, downloadResumable, tryMirrors } from '../net/download'
-import { locateWorkerScript, voiceRuntimeNodeBinary, voiceWorkerEnv } from './runtime'
+import { voiceRuntimeNodeBinary } from './runtime'
 import { offlineVoicePreset, type OfflineVoiceId } from '../../../shared/ipc'
+import { createNdjsonWorker, type NdjsonReply } from './worker'
 import { join } from 'node:path'
 
 /**
@@ -247,23 +248,16 @@ export async function ensureOfflineModel(voice: OfflineVoiceId = 'baker'): Promi
 }
 
 /**
- * 推理子进程。Electron 主进程里 sherpa 的原生插件会抛
- * `External buffers are not allowed`（N-API 外部缓冲在 Electron 的 Node 里被禁），
- * 同样的调用在普通 Node 下正常，所以合成搬到 `ELECTRON_RUN_AS_NODE=1` 的子进程里，
+ * 推理子进程：进程协议（spawn、行缓冲、id 派发、close 守卫）收口在 ./worker，
+ * 这里只声明脚本、超时和日志标签。为什么单开进程——Electron 主进程里 sherpa 的
+ * 原生插件抛 `External buffers are not allowed`（N-API 外部缓冲被禁），纯 Node 下正常；
  * 引擎只加载一次，后续每句只是一个 JSON 往返 + 一次 WAV 落盘。
  */
-let worker: ChildProcess | null = null
-let workerSeq = 0
-const workerPending = new Map<number, (reply: WorkerReply) => void>()
-
-interface WorkerReply {
-  ok: boolean
-  err?: string
-}
-
-function workerScript(): string {
-  return locateWorkerScript('tts-offline-worker.cjs')
-}
+const worker = createNdjsonWorker<NdjsonReply>({
+  script: 'tts-offline-worker.cjs',
+  timeoutMs: 10_000,
+  tag: 'TTS_OFFLINE'
+})
 
 /**
  * sherpa 的原生插件在任何 Electron 运行时里都会抛 External buffers are not allowed，
@@ -273,48 +267,6 @@ export function offlineNodeBinary(): string | null {
   return voiceRuntimeNodeBinary()
 }
 
-function ensureWorker(): ChildProcess {
-  if (worker && !worker.killed) return worker
-  const script = workerScript()
-  if (!existsSync(script)) throw new Error(`TTS_OFFLINE_WORKER_MISSING ${script}`)
-  const node = offlineNodeBinary()
-  if (!node) throw new Error('TTS_OFFLINE_NO_NODE')
-  const child = spawn(node, [script], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true,
-    env: voiceWorkerEnv()
-  })
-  let buffer = ''
-  child.stdout?.setEncoding('utf8')
-  child.stdout?.on('data', (chunk: string) => {
-    buffer += chunk
-    let index = buffer.indexOf('\n')
-    while (index >= 0) {
-      const line = buffer.slice(0, index)
-      buffer = buffer.slice(index + 1)
-      index = buffer.indexOf('\n')
-      try {
-        const reply = JSON.parse(line) as WorkerReply & { id: number }
-        const done = workerPending.get(reply.id)
-        workerPending.delete(reply.id)
-        done?.(reply)
-      } catch {
-        // 半行或噪声，丢掉。
-      }
-    }
-  })
-  child.stderr?.on('data', (chunk: Buffer) => {
-    console.log('TTS_OFFLINE_WORKER_STDERR', JSON.stringify({ text: String(chunk).trim().slice(0, 300) }))
-  })
-  child.on('close', (code) => {
-    console.log('TTS_OFFLINE_WORKER_EXIT', JSON.stringify({ code }))
-    if (worker === child) worker = null
-    for (const done of workerPending.values()) done({ ok: false, err: 'worker exited' })
-    workerPending.clear()
-  })
-  worker = child
-  return child
-}
 
 /** 合成一句，返回 WAV。模型没装好或推理失败都返回 null（调用方负责「这句不念」）。 */
 export async function synthesizeOffline(
@@ -331,33 +283,18 @@ export async function synthesizeOffline(
   const started = Date.now()
   const out = join(tmpdir(), `oh-my-dota2-tts-${process.pid}-${Date.now()}.wav`)
   try {
-    const child = ensureWorker()
-    const id = ++workerSeq
-    const reply = await new Promise<WorkerReply>((resolve) => {
-      const timer = setTimeout(() => {
-        workerPending.delete(id)
-        resolve({ ok: false, err: 'timeout' })
-      }, 10_000)
-      workerPending.set(id, (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      })
-      child.stdin?.write(
-        `${JSON.stringify({
-          id,
-          text,
-          speed,
-          pitch,
-          sid: preset.sid ?? modelFiles(voice).sid,
-          dir: offlineModelDir(voice),
-          // onnx 文件名与架构都由注册表给出：猜错就是 'vits-model ... does not exist'，
-          // 或者 matcha 包被当成 vits 加载直接报 config 错。
-          kind: modelFiles(voice).kind,
-          model: modelFiles(voice).model,
-          vocoder: vocoderPath(voice),
-          out
-        })}\n`
-      )
+    const reply = await worker.request({
+      text,
+      speed,
+      pitch,
+      sid: preset.sid ?? modelFiles(voice).sid,
+      dir: offlineModelDir(voice),
+      // onnx 文件名与架构都由注册表给出：猜错就是 'vits-model ... does not exist'，
+      // 或者 matcha 包被当成 vits 加载直接报 config 错。
+      kind: modelFiles(voice).kind,
+      model: modelFiles(voice).model,
+      vocoder: vocoderPath(voice),
+      out
     })
     if (!reply.ok) {
       console.log('TTS_OFFLINE_FAILED', JSON.stringify({ ms: Date.now() - started, err: reply.err ?? 'unknown' }))

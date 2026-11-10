@@ -19,7 +19,7 @@ import {
   type TrainTaskStatus
 } from '@shared/train/task'
 import { parseTrainProgress } from '@shared/train/progress'
-import { ensureSovitsServer, pauseSovitsForTraining, setInferenceHold } from '../voice/sovits-server'
+import { ensureSovitsServer, pauseSovitsForTraining, setInferenceHold, type SovitsPauseOutcome } from '../voice/sovits-server'
 import { applyAsrFtModel, markRunStatus, pruneAsrFtRunDirs } from './asr-ft'
 import { ftWavDurationMs, summarizePendingTakes } from '@shared/train/asr-ft'
 import {
@@ -106,8 +106,22 @@ function notifyRunEnd(run: TrainRunRecord): void {
   }
 }
 
+/**
+ * manager 对语音侧的副作用出口：默认绑真实实现（sovits-server）。
+ * 探针注入记录器后，「训练占卡 → 朗读让路」的接线从源码文本钉升级为行为断言。
+ */
+export interface TrainVoiceIo {
+  holdInference(hold: boolean): void
+  pause(): SovitsPauseOutcome
+  resume(): Promise<boolean>
+}
 
-class TrainManager {
+function realTrainVoiceIo(): TrainVoiceIo {
+  return { holdInference: setInferenceHold, pause: pauseSovitsForTraining, resume: ensureSovitsServer }
+}
+
+export class TrainManager {
+  constructor(private io: TrainVoiceIo = realTrainVoiceIo()) {}
   private task: TrainTaskInfo | null = null
   private logs: TrainLogLine[] = []
   private child: ChildProcess | null = null
@@ -207,13 +221,13 @@ class TrainManager {
     if (kind === 'asr-ft') this.recordAsrFtOpening(request)
     this.emit(true)
     if (shouldPauseInference(this.status()) && this.task) {
-      const outcome = pauseSovitsForTraining()
+      const outcome = this.io.pause()
       this.task = { ...this.task, inference: outcome === 'paused' ? 'held' : 'kept-off' }
       this.record(inferenceHoldLabel(outcome === 'paused' ? 'held' : 'kept-off'))
       this.emit(true)
     }
     // 训练占显存期间，朗读热键与试听都不许把 GV 拉回来——那等于把刚下的暂停命令撤销。
-    setInferenceHold(true)
+    this.io.holdInference(true)
 
     this.request = request
     this.chain = chain ?? null
@@ -366,7 +380,7 @@ class TrainManager {
       saveTrainRun(saved)
       this.run = saved
     }
-    setInferenceHold(false)
+    this.io.holdInference(false)
   }
 
   /** 日志环最近一段有没有 OOM 原文：失败收场要说人话，别只丢一个 exit code。 */
@@ -455,14 +469,14 @@ class TrainManager {
     this.child = null
     this.emit(true)
     // 任务退干净就该恢复推理（T2 接线）；没停过（kept-off）不演恢复。
-    setInferenceHold(false)
+    this.io.holdInference(false)
     if (shouldResumeInference(this.status())) void this.resumeInference()
   }
 
   /** T2：把 GV 推理拉回来；失败在窗口里明说，别让「怎么没声」变成悬案。 */
   private async resumeInference(): Promise<void> {
     if (this.task?.inference !== 'held') return
-    const resumed = await ensureSovitsServer()
+    const resumed = await this.io.resume()
     if (!this.task) return
     this.task = { ...this.task, inference: resumed ? 'released' : 'release-failed' }
     this.record(inferenceHoldLabel(resumed ? 'released' : 'release-failed'))

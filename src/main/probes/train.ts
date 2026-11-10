@@ -138,6 +138,7 @@ import {
   trainDbPath,
   useTrainDatabase
 } from '../services/train/run-store'
+import { TrainManager, type TrainVoiceIo } from '../services/train/manager'
 import { assertRecordingKeyFree } from '../services/train/ft-record'
 import {
   ensureSovitsServer,
@@ -153,21 +154,6 @@ import { openTrainFixture } from './train-fixtures'
  * 进程生命周期（spawn/停/树杀）进 docs/ACCEPTANCE.md 人工验收。
  */
 
-/**
- * 接线钉：manager 里「开跑置位 / 收场清除」两句。任务生命周期要真 spawn 才走得到，
- * 纯缝探针跑不了进程，所以这两句以源码文本为契约钉住——删掉任意一句（例如收场忘了清）本探针立刻红。
- * 读不到源码（安装版没有 src/）不判红：行为半边仍由下面的运行时断言守着。
- */
-function managerHoldWiring(): { readable: boolean; set: boolean; clear: boolean } {
-  const file = join(process.cwd(), 'src/main/services/train/manager.ts')
-  if (!existsSync(file)) return { readable: false, set: false, clear: false }
-  const source = readFileSync(file, 'utf8')
-  return {
-    readable: true,
-    set: /setInferenceHold\(\s*true\s*\)/.test(source),
-    clear: /setInferenceHold\(\s*false\s*\)/.test(source)
-  }
-}
 
 /**
  * 接线钉：#64 录音存盘那条路要把这条录音落进账本（run_id 空），否则「录一条待训数字就涨」不成立。
@@ -551,13 +537,36 @@ export async function runTrainProbe(): Promise<void> {
   const reHeld = await ensureSovitsServer(probeIo)
   push('开关：再置位又拦住（释放不粘）', reHeld === false && ioCalls === 0, `ensure=${reHeld} ioCalls=${ioCalls}`)
   setInferenceHold(false)
-  // 接线钉：任务生命周期要真 spawn 才走得到，纯缝探针只能钉 manager 里那两句还在。
-  const wiring = managerHoldWiring()
-  push(
-    '接线钉：manager 开跑置位、退场清除两句都还在',
-    !wiring.readable || (wiring.set && wiring.clear),
-    wiring.readable ? `set=${wiring.set} clear=${wiring.clear}` : '源码不在（非源码运行），跳过'
-  )
+  // 行为断言：注入记录型 io，跑一个 demo 任务（内联 node 脚本，无真训练、临时库不碰 data/），
+  // 「开跑置位、收场清除」从源码文本钉升级为真行为——删掉任意一句（例如收场忘了清）这里立刻红。
+  const holdRoot = mkdtempSync(join(tmpdir(), 'omd2-train-hold-'))
+  try {
+    useTrainDatabase(join(holdRoot, 'db', 'runs.db'))
+    const holds: boolean[] = []
+    const recorder: TrainVoiceIo = {
+      holdInference: (hold) => holds.push(hold),
+      pause: () => 'untouched',
+      resume: async () => false
+    }
+    const holdMgr = new TrainManager(recorder)
+    const holdStart = holdMgr.start({ kind: 'demo', dataset: '' })
+    let terminal: string | null = null
+    for (let waited = 0; waited < 30_000; waited += 200) {
+      const state = holdMgr.status()
+      if (state === 'done' || state === 'failed' || state === 'stopped') {
+        terminal = state
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    push(
+      '行为：demo 任务开跑置位、收场清除推理互斥',
+      holdStart.ok && terminal === 'done' && holds[0] === true && holds[holds.length - 1] === false,
+      JSON.stringify({ ok: holdStart.ok, terminal, holds })
+    )
+  } finally {
+    rmSync(holdRoot, { recursive: true, force: true })
+  }
   const ledgerWiring = recordLedgerWiring()
   push(
     '接线钉：录音存盘那条路把录音落进账本（待训数字才会跟着涨）',

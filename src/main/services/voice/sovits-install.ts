@@ -5,6 +5,7 @@ import { statfs } from 'node:fs/promises'
 import { join } from 'node:path'
 import { downloadResumable } from '../net/download'
 import { createInstallJob } from '../install-job'
+import { notifyVoiceOutMutation } from './mutations'
 
 /**
  * GPT-SoVITS 引擎包的应用内安装（一键下载 / 手动放置）。
@@ -155,6 +156,7 @@ export async function ensureSovitsInstall(): Promise<SovitsInstallState> {
     onSettled: (ok, error) => {
       state = ok ? { phase: 'ready', progress: 1, error: null } : { phase: 'error', progress: 0, error }
       if (!ok) console.log('TTS_SOVITS_INSTALL_FAILED', JSON.stringify({ err: error }))
+      if (ok) notifyVoiceOutMutation()
     },
     work: async (report) => {
       mkdirSync(sovitsInstallRoot(), { recursive: true })

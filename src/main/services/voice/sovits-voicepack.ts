@@ -17,6 +17,7 @@ import {
 import { activateSovitsRef, recordSovitsLog } from './sovits-server'
 import { synthesizeEdge } from './edge'
 import { DEFAULT_EDGE_VOICE } from '@shared/tts-voices'
+import { notifyVoiceOutMutation } from './mutations'
 
 /**
  * 英雄音色包：参考音频 + 成对的微调权重，从魔搭公开仓一键拉齐。
@@ -246,6 +247,7 @@ export async function deleteVoicePack(id: string): Promise<SovitsVoicePack[]> {
   }
   packRuns.delete(pack.id)
   recordSovitsLog('TTS_SOVITS_PACK_DELETE', { id: pack.id })
+  notifyVoiceOutMutation()
   return sovitsVoicePacks()
 }
 
@@ -426,6 +428,7 @@ export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
         run.error = error
         recordSovitsLog('TTS_SOVITS_PACK_FAIL', { id: pack.id, err: error })
       }
+      if (ok) notifyVoiceOutMutation()
     },
     work: async (report) => {
       const plan = planVoicePackFiles(pack, refsRoot, weightsRoot)
@@ -506,6 +509,7 @@ export async function ensureSovitsSeedRef(force = false): Promise<boolean> {
   }
   writeRefsRaw(refsRoot, mergeRefsJson(readRefsRaw(refsRoot), entry))
   recordSovitsLog('TTS_SOVITS_SEED_READY', { bytes: mp3.length })
+  notifyVoiceOutMutation()
   return true
 }
 
