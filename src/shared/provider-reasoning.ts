@@ -1,4 +1,4 @@
-import type { ProviderConfig, ProviderId, ProviderPreset } from './ipc'
+import type { ProviderConfig, ProviderId, ProviderPreset } from './providers'
 
 /**
  * 每家供应商关/开「先思考」用的不是同一个字段，猜错就是 400 或者白等 7 秒：

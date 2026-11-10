@@ -1,6 +1,6 @@
 ---
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-10
 tags: [provider, settings, keys, reasoning, decision]
 ---
 
@@ -40,9 +40,9 @@ tags: [provider, settings, keys, reasoning, decision]
 
 | 文件 | 作用 |
 | --- | --- |
-| `src/shared/ipc.ts` | `ProviderConfig`/`ProviderPreset`/`AppSettings.providerKeys`/`providerReasoning`，`PROVIDER_PRESETS` |
-| `src/main/services/settings.ts` | `loadSettings` 漂移仲裁 + `authStyle` 归位 + 推理归位，`saveSettings` 深合并 |
+| `src/shared/providers.ts` | `ProviderConfig`/`ProviderPreset`/`PROVIDER_PRESETS`（从 ipc.ts 迁出，ipc 再导出保兼容） |
+| `src/main/services/settings.ts` | `normalizeSettings`（漂移仲裁/authStyle/推理归位委托 `@shared/providers` 的 `healProvider`）+ `mergeSettings` 单份深合并 |
 | `src/shared/provider-reasoning.ts` | `healProviderReasoning` / `reasoningForProvider` |
-| `src/renderer/src/App.tsx` | `applyPreset`（换家换 key + 盖声明字段）、key 框一处改动两处记 |
+| `src/renderer/src/panel/pages/engine.tsx` | `applyPreset`（换家换 key + 盖声明字段）、key 框一处改动两处记 |
 | `src/main/probes/settings-persist.ts` | 设置持久化探针（按家归档用例） |
 | `src/main/probes/provider-reasoning.ts` | 推理决策探针 |

@@ -1,7 +1,6 @@
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
 import type { VoiceChainTiming } from './voice-timing'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
-import { DEFAULT_CAPTURE_MODE, DEFAULT_HOTKEYS } from './hotkeys'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
@@ -14,6 +13,8 @@ import type { TrainRunRecord } from '@shared/train/run'
 import type { AsrState } from '@shared/asr/models'
 import type { FtScriptGroup, FtScriptState } from '@shared/train/recording'
 import type { FtCorrectionInput, FtCorrectionSaveResult } from '@shared/train/corrections'
+import type { ProviderConfig } from './providers'
+import type { AppSettings } from './settings-shape'
 
 // 读稿的类型归纯缝（解析与来源选择都在那里），契约只把它们带出来给渲染端。
 export type { FtScriptGroup, FtScriptLine, FtScriptState } from '@shared/train/recording'
@@ -26,303 +27,16 @@ export interface FtRecInfo {
   /** 文件修改时间（续训对账/已训标记的指纹之一）。 */
   mtimeMs: number
 }
-export type ProviderId = 'deepseek' | 'openai' | 'ollama' | 'mimo' | 'zhipu' | 'ark' | 'custom'
-
-export interface ProviderConfig {
-  id: ProviderId
-  baseUrl: string
-  apiKey: string
-  model: string
-  /** Auth header style; omitted means the usual "Authorization: Bearer". */
-  authStyle?: 'bearer' | 'api-key'
-  /** 让模型先思考（推理）再回答；默认关：翻译是短句任务，思考只加延迟。 */
-  reasoning?: boolean
-}
-
-export interface ProviderPreset {
-  id: ProviderId
-  label: string
-  baseUrl: string
-  model: string
-  needsKey: boolean
-  authStyle?: 'bearer' | 'api-key'
-  /** 预设里声明了推理开关：载入/切家以声明为准（authStyle 同款归位）。不声明 = 用户自己管。 */
-  reasoning?: boolean
-}
-
-export const PROVIDER_PRESETS: ProviderPreset[] = [
-  {
-    id: 'deepseek',
-    label: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-chat',
-    needsKey: true
-  },
-  {
-    id: 'openai',
-    label: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini',
-    needsKey: true
-  },
-  {
-    id: 'ollama',
-    label: 'Ollama (local)',
-    baseUrl: 'http://localhost:11434/v1',
-    model: 'qwen2.5:7b',
-    needsKey: false
-  },
-  {
-    id: 'mimo',
-    label: 'MiMo (Xiaomi)',
-    baseUrl: 'https://api.xiaomimimo.com/v1',
-    model: 'mimo-v2.6-flash',
-    needsKey: true,
-    authStyle: 'api-key'
-  },
-  {
-    id: 'zhipu',
-    label: 'GLM (智谱 BigModel · 免费)',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    model: 'glm-4-flash-250414',
-    needsKey: true
-  },
-  {
-    id: 'ark',
-    label: '豆包 (火山方舟)',
-    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    model: 'doubao-seed-2-0-mini-260428',
-    needsKey: true
-  },
-  {
-    id: 'custom',
-    label: 'Custom (OpenAI-compatible)',
-    baseUrl: '',
-    model: '',
-    needsKey: true
-  }
-]
+// 供应商域：类型与预设表的家在 ./providers（架构扫描 C2 迁出），契约只做再导出。
+export type { ProviderId, ProviderConfig, ProviderPreset } from './providers'
+export { PROVIDER_PRESETS, healProvider } from './providers'
 
 
-export type OfflineVoiceId = 'baker' | 'xiao_ya' | 'eula'
-export type VoiceOutEngine = 'edge' | 'offline' | 'sovits'
-/** 说话方式：hold = 按住整段（游戏里选「按住说话」）；toggle = 敲一下开麦、播完再敲一下关麦（游戏里选「切换」）。 */
-export type SpeakMode = 'hold' | 'toggle'
-
-export interface OfflineVoice {
-  id: OfflineVoiceId
-  label: string
-  note: string
-  speed: number
-  pitch: number
-  /** 多说话人模型固定用这一个嗓子；单说话人模型为 0。 */
-  sid: number
-}
-
-/**
-/**
- * 本地音色留下这三个（用户钦定后又裁掉 melo，2026-10-25）：
- * - baker：Matcha icefall，22.05 kHz，最快（200 ms 级），声音闷一点但最跟得上节奏。
- * - xiao_ya：piper 小雅，22.05 kHz，包最小（60 MB），音色偏温柔。
- * - eula：hf 角色微调，22.05 kHz，804 个说话人，sid 挑嗓子。
- * 名字给人的错觉要说清：eula/baker 这些是「训练目标」，不代表听感；听感由模型 + sid 决定。
- * melo（44.1 kHz 中英混读）曾入选，因延迟最高（~0.5 s）被移除，模型目录可整目录删掉。
- */
-export const OFFLINE_VOICES: OfflineVoice[] = [
-  { id: 'baker', label: 'Baker（最快）', note: '22.05 kHz，200 ms 级', speed: 1, pitch: 1, sid: 0 },
-  { id: 'xiao_ya', label: '小雅', note: '22.05 kHz，包最小', speed: 1, pitch: 1, sid: 0 },
-  { id: 'eula', label: 'Eula #5', note: '22.05 kHz，804 人表', speed: 1, pitch: 1, sid: 5 }
-]
-
-export function offlineVoicePreset(id: OfflineVoiceId): OfflineVoice {
-  return OFFLINE_VOICES.find((voice) => voice.id === id) ?? OFFLINE_VOICES[0]
-}
-
-export interface AppSettings {
-  provider: ProviderConfig
-  /**
-   * 每个供应商各记各的 API Key（含 custom）：provider.apiKey 只是「当前生效」的那把，
-   * 切预设时从这里按 id 取回，换家不用重新粘 key。写路径只有面板的 key 输入框。
-   */
-  providerKeys?: Partial<Record<ProviderId, string>>
-  /**
-   * 推理开关按供应商各记各的（含 custom）：provider.reasoning 只是「当前生效」的那格，
-   * 切预设时从这里按 id 取回，换家不用重新点开关。预设表声明了 reasoning 的家以声明为准。
-   */
-  providerReasoning?: Partial<Record<ProviderId, boolean>>
-  /**
-   * zh-en 译文的词数上限（4-32，默认 16）：提示词上限行与回复截断共用一个值。
-   * 改动会让翻译会话按新上限重建（进 runtimeConfigKey）。
-   */
-  translationMaxWords?: number
-  proxyUrl: string
-  targetLang: string
-  ttsOutputDevice: string
-  /**
-   * 讲话设备（声音输入）：'' = 自动挑（跳过虚拟声卡与蓝牙通话端点，见 pickCaptureDevice）。
-   * 选蓝牙耳机的麦克风会让 Windows 把耳机从音乐模式切到通话模式：游戏声音断一两秒、之后变单声道闷音。
-   * 那是协议限制，软件绕不过；要一边听游戏一边说话，选内置的「麦克风阵列」。
-   */
-  micDevice: string
-  /** 调试用：译文同时播到系统默认扬声器；正式使用时关掉，本机就只剩游戏里能听到。 */
-  ttsMonitorLocal: boolean
-  /**
-   * 声出引擎：edge = 英文神经嗓占位（默认）；offline = 本地离线模型（中文嗓，念英文吞字）；
-   * sovits = GV（GPT-SoVITS）音色包——音色由参考音频决定，权重切换走现有音色包管线。
-   */
-  ttsOutEngine: VoiceOutEngine
-  /** 声出音色：edge 存声出清单里的英文嗓 id，offline 存离线清单里的本地嗓 id；GV 不用（空串）。 */
-  ttsOutVoice: string
-  /**
-   * 说话键（push-to-talk）：游戏内按住才发言的按键，F1–F12 或单个字母/数字。
-   * 声出期间由应用自动按下/松开（合成成功才按，头尾各留 200ms 余量）；乱填打回 F5。
-   */
-  ttsSpeakKey: string
-  /**
-   * 说话方式：hold = 播放期间按住说话键，播完再松开；toggle = 起播前敲一下开麦、播完再敲一下关麦。
-   * 必须和游戏里语音按键的设置一致，否则队友听不到或频道一直开着。
-   */
-  ttsSpeakMode: SpeakMode
-  /** 测试模式：开了只放音频到所选输出设备、不模拟按下说话键——游戏没开也能全链路试听，F5 不会落到别的窗口上。 */
-  voiceOutTestMode: boolean
-  /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
-  /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
-  voiceTranscribeOnly: boolean
-  /**
-   * 对讲耗时统计（默认关）：开了才给每句话记账——浮层那行多一行五段数字，面板记录行与
-   * `logs/voice-chain.jsonl` 同步有；关着时一行都不量，界面上也没有数字可画。
-   */
-  voiceShowTiming: boolean
-  /**
-   * 现役识别模型 id（`<engine>:<rel>`），来自 ASR_MODELS 的注册表；空 = 按可用性自动选。
-   * 引擎不再单独存（旧 `asrEngine` 字段已在 #67 退役）：模型属于哪个引擎由这个 id 的前缀决定。
-   */
-  asrActiveModel: string
-  /**
-   * 微调目标引擎 id（`qwen3` / `paraformer`）；空 = 跟着现役模型所属引擎走。
-   * 与 `asrActiveModel` 分开：训练只要引擎在表里声明了 finetune 就能选，运行时模型还没装也行
-   * （删掉旧权重、只留底模的场景）；训练成功转正时才把现役切过去。
-   */
-  asrTrainEngine: string
-  /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
-  /** 热词表（逗号/顿号分隔），仅 Qwen3 引擎注入；纠错回路自动追加，也可手编。 */
-  asrHotwords: string
-  /**
-   * 纠错样本回喂（#66）：语音页把一句改对时，原始录音落成自由说样本（G01-Tnn），标签 = 改对的那句。
-   * 关掉 = 纠错只并热词，不写任何文件。
-   */
-  asrCorrectionsToDataset: boolean
-  /** 训练窗口记住的任务类型：demo 演示任务；gv-gpt/gv-sovits/asr-ft 在 T3/T5 接入。 */
-  trainKind: 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
-  /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
-  /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
-  trainDataset: string
-  /** ASR 微调环境根目录：空 = 用应用数据目录里的 asr-ft-env；手动搭的环境（试点那套）填根路径。 */
-  asrFtEnvDir: string
-  /** 总开关：关掉就只静默记录 GSI 帧，不当聊天处理、不翻译、不上屏。 */
-  autoStartCapture: boolean
-  /** 快捷短语表：呼出面板「短语」标签的内容，方向键选、Enter 复制进剪贴板。 */
-  quickPhrases: string[]
-  /** In-game nicknames that should never be translated (your own messages). */
-  myNicknames: string[]
-  replyTone: ReplyTone
-  /**
-   * 浮层默认点击穿透：它在游戏画面之上，只要吃鼠标就会挡住底下的走位与技能点击。
-   * 需要点浮层上的东西（回复条）时，代码会临时关掉它，关掉回复条再恢复。
-   */
-  /** 浮层显示哪一层文字：默认只显示译文（译文未到时先用原文占位）。 */
-  overlayText: OverlayTextMode
-  /**
-   * 跨语气查账本：这句话在目标语气下没有，就去别的语气找现成译文。
-   * 默认开——同一句中文用「客气」发过一次，下次用「简短」发就别再翻一遍。
-   */
-  crossToneLookup: boolean
-  /**
-   * 朗读译文：新消息的译文到达时用系统语音念出来（分神时不用一直盯浮层）。
-   * 走 Chromium 的 speechSynthesis，全离线、不花 token、不联网。
-   */
-  ttsReadAloud: boolean
-  /**
-   * 自己也念：默认关。自己刚打完的字不必再听一遍，而且真对局里自己那句「::」
-   * 会被念成「司夜刺客说，」紧接敌方的「基地」，听成「司夜刺客说基地」。
-   * 想核对发音、或单人练英雄时打开它。
-   */
-  ttsReadOwn: boolean
-  /**
-   * 丢弃积压：默认开。GPT-SoVITS 在本机显卡上推理，游戏正吃满显卡时一句要 5–7 s，
-   * 聊天刷屏时排队会把显卡按住几十秒——游戏掉帧、读到的也是过时的旧消息。
-   * 开启后同一时刻只保留最新一条待读，被顶掉的直接跳过（日志 TTS_SPEAK_DROP）。
-   * 关掉它就恢复「每条都念」的完整回放。
-   */
-  ttsDropBacklog: boolean
-  /**
-   * 「某某说」前缀念不念、念在哪头。默认 front（「影魔说，中路没人」）；
-   * back = 内容在前（「中路没人，影魔说」）；off = 只念内容。
-   */
-  ttsSpeakPrefix: 'front' | 'back' | 'off'
-  /**
-   * 长句切段上限（字）：朗读前按标点把长句切成不超过这个长度的小段，第一段先出声，
-   * 其余段边播边合成。太小断句碎，太大每段等得久；10–60，默认 30。
-   */
-  ttsSpeakSegmentChars: number
-  /**
-   * 说话人怎么念，连标点一起整句模板化：{who}=说话人（我/影魔/玩家9），{body}=内容。
-   * 两条各自管一头；没有 {body} 的模板视同没配（loadSettings 打回缺省）。
-   */
-  ttsSpeakFrontTpl: string
-  ttsSpeakBackTpl: string
-  /** 朗读语速，1 = 正常；超过 2 会听不清，低于 0.6 会跟不上聊天节奏。 */
-  ttsRate: number
-  /**
-   * 朗读音高倍率，1 = 原声。0.9 更沉、1.15 更尖（同一个嗓子听起来是另一个人）。
-   * 只在 Edge 引擎上生效——系统嗓子拿不到这个参数。
-   */
-  ttsPitch: number
-  /** 朗读语音名（空 = 按语言自动挑：中文用 zh-CN，其余用 en-US）。 */
-  ttsVoice: string
-  /**
-   * 本地音色预设。Matcha 中文模型只有一个嗓子，所谓「多个音色」只能是
-   * 同一嗓子的语速/音高变体——这点得让用户看得见，免得以为是换了模型。
-   */
-  ttsOfflineVoice: OfflineVoiceId
-  /**
- * 朗读引擎：edge = 微软神经语音（好听，需联网，失败自动退回系统嗓子）；
- * system = 本机 speechSynthesis（离线，中文只有「慧慧」一个嗓子）；
- * sovits = GPT-SoVITS 本地服务（需另起整合包的 api_v2，服务不在就不出声，绝不回退）。
-   */
-  ttsEngine: 'system' | 'edge' | 'offline' | 'sovits'
-  /** GPT-SoVITS api_v2 服务地址（整合包 runtime 起，默认 127.0.0.1:9880）。 */
-  ttsSovitsUrl: string
-  /** 参考音频绝对路径（api_v2 在服务端磁盘上读这个文件；同机部署就是本机路径）。 */
-  ttsSovitsRefAudio: string
-  /** 参考音频的逐字转写：转写和音频对不上，克隆音质会明显劣化。 */
-  ttsSovitsPromptText: string
-  /** 参考音频转写的语言（zh/en）：零样本克隆按转写语言对齐，英文参考必须配 en。 */
-  ttsSovitsPromptLang: 'zh' | 'en'
-  /** 整合包安装目录；填了就由应用自动拉起 api_v2，留空用数据目录的 gpt-sovits 自装位。 */
-  ttsSovitsHome: string
-  /** 浮层锁定：位置尺寸冻住 + 强制穿透。想拖动或改大小时先解锁。 */
-  overlayLocked: boolean
-  /** 上次退出时浮层是收起的小图标还是整块；启动时照此还原（2026-10-28「记忆收起」）。 */
-  overlayCollapsed: boolean
-  /** 上次退出时浮层是显示还是被「显示/隐藏浮层」热键藏了；启动时照此还原（「记忆隐藏」）。 */
-  overlayVisible: boolean
-  /** 每行底色不透明度（0.05–0.9）：游戏画面亮的时候要淡，暗图要深一点才看得清。 */
-  overlayOpacity: number
-  /** 用户调过的浮层几何；null = 跟随捕获区域自动摆放。 */
-  overlayBounds: OverlayGeometry | null
-  /**
-   * 全局热键表：动作 id → canonical 组合键，空串 = 该动作不绑键。
-   * 单独一项而不是五个平铺字段——面板一次改整张表，平铺就要五个归一化分支加五处探针。
-   */
-  /**
-  /**
-   * 语音对讲热键怎么按：hold = 按住说话、松开触发；toggle = 按一下开录、再按一下触发。
-   * 只影响「语音对讲」这一个动作；其余热键永远是敲一下。
-   */
-  voiceCaptureMode: CaptureMode
-  hotkeys: Record<HotkeyActionId, string>
-}
+// 音色域：离线音色清单的家在 ./voices（架构扫描 C2 迁出），契约只做再导出。
+export type { OfflineVoiceId, OfflineVoice, VoiceOutEngine, SpeakMode } from './voices'
+export { OFFLINE_VOICES, offlineVoicePreset } from './voices'
+// 设置形状域：AppSettings 的家在 ./settings-shape（架构扫描 C2 迁出），契约只做再导出。
+export type { AppSettings } from './settings-shape'
 
 /**
  * 热键注册结果（动作 id → 抢到 / 被别的软件占了 / 这个动作没绑键）。
@@ -336,82 +50,9 @@ export interface HotkeysResult extends HotkeyState {
   error: string | null
 }
 
-/** 快捷短语默认表：对局里高频、通用、不需要现场组织的英文短句；面板「文出」页可改。 */
-export const DEFAULT_QUICK_PHRASES: string[] = [
-  'Push mid',
-  'Group up',
-  'Fall back',
-  'Careful, they are missing',
-  'Nice play',
-  'Well played',
-  'My bad',
-  'Give me a sec'
-]
+export { DEFAULT_QUICK_PHRASES } from './settings-shape'
 
-export const DEFAULT_SETTINGS: AppSettings = {
-  provider: {
-    id: 'deepseek',
-    baseUrl: 'https://api.deepseek.com',
-    apiKey: '',
-    model: 'deepseek-chat',
-    reasoning: false
-  },
-  providerKeys: {},
-  providerReasoning: {},
-  translationMaxWords: 16,
-  proxyUrl: '',
-  targetLang: 'zh-CN',
-  ttsOutputDevice: '',
-  micDevice: '',
-  ttsMonitorLocal: false,
-  ttsSpeakKey: 'F5',
-  ttsSpeakMode: 'hold',
-  voiceOutTestMode: false,
-  voiceTranscribeOnly: false,
-  voiceShowTiming: false,
-  /** 现役模型空 = 由注册表按可用性自动选（#67 起引擎跟着这个 id 走，不再单独存）。 */
-  asrActiveModel: '',
-  /** 训练目标引擎空 = 跟现役模型走；填了就固定训这个引擎（运行时模型没装也能选）。 */
-  asrTrainEngine: '',
-  trainKind: 'demo',
-  trainDataset: '',
-  asrFtEnvDir: '',
-  asrHotwords: '',
-  /** 纠错样本默认开：它只是把用户已经改对的句子留成训练数据，不改变任何现有行为。 */
-  asrCorrectionsToDataset: true,
-  ttsOutEngine: 'edge',
-  ttsOutVoice: '',
-  autoStartCapture: true,
-  quickPhrases: DEFAULT_QUICK_PHRASES,
-  myNicknames: [],
-  replyTone: 'terse',
-  overlayText: 'translated',
-  crossToneLookup: true,
-  ttsReadAloud: false,
-  ttsReadOwn: false,
-  ttsDropBacklog: true,
-  ttsSpeakPrefix: 'front',
-  ttsSpeakSegmentChars: 30,
-  ttsSpeakFrontTpl: '{who}说，{body}',
-  ttsSpeakBackTpl: '{body}，{who}表示',
-  ttsRate: 1,
-  ttsPitch: 1,
-  ttsVoice: '',
-  ttsOfflineVoice: 'baker',
-  ttsEngine: 'edge',
-  ttsSovitsUrl: 'http://127.0.0.1:9880',
-  ttsSovitsRefAudio: '',
-  ttsSovitsPromptText: '',
-  ttsSovitsPromptLang: 'zh',
-  ttsSovitsHome: '',
-  overlayLocked: true,
-  overlayCollapsed: false,
-  overlayVisible: false,
-  overlayOpacity: 0.34,
-  overlayBounds: null,
-  voiceCaptureMode: DEFAULT_CAPTURE_MODE,
-  hotkeys: { ...DEFAULT_HOTKEYS }
-}
+export { DEFAULT_SETTINGS } from './settings-shape'
 
 export type TranslateDirection = 'en-zh' | 'zh-en' | 'auto-zh'
 

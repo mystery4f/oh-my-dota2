@@ -86,6 +86,7 @@ tags: [docs, index]
 | `docs/adr/asr-check-batch.md` | 全量识别比对：数据步一个按钮 + 弹层，用现役模型跑全库、归一化后判一致，结果不落库 |
 | `docs/adr/asr-finetune-leg.md` | 识别微调成为正式训练腿（两引擎、增量、底模保留、转正/回滚）；热词只给支持提示的引擎。取代 `asr-hotwords-not-finetune.md` |
 | `docs/adr/asr-hotwords-not-finetune.md` | 识别个性化走热词注入；两次更正（Qwen3 可微调、后续切 FunASR paraformer）。**已被 `asr-finetune-leg.md` 取代**，留作决策历史 |
+| `docs/adr/domain-models-out-of-ipc.md` | 领域模型迁出 IPC 契约文件：供应商/音色/设置形状各归各家，契约只留通道表，字段声明表按删除测试否决 |
 | `docs/adr/overlay-reply-and-send-channels-removed.md` | 移除浮层回复框与两条非原地文出通道 |
 | `docs/adr/provider-keys-per-provider.md` | 翻译供应商按家记忆密钥 |
 | `docs/adr/train-manager-orchestrator.md` | 训练管理页采用编排器定位 |
