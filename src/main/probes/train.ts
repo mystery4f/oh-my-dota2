@@ -459,13 +459,13 @@ async function correctionsCases(): Promise<void> {
       const file = join(process.cwd(), rel)
       return existsSync(file) ? readFileSync(file, 'utf8') : null
     }
-    const ipcSource = sourceOf('src/main/ipc.ts')
+    const asrSource = sourceOf('src/main/services/voice/asr.ts')
     const datasetSource = sourceOf('src/main/services/train/ft-dataset.ts')
     const chainSource = sourceOf('src/renderer/src/overlay/voice-capture.ts')
     push(
-      '纠错：识别结束就把票据随结果交出去（ipc + 浮层接线钉）',
-      (ipcSource === null || /utteranceId/.test(ipcSource)) && (chainSource === null || /utteranceId/.test(chainSource)),
-      ipcSource === null ? '安装版没有 src/，跳过' : 'utteranceId 在'
+      '纠错：识别结束就把票据随结果交出去（voice 服务 + 浮层接线钉）',
+      (asrSource === null || /utteranceId/.test(asrSource)) && (chainSource === null || /utteranceId/.test(chainSource)),
+      asrSource === null ? '安装版没有 src/，跳过' : 'utteranceId 在'
     )
     push(
       '纠错：打包真的收了纠错样本、且按磁盘真值过滤（ft-dataset 接线钉）',
@@ -593,8 +593,8 @@ export async function runTrainProbe(): Promise<void> {
   const epochAt = ftPlan.args.indexOf('--epochs')
   push('asr-ft：带环境附件出真命令（python + 冻结的试点参数）', ftPlan.exe === ftPaths.pythonExe && epochAt >= 0 && ftPlan.args[epochAt + 1] === '66' && !ftPlan.unavailable, ftPlan.args.join(' '))
   push(
-    '自适应轮数：38 条→66 封顶、122→26、400→10 保底、99→32、0→66',
-    deriveFtEpochs(38) === 66 && deriveFtEpochs(122) === 26 && deriveFtEpochs(400) === 10 && deriveFtEpochs(99) === 32 && deriveFtEpochs(0) === 66,
+    '自适应轮数：38 条→11、122→4、400→3 保底、99→4、0→66（2026-11-09 保底 10→3）',
+    deriveFtEpochs(38) === 11 && deriveFtEpochs(122) === 4 && deriveFtEpochs(400) === 3 && deriveFtEpochs(99) === 4 && deriveFtEpochs(0) === 66,
     [38, 122, 400, 99, 0].map((n) => deriveFtEpochs(n)).join('/')
   )
   const tuned = planAsrFtTrainArgv(ftPaths, ftData, { epochs: 26, lr: '1e-5', resumeFrom: 'R/checkpoint-660' })
@@ -675,13 +675,13 @@ export async function runTrainProbe(): Promise<void> {
     estOne.steps === 66 && estOne.minutes === 6 && estOneFunasr.steps === 40 && estOneFunasr.minutes === 1,
     `qwen3: ${estOne.label} | funasr: ${estOneFunasr.label}`
   )
-  // 40 条按默认尾部 holdout 留 2 条验证 ⇒ 38 条进训练，两条腿的 660 / 608 步都不变。
+  // 40 条按默认尾部 holdout 留 2 条验证 ⇒ 38 条进训练，两条腿的 110 / 608 步都不变。
   const estG14 = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 40, audioMs: 59_000 })
   const estG14Funasr = estimateFtCost({ mode: 'fresh', trainer: 'funasr-paraformer', takes: 40, audioMs: 59_000 })
   push(
-    '开训估时对得上实测：G14 40 条（38 训 + 2 验）→ qwen3 660 步 65 分钟（BENCH 实测 1:05:18）、paraformer 608 步 6 分钟（BENCH 约 6 分钟）',
-    estG14.steps === 660 &&
-      Math.abs(estG14.minutes - 65) <= 1 &&
+    '开训估时：G14 40 条（38 训 + 2 验）→ qwen3 110 步 11 分钟（11 轮 × 10 步/轮）、paraformer 608 步 6 分钟（BENCH 约 6 分钟）',
+    estG14.steps === 110 &&
+      Math.abs(estG14.minutes - 11) <= 1 &&
       estG14.trainTakes === 38 &&
       estG14Funasr.steps === 608 &&
       estG14Funasr.minutes === 6 &&
@@ -690,15 +690,15 @@ export async function runTrainProbe(): Promise<void> {
   )
   const estMany = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 400 })
   push(
-    '开训估时：几百条不炸（400 条 → 1000 步 / 98 分钟），没有 NaN / Infinity',
-    estMany.steps === 1000 && estMany.minutes === 98 && Number.isFinite(estMany.steps + estMany.minutes),
+    '开训估时：几百条不炸（400 条 → 保底 3 轮 300 步 / 30 分钟），没有 NaN / Infinity',
+    estMany.steps === 300 && estMany.minutes === 30 && Number.isFinite(estMany.steps + estMany.minutes),
     estMany.label
   )
   const estIncQwen = estimateFtCost({ mode: 'incremental', trainer: 'qwen3-sft', takes: 40, lastStep: 660 })
   const estIncFunasr = estimateFtCost({ mode: 'incremental', trainer: 'funasr-paraformer', takes: 40, lastStep: 660 })
   push(
-    '增量估时只报「这次还要跑多少」：qwen3 从 checkpoint-660 接着算 200 步 / 20 分钟；funasr 优化器重建，报整段 304 步 / 3 分钟',
-    estIncQwen.steps === 200 && estIncQwen.minutes === 20 && estIncFunasr.steps === 304 && estIncFunasr.minutes === 3,
+    '增量估时只报「这次还要跑多少」：qwen3 从 checkpoint-660 接着算 20 步 / 2 分钟（ceil(660/10)+2=68 轮 → 680 步）；funasr 优化器重建，报整段 304 步 / 3 分钟',
+    estIncQwen.steps === 20 && estIncQwen.minutes === 2 && estIncFunasr.steps === 304 && estIncFunasr.minutes === 3,
     `qwen3: ${estIncQwen.label} | funasr: ${estIncFunasr.label}`
   )
   // 音频时长只进文案（docs/BENCH.md 的「只做标签」决定）：跨过 1 分钟换单位，但步数一分钟都不变。
@@ -724,7 +724,7 @@ export async function runTrainProbe(): Promise<void> {
   const estIncOne = estimateFtCost({ mode: 'incremental', trainer: 'qwen3-sft', takes: 40, lastStep: 660, pendingTakes: 1 })
   const estFreshLabel = estimateFtCost({ mode: 'fresh', trainer: 'qwen3-sft', takes: 40 })
   push(
-    '估时文案：增量说「新增 1 条 / 只训这 1 条」，步数按这 1 条算（ceil(660/1)+2 轮 = 662 步，已跑 660 → 还差 2 步）',
+    '估时文案：增量说「新增 1 条 / 只训这 1 条」，步数按这 1 条算（ceil(660/1)+2 轮 = 662 步，已跑 660 → 还差 2 步）；全量 40 条 → 110 步',
     estIncOne.label.includes('新增 1 条') &&
       estIncOne.label.includes('只训这 1 条') &&
       estIncOne.pendingTakes === 1 &&
@@ -732,7 +732,7 @@ export async function runTrainProbe(): Promise<void> {
       estIncOne.steps === 2 &&
       estFreshLabel.label.includes('进训练') &&
       estFreshLabel.label.includes('留验证') &&
-      estFreshLabel.steps === 660,
+      estFreshLabel.steps === 110,
     `增量: ${estIncOne.label} | 全量: ${estFreshLabel.label}`
   )
   // 增量估时必须跟开训同一份切分：真开跑会拿上一轮 evalKeys 重打包，不是默认尾部 holdout。
