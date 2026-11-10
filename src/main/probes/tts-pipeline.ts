@@ -164,17 +164,17 @@ export async function runTtsPipelineProbe(): Promise<void> {
     push('GV：P 豁免代际、播完接 B，A 全程未合成', seen.join('|') === '前排的|新来的' && JSON.stringify(f.calls) === JSON.stringify(['sovits:前排的', 'sovits:新来的']) && p.delivered === 1 && b.delivered === 1, JSON.stringify({ calls: f.calls, seen }))
   }
 
-  // —— GV：段间预取，长句听完不出空窗 ——
+  // —— GV：不预取，播放期间不碰显卡（段间多一次合成等待）——
   {
     const f = makeFake()
     const seen: string[] = []
     const outcome = speakPipeline(base('sovits', '甲，乙，丙', { split: true, segmentChars: 2, adapters: f.adapters }), (segment) => { seen.push(segment.text) })
     f.gates.get('sovits:甲，')!.open(wav('甲'))
     await tick()
-    push('GV：当前段出声时下一段已在合成', f.calls.includes('sovits:乙，') && !f.calls.includes('sovits:丙，') && seen.join('') === '甲，', JSON.stringify({ calls: f.calls, seen }))
+    push('GV：本段出声时不发下一段的合成', !f.calls.includes('sovits:乙，') && seen.join('') === '甲，', JSON.stringify({ calls: f.calls, seen }))
     f.gates.get('sovits:乙，')!.open(wav('乙'))
     await tick()
-    push('GV：预取接续第三段', f.calls.includes('sovits:丙') && seen.join('') === '甲，乙，', JSON.stringify({ calls: f.calls, seen }))
+    push('GV：本段收尾才轮到下一段合成', f.calls.includes('sovits:丙') && seen.join('') === '甲，乙，', JSON.stringify({ calls: f.calls, seen }))
     f.gates.get('sovits:丙')!.open(wav('丙'))
     const o = await outcome
     push('GV：三段全出', o.delivered === 3 && seen.join('') === '甲，乙，丙', JSON.stringify(o))

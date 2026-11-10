@@ -32,9 +32,9 @@
 
 ## 还没解决的事
 
-- 用户关于卡顿的「新进展」始终没讲出来，这是最大的一条未决。
-- 交接文档记 `data/settings.json` 的 `micDevice = "488a6f4a7d103301df2dd7a91a5ddff635794fb3d71327b3c982c60a61c3d50f"`，与本轮读到的 `"micDevice": ""` 以及实际开的 `2e1421a6` 三者不一致。说明点名 `{ exact }` 失败后会退回自动选择，而 `MIC_PREF_FAIL` 只打在渲染层控制台。已提议在面板「讲话设备」行显示「已保存的设备打不开，当前用 XX」，用户还没答。
-- 有一次 TTS 合成之后 Chromium 报 `Network service crashed` 与 `GPU process exited unexpectedly: exit_code=-1`，当时显存 6.8/8.2 GB（GPT-SoVITS 常驻占着）。是否与卡顿同源未知。
+- 卡顿的「新进展」已讲到（2026-11-10 晚）：起播那一刻整机静音 + 画面卡。已按「sovits 不预取」修掉，electron-vite 收到主进程改动后自动重建并重启，用户随即实测说「好像解决了」；`out/main/index.js` 22:20:26 的构建已含该改动，`data/logs/voice-chain.jsonl` 22:21:41 那条 `seg=4` 走的是新构建。**仍欠**：`--tts-pipeline` 探针没跑（app 单实例占着），以及段间停顿是否可接受。
+- 显存账（8 GB 卡）：dwm 3.8 GB + sovits 的 api_v2 常驻 2.8 GB + dota2 1.5 GB = 7260/8192 MB。谁都没还显存，这是「起播要显存就得换页」的物理底座；`dwm.exe` 那 3.8 GB 是否来自浮层待查（收起浮层后回落多少）。
+- `docs/settings.json` 的 `micDevice` 三处不一致那条仍未解决（见上）。
 - 浮层：真机验证仍欠着（锁定后指针划过不亮、锁定态 Tab 不误抓键盘、面板里能点能复制）。
 ## 本轮改动一：锁定后浮层不得对鼠标有任何反应（未真机验证）
 

@@ -147,7 +147,9 @@ const ENGINE_DRIVERS: Record<SpeechEngine, EngineDriver> = {
     split: true,
     mime: SPEECH_MIME.sovits,
     scheduling: 'lazy',
-    synthAhead: 1,
+    // 不预取：预取会在「正在念」的那一刻再起一次 GPU 推理，游戏开着时就是掉帧加整机静音一下。
+    // 代价是每段之间多一次合成等待，换来播放期间显卡完全安静。
+    synthAhead: 0,
     genDropout: true,
     dropQueued: true,
     exclusiveLane: 'sovits',

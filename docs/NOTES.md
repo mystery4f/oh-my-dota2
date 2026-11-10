@@ -707,3 +707,11 @@
 - 根因：上一轮训练被用户停止时，`model.pt.best` 正写到一半，文件在但末尾没有 zip 的 EOCD（`50 4b 05 06`）。`incrementalWeightFile` 只按文件名优先级（`avg1 → best → model.pt`）挑，从不看内容，于是拿残件当起点；`torch.load` 立刻炸。同目录里 `model.pt` 是完整的，优先级却排在残件之后。
 - 修法：`src/main/services/train/asr-ft.ts` 的 `torchArchiveIntact`（读末 66000 字节找 EOCD，<1KB 直接判坏）+ `usableIncrementalWeight`（挑第一个真完整的），`findIncrementalSource` 与 `stageIncrementalSource` 都用它；只剩残件时报「上一轮的权重是半成品（… 末尾缺 Central Directory，多半是训练中途被停止时正在写）：先做一次「从底模重训」」，复制到 `<现役目录>.next` 后再复验一次（大小不符 = 没抄全）。
 - 附带修掉「失败原因等于没说」：`src/main/services/train/manager.ts` 的 `lastErrorLine()` 从日志尾巴取最后一条真错误行，stage 变成 `失败 (exit 1)：RuntimeError: …`，同时写进 runs.db 的 `error`。
+
+### 起播那一下游戏静音又掉帧 = 预取把推理压在「正在念」的那一刻
+
+- 症状：对讲出声的瞬间，Dota 的画面卡一下、游戏声音整片消失又回来；换成扬声器或蓝牙耳机都一样，说明跟游戏音频设备无关。
+- 根因：`src/main/services/voice/speech-pipeline.ts` 的 sovits 表项原来是 `synthAhead: 1`——当前段的合成**一返回**就发下一段的推理请求，而这个时刻正好是当前段开始播放的时刻。本机 sovits 一句 20 字要 2–5 s，GPU 与显存一起被按住，而这块 8 GB 卡上 dwm 3.8 GB + sovits 服务常驻 2.8 GB + dota2 1.5 GB 已经占满，起播时再要显存就得换页，游戏跟着掉帧，音频引擎一并打嗝。
+- 修法：sovits 改成 `synthAhead: 0`（播放期间不再发任何推理），代价是每段之间多等一次合成；`src/main/probes/tts-pipeline.ts` 的「段间预取」那块断言同步改成「本段出声时不发下一段的合成」。
+- 怎么确认是这个原因：`data/logs/voice-chain.jsonl` 里看带 `seg>1` 的条目，改前改后 `firstAudioMs` 与 `speakMs` 的差值会明显变大（等待从段中挪到了段间），而 `logs/` 下 Dota 侧的卡顿不再出现。
+- 还可以再省一大笔：sovits 的 api_v2 常驻 2.8 GB 显存，不在说话时也不还；`dwm.exe` 3.8 GB 需要单独查（浮层收起后是否回落）。
