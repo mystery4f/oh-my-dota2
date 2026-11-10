@@ -35,7 +35,6 @@ tags: [docs, index]
 | `GLOSSARY.md`（根） | 项目领域术语表：识别引擎 / 模型 / 微调腿 / 转正 / 热词 / 推理互斥… | 现行 |
 | `docs/IDEAS.md` | 功能想法池（未排期） | 现行 |
 | `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 那一轮的待验收项 | 历史快照 |
-| `docs/HANDOFF-2026-11-02.md` | 语音管线会话交接 | 历史快照 |
 | `docs/HANDOFF-2026-11-10.md` | 架构走查实施交接：待跑的三个探针、探针盖不到的手测项、环境坑 | 现行 |
 
 ## 设计与规范
@@ -115,7 +114,5 @@ tags: [docs, index]
 
 | 文件 | 内容 |
 | --- | --- |
-| `docs/HANDOFF-2026-11-02.md` | 语音管线会话交接（2026-11-02 晨） |
 | `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 2026-11-02 那轮待验收清单 |
-| `docs/agents/handoff-asr-finetune-2026-11-02.md` | ASR 微调闭环 + 一键环境安装器的交接 |
 | `docs/agents/retro-asr-finetune-2026-11.md` | 同一次的复盘 |
