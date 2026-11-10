@@ -638,7 +638,8 @@
 ### 防截屏会让浮层收不到鼠标
 - 症状：解锁后拖动条带、拉两侧完全没反应，鼠标像点在空气上。
 - 根因：窗口开着 `setContentProtection(true)`（`WDA_EXCLUDEFROMCAPTURE`）。它把窗口从截屏里摘出去的同时，在 Windows 上也会让部分鼠标消息不再送达该窗口——而这正是「解锁后我要操作它」的时刻。
-- 修法：防护跟随锁定态——锁定（默认）开着防截屏，解锁时关掉，重新锁定时恢复。
+- 修法：防护跟随「能不能操作」而不是跟随锁定——锁定且呼出面板没开时挡截图，解锁或面板打开都让开。判据在 `shouldProtectContent(locked, panelOpen)`。
+- 2026-11 追加：之前只判锁定，于是「锁定状态下按 Alt+Shift+H 唤出面板」既挡截图又丢鼠标消息，看着像面板坏了。现在面板一开就解除防护。
 - 顺带：外部截图工具（含我自己的桌面截图）看不到浮层，就是这条在起作用；排查「浮层在哪」时别拿截图当证据。
 
 ### 底色不透明度要给用户一个旋钮
@@ -661,6 +662,18 @@
 - 根因：早期为了让「收起还能点回来」，把穿透写成 `locked && !collapsed`——把「能不能点到」和「窗口多大」绑在一起了。两件事本来无关。
 - 修法：抽出纯函数 `shouldIgnoreMouse(locked, replyOpen)`，只有「锁定且不在回复」才穿透；收起不改变它。收起后要展开按 **Alt+Shift+B**（全局热键，不依赖点得到），或先 Alt+Shift+P 解锁再点。
 - 教训：一个布尔判定里塞进两个维度的状态（锁定 / 尺寸），迟早会互相污染。
+
+### 呼出面板关不掉：文案写着 Esc，代码里没人监听
+- 症状：按 Alt+Shift+H 唤出面板后，Esc 按了没反应，只能用鼠标点「关闭（Esc）」，或再按一次热键。
+- 根因：按钮文案（`src/renderer/src/overlay/summon-panel.tsx`）与 `GLOSSARY.md` 都写着 Esc 能关，但渲染层只有方向键/Enter 的监听，全仓库没有一处处理 `Escape`。
+- 修法：`SummonPanel` 自己挂 `keydown`，命中 `Escape` 就调 `overlayPanelToggle()`，状态与穿透恢复交给主进程 `togglePanel`（它本来就这么做）。
+- 教训：按钮上写了快捷键，就等于对外承诺了这条路径；文案和监听必须同一个提交里出现。
+
+### 锁定后鼠标划过浮层还会亮 = forward 把移动消息喂给了页面
+- 症状：浮层锁定（默认态）之后，指针划过去行还会亮、光标还会变，看着像「锁定没生效」。
+- 根因：`setIgnoreMouseEvents(true, { forward: true })`。`forward` 只会把鼠标**移动**消息转发给页面（Electron 类型文档 `IgnoreMouseEventsOptions` 的原话是 forwards mouse move messages to Chromium），点击从来不转发。于是点击确实给了游戏，CSS `:hover` 照样跟着指针跑——半开半关比全开更像 bug。
+- 修法：穿透只调 `setIgnoreMouseEvents(ignore)`，不开 `forward`。锁定 = 对鼠标完全无感：不亮、不拖、不滚；只有呼出面板打开时才恢复可点。
+- 顺带：`createWindow()` 里也补一次穿透样式。`applyGeometry` / `togglePanel` 都会直接开窗，只在 `show()` 里设一次，等于把鼠标交给了一块没人管的透明窗口。
 
 ### 浮层交互：正常时「什么都不显示」
 - 现状：锁定+正常捕获时，pill 整块隐藏——浮层是字幕，不是仪表盘。只有三种情况会出现一行字：回复框打开、配置态（未锁定）、以及「取不到字」。

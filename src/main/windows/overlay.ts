@@ -8,7 +8,13 @@ import {
 } from '@shared/ipc'
 import { broadcastToWindows } from './broadcast'
 import { loadSettings, saveSettings } from '../services/settings'
-import { clampGeometry, shouldIgnoreMouse, snapToEdges, windowBoundsFor } from '@shared/overlay-geometry'
+import {
+  clampGeometry,
+  shouldIgnoreMouse,
+  shouldProtectContent,
+  snapToEdges,
+  windowBoundsFor
+} from '@shared/overlay-geometry'
 import { overlayStateFromSettings, reduceOverlay, type OverlayEvent, type OverlayState } from '@shared/overlay-state'
 import { formatAccelerator } from '@shared/hotkeys'
 
@@ -95,11 +101,14 @@ class OverlayManager {
     // 锁定 / 解锁对收起的小图标同样生效：锁定就穿透，防误点；
     // 要展开就按「收起/展开」热键（全局热键，不依赖点得到）或先解锁。
     const ignore = shouldIgnoreMouse(this.s.locked, this.s.panelOpen)
-    this.win.setIgnoreMouseEvents(ignore, { forward: true })
+    // 不开 forward：它把鼠标移动消息转发给页面，锁定的浮层照样跟着指针亮悬停高亮，
+    // 看起来「鼠标还能操作它」。锁定就该对鼠标完全无感：不亮、不拖、不滚。
+    this.win.setIgnoreMouseEvents(ignore)
     // 防截屏默认开着（否则手动截图会把浮层自己的行 OCR 回来再翻一遍），
     // 但 WDA_EXCLUDEFROMCAPTURE 在 Windows 上会让窗口收不到部分鼠标事件——
-    // 解锁本来就是「我要操作它」的时刻，这时候关掉防护；锁定时再打开。
-    this.win.setContentProtection(this.s.locked)
+    // 解锁是「我要操作它」的时刻，呼出面板打开也是：这两种情况都关掉防护。
+    // 只在「锁定且面板没开」时挡截图——否则点了没反应，用户只会说「面板坏了」。
+    this.win.setContentProtection(shouldProtectContent(this.s.locked, this.s.panelOpen))
   }
 
   setOpacity(value: number): OverlayStatus {
@@ -347,8 +356,11 @@ class OverlayManager {
       }
     })
     win.setAlwaysOnTop(true, 'screen-saver')
-    // 初始状态跟随锁定：锁定态（默认）开着防截屏，解锁后由 applyClickThrough 关掉。
-    win.setContentProtection(this.s.locked)
+    // 初始状态跟随锁定与面板：只有「锁定且面板没开」才挡截图，理由同 applyClickThrough。
+    win.setContentProtection(shouldProtectContent(this.s.locked, this.s.panelOpen))
+    // 穿透样式开窗即上，别只等 show()：applyGeometry / togglePanel 这些路径也会开窗，
+    // 少设一次就是锁定期间把鼠标交给了一块透明窗口。
+    win.setIgnoreMouseEvents(shouldIgnoreMouse(this.s.locked, this.s.panelOpen))
     win.on('closed', () => {
       this.win = null
     })

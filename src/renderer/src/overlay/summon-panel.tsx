@@ -18,6 +18,16 @@ const TABS: { id: Tab; label: string }[] = [
 export function SummonPanel(props: { status: OverlayStatus; onStatus: (s: OverlayStatus) => void }): JSX.Element {
   const { status } = props
   const [tab, setTab] = useState<Tab>('history')
+  // 按钮上写着「关闭（Esc）」，这里就得真的能关。主进程 togglePanel 管状态与穿透恢复。
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      void window.api.overlayPanelToggle().then(props.onStatus)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [props.onStatus])
   return (
     <div id="panel">
       <div id="panel-head">

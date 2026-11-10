@@ -265,8 +265,13 @@ it and nothing happened". The overlay and the pause hint print key names from th
   module next to the component.
 - Overlay diagnostics: a locked overlay is click-through *and* content-protected, so it is absent from
   every screenshot and ignores the mouse. Never conclude "the overlay is not showing" from a desktop
-  capture — read the panel badge or the `overlay:status` payload instead. Both rules (ignore clicks,
-  content protection) come from one function, `shouldIgnoreMouse(locked, replyOpen)`.
+  capture — read the panel badge or the `overlay:status` payload instead. Both rules are pure seams in
+  `src/shared/overlay-geometry.ts`: `shouldIgnoreMouse(locked, panelOpen)` and
+  `shouldProtectContent(locked, panelOpen)`. The summon panel (`Alt+Shift+H`) is the one state that must
+  stay both clickable and capturable — otherwise the buttons you were called over to press do nothing.
+  Pass no `forward` option: it forwards mouse-move messages to the page, so a locked overlay still
+  lights its hover styles and looks clickable while clicks go to the game. Locked means invisible to
+  the mouse — no highlight, no drag, no wheel; only the summon panel makes it clickable again.
 - Hiding the overlay is not an A/B for "the overlay repaint is the cost": `startVoiceCapture()` and
   `toggleVoiceCapture()` both call `show()` when the window is hidden, so it reappears the moment you speak
   (`overlayCollapsed` is ignored by that path too — set it through the panel, then check the settings file).

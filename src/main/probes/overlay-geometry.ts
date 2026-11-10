@@ -10,6 +10,7 @@ import {
   moveBy,
   resizeFromLeft,
   shouldIgnoreMouse,
+  shouldProtectContent,
   snapToEdges,
   SNAP_PX,
   resizeFromRight
@@ -135,6 +136,9 @@ export function runOverlayGeometryProbe(): void {
   push('锁定就穿透', shouldIgnoreMouse(true, false) === true, 'locked=true')
   push('解锁不吃穿透', shouldIgnoreMouse(false, false) === false, 'locked=false')
   push('回复框打开必须可点', shouldIgnoreMouse(true, true) === false, 'locked+reply')
+  // 防截屏会吞掉部分鼠标事件（WDA_EXCLUDEFROMCAPTURE），所以它只能跟「不可操作」同义。
+  push('锁定就挡截图', shouldProtectContent(true, false) === true, 'locked=true')
+  push('面板开着不挡截图', shouldProtectContent(true, true) === false, 'locked+panel')
 
   // 贴边吸附：只在真正靠边时生效，不能把「想放中间」的位置拽走。
   const snapL = snapToEdges({ x: 6, y: 300, width: 400, height: 300 }, WORK)

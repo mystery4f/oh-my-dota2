@@ -101,6 +101,15 @@ export function shouldIgnoreMouse(locked: boolean, panelOpen: boolean): boolean 
   return !panelOpen && locked
 }
 
+/**
+ * 防截屏跟着「能不能操作」走，不跟着锁定走：
+ * WDA_EXCLUDEFROMCAPTURE 在 Windows 上会让窗口丢掉一部分鼠标事件，
+ * 呼出面板打开正是「我要点它」的时刻，防护必须让开。
+ */
+export function shouldProtectContent(locked: boolean, panelOpen: boolean): boolean {
+  return locked && !panelOpen
+}
+
 /** 离屏幕边多近就吸附：够近是「想贴边」，太远是「想放开」。 */
 export const SNAP_PX = 24
 
