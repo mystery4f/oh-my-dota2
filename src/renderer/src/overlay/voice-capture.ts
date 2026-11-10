@@ -3,7 +3,8 @@ import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
-import { describeCaptureDevice, openMicStream } from '../lib/mic'
+import { describeCaptureDevice } from '../lib/mic'
+import { startPcmRecorder, type PcmRecorder } from '../lib/pcm-recorder'
 
 /** 录音上限：一条对讲顶多 20 秒，超时自动停——忘记停也不会一直占着麦克风。 */
 const RECORD_MAX_MS = 20_000
@@ -32,27 +33,22 @@ export interface VoiceCaptureSink {
 }
 
 /**
- * 语音对讲的录音腿：getUserMedia → ScriptProcessorNode 攒 PCM → 停止时
+ * 语音对讲的录音腿：共享录音图（lib/pcm-recorder）攒 PCM → 停止时
  * 转写（whisper.cpp）→ 翻译 → 声出，一键到底。
- * ScriptProcessorNode 已废弃但不需要额外 worklet 资产，多条 page 的构建里最省事。
  */
 export function createVoiceCapture(sink: VoiceCaptureSink) {
   let recording = false
-  let recordCtx: AudioContext | null = null
-  let recordStream: MediaStream | null = null
+  let recorder: PcmRecorder | null = null
   /** 本次录音实际用的输入设备（label|id 前 8 位），随转写一起交给主进程进日志。 */
   let recordDevice = ''
-  let recordNode: ScriptProcessorNode | null = null
-  let recordChunks: Float32Array[] = []
   let recordTimer: ReturnType<typeof setTimeout> | null = null
 
   async function start(): Promise<void> {
     if (recording) return
     try {
-      const opened = await openMicStream()
-      recordStream = opened
+      recorder = await startPcmRecorder()
       // 记下「这次到底开了哪台」：断声、串音这类问题，日志里没有设备名就只能猜。
-      recordDevice = await describeCaptureDevice(opened).catch(() => '')
+      recordDevice = await describeCaptureDevice(recorder.stream).catch(() => '')
     } catch (err) {
       const micError = '麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）'
       sink.pushRow({ id: `voice-err-${Date.now()}`, ts: Date.now(), original: '🎤 ' + micError, translated: null })
@@ -61,15 +57,6 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       sink.stage('麦克风不可用', 2500)
       return
     }
-    recordCtx = new AudioContext()
-    const source = recordCtx.createMediaStreamSource(recordStream)
-    recordNode = recordCtx.createScriptProcessor(4096, 1, 1)
-    recordChunks = []
-    recordNode.onaudioprocess = (event) => {
-      recordChunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
-    }
-    source.connect(recordNode)
-    recordNode.connect(recordCtx.destination)
     recording = true
     window.api.reportVoiceState(true)
     sink.stage(recordingStageLine(sink.voiceCaptureMode(), sink.voiceCaptureKey()))
@@ -82,16 +69,8 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     window.api.reportVoiceState(false)
     if (recordTimer) clearTimeout(recordTimer)
     recordTimer = null
-    const rate = recordCtx?.sampleRate ?? 48_000
-    recordNode?.disconnect()
-    recordNode = null
-    recordStream?.getTracks().forEach((track) => track.stop())
-    recordStream = null
-    const ctx = recordCtx
-    recordCtx = null
-    if (ctx) ctx.close().catch(() => undefined)
-    const chunks = recordChunks
-    recordChunks = []
+    const { chunks, sampleRate: rate } = recorder?.stop() ?? { chunks: [], sampleRate: 48_000 }
+    recorder = null
     const frames = chunks.reduce((total, chunk) => total + chunk.length, 0)
     if (frames < (rate * MIN_SPEECH_MS) / 1000) {
       fail('录音太短，已忽略', '录音太短（不足 0.3 秒）', 1800)
