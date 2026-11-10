@@ -25,7 +25,7 @@ import { getOverlayManager } from '../../windows/overlay'
 export async function voiceReply(transcript: string): Promise<VoiceReplyResult> {
   const settings = loadSettings()
   const recognized = String(transcript ?? '').trim()
-  // 对讲计时：识别那一段由 transcribeAudio 记着，这里领走——链从识别开始算，不是从翻译开始。
+  // 对讲计时：识别那一段由 transcribeForVoice 记着，这里领走——链从识别开始算，不是从翻译开始。
   const timer = new ChainTimer(takeAsrRun())
   const timed = settings.voiceShowTiming
   // 耗时统计是可选开的（面板「对讲 → 耗时统计」，默认关）：关着就一行都不量，

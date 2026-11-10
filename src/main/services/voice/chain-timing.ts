@@ -7,7 +7,7 @@ import { appendCappedJsonl } from '../logs/jsonl'
  * 对讲计时（voice-reply-latency）：谁在等、等在哪一段。
  *
  * 这条链严格串行（识别 → 翻译 → 首段合成 → 起播 → 播完），所以一份计时跟着链走：
- * 识别那一段由 transcribeAudio 记账（noteAsrRun），voiceReply 开头把它领走（takeAsrRun），
+ * 识别那一段由 transcribeForVoice 记账（noteAsrRun），voiceReply 开头把它领走（takeAsrRun），
  * 后面的段各自在自己的执行点打一下 note。只认第一次，重复打点不会把数字改小。
  *
  * 识别记录 60 秒内有效：对讲一次一句，中间没有别的识别能插进来；超时说明这句不是对讲来的
