@@ -112,6 +112,22 @@ export function buildSystemPrompt(
   return base + '\n\nTone:\n- ' + REPLY_TONE_HINTS[tone]
 }
 
+/** 编号契约：批量提交时每行独立翻译，禁止合并/拆分/乱序——capture 批量路径的格式保证。 */
+const NUMBERED_CONTRACT_NOTE = [
+  '',
+  'When the user message contains numbered lines like "1| text", each numbered line is one independent chat line: reply with the same numbering and exactly one translation per line, in the same order, e.g. "1| 译文".',
+  'Never merge, split, drop, reorder, or add lines.'
+].join('\n')
+
+/** 会话系统指令 = 方向提示词（短格式 + 示例）+ 编号契约；静态，会话按会话配置指令，不按行。 */
+export function instructionsFor(
+  direction: TranslateDirection,
+  tone: ReplyTone = 'terse',
+  maxWords = DEFAULT_MAX_WORDS
+): string {
+  return buildSystemPrompt(direction, tone, maxWords) + NUMBERED_CONTRACT_NOTE
+}
+
 /** 去掉引号与句末标点，再按词截断到上限词数/字符：游戏聊天框容不下长句。 */
 export function clampReply(text: string, maxWords = DEFAULT_MAX_WORDS): string {
   const cleaned = text

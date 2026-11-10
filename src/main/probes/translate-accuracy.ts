@@ -12,8 +12,7 @@ import {
   KEEP_VERBATIM_TOKENS
 } from '@shared/dota-glossary'
 import { ensureTerminalPunct, latinTokenViolations } from '@shared/translate-fidelity'
-import { DEFAULT_MAX_WORDS, SYSTEM_PROMPTS, buildSystemPrompt, clampReply, maxWordsFromSettings, replyWithinLimits } from '../services/providers'
-import { instructionsFor } from '../services/session/durable-translator'
+import { DEFAULT_MAX_WORDS, SYSTEM_PROMPTS, buildSystemPrompt, instructionsFor, clampReply, maxWordsFromSettings, replyWithinLimits } from '../services/providers'
 
 const deepEqualJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 

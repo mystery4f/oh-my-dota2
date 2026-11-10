@@ -18,7 +18,7 @@ import { ensureTerminalPunct, latinTokenViolations } from '@shared/translate-fid
 import { loadSettings } from '../settings'
 import {
   DEFAULT_MAX_WORDS,
-  buildSystemPrompt,
+  instructionsFor,
   maxWordsFromSettings,
   clampReply,
   looksLikeCommentary,
@@ -36,6 +36,7 @@ import {
   type TranslationOrigin
 } from './translate-cache'
 
+import { latencySummary, trackLatency, type LatencySummary } from './translator-latency'
 /** Longest block sent to the model in one submission; longer ticks are split. */
 const BLOCK_LIMIT = 8
 /** A reasoning model can spend several seconds per answer; anything past this is a stall. */
@@ -73,11 +74,6 @@ function sessionSlot(
   return slot
 }
 export type TranslateScope = 'prod' | 'try' | 'warm'
-const NUMBERED_CONTRACT_NOTE = [
-  '',
-  'When the user message contains numbered lines like "1| text", each numbered line is one independent chat line: reply with the same numbering and exactly one translation per line, in the same order, e.g. "1| 译文".',
-  'Never merge, split, drop, reorder, or add lines.'
-].join('\n')
 
 interface SessionRuntime {
   key: string
@@ -94,28 +90,6 @@ interface SessionRuntime {
   maxWords: number
 }
 
-export type LatencySource = 'session' | 'direct' | 'timeout' | 'error'
-
-export interface LatencySample {
-  at: number
-  ms: number
-  source: LatencySource
-  lines: number
-}
-
-/** 翻译抖动统计：服务端首字节能从 1.3s 抖到 31s，只看单次没用，必须看分位数。 */
-export interface LatencySummary {
-  count: number
-  p50: number | null
-  p90: number | null
-  max: number | null
-  session: number
-  direct: number
-  timeout: number
-  error: number
-  lastSource: LatencySource | null
-  lastMs: number | null
-}
 
 export interface SessionStatus {
   active: boolean
@@ -127,33 +101,6 @@ export interface SessionStatus {
   latency: LatencySummary
 }
 
-const LATENCY_WINDOW = 60
-const latencySamples: LatencySample[] = []
-
-function trackLatency(ms: number, source: LatencySource, lines: number): void {
-  latencySamples.push({ at: Date.now(), ms: Math.round(ms), source, lines })
-  if (latencySamples.length > LATENCY_WINDOW) latencySamples.splice(0, latencySamples.length - LATENCY_WINDOW)
-}
-
-export function latencySummary(): LatencySummary {
-  const times = latencySamples.map((sample) => sample.ms).sort((a, b) => a - b)
-  const pick = (ratio: number): number | null =>
-    times.length === 0 ? null : times[Math.min(times.length - 1, Math.floor(times.length * ratio))]
-  const count = (source: LatencySource): number => latencySamples.filter((sample) => sample.source === source).length
-  const last = latencySamples[latencySamples.length - 1]
-  return {
-    count: latencySamples.length,
-    p50: pick(0.5),
-    p90: pick(0.9),
-    max: times.length > 0 ? times[times.length - 1] : null,
-    session: count('session'),
-    direct: count('direct'),
-    timeout: count('timeout'),
-    error: count('error'),
-    lastSource: last?.source ?? null,
-    lastMs: last?.ms ?? null
-  }
-}
 
 let runtime: SessionRuntime | null = null
 let opening: Promise<SessionRuntime> | null = null
@@ -241,14 +188,6 @@ export function resetSessionsOnBoot(): void {
   if (gone.length > 0) console.log('SESSIONS_RESET', JSON.stringify({ files: gone.length }))
 }
 
-/** 会话系统指令 = 方向提示词（短格式 + 示例）+ 编号契约；静态，会话按会话配置指令，不按行。 */
-export function instructionsFor(
-  direction: TranslateDirection,
-  tone: ReplyTone = 'terse',
-  maxWords = DEFAULT_MAX_WORDS
-): string {
-  return buildSystemPrompt(direction, tone, maxWords) + NUMBERED_CONTRACT_NOTE
-}
 
 function withTimeout<T>(promise: Promise<T>, label: string, ms = SUBMIT_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve, reject) => {
