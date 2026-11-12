@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { HOTWORD_LIMIT, joinHotwords, mergeHotwords, parseHotwords } from '@shared/asr-hotwords'
 import { Input } from '@/components/ui/input'
 
 /**
- * 热词 chip 编辑器：打词回车（或打出分隔符、粘贴逗号串）成词，× 删除，Backspace 删末词。
- * 每次提交都过 parse→merge→join，落盘的永远是规范串，存储里不会再留全角逗号；
- * 提交按词发生、没有逐键保存，worker 的识别器不会跟着敲键重载。
+ * Hotword chip editor: Enter (or a separator, or a pasted comma string) commits a word, x removes one, Backspace pops the last.
+ * Every commit goes through parse→merge→join so storage always holds a canonical string; commits are per word,
+ * never per keystroke, so the worker's recognizer does not reload while typing.
  * @author mystery4f
  */
 export function HotwordEditor({
@@ -21,6 +21,7 @@ export function HotwordEditor({
   disabled: boolean
 }): React.ReactElement {
   const [draft, setDraft] = useState('')
+  const composingRef = useRef(false)
   const words = parseHotwords(value)
   const full = words.length >= HOTWORD_LIMIT
 
@@ -34,10 +35,19 @@ export function HotwordEditor({
     onChange(joinHotwords(words.filter((w) => w !== word)))
   }
 
-  const onDraftChange = (raw: string): void => {
-    // 打到分隔符（中英文逗号、顿号、分号、空白）就把已成的词直接收下，粘贴整串也走这条路。
+  const settle = (raw: string): void => {
+    // One settlement pass: a separator (CJK/ASCII comma, dunhao, semicolon, whitespace) commits the finished words; a pasted string takes the same path.
     if (/[,，、;；\s]/.test(raw)) commit(raw)
     else setDraft(raw)
+  }
+
+  const onDraftChange = (raw: string): void => {
+    // While the IME composition is live (pinyin not yet committed), only mirror it into the draft — never settle.
+    if (composingRef.current) {
+      setDraft(raw)
+      return
+    }
+    settle(raw)
   }
 
   return (
@@ -66,13 +76,22 @@ export function HotwordEditor({
           disabled={disabled || full}
           placeholder={full ? `已达上限 ${HOTWORD_LIMIT} 词，先删一个再加` : '容易认错的词，回车收下一个'}
           onChange={(e) => onDraftChange(e.target.value)}
+          onCompositionStart={() => {
+            composingRef.current = true
+          }}
+          onCompositionEnd={(e) => {
+            composingRef.current = false
+            settle(e.currentTarget.value)
+          }}
           onKeyDown={(e) => {
+            // Every keypress during an IME composition belongs to the composition, not to the editor.
+            if (composingRef.current || e.nativeEvent.isComposing) return
             if (e.key === 'Enter') commit(draft)
             else if (e.key === 'Backspace' && draft === '' && words.length > 0) remove(words[words.length - 1])
             else if (e.key === 'Escape') setDraft('')
           }}
           onBlur={() => {
-            if (draft.trim() !== '') commit(draft)
+            if (!composingRef.current && draft.trim() !== '') commit(draft)
           }}
           className="h-8 w-64 text-sm"
         />
