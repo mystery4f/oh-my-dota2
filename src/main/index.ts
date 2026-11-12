@@ -54,8 +54,8 @@ import { trainManagerIfStarted } from './services/train/manager'
 import { reconcileTrainState } from './services/train/reconcile'
 import { runVoiceRuntimeProbe } from './probes/voice-runtime'
 import { runVoiceWorkerProbe } from './probes/voice-worker'
-import { loadSettings } from './services/settings'
-import { hotkeysState, installHotkeys, releaseHotkeys } from './services/hotkeys'
+import { loadSettings, onSettingsSaved } from './services/settings'
+import { hotkeysState, installHotkeys, releaseHotkeys, onHotkeysSaved } from './services/hotkeys'
 import { resetSessionsOnBoot, warmTranslator } from './services/session/durable-translator'
 import { translateInPlace } from './services/reply/reply-service'
 import { suppressExperimentalSqliteWarning } from './services/session/warnings'
@@ -336,6 +336,16 @@ app.whenReady().then(() => {
     }, 3000)
   }
 
+
+  // 写后联动挂在属主发出的观察者缝上（settings/hotkeys），handler 表只做转发。
+  onSettingsSaved(() => {
+    // 换引擎、换参考音频都得让对讲页那一行立刻翻牌。
+    void refreshVoiceOutReadiness()
+  })
+  onHotkeysSaved((result) => {
+    // 浮层和自己那行提示上的键名都来自 status()，不重发就会出现「键改了、浮层还在教旧键」。
+    if (!result.error) getOverlayManager().refreshStatus()
+  })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createDashboard()
   })

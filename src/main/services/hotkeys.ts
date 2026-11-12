@@ -114,6 +114,12 @@ export function hotkeysState(): HotkeysResult {
  * 面板存：整张表先校验再落盘。
  * 有冲突就整张拒收并说清撞在哪个键上——半存进去只会让用户下次启动莫名少一个键。
  */
+/** 保存成功的观察者缝：热键属主发事件，联动（浮层键名刷新）挂这里。 */
+const savedListeners: ((result: HotkeysResult) => void)[] = []
+export function onHotkeysSaved(listener: (result: HotkeysResult) => void): void {
+  savedListeners.push(listener)
+}
+
 export function saveHotkeysState(input: unknown): HotkeysResult {
   const map = normalizeHotkeyMap(input)
   const conflicts = findHotkeyConflicts(map)
@@ -124,5 +130,8 @@ export function saveHotkeysState(input: unknown): HotkeysResult {
     }
   }
   saveSettings({ hotkeys: map })
-  return { ...describeHotkeys(map, applyHotkeys(map)), error: null }
+  const result = { ...describeHotkeys(map, applyHotkeys(map)), error: null }
+  // 保存成功的观察者缝：浮层键名刷新这类联动挂这里，不散在 handler 表。
+  for (const listener of savedListeners) listener(result)
+  return result
 }

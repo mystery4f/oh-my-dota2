@@ -100,20 +100,9 @@ async function openExternalSafe(raw: string): Promise<OpenExternalResult> {
 const handlers: MainHandlers = {
   // 设置 / 提供商 / 翻译
   getSettings: () => loadSettings(),
-  // 存完设置顺手重算声出就绪：换引擎、换参考音频都得让对讲页那一行立刻翻牌。
-  setSettings: (patch) => {
-    const next = saveSettings(patch)
-    void refreshVoiceOutReadiness()
-    return next
-  },
+  setSettings: (patch) => saveSettings(patch),
   getHotkeys: () => hotkeysState(),
-  // 存完热键要重发一次浮层状态：浮层和自己那行提示上的键名都来自 status()，
-  // 不重发就会出现「键改了、浮层还在教旧键」，直到下一次状态变化。
-  setHotkeys: (map) => {
-    const result = saveHotkeysState(map)
-    if (!result.error) getOverlayManager().refreshStatus()
-    return result
-  },
+  setHotkeys: (map) => saveHotkeysState(map),
   testProvider: (provider) => testProvider(provider),
   translate: (text, direction) =>
     translateTry(loadSettings().provider, text, direction ?? 'en-zh').catch(() =>
@@ -159,7 +148,8 @@ const handlers: MainHandlers = {
     clipboard.writeText(String(text ?? ''))
     return true
   },
-  voiceReply: (args) => voiceReply({ text: String(args?.text ?? ''), rowId: args?.rowId }),
+  voiceReply: (args) =>
+    voiceReply({ text: String(args?.text ?? ''), rowId: args?.rowId, asrMs: args?.asrMs, mic: args?.mic }),
   // overlay 起录/停录/出结果时上抛，广播给所有窗口（面板按钮与回显行靠它活着）。
   reportVoiceState: (recording) => {
     broadcast(IPC.VOICE_RECORD_STATE, { recording: Boolean(recording) })

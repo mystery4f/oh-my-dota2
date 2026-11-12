@@ -14,7 +14,7 @@ import type {
 } from '@earendil-works/pi-durable'
 import type { ProviderConfig, ReplyTone, TranslateDirection, TranslationCacheCounts } from '@shared/ipc'
 import { thinkingCompatFor, thinkingLevelFor } from '@shared/provider-reasoning'
-import { ensureTerminalPunct, latinTokenViolations } from '@shared/translate-fidelity'
+import { ensureTerminalPunct, guardedTranslate } from '@shared/translate-fidelity'
 import { loadSettings } from '../settings'
 import {
   DEFAULT_MAX_WORDS,
@@ -492,23 +492,14 @@ async function translateWithSession(
       return translated
     }
 
-    let translated = await submitOnce()
-    translated = ensureTerminalPunct(text, translated)
-    // 保真守卫：缩写被写坏（bkb → bkg）就清历史重试一次；再犯就放弃，原文原样返回，
-    // 译文和记账本都不进（调用方对「译文 === 原文」本来就不落账）。适用于所有 scope 包括 try。
-    const violations = latinTokenViolations(text, translated, direction)
-    if (violations.length > 0) {
-      console.log('TRANSLATE_GUARD_RETRY', JSON.stringify({ tokens: violations, via: 'session' }))
+    let translated = ensureTerminalPunct(text, await submitOnce())
+    // 保真守卫：缩写被写坏（bkb → bkg）就清历史重试一次；再犯就放弃，原文原样返回
+    //（调用方对「译文 === 原文」本来就不落账）。两条车道共用同一份判定（guardedTranslate）。
+    translated = await guardedTranslate(text, translated, direction, 'session', async () => {
+      // 重试前清历史：把写坏缩写的回合从会话里抹掉，别让它变成下一句的范例。
       await resetHistory(direction, tone, scope)
-      translated = await submitOnce()
-      translated = ensureTerminalPunct(text, translated)
-      const again = latinTokenViolations(text, translated, direction)
-      if (again.length > 0) {
-        console.log('TRANSLATE_GUARD_GIVEUP', JSON.stringify({ tokens: again, translated: translated.slice(0, 200), via: 'session' }))
-        trackLatency(Date.now() - startedAt, 'session', 1)
-        return text
-      }
-    }
+      return ensureTerminalPunct(text, await submitOnce())
+    })
     trackLatency(Date.now() - startedAt, 'session', 1)
     return translated
   })
@@ -611,19 +602,10 @@ async function translateDirect(
   try {
     let output = await translateText(provider, text, direction, maxWords)
     output = ensureTerminalPunct(text, output)
-    // 直连同样过保真守卫（对冲赢家、冷却兜底都走这里），重试一次后放弃回原文。
-    const violations = latinTokenViolations(text, output, direction)
-    if (violations.length > 0) {
-      console.log('TRANSLATE_GUARD_RETRY', JSON.stringify({ tokens: violations, via: 'direct' }))
-      output = await translateText(provider, text, direction, maxWords)
-      output = ensureTerminalPunct(text, output)
-      const again = latinTokenViolations(text, output, direction)
-      if (again.length > 0) {
-        console.log('TRANSLATE_GUARD_GIVEUP', JSON.stringify({ tokens: again, translated: output.slice(0, 200), via: 'direct' }))
-        trackLatency(Date.now() - startedAt, 'direct', 1)
-        return text
-      }
-    }
+    // 直连同样过保真守卫（对冲赢家、冷却兜底都走这里），判定与会话车道共用一份。
+    output = await guardedTranslate(text, output, direction, 'direct', async () =>
+      ensureTerminalPunct(text, await translateText(provider, text, direction, maxWords))
+    )
     trackLatency(Date.now() - startedAt, 'direct', 1)
     return output
   } catch (err) {

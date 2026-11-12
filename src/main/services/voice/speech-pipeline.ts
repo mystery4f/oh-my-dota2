@@ -92,6 +92,26 @@ export interface SpeechRequest {
   lane?: string
 }
 
+
+/** 四条腿共用的请求构造器：引擎计划里能定的字段（引擎/嗓/语速/音高/语言）在这里落地，
+ * 调用方只声明腿自己的差异（切不切段、投递通道、嗓音白名单、每段精调）。
+ * 此前四条腿各自手写十来个字段，字段一加就要四处对账。 */
+export function requestFromPlan(
+  text: string,
+  plan: { engine: SpeechEngine; voice?: string; rate?: number; pitch?: number; lang?: 'zh' | 'en' },
+  deltas: Partial<SpeechRequest> = {}
+): SpeechRequest {
+  return {
+    text,
+    engine: plan.engine,
+    voice: plan.voice,
+    rate: plan.rate ?? 1,
+    pitch: plan.pitch,
+    lang: plan.lang,
+    ...deltas
+  }
+}
+
 /** 一次合成调用：引擎差异只在参数怎么给，调用处不看引擎名。 */
 type SynthCall = (
   adapters: SpeechSynthAdapters,
@@ -111,8 +131,6 @@ export interface EngineDriver {
   atEnqueue?: SynthCall
   /** 轮到才合成的引擎（lazy）：过期单子根本不浪费推理。 */
   atDelivery?: SynthCall
-  /** 段间预取：当前段合成一完成就发下一段的合成请求（长句听完不出空窗）；0 = 不预取。 */
-  synthAhead: number
   /** 换代作废：新单一来，旧单未合成的段当场作废——本机推理按住显卡，过时的话不值得再推理。 */
   genDropout?: boolean
   /** 排队积压丢弃：新单入队时顶掉队里可丢的旧单（被顶掉的永不合成、当场结账）。 */
@@ -127,12 +145,11 @@ export interface EngineDriver {
  * 投递循环只有一条（deliverSegments）：所有引擎的段都从它出，时序差异全在这张表里。
  */
 const ENGINE_DRIVERS: Record<SpeechEngine, EngineDriver> = {
-  system: { split: false, mime: null, scheduling: 'none', synthAhead: 0 },
+  system: { split: false, mime: null, scheduling: 'none' },
   edge: {
     split: true,
     mime: SPEECH_MIME.edge,
     scheduling: 'eager',
-    synthAhead: 0,
     atEnqueue: (adapters, text, voice, request) =>
       adapters.edge(text, voice, request.rate, request.pitch ?? 1, request.edgeVoices)
   },
@@ -140,16 +157,12 @@ const ENGINE_DRIVERS: Record<SpeechEngine, EngineDriver> = {
     split: false,
     mime: SPEECH_MIME.offline,
     scheduling: 'lazy',
-    synthAhead: 0,
     atDelivery: (adapters, text, voice, request) => adapters.offline(text, voice, request.rate)
   },
   sovits: {
     split: true,
     mime: SPEECH_MIME.sovits,
     scheduling: 'lazy',
-    // 不预取：预取会在「正在念」的那一刻再起一次 GPU 推理，游戏开着时就是掉帧加整机静音一下。
-    // 代价是每段之间多一次合成等待，换来播放期间显卡完全安静。
-    synthAhead: 0,
     genDropout: true,
     dropQueued: true,
     exclusiveLane: 'sovits',
@@ -231,7 +244,7 @@ function startEagerSynths(
 }
 
 /** 投递一段产出：所有引擎共用的唯一投递循环——按序 await、投递闸拦截、失败留 null
- * （调用方整句跳过，绝不换系统嗓子）。时序差异（预取、换代作废）看引擎表，不看引擎名。 */
+ * （调用方整句跳过，绝不换系统嗓子）。时序差异（入队发车、换代作废）看引擎表，不看引擎名。 */
 async function deliverSegments(
   request: SpeechRequest,
   adapters: SpeechSynthAdapters,
@@ -247,8 +260,6 @@ async function deliverSegments(
   let delivered = 0
   let dropped = 0
   let synthOkAny = false
-  // 段间预取：当前段在合成/播放时，下一段已经发车（同一时刻最多一段在推理，api_v2 不堆活）。
-  let inFlight: Promise<Buffer | null> | null = null
   for (let index = 0; index < segments.length; index += 1) {
     const text = segments[index]
     // 投递闸：宣布时只拦了宣布就过期的，这里拦合成期间变旧的——过期的段连推理都不该有。
@@ -271,9 +282,8 @@ async function deliverSegments(
         audioMime = audio ? driver.mime : null
       }
     } else if (driver.atDelivery) {
-      // 轮到才合成：上一段预取的正好接上，没有就现发车——过期单子根本不浪费推理。
-      audio = inFlight ? await inFlight : await driver.atDelivery(adapters, text, resolveFor(request, text).voice, request)
-      inFlight = null
+      // 轮到才合成：过期单子根本不浪费推理。
+      audio = await driver.atDelivery(adapters, text, resolveFor(request, text).voice, request)
       audioMime = audio ? driver.mime : null
     }
     // 合成期间来了新单：这条剩下的段不再投递（音频已花掉，认了）。
@@ -283,9 +293,6 @@ async function deliverSegments(
       break
     }
     // 预取下一段：当前段合成一完成就发车，推理时间藏进投递顺位里，长句听完不出空窗。
-    if (driver.synthAhead > 0 && driver.atDelivery && index + 1 < segments.length) {
-      inFlight = driver.atDelivery(adapters, segments[index + 1], resolveFor(request, segments[index + 1]).voice, request)
-    }
     if (audio) synthOkAny = true
     delivered += 1
     if (onSegment) await onSegment({ index, text, audio, audioMime })

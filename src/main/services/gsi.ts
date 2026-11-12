@@ -1,9 +1,9 @@
-import { appendFileSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { getCaptureService } from './capture/capturer'
 import { loadSettings, saveSettings } from './settings'
+import { appendCappedJsonl } from './logs/jsonl'
 import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
 import type { GsiStatusView } from '../../shared/ipc'
@@ -49,7 +49,6 @@ export function gsiChatLogPath(): string {
 }
 
 const CHAT_LOG_MAX_BYTES = 256_000
-let chatLogSize = -1
 
 function recordChatEvent(
   event: GsiEvent,
@@ -71,19 +70,7 @@ function recordChatEvent(
     gameTime: event.game_time ?? null,
     text: typeof event.message === 'string' ? event.message : null
   }
-  const line = JSON.stringify(record)
-  try {
-    const path = gsiChatLogPath()
-    if (chatLogSize < 0) chatLogSize = existsSync(path) ? statSync(path).size : 0
-    if (chatLogSize > CHAT_LOG_MAX_BYTES) {
-      writeFileSync(path, '')
-      chatLogSize = 0
-    }
-    appendFileSync(path, `${line}\n`, 'utf8')
-    chatLogSize += Buffer.byteLength(line) + 1
-  } catch {
-    // 证据日志写不进去不能反过来影响捕获
-  }
+  appendCappedJsonl(gsiChatLogPath(), record, CHAT_LOG_MAX_BYTES)
 }
 
 /**
@@ -94,13 +81,11 @@ function recordChatEvent(
  * player_slot 到底是哪个空间、own 判定该用哪个字段。
  */
 const PLAYER_LOG_MAX_BYTES = 64_000
-let playerLogSize = -1
 let lastPlayerLine = ''
-
 function recordPlayer(payload: GsiPayload): void {
   const p = payload.player
   if (!p) return
-  const key = JSON.stringify({
+  const fields = {
     matchId: payload.map?.matchid ?? null,
     gameState: payload.map?.game_state ?? null,
     name: p.name ?? null,
@@ -108,23 +93,12 @@ function recordPlayer(payload: GsiPayload): void {
     teamSlot: p.team_slot ?? null,
     teamName: p.team_name ?? null,
     steamid: p.steamid ?? null
-  })
+  }
   // 去重键不含 at：player 块内容不变就不落行，否则每帧一条把留痕刷成流水账。
+  const key = JSON.stringify(fields)
   if (key === lastPlayerLine) return
   lastPlayerLine = key
-  const line = `{"at":${JSON.stringify(new Date().toISOString())},${key.slice(1)}`
-  try {
-    const path = join(app.getPath('userData'), 'logs', 'gsi-player.jsonl')
-    if (playerLogSize < 0) playerLogSize = existsSync(path) ? statSync(path).size : 0
-    if (playerLogSize > PLAYER_LOG_MAX_BYTES) {
-      writeFileSync(path, '')
-      playerLogSize = 0
-    }
-    appendFileSync(path, `${line}\n`, 'utf8')
-    playerLogSize += Buffer.byteLength(line) + 1
-  } catch {
-    // 证据日志写不进去不能反过来影响对局
-  }
+  appendCappedJsonl(join(app.getPath('userData'), 'logs', 'gsi-player.jsonl'), { at: new Date().toISOString(), ...fields }, PLAYER_LOG_MAX_BYTES)
 }
 
 /**
@@ -135,46 +109,35 @@ function recordPlayer(payload: GsiPayload): void {
  */
 const DRAFT_LOG_MAX_BYTES = 256_000
 const SEEN_DRAFT_MAX = 64
-let draftLogSize = -1
 const seenDraft = new Set<string>()
 
 function recordDraft(payload: GsiPayload): void {
   const draft = payload.draft
   if (!draft || typeof draft !== 'object' || Object.keys(draft).length === 0) return
-  const line = JSON.stringify({
+  const record = {
     at: new Date().toISOString(),
     matchId: payload.map?.matchid ?? null,
     gameState: payload.map?.game_state ?? null,
     draft
-  })
-  if (seenDraft.has(line)) return
-  seenDraft.add(line)
-  if (seenDraft.size > SEEN_DRAFT_MAX)
-    for (const oldest of seenDraft.keys()) {
-      seenDraft.delete(oldest)
-      break
-    }
-  try {
-    const path = join(app.getPath('userData'), 'logs', 'gsi-draft.jsonl')
-    if (draftLogSize < 0) draftLogSize = existsSync(path) ? statSync(path).size : 0
-    if (draftLogSize > DRAFT_LOG_MAX_BYTES) {
-      writeFileSync(path, '')
-      draftLogSize = 0
-    }
-    appendFileSync(path, `${line}\n`, 'utf8')
-    draftLogSize += Buffer.byteLength(line) + 1
-  } catch {
-    // 证据日志写不进去不能反过来影响对局
   }
+  const line = JSON.stringify(record)
+  boundedRemember(seenDraft, line, SEEN_DRAFT_MAX)
+  appendCappedJsonl(join(app.getPath('userData'), 'logs', 'gsi-draft.jsonl'), record, DRAFT_LOG_MAX_BYTES)
 }
 
 /** 一帧里的聊天事件都落盘；自己说的那几条用 own 标出来，对账时好区分。 */
-/**
- * Dota 对同一条聊天会连着推二十多帧（实测每条重复 26–27 次），不记账就等于重复翻译 + 重复写盘。
- * 键用「时间 + 说话人 + 频道 + 槽位 + 正文」，同秒同人同话才算同一条。
- */
+/** 有界去重集合：塞进第 max+1 条时淘汰最早的一条（Map/Set 都按插入序，语义一致）。 */
+function boundedRemember(store: Set<string>, key: string, max: number): void {
+  if (store.has(key)) return
+  store.add(key)
+  if (store.size > max)
+    for (const oldest of store.keys()) {
+      store.delete(oldest)
+      break
+    }
+}
 const SEEN_CHAT_MAX = 256
-const seenChatEvents = new Map<string, true>()
+const seenChatEvents = new Set<string>()
 
 function chatEventKey(event: GsiEvent, slot: number | undefined): string {
   return [event.game_time ?? '', event.player_id ?? '', event.channel_type ?? '', slot ?? '', event.message ?? ''].join('|')
@@ -297,13 +260,7 @@ function recordChatEvents(payload: GsiPayload): ChatLine[] {
     if (event?.event_type !== 'chat_message') continue
     const key = chatEventKey(event, mySlot)
     if (seenChatEvents.has(key)) continue
-    seenChatEvents.set(key, true)
-    // 只留最近若干条：一局也就几百句，不需要无限长。
-    if (seenChatEvents.size > SEEN_CHAT_MAX)
-      for (const oldest of seenChatEvents.keys()) {
-        seenChatEvents.delete(oldest)
-        break
-      }
+    boundedRemember(seenChatEvents, key, SEEN_CHAT_MAX)
     const label = slotLabel(event.player_id, mySlot)
     // 英雄/关系在行组装前先算好：落盘记录里带上它们，对账时一眼看出这条当时有没有英雄名。
     const hero = slotHero(event.player_id)

@@ -3,7 +3,7 @@ import { broadcastToWindows } from '../../windows/broadcast'
 import { loadSettings } from '../settings'
 import { heroChinese } from '../hero-names'
 import { warmEdge } from './edge'
-import { speakPipeline, type SpeechSegment } from './speech-pipeline'
+import { requestFromPlan, speakPipeline, type SpeechSegment } from './speech-pipeline'
 import { resolveSpeechPlan } from '@shared/speech-plan'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 
@@ -216,20 +216,13 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
     // 一句交给管线：切段、并行合成、按序投递、丢弃与失败策略全在管内（见 speech-pipeline）。
     // lane='announce' 保证同一拍多条、跨拍多条都按到达顺序出声；GV 的懒队列由管线自带。
     void speakPipeline(
-      {
-        text: payload.text,
-        engine,
-        ts: payload.ts,
+      requestFromPlan(payload.text, { ...payload, engine: payload.engine ?? 'system' }, {
         cutoff,
         dropStale: settings.ttsDropBacklog === true,
         split: true,
         segmentChars: options.segmentChars,
-        voice: payload.voice,
-        rate: payload.rate,
-        pitch: payload.pitch,
-        lang: payload.lang,
         lane: 'announce'
-      },
+      }),
       (segment) => broadcast(payload, segment)
     ).catch(() => undefined)
   }

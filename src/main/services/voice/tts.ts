@@ -5,7 +5,7 @@ import type { VoicePreviewResult } from '@shared/ipc'
 import { resolveSpeechPlan, speechFailHint } from '@shared/speech-plan'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 import { loadSettings } from '../settings'
-import { speakPipeline, type SpeechSegment } from './speech-pipeline'
+import { requestFromPlan, speakPipeline, type SpeechSegment } from './speech-pipeline'
 
 /**
  * 语音试听：合成一句让人当场听见效果，顺便把音频落到 `tts-preview/`。
@@ -37,16 +37,7 @@ class TtsAdapter {
     const segments: SpeechSegment[] = []
     // 单句直发：不切段、不进队列。mime 一律从计划取，缺了它离线 WAV 就是静音。
     await speakPipeline(
-      {
-        text: draft,
-        engine: plan.engine,
-        split: false,
-        segmentChars: plan.segmentChars,
-        voice: plan.voice,
-        rate: plan.rate,
-        pitch: plan.pitch,
-        lang: plan.lang
-      },
+      requestFromPlan(draft, plan, { split: false }),
       (segment) => {
         segments.push(segment)
       }

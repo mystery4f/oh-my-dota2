@@ -8,7 +8,7 @@ import {
   resolveVoiceOutSynth,
   speakKeyVk
 } from '@shared/voice-out'
-import { speakPipeline } from './speech-pipeline'
+import { requestFromPlan, speakPipeline } from './speech-pipeline'
 import { SegmentPlayer } from './segment-player'
 import { errorMessage } from '@shared/errors'
 import { speechFailHint } from '@shared/speech-plan'
@@ -78,16 +78,7 @@ class VoiceOutService {
     // 合成收进管线：引擎、音色、语言、格式全由计划值决定，本腿只管「一段怎么播」。
     const got: Buffer[] = []
     await speakPipeline(
-      {
-        text: VOICE_OUT_TEST_LINE,
-        engine: synth.engine,
-        split: false,
-        voice: synth.voice,
-        rate: settings.ttsRate,
-        pitch: settings.ttsPitch,
-        lang: synth.lang,
-        edgeVoices: VOICE_OUT_VOICES
-      },
+      requestFromPlan(VOICE_OUT_TEST_LINE, synth, { split: false, edgeVoices: VOICE_OUT_VOICES }),
       (segment) => {
         if (segment.audio !== null) got.push(segment.audio)
       }
@@ -201,20 +192,17 @@ class VoiceOutService {
       // 合成→按序投递收进 speech-pipeline：切段并行合成（GV 走它自带的懒队列），这里只管「一段怎么播」——
       // 等窗口就绪、按住说话键、起播等结束；单段翻车跳过这段继续。
       await speakPipeline(
-        {
-          text,
-          engine: plan.engine,
-          split: true,
-          segmentChars: settings.ttsSpeakSegmentChars,
-          voice: plan.voice,
-          edgeVoices: VOICE_OUT_VOICES,
+        requestFromPlan(text, plan, {
           rate: settings.ttsRate,
           pitch: settings.ttsPitch,
+          split: true,
+          segmentChars: settings.ttsSpeakSegmentChars,
+          edgeVoices: VOICE_OUT_VOICES,
           resolveSegment: (segment) => {
             const synth = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, segment)
             return { voice: synth.voice, lang: synth.lang }
           }
-        },
+        }),
         async (segment) => {
           segmentCount += 1
           if (segment.audio === null) return

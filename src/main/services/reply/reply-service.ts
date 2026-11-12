@@ -10,7 +10,7 @@ import { abortTranslation, translateReply } from '../session/durable-translator'
 import { toPrintableAscii } from '@shared/chat-line'
 import { getInPlaceSender } from '../input/chat-inplace'
 import { getVoiceOutService } from '../voice/voice-out'
-import { ChainTimer, reportChainTiming, takeAsrRun } from '../voice/chain-timing'
+import { ChainTimer, reportChainTiming } from '../voice/chain-timing'
 import { getOverlayManager } from '../../windows/overlay'
 
 /**
@@ -28,12 +28,15 @@ export async function voiceReply(args: VoiceReplyArgs): Promise<VoiceReplyResult
   const settings = loadSettings()
   const recognized = String(args.text ?? '').trim()
   // 对讲计时：识别那一段由 transcribeForVoice 记着，这里领走——链从识别开始算，不是从翻译开始。
-  // 每完成一段就把整份快照推给渲染端（voice-stage）：短段靠留痕存在，不靠停留抢帧。
+  // 对讲计时：识别那一段的耗时与麦克风由渲染层随参数显式带来（asrMs/mic），链从识别开始算。
   const rowId = args.rowId
   const emitStage = (progress: VoiceStageProgress): void => {
     if (rowId !== undefined) broadcastToWindows(IPC.VOICE_STAGE, { rowId, ...progress })
   }
-  const timer = new ChainTimer(takeAsrRun(), { onStage: emitStage })
+  const timer = new ChainTimer(
+    args.asrMs !== undefined ? { startedAt: Date.now() - args.asrMs, ms: args.asrMs, mic: args.mic ?? '' } : null,
+    { onStage: emitStage }
+  )
   const timed = settings.voiceShowTiming
   // 耗时统计是可选开的（面板「对讲 → 耗时统计」，默认关）：关着就一行都不量，
   // 浮层、面板记录、logs/voice-chain.jsonl 就不会有数字——没有「量了但不显示」的中间态。

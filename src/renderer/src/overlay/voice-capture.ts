@@ -98,7 +98,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     const rowId = `voice-${Date.now()}`
     sink.pushRow({ id: rowId, ts: Date.now(), original: '🎤 ' + transcript, translated: null, pending: true })
     sink.stage(null)
-    const reply = await window.api.voiceReply({ text: transcript, rowId })
+    const reply = await window.api.voiceReply({ text: transcript, rowId, asrMs: result.asrMs, mic: result.mic })
     if (reply.translated) {
       sink.patchRow({
         id: rowId,

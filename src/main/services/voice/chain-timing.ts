@@ -8,26 +8,10 @@ import { appendCappedJsonl } from '../logs/jsonl'
  * 对讲计时（voice-reply-latency）：谁在等、等在哪一段。
  *
  * 这条链严格串行（识别 → 翻译 → 首段合成 → 起播 → 播完），所以一份计时跟着链走：
- * 识别那一段由 transcribeForVoice 记账（noteAsrRun），voiceReply 开头把它领走（takeAsrRun），
+ * 这条链严格串行（识别 → 翻译 → 首段合成 → 起播 → 播完），所以一份计时跟着链走：
+ * 识别那一段的耗时与麦克风由渲染层随 voiceReply 显式带来（asrMs/mic），
  * 后面的段各自在自己的执行点打一下 note。只认第一次，重复打点不会把数字改小。
- *
- * 识别记录 60 秒内有效：对讲一次一句，中间没有别的识别能插进来；超时说明这句不是对讲来的
- * （例如识别训练那边也在转写），宁可缺段也不张冠李戴。
  */
-const ASR_TTL_MS = 60_000
-let pendingAsr: { startedAt: number; ms: number; mic: string; measuredAt: number } | null = null
-
-export function noteAsrRun(startedAt: number, ms: number, mic = ''): void {
-  pendingAsr = { startedAt, ms, mic, measuredAt: Date.now() }
-}
-
-/** 领走最近一次识别；`now` 只为探针可测（TTL 判定），正常调用不用传。 */
-export function takeAsrRun(now = Date.now()): { startedAt: number; ms: number; mic: string } | null {
-  const hit = pendingAsr
-  pendingAsr = null
-  if (!hit || now - hit.measuredAt > ASR_TTL_MS) return null
-  return { startedAt: hit.startedAt, ms: hit.ms, mic: hit.mic }
-}
 
 /** 起播那 2 秒的三段拆账（窗口准备 / 按说话键 / 首段余量），只进日志，不进计时模型。 */
 export interface ChainPrepMs {

@@ -28,6 +28,7 @@ import { selectClass } from '../components/select-class'
 import { useRecorder, type RecorderTarget } from '../use-recorder'
 import { useSaveFlash, useSettings } from '../use-settings'
 
+import { firstStepOf, headlineOf, pageStateOf, type AsrTrainFacts, type PageState } from './asr-train-state'
 /** 开训方式的两档：增量微调（接上一轮权重，只补新错，默认）与全量重训（从底模重训，最稳的底）。 */
 const FT_MODE_OPTIONS: { id: AsrFtMode; label: string }[] = [
   { id: 'incremental', label: '增量微调' },
@@ -44,8 +45,6 @@ const STEPS = [
 
 type StepId = (typeof STEPS)[number]['id']
 
-/** 六态：页面永远先说清「现在在哪一步、下一步点哪里」。 */
-type PageState = 'env' | 'nodata' | 'ready' | 'running' | 'live' | 'failed'
 
 /**
  * 识别训练：左侧四步（环境 / 数据 / 训练 / 现役），右侧是当前状态与所选那一步的明细。
@@ -222,68 +221,35 @@ export function AsrTrainPage(): React.ReactElement {
     })
   }
 
-  const state = React.useMemo<PageState>(() => {
-    if (!status) return 'env'
-    if (!status.env.ok) return 'env'
-    if (taskRunning) return 'running'
-    if (runs[0]?.status === 'failed') return 'failed'
-    const trained = Object.values(status.coverage).reduce((sum, item) => sum + item.done, 0)
-    if (!status.swap.activeExists && status.pending.count === 0 && trained === 0) return 'nodata'
-    if (status.swap.activeExists && status.pending.count === 0) return 'live'
-    return 'ready'
-  }, [status, taskRunning, runs])
-
+  const pageFacts = React.useMemo<AsrTrainFacts>(
+    () => ({
+    status,
+    taskRunning,
+    task,
+    lastRun: runs[0] ?? null,
+    blocksCount: blocks.length,
+    busy: Boolean(busy)
+    }),
+    [status, taskRunning, task, runs, blocks, busy]
+  )
+  const state = React.useMemo<PageState>(() => pageStateOf(pageFacts), [pageFacts])
   // 首屏按状态选步，之后人点哪步就是哪步：状态再变也不把人从正在看的地方拽走。
   const picked = React.useRef(false)
   React.useEffect(() => {
-    if (picked.current || !status) return
+    if (picked.current) return
+    const first = firstStepOf(pageFacts)
+    if (!first) return
     picked.current = true
-    if (!status.env.ok) setStep('env')
-    else if (!status.swap.activeExists && status.pending.count === 0) setStep('data')
-    else if (status.pending.count > 0) setStep('train')
-    else setStep('live')
-  }, [status])
+    setStep(first)
+  }, [pageFacts])
 
-  const headline = ((): {
-    title: string
-    hint: string
-    action?: { label: string; step: StepId; disabled?: boolean; run: () => void }
-  } => {
-    if (state === 'env')
-      return {
-        title: '缺少训练环境',
-        hint: `还差 ${status?.env.gaps.length ?? 0} 项依赖：装好才能开训，录音、纠错、打包都不受影响。`,
-        action: { label: '安装环境', step: 'env', disabled: Boolean(busy) || taskRunning, run: installEnv }
-      }
-    if (state === 'nodata')
-      return {
-        title: '还没有可训练的数据',
-        hint: '先录一组读稿：说完自动停，存完跳下一句；也可以写一句话再录。',
-        action: { label: '去录音', step: 'data', run: () => setStep('data') }
-      }
-    if (state === 'running')
-      return {
-        title: '正在训练',
-        hint: `${task?.stage || '准备中'} · ${task?.progress ?? 0}%｜中途停掉不会动现役模型`,
-        action: { label: '停止', step: 'train', run: stopTraining }
-      }
-    if (state === 'failed')
-      return {
-        title: '上次训练失败了',
-        hint: `${runs[0]?.error ?? '记录里没写原因'}｜旧模型没动，改完再开一轮`,
-        action: { label: '重试', step: 'train', disabled: blocks.length > 0, run: startTraining }
-      }
-    if (state === 'live')
-      return {
-        title: '现役模型已就位',
-        hint: `${status?.target.label ?? '微调模型'} 正在用｜有新录音时才需要再训一轮`
-      }
-    return {
-      title: '可以开训',
-      hint: `${status?.pending.label ?? ''}｜全量 ${status?.estimate.fresh.label ?? ''}，增量 ${status?.estimate.incremental.label ?? ''}`,
-      action: { label: '开始训练', step: 'train', disabled: blocks.length > 0, run: startTraining }
-    }
-  })()
+  // headline 的文案与主按钮也从同一份事实推导（asr-train-state）：六态各自的提示都在一起。
+  const headline = headlineOf(pageFacts, state, {
+    startTraining,
+    stopTraining,
+    goData: () => setStep('data'),
+    installEnv
+  })
 
   const stepSummary: Record<StepId, string> = {
     env: status ? (status.env.ok ? '就绪' : `缺 ${status.env.gaps.length} 项`) : '…',

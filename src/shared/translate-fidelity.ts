@@ -52,3 +52,28 @@ export function ensureTerminalPunct(source: string, target: string): string {
   if (/[?？！!]$/.test(trimmed)) return target
   return trimmed.replace(/[.。]$/, '') + mark
 }
+
+/**
+ * 保真守卫的执行策略：违例就清场重试一次，再犯放弃回原文。
+ * 会话车道（durable-translator 的 submitOnce）和直连车道（translateText）共用这一份，
+ * 重试怎么跑由调用方给（retry），这里只管「判、重试、放弃」的顺序和留痕。
+ * 返回原文 = 调用方按「译文 === 原文」处理：不落账、不发频道。
+ */
+export async function guardedTranslate(
+  source: string,
+  first: string,
+  direction: TranslateDirection,
+  via: 'session' | 'direct',
+  retry: () => Promise<string>
+): Promise<string> {
+  const violations = latinTokenViolations(source, first, direction)
+  if (violations.length === 0) return first
+  console.log('TRANSLATE_GUARD_RETRY', JSON.stringify({ tokens: violations, via }))
+  const translated = await retry()
+  const again = latinTokenViolations(source, translated, direction)
+  if (again.length > 0) {
+    console.log('TRANSLATE_GUARD_GIVEUP', JSON.stringify({ tokens: again, translated: translated.slice(0, 200), via }))
+    return source
+  }
+  return translated
+}

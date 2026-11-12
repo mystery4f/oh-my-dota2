@@ -161,6 +161,9 @@ export interface VoiceReplyResult {
 export interface VoiceReplyArgs {
   text: string
   rowId?: string
+  /** 识别段耗时（毫秒）与麦克风：由 transcribeAudio 的结果原样带回，显式传递，不再有全局票据。 */
+  asrMs?: number
+  mic?: string
 }
 
 /** 语音链在面板上的回显：一条摘要覆盖 成功 / 某环失败 / 压根没识别到话。 */
@@ -325,7 +328,12 @@ export interface VoiceTranscribeResult {
   error?: string
   /** 原音票据：纠错（`voice:correction`）凭它取回这段录音；没留录音时缺省。 */
   utteranceId?: string
+  /** 识别耗时（毫秒）；渲染层把它随 voiceReply 显式带回主进程计时。 */
+  asrMs?: number
+  /** 录音设备 label|id 前 8 位；缺省为空。 */
+  mic?: string
 }
+
 /** Result of a TTS preview; audio is base64 (edge=mp3, sovits=wav) for the renderer. */
 export interface VoicePreviewResult {
   ok: boolean

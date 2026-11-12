@@ -3,7 +3,6 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { VoiceTranscribeResult } from '@shared/ipc'
 import { activeAsrModel, engineSpecOf, transcribeAsr } from './asr-model'
-import { noteAsrRun } from './chain-timing'
 import { stashUtterance } from './corrections'
 /**
  * 识别入口：没就绪怎么说、结果怎么归一，都在这一处。
@@ -28,9 +27,9 @@ export async function transcribeWav(wavPath: string): Promise<VoiceTranscribeRes
 }
 
 /**
- * 对讲链路的识别段深入口：写盘、转写、记账、发票据一趟做完。
- * 时序协议是这里的实现细节，不该漏到 handler 层——漏一行 noteAsrRun，
- * totalMs 就会静默从「识别开始」漂成「翻译开始」，这正是收拢它的原因。
+ * 对讲链路的识别段深入口：写盘、转写、报耗时一趟做完。
+ * asrMs/mic 随返回值显式交给渲染层，再随 voiceReply 原样带回——漏传这一步，
+ * totalMs 就会静默从「识别开始」漂成「翻译开始」，这正是把它做成返回值的原因。
  */
 export async function transcribeForVoice(wavBase64: string, micLabel?: string): Promise<VoiceTranscribeResult> {
   const base64 = String(wavBase64 ?? '')
@@ -40,14 +39,14 @@ export async function transcribeForVoice(wavBase64: string, micLabel?: string): 
   const wavPath = join(dir, 'utterance.wav')
   const wav = Buffer.from(base64, 'base64')
   writeFileSync(wavPath, wav)
-  // 这一段就是「识别耗时」；紧接着的 voiceReply 会把票领走（60 秒内有效）。
+  // 这一段就是「识别耗时」；渲染层把它随 voiceReply 带回来（显式传，没有全局票据）。
+  const mic = String(micLabel ?? '')
   const startedAt = Date.now()
   const result = await transcribeWav(wavPath)
-  if (result.ok) noteAsrRun(startedAt, Date.now() - startedAt, String(micLabel ?? ''))
+  const asrMs = Date.now() - startedAt
+  if (!result.ok || !result.text.trim()) return result.ok ? { ...result, asrMs, mic } : result
   // #66：这句的原音留在内存里，并把票据（utteranceId）随结果交给渲染层——语音页纠错在
-  // 另一个窗口、时间也更晚，而 utterance.wav 下一句就被覆盖了。票据而不是文本：同一句说两遍
   // 文本一样、录音不同，按文本找会把较新那段音配到较旧那一行上。
-  if (!result.ok || !result.text.trim()) return result
   const utteranceId = stashUtterance(result.text, wav)
-  return utteranceId ? { ...result, utteranceId } : result
+  return utteranceId ? { ...result, utteranceId, asrMs, mic } : { ...result, asrMs, mic }
 }

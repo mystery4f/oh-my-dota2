@@ -5,14 +5,13 @@ import { formatChainOverlay, formatChainTiming, formatMs } from '@shared/voice-t
 import type { VoiceStageProgress } from '@shared/voice-stage'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 import { appendCappedJsonl } from '../services/logs/jsonl'
-import { ChainTimer, noteAsrRun, reportChainTiming, takeAsrRun } from '../services/voice/chain-timing'
+import { ChainTimer, reportChainTiming } from '../services/voice/chain-timing'
 
 /**
  * 对讲计时探针（--voice-chain-probe）：只验计时的「账」，不转录、不合成、不开游戏。
  *
- * 这条链慢的时候最怕数字说谎：缺一段被写成 0、总计把识别漏掉、识别记录被下一句抢走。
- * 这里把它们逐条钉死：缺段是 null、总计含识别、重复打点只认第一次、识别票据领一次就没了、
- * 超过 60 秒的识别不再算本句，以及 jsonl 日志既有容量上限又不会因此丢最后一条。
+ * 这里把它们逐条钉死：缺段是 null、总计含识别、重复打点只认第一次、识别段随参数显式带入、
+ * 以及 jsonl 日志既有容量上限又不会因此丢最后一条。
  */
 
 interface Row {
@@ -31,8 +30,8 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 export async function runVoiceChainProbe(): Promise<void> {
   // —— 计时形状：缺段是 null，不是 0 ——
-  noteAsrRun(Date.now() - 500, 120, '麦克风阵列|9675a266')
-  const partial = new ChainTimer(takeAsrRun()).timing()
+  // —— 计时形状：缺段是 null，不是 0 ——
+  const partial = new ChainTimer({ startedAt: Date.now() - 500, ms: 120, mic: '麦克风阵列|9675a266' }).timing()
   push(
     '只记了识别：其余段全 null（没量到不等于 0 毫秒），总计也还不存在',
     partial.asrMs === 120 &&
@@ -43,7 +42,6 @@ export async function runVoiceChainProbe(): Promise<void> {
       partial.totalMs === null,
     JSON.stringify(partial)
   )
-  push('领一次就没了：同一句不会被下一句抢走票据', takeAsrRun() === null, 'second take')
   push(
     '设备名跟着识别票走：日志里认得出这句是哪台麦录的',
     new ChainTimer({ startedAt: Date.now(), ms: 1, mic: '麦克风阵列|9675a266' }).mic === '麦克风阵列|9675a266' &&
@@ -52,9 +50,8 @@ export async function runVoiceChainProbe(): Promise<void> {
   )
 
   // —— 五段都量到 ——
-  noteAsrRun(Date.now() - 4000, 700)
-  const asr = takeAsrRun()
-  const timer = new ChainTimer(asr)
+  // —— 五段都量到 ——
+  const timer = new ChainTimer({ startedAt: Date.now(), ms: 700, mic: '' })
   await delay(25)
   timer.noteTranslated()
   await delay(25)
@@ -85,11 +82,6 @@ export async function runVoiceChainProbe(): Promise<void> {
   repeat.noteTranslated()
   push('重复打点只认第一次（后到的 mark 不缩短已计的时长）', repeat.timing().translateMs === once, `${once} vs ${repeat.timing().translateMs}`)
 
-  // —— 识别票据的 60 秒有效期：夸口的旧识别不许张贴到本句 ——
-  noteAsrRun(Date.now() - 100, 50)
-  push('超过 60 秒的识别不算本句', takeAsrRun(Date.now() + 61_000) === null, 'expired')
-  noteAsrRun(Date.now() - 100, 50)
-  push('60 秒内仍有效', takeAsrRun(Date.now())?.ms === 50, 'fresh')
 
   // —— 展示：缺段不出现在串里，全缺就不画 ——
   push('formatMs: 缺值画 -', formatMs(null) === '-' && formatMs(undefined) === '-', '-')

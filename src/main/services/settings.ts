@@ -111,5 +111,12 @@ export function saveSettings(patch: Partial<AppSettings>): AppSettings {
   const file = settingsFile()
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, JSON.stringify(next, null, 2), 'utf-8')
+  for (const listener of savedListeners) listener(next)
   return next
+}
+
+/** 保存后的观察者缝：设置属主发事件，联动（如声出就绪重算）挂在这里，不散在 handler 表。 */
+const savedListeners: ((next: AppSettings) => void)[] = []
+export function onSettingsSaved(listener: (next: AppSettings) => void): void {
+  savedListeners.push(listener)
 }
