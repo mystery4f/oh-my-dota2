@@ -12,6 +12,39 @@ const RECORD_MAX_MS = 20_000
 const MIN_SPEECH_MS = 300
 /** 静音阈值：whisper 对纯静音会幻觉出文本，先量 RMS 再决定送不送。 */
 const SILENCE_RMS = 0.012
+/** 开麦超时：设备被占用或驱动卡住时 getUserMedia 可能永远不落定，超时判负，别让对讲从此挂死。 */
+const MIC_OPEN_TIMEOUT_MS = 3000
+
+/**
+ * 带超时的开麦。超时判负之后流才开成功的：立刻关掉，别留一路开着的话筒。
+ */
+async function openRecorder(): Promise<PcmRecorder> {
+  let settled = false
+  return new Promise<PcmRecorder>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error('麦克风打开超时'))
+    }, MIC_OPEN_TIMEOUT_MS)
+    void startPcmRecorder().then(
+      (rec) => {
+        if (settled) {
+          rec.stop()
+          return
+        }
+        settled = true
+        clearTimeout(timer)
+        resolve(rec)
+      },
+      (err: unknown) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
+    )
+  })
+}
 
 /** 语音行就地补齐所需的全部信息：同一行从「识别原文」长成「译文 + 已播」。 */
 export interface VoiceRowPatch {
@@ -42,28 +75,59 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
   /** 本次录音实际用的输入设备（label|id 前 8 位），随转写一起交给主进程进日志。 */
   let recordDevice = ''
   let recordTimer: ReturnType<typeof setTimeout> | null = null
+  /** 开麦进行中：松开（HOLD 0）可能赶在 recording=true 之前到。 */
+  let starting = false
+  /** 开麦期间收到的松开：开麦回来后立刻收掉这条录音，不让它变成「松开还在录」。 */
+  let stopWhileStarting = false
 
   async function start(): Promise<void> {
-    if (recording) return
+    if (recording || starting) return
+    starting = true
+    stopWhileStarting = false
+    let opened: PcmRecorder
     try {
-      recorder = await startPcmRecorder()
-      // 记下「这次到底开了哪台」：断声、串音这类问题，日志里没有设备名就只能猜。
-      recordDevice = await describeCaptureDevice(recorder.stream).catch(() => '')
+      opened = await openRecorder()
     } catch (err) {
-      const micError = '麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）'
+      starting = false
+      const timedOut = err instanceof Error && err.message === '麦克风打开超时'
+      const micError = timedOut
+        ? '麦克风打开超时（设备被占用或无响应）'
+        : '麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）'
       sink.pushRow({ id: `voice-err-${Date.now()}`, ts: Date.now(), original: '🎤 ' + micError, translated: null })
       sink.reportChain({ transcript: '', translated: null, spoken: false, stage: null, error: micError })
       console.error('overlay: getUserMedia failed', err)
-      sink.stage('麦克风不可用', 2500)
+      sink.stage(timedOut ? '麦克风打开超时' : '麦克风不可用', 2500)
+      return
+    }
+    recorder = opened
+    starting = false
+    if (stopWhileStarting) {
+      // 松开赶在开麦完成之前：这条停不能装没看见——丢了它，观感就是「松开了还在录」。
+      stopWhileStarting = false
+      opened.stop()
+      recorder = null
+      fail('松开太快，麦克风还没就绪，已忽略', '松开时麦克风还没就绪', 1800)
       return
     }
     recording = true
     window.api.reportVoiceState(true)
     sink.stage(recordingStageLine(sink.voiceCaptureMode(), sink.voiceCaptureKey()))
     recordTimer = setTimeout(() => void stop(), RECORD_MAX_MS)
+    // 设备名只进日志：挪到 recording=true 之后异步补齐，别再撑大「松开撞上开麦」的竞态窗口。
+    const openedRef = opened
+    void describeCaptureDevice(openedRef.stream)
+      .then((device) => {
+        if (recorder === openedRef) recordDevice = device
+      })
+      .catch(() => undefined)
   }
 
   async function stop(): Promise<void> {
+    if (starting) {
+      // 开麦还没回来：松开先记账，等开麦回来由 start 结算——直接丢掉就是「松开还在录」。
+      stopWhileStarting = true
+      return
+    }
     if (!recording) return
     recording = false
     window.api.reportVoiceState(false)
@@ -141,8 +205,14 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       if (recording) void stop()
       else void start()
     },
-    // 按住模式：按下开录、松开结束。内部有幂等守卫，重复信号不会翻面。
+    // 按住模式：按下开录、松开结束。开麦未落定时按下/松开记为意图，落定时按最后一条结算。
     start(): void {
+      if (starting) {
+        // 松开后马上又按下（重按重试）：后到的按下赢，撤销挂起的停，开麦回来直接进录音。
+        stopWhileStarting = false
+        return
+      }
+      if (recording) return
       void start()
     },
     stop(): void {

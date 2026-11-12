@@ -599,6 +599,12 @@
 - 教训：一个只在日志里的失败，等于没有失败信号。凡是用户能触发、又能自愈的失败，结局必须回到用户眼前。
 
 
+### 按住说话「松开不停录、按住没反应」：竞态在录音腿，不在热键监视
+
+- 症状：按住模式（`voiceCaptureMode=hold`）时好时坏——松开之后录音不结束，要再按一下才停；卡住的这段时间里再按住毫无反应。
+- 根因：`overlay/voice-capture.ts` 的 `recording` 要等 `getUserMedia` 开麦完成才置 true（几十到几百毫秒，设备探测/切换时更久），而 `stop()` 开头 `if (!recording) return` 把这段窗口里到达的松开信号**静默丢弃**。丢弃之后录音最长挂 20 秒（RECORD_MAX_MS 才自动停），期间 `start()` 又因 `recording=true` 直接跳过——「再按一下」恰好是唯一能结束它的操作，两个症状同源。
+- 修法：开麦未落定时按下/松开不丢，记为意图（`starting` / `stopWhileStarting`），落定时按最后一条结算：松开先到就立刻收掉流并提示「松开太快」；落定前又按下则撤销挂起的停（重按重试）。开麦另加 3 秒超时（`MIC_OPEN_TIMEOUT_MS`，getUserMedia 挂死一次热键就永久哑掉；判负后才开成的流立刻关掉）；设备名探查挪到 `recording=true` 之后异步补齐，不再撑大竞态窗口。
+- 教训：事件驱动的状态机里，「条件不满足就 return」的守卫会把快速边沿变成静默丢失。边沿必须记账、落定时结算，不能当场丢弃——丢一条边，用户看到的就是「按键时灵时不灵」。
 ## 调试方法
 
 - 数据目录已改便携：安装版在 exe 同级 `data/`，`npm run dev` 与探针用项目根 `data/`（`src/main/services/data-dir.ts` 的 `applyPortableUserData()` 在 ready 前改掉 userData）。只有目标目录不可写（装进 Program Files）才回落系统 `%APPDATA%`；首次启动会从老位置搬一次 `settings.json` 与账本，不覆盖已有文件。
