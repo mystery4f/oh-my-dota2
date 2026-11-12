@@ -16,7 +16,10 @@ export default tseslint.config(
       'data/**',
       'logs/**',
       '.pi/**',
-      '.dev-flow/**'
+      '.dev-flow/**',
+      // `.worktrees/**` 同理：别人注册在仓库里的 git worktree（含 CJS 脚本），
+      // 不 ignore 会把别人工作区的源码扫进 `eslint .`，钩子对所有人都是坏的。
+      '.worktrees/**'
     ]
   },
   {
