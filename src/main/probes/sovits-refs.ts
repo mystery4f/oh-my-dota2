@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -174,5 +174,5 @@ export async function runSovitsRefsProbe(): Promise<void> {
   for (const item of checks) {
     console.log(`  ${item.ok ? 'ok  ' : 'FAIL'} ${item.name}${item.detail ? `  (${item.detail})` : ''}`)
   }
-  app.exit(failed.length === 0 ? 0 : 1)
+  exitProbe(failed.length === 0 )
 }

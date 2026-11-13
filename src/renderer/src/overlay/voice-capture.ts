@@ -1,5 +1,6 @@
 import { recordingStageLine, type CaptureMode } from '@shared/hotkeys'
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
+import { captureLevel, judgeCapture } from '@shared/voice-capture-gate'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
@@ -8,10 +9,6 @@ import { startPcmRecorder, type PcmRecorder } from '../lib/pcm-recorder'
 
 /** 录音上限：一条对讲顶多 20 秒，超时自动停——忘记停也不会一直占着麦克风。 */
 const RECORD_MAX_MS = 20_000
-/** 短于这个时长的录音直接丢：多半是误触。 */
-const MIN_SPEECH_MS = 300
-/** 静音阈值：whisper 对纯静音会幻觉出文本，先量 RMS 再决定送不送。 */
-const SILENCE_RMS = 0.012
 /** 开麦超时：设备被占用或驱动卡住时 getUserMedia 可能永远不落定，超时判负，别让对讲从此挂死。 */
 const MIC_OPEN_TIMEOUT_MS = 3000
 
@@ -93,7 +90,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       const micError = timedOut
         ? '麦克风打开超时（设备被占用或无响应）'
         : '麦克风不可用（检查 Windows 隐私设置：允许桌面应用使用麦克风）'
-      sink.pushRow({ id: `voice-err-${Date.now()}`, ts: Date.now(), original: '🎤 ' + micError, translated: null })
+      sink.pushRow({ id: `voice-err-${Date.now()}`, ts: Date.now(), original: '🎤 ' + micError, body: '', translated: null })
       sink.reportChain({ transcript: '', translated: null, spoken: false, stage: null, error: micError })
       console.error('overlay: getUserMedia failed', err)
       sink.stage(timedOut ? '麦克风打开超时' : '麦克风不可用', 2500)
@@ -136,17 +133,10 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     const { chunks, sampleRate: rate } = recorder?.stop() ?? { chunks: [], sampleRate: 48_000 }
     recorder = null
     const frames = chunks.reduce((total, chunk) => total + chunk.length, 0)
-    if (frames < (rate * MIN_SPEECH_MS) / 1000) {
-      fail('录音太短，已忽略', '录音太短（不足 0.3 秒）', 1800)
-      return
-    }
-    let energy = 0
-    for (const chunk of chunks) {
-      for (let i = 0; i < chunk.length; i += 1) energy += chunk[i] * chunk[i]
-    }
-    const rms = Math.sqrt(energy / frames)
-    if (rms < SILENCE_RMS) {
-      fail(`没有检测到语音（音量 RMS ${rms.toFixed(4)}）`, `没有检测到语音（音量 RMS ${rms.toFixed(4)}）`, 1800)
+    const rms = captureLevel(chunks, frames)
+    const verdict = judgeCapture({ frames, sampleRate: rate, rms })
+    if (!verdict.ok) {
+      fail(verdict.line, verdict.detail, 1800)
       return
     }
     sink.stage('识别中…')
@@ -160,7 +150,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     // 一键到底：识别文本先落一行，这条链的进度由行自己的留痕报（译/合/起/播），
     // 底部阶段行只留链两端：识别中的「识别中…」和结束时的「已播/未播」——中间再报一遍就是两句状态打架。
     const rowId = `voice-${Date.now()}`
-    sink.pushRow({ id: rowId, ts: Date.now(), original: '🎤 ' + transcript, translated: null, pending: true })
+    sink.pushRow({ id: rowId, ts: Date.now(), original: '🎤 ' + transcript, body: transcript, translated: null, pending: true })
     sink.stage(null)
     const reply = await window.api.voiceReply({ text: transcript, rowId, asrMs: result.asrMs, mic: result.mic })
     if (reply.translated) {
@@ -195,7 +185,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
 
   /** 失败也落一行 + 面板可见的链路结果：按了没反应比报错更糟。 */
   function fail(rowText: string, error: string, stageHoldMs: number): void {
-    sink.pushRow({ id: `voice-err-${Date.now()}`, ts: Date.now(), original: rowText, translated: null })
+    sink.pushRow({ id: `voice-err-${Date.now()}`, ts: Date.now(), original: rowText, body: '', translated: null })
     sink.reportChain({ transcript: '', translated: null, spoken: false, stage: null, error })
     sink.stage(error, stageHoldMs)
   }

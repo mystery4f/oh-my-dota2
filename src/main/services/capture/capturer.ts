@@ -1,7 +1,15 @@
 import { errorMessage } from '@shared/errors'
 import { IPC, type CaptureEntry, type CaptureStatus, type IpcChannelValue } from '@shared/ipc'
-import { chatBody, hasHan, normalizeLine, splitChatLine, takeHero, worthTranslating } from '@shared/chat-line'
+import {
+  hasHan,
+  normalizeLine,
+  renderChatLine,
+  withChatBody,
+  worthTranslating,
+  type ChatLine
+} from '@shared/chat-line'
 import { translateLines } from '../session/durable-translator'
+import { latencySummary } from '../session/translator-latency'
 import { announceEntries } from '../voice/speech'
 import { loadSettings } from '../settings'
 import { broadcastToWindows } from '../../windows/broadcast'
@@ -48,7 +56,6 @@ export class ChatCaptureService {
   private recent: { key: string; text: string }[] = []
   private recentSet = new Set<string>()
   private translateChain: Promise<void> = Promise.resolve()
-  private lastTranslateMs: number | null = null
   private lastError: string | null = null
   private totalEntries = 0
   private seq = 0
@@ -93,23 +100,13 @@ export class ChatCaptureService {
     return this.status()
   }
 
-  pushMessages(messages: Array<{ text: string; own?: boolean; speaker?: string }>): void {
+  pushMessages(messages: ChatLine[]): void {
     // 先盖章再构造条目：本拍条目的 ts 都 >= lastPushAt，宣布时不会被自己的 cutoff 判成过期。
     this.lastPushAt = Date.now()
-    const fresh = messages
-      .map((line) => ({ text: line.text.trim(), own: line.own === true, speaker: line.speaker }))
-      .filter((line) => normalizeLine(line.text).length >= 2)
+    const fresh = messages.filter((line) => normalizeLine(line.body).length >= 2)
     if (fresh.length === 0) return
-    for (const line of fresh) this.remember(normalizeLine(line.text), line.text)
-    const pending = fresh.map((line) => {
-      const entry = this.makeEntry(line.text, null, true)
-      // own 只影响归属标注，不影响上屏：用户要的是「只看一个地方」，自己那句也得看得到。
-      return {
-        ...entry,
-        ...(line.own ? { own: true } : {}),
-        ...(line.speaker ? { speaker: line.speaker } : {})
-      }
-    })
+    for (const line of fresh) this.remember(normalizeLine(line.body), renderChatLine(line))
+    const pending = fresh.map((line) => this.makeEntry(line, null, true))
     this.broadcast(IPC.CAPTURE_ENTRIES, pending)
 
     // 两种行都不必翻，直接收尾成「没有译文」，浮层在只译文模式下照样显示原文：
@@ -117,8 +114,7 @@ export class ChatCaptureService {
     const needs: CaptureEntry[] = []
     const settled: CaptureEntry[] = []
     for (const entry of pending) {
-      const body = chatBody(entry.original)
-      if (hasHan(body) || !worthTranslating(body)) settled.push(entry)
+      if (hasHan(entry.body) || !worthTranslating(entry.body)) settled.push(entry)
       else needs.push(entry)
     }
     if (settled.length > 0) {
@@ -130,7 +126,7 @@ export class ChatCaptureService {
     }
     if (needs.length === 0) return
     this.translateChain = this.translateChain
-      .then(() => this.translatePending(needs.map((entry) => entry.original), needs))
+      .then(() => this.translatePending(needs))
       .catch((err: unknown) => {
         // 队列是一条 Promise 链，一节坏掉会把后面所有翻译冻住且毫无声响。
         this.lastError = `translate chain: ${errorMessage(err)}`
@@ -143,7 +139,8 @@ export class ChatCaptureService {
       running: this.running,
       source: 'gsi',
       totalEntries: this.totalEntries,
-      lastTranslateMs: this.lastTranslateMs,
+      // 与面板的 p50/p90 同源：翻译耗时只有记账本一处测量，这里不再自己掐表。
+      lastTranslateMs: latencySummary().lastMs,
       lastError: this.lastError
     }
   }
@@ -157,14 +154,13 @@ export class ChatCaptureService {
     this.notifyState()
   }
 
-  private async translatePending(fresh: string[], pending: CaptureEntry[]): Promise<void> {
-    const translateStarted = Date.now()
+  private async translatePending(pending: CaptureEntry[]): Promise<void> {
     try {
-      const settled = await this.buildEntries(fresh)
-      this.lastTranslateMs = Date.now() - translateStarted
-      const done = new Map(settled.map((entry) => [entry.original, entry]))
+      const settled = await this.buildEntries(pending)
+      // 按 id 对账：同一屏里两行一模一样的正文各归各的（以前拿展示串当键，后者会顶掉前者）。
+      const done = new Map(settled.map((entry) => [entry.id, entry]))
       const filled = pending.map((entry) => {
-        const hit = done.get(entry.original)
+        const hit = done.get(entry.id)
         return {
           ...entry,
           translated: hit ? hit.translated : null,
@@ -223,20 +219,18 @@ export class ChatCaptureService {
     }
   }
 
-  private async buildEntries(fresh: string[]): Promise<CaptureEntry[]> {
+  private async buildEntries(rows: CaptureEntry[]): Promise<CaptureEntry[]> {
     const provider = loadSettings().provider
     if (provider.id !== 'ollama' && !provider.apiKey) {
       this.lastError = `翻译失败：模型服务 "${provider.id}" 需要 API Key`
-      return fresh.map((raw) => this.makeEntry(raw, null))
+      return rows
     }
-
     let firstError: string | null = null
-    // 频道与昵称由代码原样回填，只把正文交给模型 —— 玩家名不可能被译丢。
-    const splits = fresh.map((raw) => splitChatLine(raw))
+    // 正文就在条目上：不再从展示串里拆，玩家名、频道、英雄都不可能被译丢或被当成中文。
     const pending: { index: number; body: string }[] = []
-    splits.forEach((split, index) => {
+    rows.forEach((row, index) => {
       // 与 pushMessages 用同一把尺子：中文、纯符号、单字符都不进队列。
-      if (!hasHan(split.body) && worthTranslating(split.body)) pending.push({ index, body: split.body })
+      if (!hasHan(row.body) && worthTranslating(row.body)) pending.push({ index, body: row.body })
     })
 
     // 谁真的被送去翻译了：只有这些行在失败时该背「翻译服务不可用」的标记。
@@ -252,7 +246,7 @@ export class ChatCaptureService {
           provider,
           pending.map((item) => item.body),
           'auto-zh',
-          marks
+          { marks }
         )
         block.forEach((value, i) => {
           const item = pending[i]
@@ -266,27 +260,32 @@ export class ChatCaptureService {
       }
     }
 
-    const entries = fresh.map((raw, index): CaptureEntry => {
+    const entries = rows.map((row, index): CaptureEntry => {
       const value = translated.get(index)
       // 失败要看得见：只有真的送进队列却没翻成的行才标错，中文行与不值得翻的行不背这个锅。
       const failed = firstError !== null && attempted.has(index)
-      if (!value) return failed ? { ...this.makeEntry(raw, null), error: firstError ?? undefined } : this.makeEntry(raw, null)
-      const restored = `${splits[index].prefix}${value.trim()}`.trim()
-      const entry = this.makeEntry(raw, restored || null)
+      if (!value) return failed ? { ...row, error: firstError ?? undefined } : row
+      const restored = withChatBody(row.original, row.body, value)
+      const entry = { ...row, translated: restored || null }
       return cachedRows.get(index) === true ? { ...entry, cached: true } : entry
     })
     if (firstError) this.lastError = firstError
     return entries
   }
 
-  private makeEntry(original: string, translated: string | null, pending = false): CaptureEntry {
-    const { hero, text } = takeHero(original)
+  private makeEntry(line: ChatLine, translated: string | null, pending = false): CaptureEntry {
+    // 朗读念「XXX 说 ……」：GSI 行优先用英雄短名，没有英雄就退回昵称（值里带着，不再从行里拆）。
+    const speaker = line.hero || line.speaker
     return {
       id: `${Date.now()}-${this.seq++}`,
       ts: Date.now(),
       pending,
-      hero,
-      original: cleanCjkSpacing(text),
+      ...(line.hero ? { hero: line.hero } : {}),
+      ...(speaker ? { speaker } : {}),
+      ...(line.own ? { own: true } : {}),
+      // 上屏不带 [英雄]：浮层已经用 hero 换成了头像，再写一遍就重了。
+      original: cleanCjkSpacing(renderChatLine({ ...line, hero: undefined })),
+      body: line.body,
       translated
     }
   }

@@ -1,3 +1,4 @@
+import { exitProbe } from './harness'
 import { app } from 'electron'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -197,5 +198,5 @@ export async function runVoiceChainProbe(): Promise<void> {
   console.log(
     `VOICE_CHAIN_PROBE ${JSON.stringify({ ok: failed.length === 0, passed: cases.length - failed.length, failed: failed.length })}`
   )
-  app.exit(failed.length > 0 ? 1 : 0)
+  exitProbe(!(failed.length > 0 ))
 }

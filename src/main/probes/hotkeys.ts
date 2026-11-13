@@ -1,4 +1,5 @@
-import { app, globalShortcut } from 'electron'
+import { exitProbe } from './harness'
+import { globalShortcut } from 'electron'
 import {
   DEFAULT_HOTKEYS,
   HOTKEY_ACTIONS,
@@ -240,5 +241,5 @@ export function runHotkeyProbe(): void {
   console.log(
     `HOTKEY_PROBE ${JSON.stringify({ ok: failed.length === 0, passed: cases.length - failed.length, failed: failed.length })}`
   )
-  app.exit(failed.length > 0 ? 1 : 0)
+  exitProbe(!(failed.length > 0 ))
 }

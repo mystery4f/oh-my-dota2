@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { finishProbe, probeCases } from './harness'
 import { DEFAULT_SETTINGS, OFFLINE_VOICES } from '@shared/ipc'
 import { speechFailHint } from '@shared/speech-plan'
 import {
@@ -50,17 +50,7 @@ import { pickCablePackUrl } from '../services/voice/virtual-cable-install'
  * 物理层（VB-Cable 出声、游戏里听到、SendInput 真按键）走人工验收。
  */
 
-interface Row {
-  name: string
-  ok: boolean
-  detail: string
-}
-
-const cases: Row[] = []
-
-function push(name: string, ok: boolean, detail: string): void {
-  cases.push({ name, ok, detail })
-}
+const { cases, push } = probeCases()
 
 export function runVoiceOutProbe(): void {
   // —— 决策一：念什么、哪个嗓、念不念 ——
@@ -568,12 +558,5 @@ export function runVoiceOutProbe(): void {
     failHint
   )
 
-  const failed = cases.filter((item) => !item.ok)
-  for (const item of cases) {
-    console.log(`${item.ok ? 'PASS' : 'FAIL'} ${item.name} ${item.detail}`)
-  }
-  console.log(
-    `VOICE_OUT_PROBE ${JSON.stringify({ ok: failed.length === 0, passed: cases.length - failed.length, failed: failed.length })}`
-  )
-  app.exit(failed.length > 0 ? 1 : 0)
+  finishProbe('VOICE_OUT_PROBE', cases)
 }

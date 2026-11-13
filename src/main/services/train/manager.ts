@@ -369,16 +369,11 @@ export class TrainManager {
     if (this.task) this.task = { ...this.task, status: 'failed', endedAt: Date.now(), stage: '应用退出，训练被中断' }
     if (run && run.status === 'running') {
       this.record('应用退出，训练被中断（这一轮没有跑完）')
-      const saved = finishTrainRun(run, {
+      this.settle({
         status: 'failed',
         error: '应用退出，训练被中断（这一轮没有跑完）',
-        metrics:
-          run.kind === 'asr-ft'
-            ? readAsrMetrics(run.artifacts.runDir)
-            : readGvMetrics(this.request?.gvResolved?.home, run.experiment)
+        metrics: this.runMetrics(run)
       })
-      saveTrainRun(saved)
-      this.run = saved
     }
     this.io.holdInference(false)
   }
@@ -402,6 +397,26 @@ export class TrainManager {
     return null
   }
 
+  /** 这一轮该记什么指标：识别读训练目录，音色读 GV 日志；读不到就记 null，不编。 */
+  private runMetrics(run: TrainRunRecord) {
+    return run.kind === 'asr-ft'
+      ? readAsrMetrics(run.artifacts.runDir)
+      : readGvMetrics(this.request?.gvResolved?.home, run.experiment)
+  }
+
+  /**
+   * 收场的共同一段：结果补进这一轮并落库。
+   * 正常收场与「应用退出」从这里分叉之前完全一样，区别只在要不要广播与通知——
+   * 退出途中窗口正在销毁，所以这里刻意不广播。
+   */
+  private settle(patch: Parameters<typeof finishTrainRun>[1]): TrainRunRecord | null {
+    if (!this.run) return null
+    const saved = finishTrainRun(this.run, patch)
+    saveTrainRun(saved)
+    this.run = saved
+    return saved
+  }
+
   private finish(status: Extract<TrainTaskStatus, 'done' | 'failed' | 'stopped'>, code: number | null): void {
     // asr-ft 失败收场回写 run.json（成功标 trained 走链回调、转正标 applied 走 apply）；缺账本就跳过。
     if (status === 'failed' && this.request?.asrFt) markRunStatus(this.request.asrFt.data.runDir, 'failed')
@@ -416,17 +431,11 @@ export class TrainManager {
     // 先落库再换模：applyAsrFtModel 是按导出目录回库里找回这一轮记 applied 的，行还没写就翻不到牌。
     let saved: TrainRunRecord | null = null
     if (this.run) {
-      const run = this.run
-      const metrics =
-        run.kind === 'asr-ft'
-          ? readAsrMetrics(run.artifacts.runDir)
-          : readGvMetrics(this.request?.gvResolved?.home, run.experiment)
-      saved = finishTrainRun(run, {
+      saved = this.settle({
         status: status === 'done' ? 'trained' : status === 'stopped' ? 'stopped' : 'failed',
         error: failure,
-        metrics
+        metrics: this.runMetrics(this.run)
       })
-      saveTrainRun(saved)
     }
     // 训练 + 导出都成功就直接换上去：磁盘上只留一份微调模型，用户不必再点第二个按钮。
     const promoted = status === 'done' && this.chained && this.run?.kind === 'asr-ft' ? applyAsrFtModel() : null

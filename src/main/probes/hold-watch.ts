@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { spawn } from 'node:child_process'
 import { stopHoldWatch, watchHold } from '../services/input/hotkey-hold'
 
@@ -52,7 +52,7 @@ export function runHoldWatchProbe(): void {
     console.log(
       `HOLD_WATCH_PROBE ${JSON.stringify({ ok: failed.length === 0, passed: cases.length - failed.length, failed: failed.length })}`
     )
-    app.exit(failed.length > 0 ? 1 : 0)
+    exitProbe(!(failed.length > 0 ))
   }
 
   // 常驻进程是异步拉起的：先等 READY（PowerShell 冷启动 + Add-Type 约 1–2 s），

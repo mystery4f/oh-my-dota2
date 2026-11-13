@@ -1,3 +1,4 @@
+import { exitProbe } from './harness'
 import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -45,7 +46,7 @@ export async function runGsiDumpProbe(): Promise<void> {
       writeConfig: false,
       effects: {
         startCapture: () => undefined,
-        stopCapture: () => true,
+        endMatch: () => true,
         rememberNickname: () => undefined,
         pushChat: () => undefined
       },
@@ -68,7 +69,7 @@ export async function runGsiDumpProbe(): Promise<void> {
         detail: errorMessage(error)
       })
     )
-    app.exit(1)
+    exitProbe(false)
     return
   }
 
@@ -128,5 +129,5 @@ export async function runGsiDumpProbe(): Promise<void> {
   if (summary.frames === 0) {
     console.log('GSI_DUMP_HINT', '这 ' + seconds + ' 秒没收到任何帧：Dota 2 可能没开，或对局里没到推送时机。')
   }
-  app.exit(result.ok ? 0 : 1)
+  exitProbe(result.ok )
 }

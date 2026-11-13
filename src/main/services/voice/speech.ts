@@ -74,14 +74,6 @@ export function speakSkipReason(entry: CaptureEntry, options: SpeakOptions): 'mu
   return null
 }
 
-/** GSI 行前缀里的说话人标签：[我/队友/敌方/玩家] 后面那个 [昵称/玩家N]。「玩家」是阵营未知时的兜底关系（allplayers 不来、频道又判不出敌我），漏了它所有人频道全退成裸念。 */
-function speakerFromLine(raw: string): string | null {
-  const head = raw.split(/[⚔🌐]/u)[0] ?? ''
-  const hit = /\[(?:我|队友|敌方|玩家)\]\s*\[([^\]]+)\]/u.exec(head)
-  const label = hit?.[1]?.trim()
-  // slotLabel 兜底出「未知」时，念「未知说」比不念还难受，退空让内容裸念。
-  return label && label !== '未知' ? label : null
-}
 export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPayload | null {
   if (speakSkipReason(entry, options) !== null) return null
   // 念之前先剥掉 `[昵称] ⚔` 这类装饰；剥空了就退回原文正文，别念一串标签。
@@ -97,11 +89,8 @@ export function decideSpeak(entry: CaptureEntry, options: SpeakOptions): SpeakPa
   // 说话人怎么念由模板全权决定（含标点）：{who}=我/影魔/玩家9，{body}=内容。
   // 缺省 front「{who}说，{body}」back「{body}，{who}表示」；没配 {body} 的模板在
   // loadSettings 就被打回缺省，这里只兜底空值。off 与「没有标签」走同一条路径。
-  const candidate = entry.own === true
-    ? '我'
-    : entry.speaker
-      ? heroChinese(entry.speaker)
-      : speakerFromLine(entry.original)
+  // 说话人由条目自己带着（GSI 给英雄短名，没有英雄就是座位标签）：展示串不再被拆第二次。
+  const candidate = entry.own === true ? '我' : entry.speaker ? heroChinese(entry.speaker) : null
   const pos = options.prefix ?? 'front'
   const spoken = pos === 'off' ? null : candidate
   const tpl =
@@ -201,14 +190,13 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
       )
       continue
     }
-    // 前缀来源留痕：speaker=英雄名（现实中只有自己的话有）；fallback=退回的座位标签；
-    // 两者皆空=光念内容。英雄名消失这类问题，有这条日志就不用考古了。
+    // 前缀来源留痕：speaker=英雄名（现实中只有自己的话有）；没有就是光念内容。
+    // 英雄名消失这类问题，有这条日志就不用考古了。
     console.log(
       'TTS_SPEAK_PICK',
       JSON.stringify({
         engine: payload.engine,
         speaker: entry.speaker ?? null,
-        fallback: entry.speaker ? null : speakerFromLine(entry.original),
         text: payload.text.slice(0, 40)
       })
     )

@@ -764,12 +764,13 @@ export async function translateLines(
   provider: ProviderConfig,
   texts: string[],
   direction: TranslateDirection,
-  /** 可选出参：第 i 行是不是直接从记账本取的（没调模型）。 */
-  marks?: boolean[]
+  /** 语气与来源决定记账本里记在哪一档；整屏翻译默认是正式语气、来自捕获。 */
+  options: { tone?: ReplyTone; origin?: TranslationOrigin; marks?: boolean[] } = {}
 ): Promise<string[]> {
   if (texts.length === 0) return []
+  const { tone = 'terse', origin = 'capture', marks } = options
   const cacheKey = providerKey(provider)
-  const cached = texts.map((text) => readTranslation(text, direction, cacheKey, 'terse', 'capture'))
+  const cached = texts.map((text) => readTranslation(text, direction, cacheKey, tone, origin))
   const pending: number[] = []
   cached.forEach((value, index) => {
     if (marks) marks[index] = value !== null
@@ -791,7 +792,7 @@ export async function translateLines(
       return
     }
     merged[index] = value
-    writeTranslation(texts[index], cacheKey, 'terse', value, { direction, origin: 'capture' })
+    writeTranslation(texts[index], cacheKey, tone, value, { direction, origin })
   })
   return merged
 }

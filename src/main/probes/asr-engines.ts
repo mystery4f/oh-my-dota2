@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { app } from 'electron'
+import { probeCases, exitProbe } from './harness'
 import { ASR_ENGINE_LIST, ASR_ENGINES, requiredPathsAll } from '@shared/asr/engines'
 import {
   collectAsrModels,
@@ -29,9 +29,7 @@ interface Row {
 
 const cases: Row[] = []
 
-function push(name: string, ok: boolean, detail: string): void {
-  cases.push({ name, ok, detail })
-}
+const { push } = probeCases(cases)
 
 /** worker 里 ASR_KINDS 表的键：两个空格缩进的 `key: (request) =>` 行。 */
 function workerKindKeys(): string[] {
@@ -168,5 +166,5 @@ export function runAsrEnginesProbe(): void {
     console.log(`${item.ok ? 'PASS' : 'FAIL'} | ${item.name} | ${item.detail}`)
   }
   console.log(`ASR_ENGINES_PROBE ${cases.length - failed}/${cases.length} PASS`)
-  app.exit(failed > 0 ? 1 : 0)
+  exitProbe(!(failed > 0), cases)
 }

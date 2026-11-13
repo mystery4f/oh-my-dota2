@@ -17,43 +17,14 @@ import { captureHint } from '@shared/overlay-hint'
 import { warmEdge } from './services/voice/edge'
 import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-server'
 import { autoVoicePackSetup } from './services/voice/sovits-voicepack'
-import { runTtsBenchProbe } from './probes/tts-bench'
-import { runTtsOfflineProbe } from './probes/tts-offline'
-import { runTtsPlayProbe } from './probes/tts-play'
-import { runTtsPipelineProbe } from './probes/tts-pipeline'
-import { runTtsVoicesProbe } from './probes/tts-voices'
-import { runGsiProbe } from './probes/gsi'
-import { runSettingsPersistProbe } from './probes/settings-persist'
-import { runGsiDumpProbe } from './probes/gsi-dump'
-import { runGsiFramesReportProbe } from './probes/gsi-frames-report'
-import { runSovitsRefsProbe } from './probes/sovits-refs'
-import { runSovitsVoicepackProbe } from './probes/sovits-voicepack'
-import { runMatchReportProbe } from './probes/match-report'
-import { runTranslateCacheProbe } from './probes/translate-cache'
-import { runTranslateAccuracyProbe } from './probes/translate-accuracy'
+import { PROBES, renderProbeCatalogue } from './probes/registry'
 import { startGsi, stopGsi } from './services/gsi'
 import { startUpdateCheck } from './services/updater'
 import { registerIpc } from './ipc'
 import { installProxyAwareFetch } from './services/session/net-fetch'
 import { refreshVoiceOutReadiness } from './services/voice/voice-out-readiness'
-import { runChatBlockProbe } from './probes/chat-block'
-import { runInPlaceProbe, runReplyLatencyProbe } from './probes/latency'
-import { runOverlayGeometryProbe } from './probes/overlay-geometry'
-import { runHotkeyProbe } from './probes/hotkeys'
-import { runHoldWatchProbe } from './probes/hold-watch'
-import { runVoiceOutProbe } from './probes/voice-out'
-import { runVoiceChainProbe } from './probes/voice-chain'
-import { runAsrSwapProbe } from './probes/asr-swap'
-import { runInPlaceGuardProbe } from './probes/inplace-guard'
-import { runAsrHotwordsProbe } from './probes/asr-hotwords'
-import { runAsrEnginesProbe } from './probes/asr-engines'
-import { runProviderReasoningProbe } from './probes/provider-reasoning'
-import { runZhipuLiveProbe } from './probes/zhipu-live'
-import { runTrainProbe } from './probes/train'
 import { trainManagerIfStarted } from './services/train/manager'
 import { reconcileTrainState } from './services/train/reconcile'
-import { runVoiceRuntimeProbe } from './probes/voice-runtime'
-import { runVoiceWorkerProbe } from './probes/voice-worker'
 import { loadSettings, onSettingsSaved } from './services/settings'
 import { hotkeysState, installHotkeys, releaseHotkeys, onHotkeysSaved } from './services/hotkeys'
 import { resetSessionsOnBoot, warmTranslator } from './services/session/durable-translator'
@@ -202,40 +173,15 @@ app.whenReady().then(() => {
     }
   })
   // 任何 --xxx-probe / --xxx-selftest 都算探针；--tts-bench 不是「probe」结尾，但它同样不该抢 GSI 端口。
-  const probeRun = process.argv.some(
-    (arg) => arg.startsWith('--') && (arg.endsWith('-probe') || arg.endsWith('-selftest') || arg === '--tts-bench')
-  )
-  if (process.argv.includes('--inplace-probe')) void runInPlaceProbe()
-  if (process.argv.includes('--reply-latency-probe')) void runReplyLatencyProbe()
-  if (process.argv.includes('--tts-bench')) void runTtsBenchProbe()
-  if (process.argv.includes('--tts-offline-probe')) void runTtsOfflineProbe()
-  if (process.argv.includes('--tts-voices-probe')) void runTtsVoicesProbe()
-  if (process.argv.includes('--tts-pipeline-probe')) void runTtsPipelineProbe()
-  if (process.argv.includes('--tts-play-probe')) void runTtsPlayProbe()
-  if (process.argv.includes('--chat-block-probe')) void runChatBlockProbe()
-  if (process.argv.includes('--gsi-probe')) void runGsiProbe()
-  if (process.argv.includes('--settings-persist-probe')) void runSettingsPersistProbe()
-  if (process.argv.includes('--sovits-refs-probe')) void runSovitsRefsProbe()
-  if (process.argv.includes('--sovits-voicepack-probe')) void runSovitsVoicepackProbe()
-  if (process.argv.includes('--gsi-dump')) void runGsiDumpProbe()
-  if (process.argv.includes('--gsi-dump-report')) void runGsiFramesReportProbe()
-  if (process.argv.includes('--match-report')) void runMatchReportProbe()
-  if (process.argv.includes('--translate-cache-probe')) void runTranslateCacheProbe()
-  if (process.argv.includes('--translate-accuracy-probe')) void runTranslateAccuracyProbe()
-  if (process.argv.includes('--overlay-geometry-probe')) void runOverlayGeometryProbe()
-  if (process.argv.includes('--hotkey-probe')) void runHotkeyProbe()
-  if (process.argv.includes('--hold-watch-probe')) void runHoldWatchProbe()
-  if (process.argv.includes('--voice-out-probe')) void runVoiceOutProbe()
-  if (process.argv.includes('--voice-chain-probe')) void runVoiceChainProbe()
-  if (process.argv.includes('--asr-hotwords-probe')) void runAsrHotwordsProbe()
-  if (process.argv.includes('--provider-reasoning-probe')) void runProviderReasoningProbe()
-  if (process.argv.includes('--zhipu-live-probe')) void runZhipuLiveProbe()
-  if (process.argv.includes('--train-probe')) void runTrainProbe()
-  if (process.argv.includes('--voice-runtime-probe')) void runVoiceRuntimeProbe()
-  if (process.argv.includes('--voice-worker-probe')) void runVoiceWorkerProbe()
-  if (process.argv.includes('--asr-engines-probe')) void runAsrEnginesProbe()
-  if (process.argv.includes('--inplace-guard-probe')) void runInPlaceGuardProbe()
-  if (process.argv.includes('--asr-swap-probe')) void runAsrSwapProbe()
+  const probeRun = PROBES.some((probe) => process.argv.includes(probe.flag)) || process.argv.some((arg) => arg.endsWith('-selftest'))
+  if (process.argv.includes('--probes-md')) {
+    console.log(renderProbeCatalogue())
+    app.exit(0)
+    return
+  }
+  for (const probe of PROBES) {
+    if (process.argv.includes(probe.flag)) void probe.run()
+  }
 
   const startup = loadSettings()
   // 重启即新会话：上一个进程的会话库与槽位 id 先清掉，新进程从空白历史开始（用户要求）。

@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import {
   applyBacklogPolicy,
   isSpeakStale,
@@ -258,5 +258,5 @@ export async function runTtsPipelineProbe(): Promise<void> {
   const failed = cases.filter((row) => !row.ok)
   for (const row of cases) console.log(`${row.ok ? 'PASS' : 'FAIL'} | ${row.name} | ${row.detail}`)
   console.log(`TTS_PIPELINE_PROBE ${cases.length - failed.length}/${cases.length} ${failed.length === 0 ? 'PASS' : 'FAIL'}`)
-  app.exit(failed.length === 0 ? 0 : 1)
+  exitProbe(failed.length === 0 )
 }

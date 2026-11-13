@@ -12,7 +12,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "lint": "npm run lint:js && npm run lint:css && npm run check:shared && npm run check:docs && npm run check:pure",
+    "lint": "npm run lint:js && npm run lint:css && npm run check:shared && npm run check:docs && npm run check:probes && npm run check:pure",
     "lint:js": "eslint . --max-warnings 1",
     "lint:css": "stylelint \"src/**/*.css\"",
     "check:shared": "node scripts/check-shared-cycles.mjs",
@@ -25,7 +25,9 @@
     "guard": "node scripts/guard-secrets.mjs",
     "panel:preview": "vite -c scripts/panel-preview.mts",
     "check:pure": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-pure.mjs",
-    "check:docs": "node scripts/check-index.mjs"
+    "check:docs": "node scripts/check-index.mjs",
+    "check:probes": "node scripts/gen-probes-md.mjs",
+    "probes:doc": "node scripts/gen-probes-md.mjs --write"
   },
   "dependencies": {
     "@andresaya/edge-tts": "^1.9.1",

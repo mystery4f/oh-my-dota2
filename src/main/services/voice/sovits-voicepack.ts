@@ -233,17 +233,18 @@ export function cleanupStalePackFiles(pack: VoicePackDef, staleAudio: string[], 
 export async function deleteVoicePack(id: string): Promise<SovitsVoicePack[]> {
   const pack = (await resolveVoicePacks()).find((item) => item.id === id)
   if (!pack) throw new Error(`unknown voicepack: ${id}`)
-  const refsRoot = sovitsRefsRoot(app.getPath('userData'))
-  const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
-  const refPath = join(refsRoot, ...pack.refAudio.relPath.split('/'))
-  const settings = loadSettings()
-  const active = settings.ttsSovitsRefAudio.trim().toLowerCase() === refPath.toLowerCase()
-  if (active) throw new Error('正在使用这个音色，先切到其他音色再删除')
+  const roots = packRoots(app.getPath('userData'))
+  const refPath = packRefPath(pack, roots.refsRoot)
+  const weightsRoot = roots.weightsRoot
+  // 「正在使用」问同一个状态判定：面板上标着「使用中」的包，这里必须删不掉。
+  const activeRef = loadSettings().ttsSovitsRefAudio.trim().toLowerCase()
+  const state = resolvePackState(pack, roots, activeRef, readRefsRaw(roots.refsRoot))
+  if (state.active) throw new Error('正在使用这个音色，先切到其他音色再删除')
   rmSync(refPath, { force: true })
   rmSync(`${refPath}.part`, { force: true })
   rmSync(join(weightsRoot, pack.id), { recursive: true, force: true })
-  if (existsSync(sovitsRefsFile(refsRoot))) {
-    writeRefsRaw(refsRoot, readRefsRaw(refsRoot).filter((item) => !isPackEntry(item, pack)))
+  if (existsSync(sovitsRefsFile(roots.refsRoot))) {
+    writeRefsRaw(roots.refsRoot, readRefsRaw(roots.refsRoot).filter((item) => !isPackEntry(item, pack)))
   }
   packRuns.delete(pack.id)
   recordSovitsLog('TTS_SOVITS_PACK_DELETE', { id: pack.id })
@@ -257,29 +258,71 @@ export function planVoicePackFiles(pack: VoicePackDef, refsRoot: string, weights
   dest: string
   bytes: number
   have: number
+  /** 目标文件真的在、且字节数与清单一致：`.part` 下满也不算。 */
+  present: boolean
 }> {
   const dest = (base: string, file: VoicePackFileDef) => join(base, ...file.relPath.split('/'))
   return [pack.refAudio, pack.gptWeights, pack.sovitsWeights].map((file) => {
     const target = file === pack.refAudio ? dest(refsRoot, file) : dest(weightsRoot, file)
     let have = 0
+    let present = false
     try {
-      have = existsSync(target) ? statSync(target).size : existsSync(`${target}.part`) ? statSync(`${target}.part`).size : 0
+      present = existsSync(target) && statSync(target).size === file.bytes
+      have = present ? file.bytes : existsSync(target) ? statSync(target).size : existsSync(`${target}.part`) ? statSync(`${target}.part`).size : 0
     } catch {
       have = 0
+      present = false
     }
-    return { url: file.url, dest: target, bytes: file.bytes, have }
+    return { url: file.url, dest: target, bytes: file.bytes, have, present }
   })
+}
+
+/** 音色包的三件套落点：下载计划、删除、激活、面板状态全都问这一处，别再各拼一遍路径。 */
+export function packRoots(userData: string): { refsRoot: string; weightsRoot: string } {
+  return { refsRoot: sovitsRefsRoot(userData), weightsRoot: sovitsWeightsRoot(userData) }
+}
+
+/** 一个包在 refs 目录里的参考音频路径（绝对）。 */
+export function packRefPath(pack: VoicePackDef, refsRoot: string): string {
+  return join(refsRoot, ...pack.refAudio.relPath.split('/'))
+}
+
+/** 音色包此刻的全部真相：文件齐不齐、是不是正在用、记录过什么版本、能不能升级。 */
+export interface VoicePackState {
+  files: ReturnType<typeof planVoicePackFiles>
+  installed: boolean
+  active: boolean
+  recordedVersion: string | null
+  upgradable: boolean
+}
+
+/**
+ * 唯一的状态判定：安装、面板列表、删除、升级都读这一份。
+ * 以前同一个问题有三种答案（文件字节、refs 条目存在、版本标签），
+ * 半截权重能同时是「已装」和「未装」——面板说未装、refs 里却选得中。
+ */
+export function resolvePackState(
+  pack: VoicePackDef,
+  roots: { refsRoot: string; weightsRoot: string },
+  activeRef: string,
+  refs: unknown
+): VoicePackState {
+  const files = planVoicePackFiles(pack, roots.refsRoot, roots.weightsRoot)
+  const installed = files.every((file) => file.present)
+  const recordedVersion = packVersionFromEntry(findPackEntry(refs, pack))
+  return {
+    files,
+    installed,
+    active: activeRef !== '' && activeRef === packRefPath(pack, roots.refsRoot).toLowerCase(),
+    recordedVersion,
+    // 文件都不在就不是「可升级」，是「没装」——版本标签只管装好的包换版。
+    upgradable: installed && packUpgradable(recordedVersion, pack.version)
+  }
 }
 
 /** 音色包是否已齐（三个文件都在且字节数对上——半截的 .part 不算）。 */
 export function voicePackInstalled(pack: VoicePackDef, refsRoot: string, weightsRoot: string): boolean {
-  return planVoicePackFiles(pack, refsRoot, weightsRoot).every((file) => {
-    try {
-      return existsSync(file.dest) && statSync(file.dest).size === file.bytes
-    } catch {
-      return false
-    }
-  })
+  return planVoicePackFiles(pack, refsRoot, weightsRoot).every((file) => file.present)
 }
 
 /**
@@ -339,30 +382,29 @@ const packRuns = new Map<string, { downloading: boolean; progress: number; error
 
 /** 面板视图：目录 + 本地状态（在不在、下没下、进度、错误）合成一张表。 */
 export async function sovitsVoicePacks(): Promise<SovitsVoicePack[]> {
-  const refsRoot = sovitsRefsRoot(app.getPath('userData'))
-  const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
+  const roots = packRoots(app.getPath('userData'))
   const activeRef = loadSettings().ttsSovitsRefAudio.trim().toLowerCase()
   const packs = await resolveVoicePacks()
-  const rawRefs = readRefsRaw(refsRoot)
+  const rawRefs = readRefsRaw(roots.refsRoot)
   return packs.map((pack) => {
     const run = packRuns.get(pack.id)
-    const plan = planVoicePackFiles(pack, refsRoot, weightsRoot)
-    const haveBytes = plan.reduce((sum, file) => sum + Math.min(file.have, file.bytes), 0)
-    const installedVersion = packVersionFromEntry(findPackEntry(rawRefs, pack))
+    // 一个包只问一次状态：已装、使用中、可升级必须来自同一份判定，不能各算各的。
+    const state = resolvePackState(pack, roots, activeRef, rawRefs)
+    const haveBytes = state.files.reduce((sum, file) => sum + Math.min(file.have, file.bytes), 0)
     return {
       id: pack.id,
       name: pack.name,
       version: pack.version,
       note: pack.note,
       defaultPack: pack.default,
-      bytes: plan.reduce((sum, file) => sum + file.bytes, 0),
+      bytes: state.files.reduce((sum, file) => sum + file.bytes, 0),
       haveBytes,
-      installed: voicePackInstalled(pack, refsRoot, weightsRoot),
-      installedVersion,
-      upgradable: packUpgradable(installedVersion, pack.version),
+      installed: state.installed,
+      installedVersion: state.recordedVersion,
+      upgradable: state.upgradable,
       downloading: run?.downloading ?? false,
       progress: run?.progress ?? 0,
-      active: activeRef !== '' && activeRef === join(refsRoot, ...pack.refAudio.relPath.split('/')).toLowerCase(),
+      active: state.active,
       error: run?.error ?? null
     }
   })
@@ -408,15 +450,14 @@ function jobFor(id: string): InstallJob {
 export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
   const pack = (await resolveVoicePacks()).find((item) => item.id === id)
   if (!pack) throw new Error(`unknown voicepack: ${id}`)
-  const refsRoot = sovitsRefsRoot(app.getPath('userData'))
-  const weightsRoot = sovitsWeightsRoot(app.getPath('userData'))
+  const roots = packRoots(app.getPath('userData'))
   const run = packRuns.get(pack.id) ?? { downloading: false, progress: 0, error: null }
   await jobFor(pack.id).run({
     busyError: '这个音色包正在下载，等它结束',
     onStart: () => {
       run.downloading = true
       run.error = null
-      run.progress = voicePackInstalled(pack, refsRoot, weightsRoot) ? 1 : 0
+      run.progress = voicePackInstalled(pack, roots.refsRoot, roots.weightsRoot) ? 1 : 0
       packRuns.set(pack.id, run)
     },
     onProgress: (progress) => {
@@ -431,12 +472,12 @@ export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
       if (ok) notifyVoiceOutMutation()
     },
     work: async (report) => {
-      const plan = planVoicePackFiles(pack, refsRoot, weightsRoot)
+      // 三件套的落点与「在不在」只问状态判定：下载、清理、面板不可能再各说一套。
+      const plan = planVoicePackFiles(pack, roots.refsRoot, roots.weightsRoot)
       const totalBytes = plan.reduce((sum, file) => sum + file.bytes, 0)
       let doneBytes = 0
       for (const file of plan) {
-        const present = existsSync(file.dest) && statSync(file.dest).size === file.bytes
-        if (!present) {
+        if (!file.present) {
           await downloadPackFile(file.url, file.dest, file.bytes, (done) => {
             report((doneBytes + done) / totalBytes)
           })
@@ -445,15 +486,15 @@ export async function installVoicePack(id: string): Promise<SovitsVoicePack[]> {
         report(doneBytes / totalBytes)
       }
       // refs.json 落条目：换版时同名/同路径的旧条目先剔掉（包拥有自己的名字），旧参考音频记下来给清理步骤。
-      const merged = packRefsMerge(readRefsRaw(refsRoot), pack)
-      writeRefsRaw(refsRoot, merged.list)
-      const stale = cleanupStalePackFiles(pack, merged.staleAudio, refsRoot, weightsRoot)
+      const merged = packRefsMerge(readRefsRaw(roots.refsRoot), pack)
+      writeRefsRaw(roots.refsRoot, merged.list)
+      const stale = cleanupStalePackFiles(pack, merged.staleAudio, roots.refsRoot, roots.weightsRoot)
       if (stale.length > 0) recordSovitsLog('TTS_SOVITS_PACK_CLEANUP', { id: pack.id, files: stale })
       recordSovitsLog('TTS_SOVITS_PACK_READY', { id: pack.id, name: pack.name })
       // 自动选中：当前没配参考（或配的还是空）就选它；用户已经挑了别的音色则不动。
       const settings = loadSettings()
       if (!settings.ttsSovitsRefAudio.trim()) {
-        const entry = listSovitsRefs(refsRoot, weightsRoot).find((item) => item.audio === pack.refAudio.relPath)
+        const entry = listSovitsRefs(roots.refsRoot, roots.weightsRoot).find((item) => item.audio === pack.refAudio.relPath)
         if (entry) {
           recordSovitsLog('TTS_SOVITS_PACK_AUTO_SELECT', { id: pack.id })
           await activateSovitsRef(entry)

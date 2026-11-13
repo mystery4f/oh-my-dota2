@@ -103,7 +103,7 @@ export function AsrTrainPage(): React.ReactElement {
   }, [loadRecs])
 
   const refreshRuns = React.useCallback(async (): Promise<void> => {
-    setRuns(await window.api.trainRuns())
+    setRuns(await window.api.trainRuns('asr-ft'))
   }, [])
 
   const refreshStatus = React.useCallback(async (): Promise<void> => {

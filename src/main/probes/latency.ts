@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { errorMessage } from '@shared/errors'
 import { getInPlaceSender } from '../services/input/chat-inplace'
 import { sessionStatus, translateReply, translateTry, warmTranslator } from '../services/session/durable-translator'
@@ -24,7 +24,7 @@ export async function runInPlaceProbe(): Promise<void> {
       JSON.stringify({ ok: cold.ok, readyMs: cold.readyMs, pingMs: warm, pingMedian: median(warm) })
   )
   bridge.dispose()
-  app.exit(cold.ok ? 0 : 1)
+  exitProbe(cold.ok )
 }
 
 /** 回复翻译的端到端耗时：会话慢时 2.5 秒的直连对冲有没有把尾部削掉。 */
@@ -68,5 +68,5 @@ export async function runReplyLatencyProbe(): Promise<void> {
         latency: status.latency
       })
   )
-  app.exit(error === null ? 0 : 1)
+  exitProbe(error === null )
 }

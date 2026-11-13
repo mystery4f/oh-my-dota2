@@ -65,6 +65,24 @@ export function clampOpacity(value: number): number {
   return Math.min(OPACITY_MAX, Math.max(OPACITY_MIN, value))
 }
 
+/** 阶段行要说的那一句；`warn` 只给要用户动手的话上色。 */
+export interface StageLine {
+  text: string
+  warn: boolean
+}
+
+/**
+ * 浮层底部只显示一句话，来源有固定优先级：一次性反馈（录音中 / 已刷新 / 麦克风不可用）
+ * → 主进程 hint（被占用、引擎缺失这类要用户动手的）→ 未锁定的操作提示 → 什么都不显示。
+ * 以前这条优先级写死在 JSX 的 if 链里，探针够不着；现在是一个纯函数，浮层只管画。
+ */
+export function stageLine(input: { message: string | null; hint: string | null; locked: boolean }): StageLine | null {
+  if (input.message !== null && input.message !== '') return { text: input.message, warn: false }
+  if (input.hint !== null && input.hint !== '') return { text: input.hint, warn: true }
+  if (!input.locked) return { text: '未锁定 · 可拖动（5 秒后自动锁定）', warn: false }
+  return null
+}
+
 /** 启动时从设置文件还原浮层自有状态。 */
 export function overlayStateFromSettings(settings: AppSettings): OverlayState {
   return {

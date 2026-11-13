@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { errorMessage } from '@shared/errors'
 import { createServer, type Server } from 'node:http'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -16,6 +16,7 @@ import {
   packVersionFromEntry,
   parseVoicePackManifest,
   planVoicePackFiles,
+  resolvePackState,
   resolveVoicePacks,
   safePackRelPath,
   VOICE_PACKS,
@@ -48,6 +49,10 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
       plan[0].dest.startsWith(refsRoot) && plan[1].dest.startsWith(weightsRoot) && plan[2].dest.startsWith(weightsRoot),
       plan.map((file) => file.dest).join('|')
     )
+    push(
+      '三件套的 present 与字节一致（半截不算）',
+      plan.every((file) => !file.present)
+    )
 
     // —— 纯函数：安装判定（精确字节） ——
     push('没下文件不算安装', !voicePackInstalled(pack, refsRoot, weightsRoot))
@@ -60,6 +65,25 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
     push('少一个字节都不算（防半截文件）', !voicePackInstalled(pack, refsRoot, weightsRoot))
     writeFileSync(plan[1].dest, Buffer.alloc(plan[1].bytes, 1))
 
+    // —— 纯函数：唯一状态判定（已装 / 使用中 / 可升级 同源） ——
+    const refPath = join(refsRoot, ...pack.refAudio.relPath.split('/'))
+    const stateInstalled = resolvePackState(pack, { refsRoot, weightsRoot }, refPath.toLowerCase(), [])
+    push(
+      '装好了：已装 + 使用中 + 没有记录版本就不算可升级',
+      stateInstalled.installed && stateInstalled.active && !stateInstalled.upgradable && stateInstalled.recordedVersion === null
+    )
+    const stateElsewhere = resolvePackState(pack, { refsRoot, weightsRoot }, '', [])
+    push('没选它就不是使用中（空参考不误判）', !stateElsewhere.active)
+    // 未装但记录过旧版本：不许报「可升级」，否则面板给一个点不动的升级按钮。
+    rmSync(plan[1].dest, { force: true })
+    const stateBroken = resolvePackState(
+      pack,
+      { refsRoot, weightsRoot },
+      '',
+      [{ name: pack.name, audio: pack.refAudio.relPath, packVersion: 'old' }]
+    )
+    push('文件不全时说没装，而不是可升级', !stateBroken.installed && !stateBroken.upgradable && stateBroken.recordedVersion === 'old')
+    writeFileSync(plan[1].dest, Buffer.alloc(plan[1].bytes, 1))
     // —— 纯函数：refs.json 合并 ——
     const entryA = { name: '甲', audio: 'a/a.mp3', promptText: 'x', promptLang: 'zh' }
     const entryB = { name: '乙', audio: 'b/b.mp3', promptText: 'y', promptLang: 'zh' }
@@ -276,7 +300,7 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
   for (const item of checks) {
     console.log(`  ${item.ok ? 'ok  ' : 'FAIL'} ${item.name}${item.detail ? `  (${item.detail})` : ''}`)
   }
-  app.exit(failed.length === 0 ? 0 : 1)
+  exitProbe(failed.length === 0 )
 }
 
 function startHttpServer(

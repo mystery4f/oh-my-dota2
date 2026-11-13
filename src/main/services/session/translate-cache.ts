@@ -11,7 +11,7 @@ import { hasHan, normalizeLine } from '@shared/chat-line'
  * 就直接显示「你好」，一个 token 都不用再花。
  *
  * 落盘 sqlite，重启后仍然命中；不设 TTL（v2 的设计决策 Q3：永不过期）。
- * 键带 provider（换模型译风不同，互不串味）；带 tone（同一句话换个语气该重翻）。
+ * 键带 providerKey（换模型译风不同，互不串味）；带 tone（同一句话换个语气该重翻）。
  * 上限 20k 对，超了按最近命中淘汰。
  *
  * 除了译文，每行还预先记下做词频统计要用的字段：首次方向、首次来源、
@@ -26,7 +26,7 @@ export type TranslationOrigin = 'capture' | 'reply' | 'try' | 'warm' | 'probe'
 
 /**
  * 读取按调用方来源过滤：生产的读永远不蹭 try/warm/probe 写下的行 ——
- * glm 把 bkb 译成 bkg 那次，就是试用页的行（origin=try，键位 UNIQUE(provider,tone,a) 与生产同槽）
+ * glm 把 bkb 译成 bkg 那次，就是试用页的行（origin=try，键位 UNIQUE(providerKey,tone,a) 与生产同槽）
  * 冒充了生产命中。try/warm 只排 probe（探针的假答案谁都不许用）；
  * probe 调用方不设限制：探针要能验证自己写下的行。
  */
@@ -150,7 +150,7 @@ function open(): DatabaseSync | null {
       next.exec(`
         CREATE TABLE IF NOT EXISTS pair (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          provider TEXT NOT NULL,
+          providerKey TEXT NOT NULL,
           tone TEXT NOT NULL,
           a TEXT NOT NULL,
           a_raw TEXT NOT NULL,
@@ -166,10 +166,10 @@ function open(): DatabaseSync | null {
           created_at INTEGER NOT NULL,
           last_hit_at INTEGER NOT NULL,
           last_origin TEXT NOT NULL,
-          UNIQUE(provider, tone, a)
+          UNIQUE(providerKey, tone, a)
         )
       `)
-      next.exec('CREATE INDEX IF NOT EXISTS idx_pair_b ON pair(provider, tone, b)')
+      next.exec('CREATE INDEX IF NOT EXISTS idx_pair_b ON pair(providerKey, tone, b)')
       next.exec('CREATE INDEX IF NOT EXISTS idx_pair_hits ON pair(hits DESC)')
       // 索引损坏时 prepare/run 都会抛，但 SELECT 仍能读——所以必须在打开时查一次，
       // 否则症状是「读得到旧行、写不进新行」，看起来像词库凭空停止增长。
@@ -211,8 +211,8 @@ export function closeTranslationCache(): void {
   db = null
 }
 
-function pairKey(provider: string, tone: string, text: string): string {
-  return `${provider}|${tone}|${normalizeLine(text)}`
+function pairKey(providerKey: string, tone: string, text: string): string {
+  return `${providerKey}|${tone}|${normalizeLine(text)}`
 }
 
 export interface LookupHit {
@@ -228,7 +228,7 @@ export interface LookupHit {
 export function lookupTranslation(
   text: string,
   direction: string,
-  provider: string,
+  providerKey: string,
   tone = '',
   origin: TranslationOrigin = 'capture',
   crossTone = true
@@ -240,7 +240,7 @@ export function lookupTranslation(
   const handle = open()
 
   if (handle === null) {
-    const forward = memory.get(pairKey(provider, tone, text))
+    const forward = memory.get(pairKey(providerKey, tone, text))
     if (forward !== undefined && !excluded.includes(forward.origin) && hasHan(forward.b) === wantHan) {
       forward.hits += 1
       stats.hits += 1
@@ -248,7 +248,7 @@ export function lookupTranslation(
     }
     if (crossTone) {
       for (const [key, pair] of memory) {
-        if (!key.startsWith(`${provider}|`) || pair.a !== source) continue
+        if (!key.startsWith(`${providerKey}|`) || pair.a !== source) continue
         if (excluded.includes(pair.origin)) continue
         if (hasHan(pair.b) !== wantHan) continue
         pair.hits += 1
@@ -257,7 +257,7 @@ export function lookupTranslation(
       }
     }
     for (const [key, pair] of memory) {
-      if (!key.startsWith(`${provider}|`)) continue
+      if (!key.startsWith(`${providerKey}|`)) continue
       if (excluded.includes(pair.origin)) continue
       if (normalizeLine(pair.b) === source && hasHan(pair.a) === wantHan) {
         pair.hits += 1
@@ -271,14 +271,14 @@ export function lookupTranslation(
 
   try {
     const forward = handle
-      .prepare('SELECT b, a_han FROM pair WHERE provider = ? AND tone = ? AND a = ?' + scopeSql)
-      .get(provider, tone, source, ...excluded) as { b: string; a_han: number } | undefined
+      .prepare('SELECT b, a_han FROM pair WHERE providerKey = ? AND tone = ? AND a = ?' + scopeSql)
+      .get(providerKey, tone, source, ...excluded) as { b: string; a_han: number } | undefined
     if (forward !== undefined && hasHan(forward.b) === wantHan) {
       handle
         .prepare(
-          'UPDATE pair SET hits = hits + 1, last_hit_at = ?, last_origin = ? WHERE provider = ? AND tone = ? AND a = ?'
+          'UPDATE pair SET hits = hits + 1, last_hit_at = ?, last_origin = ? WHERE providerKey = ? AND tone = ? AND a = ?'
         )
-        .run(Date.now(), origin, provider, tone, source)
+        .run(Date.now(), origin, providerKey, tone, source)
       stats.hits += 1
       return { value: forward.b, tone }
     }
@@ -287,11 +287,11 @@ export function lookupTranslation(
       const other = handle
         .prepare(
           // scopeSql 必须在 LIMIT 之前：接在 LIMIT 后面会被当成 LIMIT 表达式，报 no such column
-          'SELECT id, b, a_han, tone FROM pair WHERE provider = ? AND a = ?' +
+          'SELECT id, b, a_han, tone FROM pair WHERE providerKey = ? AND a = ?' +
             scopeSql +
             ' ORDER BY hits DESC LIMIT 1'
         )
-        .get(provider, source, ...excluded) as { id: number; b: string; a_han: number; tone: string } | undefined
+        .get(providerKey, source, ...excluded) as { id: number; b: string; a_han: number; tone: string } | undefined
       if (other !== undefined && hasHan(other.b) === wantHan) {
         handle
           .prepare('UPDATE pair SET hits = hits + 1, last_hit_at = ?, last_origin = ? WHERE id = ?')
@@ -303,9 +303,9 @@ export function lookupTranslation(
     // 反向：这句话以前是译文，源文就在同一行；反向那半句与语气无关。
     const backward = handle
       .prepare(
-        'SELECT id, a_raw, a_han, tone FROM pair WHERE provider = ? AND b = ?' + scopeSql + ' LIMIT 1'
+        'SELECT id, a_raw, a_han, tone FROM pair WHERE providerKey = ? AND b = ?' + scopeSql + ' LIMIT 1'
       )
-      .get(provider, text.trim(), ...excluded) as
+      .get(providerKey, text.trim(), ...excluded) as
       | { id: number; a_raw: string; a_han: number; tone: string }
       | undefined
     if (backward !== undefined && (backward.a_han === 1) === wantHan) {
@@ -328,17 +328,17 @@ export function lookupTranslation(
 export function readTranslation(
   text: string,
   direction: string,
-  provider: string,
+  providerKey: string,
   tone = '',
   origin: TranslationOrigin = 'capture',
   crossTone = true
 ): string | null {
-  return lookupTranslation(text, direction, provider, tone, origin, crossTone)?.value ?? null
+  return lookupTranslation(text, direction, providerKey, tone, origin, crossTone)?.value ?? null
 }
 
 export function writeTranslation(
   text: string,
-  provider: string,
+  providerKey: string,
   tone: string,
   value: string,
   meta: { direction: string; origin: TranslationOrigin }
@@ -354,7 +354,7 @@ export function writeTranslation(
   const handle = open()
 
   if (handle === null) {
-    memory.set(pairKey(provider, tone, text), {
+    memory.set(pairKey(providerKey, tone, text), {
       tone,
       a: raw,
       b: trimmed,
@@ -375,18 +375,18 @@ export function writeTranslation(
     handle
       .prepare(
         `INSERT INTO pair (
-           provider, tone, a, a_raw, b, a_han, direction, origin,
+           providerKey, tone, a, a_raw, b, a_han, direction, origin,
            a_len, b_len, a_words, b_words, hits, created_at, last_hit_at, last_origin
          )
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-         ON CONFLICT(provider, tone, a) DO UPDATE SET
+         ON CONFLICT(providerKey, tone, a) DO UPDATE SET
            a_raw = excluded.a_raw,
            b = excluded.b,
            last_hit_at = excluded.last_hit_at,
            last_origin = excluded.last_origin`
       )
       .run(
-        provider,
+        providerKey,
         tone,
         source,
         raw,
@@ -436,38 +436,38 @@ export function translationCacheSize(): number {
   }
 }
 
-/** 这个 provider 名下有几对：面板「清空缓存」确认框用的数字。 */
-export function translationCachePairsFor(provider: string): number {
+/** 这个 providerKey 名下有几对：面板「清空缓存」确认框用的数字。 */
+export function translationCachePairsFor(providerKey: string): number {
   const handle = open()
   if (handle === null) {
     let count = 0
-    for (const key of memory.keys()) if (key.startsWith(`${provider}|`)) count += 1
+    for (const key of memory.keys()) if (key.startsWith(`${providerKey}|`)) count += 1
     return count
   }
   try {
-    return (handle.prepare('SELECT COUNT(*) AS n FROM pair WHERE provider = ?').get(provider) as { n: number }).n
+    return (handle.prepare('SELECT COUNT(*) AS n FROM pair WHERE providerKey = ?').get(providerKey) as { n: number }).n
   } catch {
     return 0
   }
 }
 
 /**
- * 清掉这个 provider 的全部记账对，返回删掉的行数；其它 provider 的行原样保留。
+ * 清掉这个 providerKey 的全部记账对，返回删掉的行数；其它 providerKey 的行原样保留。
  * 「清空」是面板上的明确指令：数不出总数也照删，只有删不动才报 0。
  */
-export function clearTranslationPairs(provider: string): number {
+export function clearTranslationPairs(providerKey: string): number {
   const handle = open()
   if (handle === null) {
     let removed = 0
     for (const key of Array.from(memory.keys())) {
-      if (!key.startsWith(`${provider}|`)) continue
+      if (!key.startsWith(`${providerKey}|`)) continue
       memory.delete(key)
       removed += 1
     }
     return removed
   }
   try {
-    return Number(handle.prepare('DELETE FROM pair WHERE provider = ?').run(provider).changes)
+    return Number(handle.prepare('DELETE FROM pair WHERE providerKey = ?').run(providerKey).changes)
   } catch (err) {
     console.log('TRANSLATE_CACHE_CLEAR_FAILED', errorMessage(err))
     return 0
@@ -482,7 +482,7 @@ export function translationCacheRows(limit = 5): Record<string, unknown>[] {
   const handle = open()
   if (handle === null) {
     return Array.from(memory.entries()).map(([key, pair]) => ({
-      provider: key.split('|')[0],
+      providerKey: key.split('|')[0],
       a_raw: pair.a,
       b: pair.b,
       direction: pair.direction,
@@ -493,7 +493,7 @@ export function translationCacheRows(limit = 5): Record<string, unknown>[] {
   try {
     return handle
       .prepare(
-        `SELECT provider, a_raw, b, a_han, direction, origin, a_len, b_len, a_words, b_words, hits, last_origin
+        `SELECT providerKey, a_raw, b, a_han, direction, origin, a_len, b_len, a_words, b_words, hits, last_origin
          FROM pair ORDER BY hits DESC, last_hit_at DESC LIMIT ?`
       )
       .all(limit) as Record<string, unknown>[]

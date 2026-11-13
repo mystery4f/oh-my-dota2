@@ -1,34 +1,74 @@
-import { app } from 'electron'
-import { hasHan, splitChatLine, takeHero, worthTranslating } from '@shared/chat-line'
+import { exitProbe } from './harness'
+import { hasHan, renderChatLine, withChatBody, worthTranslating, type ChatLine } from '@shared/chat-line'
 import { ChatCaptureService } from '../services/capture/capturer'
 import { sameText } from '../services/session/durable-translator'
 
 /**
- * 聊天行处理的纯逻辑回归（`--chat-block-probe`）。抓屏 OCR 移除后只剩 GSI 正文，
- * 但「怎么切前缀 / 翻不翻 / 是不是同一句 / 英雄名怎么抽」这几条判据全在这里冻结。
+ * 聊天行处理的纯逻辑回归（`--chat-block-probe`）。抓屏 OCR 移除后只剩 GSI，
+ * 这里冻结三件事：值的形状（正文只此一份）、展示串的格式、译文回填不丢前缀；
+ * 外加语言与「值不值得翻」的判据。
  */
 export async function runChatBlockProbe(): Promise<void> {
-  // 语言判定：正文里只要出现汉字就不翻（含中英混排）。判的是正文——`[英雄] [队友] [昵称] ⚔`
-  // 这层前缀自带汉字，拿整行算会把 `lol`、`back off` 这种纯英文误判成中文。
-  const langCases = [
-    { line: '[lina] [队友] [队友A] ⚔ 别送我', body: '别送我', want: true },
-    { line: '[pudge] [敌方] [敌人B] 🌐 lol', body: 'lol', want: false },
-    { line: '[axe] [我] [Mystery] ⚔ 冲上路', body: '冲上路', want: true },
-    { line: '[axe] [我] [Mystery] ⚔ back off', body: 'back off', want: false },
-    { line: '[axe] [我] [Mystery] ⚔ gg 打得不错', body: 'gg 打得不错', want: true },
-    { line: '[axe] [我] [Mystery] ⚔ push 中路 now', body: 'push 中路 now', want: true },
-    { line: '[axe] [我] [Mystery] ⚔ gg wp', body: 'gg wp', want: false },
-    { line: '[我] [Balance(Bot)] ⚔ hello', body: 'hello', want: false },
-    { line: '[All] k1ng: push top pls', body: 'push top pls', want: false }
-  ].map((item) => {
-    const split = splitChatLine(item.line)
-    return { ...item, stripped: split.body, prefix: split.prefix, got: hasHan(split.body) }
+  // 每一行既是输入（值）也是期望（上屏串）：格式改了这里会红。
+  // 语言判定看的是 `body`：前缀里的「队友」「中文昵称」不再参与判断 ——
+  // 以前拿整行判，中文昵称让 `lol` 被当成中文，那一句永远没有译文。
+  const lineCases: Array<{ line: ChatLine; display: string; han: boolean }> = [
+    {
+      line: { hero: 'lina', relation: '队友', speaker: '队友A', channel: 'team', body: '别送我' },
+      display: '[lina] [队友] [队友A] ⚔ 别送我',
+      han: true
+    },
+    {
+      line: { hero: 'pudge', relation: '敌方', speaker: '敌人B', channel: 'all', body: 'lol' },
+      display: '[pudge] [敌方] [敌人B] 🌐 lol',
+      han: false
+    },
+    {
+      line: { relation: '我', speaker: 'Mystery', channel: 'team', body: '冲上路' },
+      display: '[我] [Mystery] ⚔ 冲上路',
+      han: true
+    },
+    {
+      line: { relation: '我', speaker: 'Mystery', channel: 'team', body: 'back off' },
+      display: '[我] [Mystery] ⚔ back off',
+      han: false
+    },
+    {
+      line: { relation: '我', speaker: 'Mystery', channel: 'team', body: 'gg 打得不错' },
+      display: '[我] [Mystery] ⚔ gg 打得不错',
+      han: true
+    },
+    {
+      line: { relation: '我', speaker: 'Mystery', channel: 'team', body: 'push 中路 now' },
+      display: '[我] [Mystery] ⚔ push 中路 now',
+      han: true
+    },
+    {
+      line: { relation: '我', speaker: 'Mystery', channel: 'team', body: 'gg wp' },
+      display: '[我] [Mystery] ⚔ gg wp',
+      han: false
+    },
+    {
+      line: { relation: '我', speaker: 'Balance(Bot)', channel: 'team', body: 'hello' },
+      display: '[我] [Balance(Bot)] ⚔ hello',
+      han: false
+    }
+  ]
+  const langOk = lineCases.every((item) => hasHan(item.line.body) === item.han)
+  // 展示串格式只有一份：符号分频道、前缀顺序 [英雄] [关系] [昵称]。
+  const displayOk = lineCases.every((item) => renderChatLine(item.line) === item.display)
+
+  // 译文回填只换正文：前缀（频道 / 昵称 / 英雄 / 符号）原样留着，否则看不出是谁说的。
+  const restoreOk = lineCases.every((item) => {
+    const restored = withChatBody(item.display, item.line.body, '译文')
+    const prefix = item.display.slice(0, item.display.lastIndexOf(item.line.body))
+    return restored === `${prefix}译文`
   })
-  const langOk = langCases.every(
-    (item) => item.got === item.want && (item.want || item.stripped === item.body)
-  )
-  // 前缀必须原样留在行首：翻译回填的是「前缀 + 译文」，前缀丢了就看不见谁说的。
-  const prefixOk = langCases.every((item) => item.line.startsWith(item.prefix.trim()))
+
+  // 回归用例：中文昵称只属于前缀，正文是纯英文，这句必须翻。
+  const nicknameLine: ChatLine = { relation: '队友', speaker: '中文昵称', channel: 'team', body: 'lol' }
+  const nicknameOk =
+    renderChatLine(nicknameLine) === '[队友] [中文昵称] ⚔ lol' && !hasHan(nicknameLine.body)
 
   // 没有可翻文字的行不能进模型队列：纯符号、纯数字、纯 emoji、单字符。
   const uselessCases = [
@@ -50,29 +90,16 @@ export async function runChatBlockProbe(): Promise<void> {
   // 同形判定：只比「字」，大小写/空白/标点符号的差别不算两个意思。
   const sameTextOk = sameText('gg', 'GG') && sameText('??? go', '???  go!') && !sameText('gg', 'wp')
 
-  // 英雄名要能单独抽出来换成头像；频道词与普通行不能误伤。
-  const heroCases = [
-    { line: '[lina] [队友] [队友A] ⚔ 别送我', hero: 'lina', text: '[队友] [队友A] ⚔ 别送我' },
-    { line: '[nevermore] [我] [Mystery] 🌐 ok', hero: 'nevermore', text: '[我] [Mystery] 🌐 ok' },
-    { line: '[All] k1ng: push top', hero: undefined, text: '[All] k1ng: push top' },
-    { line: '[队友] k1: hello', hero: undefined, text: '[队友] k1: hello' },
-    { line: 'naked line', hero: undefined, text: 'naked line' }
-  ]
-  const heroOk = heroCases.every((item) => {
-    const got = takeHero(item.line)
-    return got.hero === item.hero && got.text === item.text
-  })
-
   // 朗读边界（#32）：把 CaptureEffects 换成假实现，翻译账本就能脱离语音栈跑。
   // 三行里只有中文行和 666 走 settled 腿；英文行走翻译链，但探针同步退出，微任务不落地、不发网络。
   const announced: Array<{ entries: Array<{ translated: string | null; pending?: boolean }>; cutoff: number }> = []
   const service = new ChatCaptureService({
-    onTranslated: (entries, cutoffMs) => announced.push({ entries: entries.map((entry) => ({ ...entry })), cutoff: cutoffMs }),
+    onTranslated: (entries, cutoffMs) => announced.push({ entries: entries.map((entry) => ({ ...entry })), cutoff: cutoffMs })
   })
   service.pushMessages([
-    { text: '[axe] [我] [Mystery] ⚔ 冲上路', speaker: 'Mystery' },
-    { text: '[pudge] 666' },
-    { text: '[pudge] push top pls' },
+    { hero: 'axe', relation: '我', speaker: 'Mystery', channel: 'team', body: '冲上路' },
+    { relation: '敌方', speaker: '敌人B', channel: 'all', body: '666' },
+    { relation: '敌方', speaker: '敌人B', channel: 'all', body: 'push top pls' }
   ])
   const settled = announced[0]
   const effectsOk =
@@ -81,10 +108,10 @@ export async function runChatBlockProbe(): Promise<void> {
     settled.cutoff > 0 &&
     settled.entries.length === 2 &&
     settled.entries.every((entry) => !entry.pending && entry.translated === null)
-  const ok = langOk && prefixOk && uselessOk && sameTextOk && heroOk && effectsOk
+  const ok = langOk && displayOk && restoreOk && nicknameOk && uselessOk && sameTextOk && effectsOk
   console.log(
     'CHAT_BLOCK_PROBE',
-    JSON.stringify({ ok, langOk, prefixOk, uselessOk, sameTextOk, heroOk, effectsOk, langCases, uselessCases })
+    JSON.stringify({ ok, langOk, displayOk, restoreOk, nicknameOk, uselessOk, sameTextOk, effectsOk, uselessCases })
   )
-  app.exit(ok ? 0 : 1)
+  exitProbe(ok )
 }

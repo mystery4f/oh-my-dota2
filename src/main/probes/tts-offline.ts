@@ -1,3 +1,4 @@
+import { exitProbe } from './harness'
 import { app } from 'electron'
 import { offlineModelDir, offlineReady, offlineStatus, synthesizeOffline } from '../services/voice/offline'
 import type { OfflineVoiceId } from '../../shared/ipc'
@@ -25,7 +26,7 @@ export async function runTtsOfflineProbe(): Promise<void> {
   if (!offlineReady(VOICE)) {
     console.log('TTS_OFFLINE_PROBE_MISSING', JSON.stringify({ voice: VOICE, dir: offlineModelDir(VOICE), hint: '首次使用请在面板点「下载模型」' }))
     console.log('TTS_OFFLINE_PROBE_RESULT', JSON.stringify({ ok: false, reason: 'model-missing' }))
-    app.exit(1)
+    exitProbe(false)
     return
   }
   const rows: { ok: boolean; ms: number; bytes: number; secs: number }[] = []
@@ -77,5 +78,5 @@ export async function runTtsOfflineProbe(): Promise<void> {
       bytes: okRows.reduce((sum, row) => sum + row.bytes, 0)
     })
   )
-  app.exit(ok ? 0 : 1)
+  exitProbe(ok )
 }

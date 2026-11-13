@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { probeCases, exitProbe } from './harness'
 import { PROVIDER_PRESETS, type ProviderConfig, type ProviderId, type ProviderPreset } from '@shared/ipc'
 import {
   directReasoningParams,
@@ -24,9 +24,7 @@ interface Row {
 
 const cases: Row[] = []
 
-function push(name: string, ok: boolean, detail: string): void {
-  cases.push({ name, ok, detail })
-}
+const { push } = probeCases(cases)
 
 function provider(id: ProviderId, reasoning?: boolean): ProviderConfig {
   return { id, baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'm', reasoning }
@@ -193,5 +191,5 @@ export function runProviderReasoningProbe(): void {
     console.log(`${item.ok ? 'PASS' : 'FAIL'} | ${item.name} | ${item.detail}`)
   }
   console.log(`PROVIDER_REASONING_PROBE ${cases.length - failed}/${cases.length} PASS`)
-  app.exit(failed > 0 ? 1 : 0)
+  exitProbe(!(failed > 0), cases)
 }

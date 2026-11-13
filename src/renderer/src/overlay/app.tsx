@@ -11,7 +11,7 @@ import { SummonPanel } from './summon-panel'
 import { Toolbar } from './toolbar'
 import { subscribeSpeech } from './speech'
 import { createVoiceCapture, type VoiceRowPatch } from './voice-capture'
-import { bindStage, setStage } from './stage'
+import { stageLine } from '@shared/overlay-state'
 
 
 /**
@@ -27,10 +27,20 @@ export function App(): JSX.Element {
   const [traceById, setTraceById] = useState<Record<string, string>>({})
   const [stage, setStageText] = useState<string | null>(null)
 
-  useEffect(() => {
-    bindStage(setStageText)
-    return () => bindStage(null)
+  // 阶段行的一次性反馈：给了 holdMs 就到点自动收起，下一条顶掉上一条的计时（旧模块级 setter 换成组件内 ref）。
+  const stageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showStage = useCallback((text: string | null, holdMs?: number): void => {
+    if (stageTimer.current) clearTimeout(stageTimer.current)
+    stageTimer.current = null
+    setStageText(text)
+    if (text !== null && holdMs !== undefined) stageTimer.current = setTimeout(() => setStageText(null), holdMs)
   }, [])
+  useEffect(
+    () => () => {
+      if (stageTimer.current) clearTimeout(stageTimer.current)
+    },
+    []
+  )
 
   useEffect(() => {
     // 快照式事件：掉一条只是少画一次，行上始终是最近一次的完整状态。
@@ -46,11 +56,18 @@ export function App(): JSX.Element {
   }, [])
 
   const onStatus = useCallback((next: OverlayStatus): void => setStatus(next), [])
+  // 状态的镜像引用：给只创建一次的回调读最新值（未读计数、录音阶段行的键名、锁判断）。
+  const statusRef = useRef<OverlayStatus | null>(null)
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
 
   /** 收到任何一批消息：进账本；收起且面板没开才计未读。 */
   const acceptBatch = useCallback((batch: CaptureEntry[]): void => {
     setRows((current) => batch.reduce(pushEntry, current))
-    setUnread((current) => batch.reduce((c) => nextUnread(c, true, true), current))
+    // 收起且面板没开才累加；看得到行的地方清零。判定在共享纯函数里，这里只给当下视角。
+    const view = statusRef.current
+    setUnread((current) => nextUnread(current, { collapsed: view?.collapsed ?? false, panelOpen: view?.panelOpen ?? false }, batch.length))
   }, [])
 
   const acceptUpdate = useCallback((batch: CaptureEntry[]): void => {
@@ -60,8 +77,8 @@ export function App(): JSX.Element {
   /** 手动触发是「拍一张照」：先清空再重建，避免旧行残留。 */
   const acceptReplace = useCallback((batch: CaptureEntry[]): void => {
     setRows(() => batch.reduce(pushEntry, [] as LedgerRow[]))
-    setStage(batch.length === 0 ? '没有识别到聊天内容' : `已刷新 ${batch.length} 条`, 1500)
-  }, [])
+    showStage(batch.length === 0 ? '没有识别到聊天内容' : `已刷新 ${batch.length} 条`, 1500)
+  }, [showStage])
 
   // 初始状态 + 状态广播：一条线进 React，没有任何轮询。
   useEffect(() => {
@@ -81,11 +98,6 @@ export function App(): JSX.Element {
     }
   }, [acceptBatch, acceptUpdate, acceptReplace])
 
-  // 展开或呼出面板时未读清零：看得到行的地方不需要红点。
-  useEffect(() => {
-    if (!status) return
-    if (!status.collapsed || status.panelOpen) setUnread(0)
-  }, [status])
 
   // 渐隐每秒算一次：12 秒前的行降为 25% 不透明，保留上下文但不占视野。
   useEffect(() => {
@@ -96,10 +108,6 @@ export function App(): JSX.Element {
   }, [])
 
   // 状态的镜像引用：给只创建一次的回调读最新值（录音阶段行的键名、锁判断）。
-  const statusRef = useRef<OverlayStatus | null>(null)
-  useEffect(() => {
-    statusRef.current = status
-  }, [status])
 
   // 朗读与录音热键：toggle 由主进程广播下来，这里真的动麦克风。
   const captureRef = useRef<ReturnType<typeof createVoiceCapture> | null>(null)
@@ -131,7 +139,7 @@ export function App(): JSX.Element {
           setSpokenById((current) => ({ ...current, [patch.id]: spoken }))
         }
       },
-      stage: setStage,
+      stage: showStage,
       reportChain: (result: VoiceChainSummary) => window.api.reportVoiceChain(result),
       voiceCaptureKey: () => statusRef.current?.hotkeys.voiceCapture ?? '',
       voiceCaptureMode: () => statusRef.current?.voiceCaptureMode ?? 'hold'
@@ -147,7 +155,7 @@ export function App(): JSX.Element {
       offStart()
       offStop()
     }
-  }, [])
+  }, [showStage])
 
   // 配置态方向键微调：Shift = 10px 步进；锁定时什么都不吃（反正穿透）。
   useEffect(() => {
@@ -218,10 +226,13 @@ export function App(): JSX.Element {
   )
 }
 
-/** 阶段行：文案来源的优先级已在 setStage 与 status 里排好，这里只负责画。 */
+/** 阶段行：选哪一句话由共享纯函数决定（stageLine），这里只画。 */
 function StageLine(props: { status: OverlayStatus; stage: string | null }): JSX.Element | null {
-  if (props.stage !== null) return <div id="stage">{props.stage}</div>
-  if (props.status.hint) return <div id="stage" className="warn">{props.status.hint}</div>
-  if (!props.status.locked) return <div id="stage">未锁定 · 可拖动（5 秒后自动锁定）</div>
-  return null
+  const line = stageLine({ message: props.stage, hint: props.status.hint ?? null, locked: props.status.locked })
+  if (line === null) return null
+  return (
+    <div id="stage" className={line.warn ? 'warn' : undefined}>
+      {line.text}
+    </div>
+  )
 }

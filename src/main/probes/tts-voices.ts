@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { EDGE_VOICES, DEFAULT_EDGE_VOICE } from '@shared/tts-voices'
 import { synthesizeEdge } from '../services/voice/edge'
 
@@ -37,5 +37,5 @@ export async function runTtsVoicesProbe(): Promise<void> {
     })
   )
   await new Promise((resolve) => setTimeout(resolve, 500))
-  app.exit(failed.length === 0 && defaultOk ? 0 : 1)
+  exitProbe(failed.length === 0 && defaultOk )
 }

@@ -8,6 +8,7 @@ import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
 import type { GsiStatusView } from '../../shared/ipc'
 import { buildRoster, rosterLine } from './team-intel'
+import type { ChatLine } from '@shared/chat-line'
 
 /**
  * Dota 2 Game State Integration：Valve 官方支持的本地状态推送。
@@ -18,8 +19,8 @@ import { buildRoster, rosterLine } from './team-intel'
  *
  * 正文还能从 GSI 拿：cfg 的 data 里开了 `"events" "1"`，Dota 就会把对局内聊天塞进
  * `payload.events[]`，形如 `{ event_type: 'chat_message', player_id, channel_type, message }`
- * （channel_type 11 = 所有人，12 = 队伍）。所以正文有两条并列的路，由设置 `chatSource` 选：
- * `ocr` 抓屏识别，`gsi` 走这里。聊天事件只带说话人 slot、不带昵称，昵称靠 `"allplayers" "1"`
+ * （channel_type 11 = 所有人，12 = 队伍）。所以正文有两条并列的路：`ocr` 抓屏识别，`gsi` 走这里。
+ * 聊天事件只带说话人 slot、不带昵称，昵称靠 `"allplayers" "1"`
  * 推来的表把 slot 翻成名字；实在没有就退回「我 / 玩家N」，绝不因为缺名字丢消息。
  */
 export const GSI_PORT = 32123
@@ -211,9 +212,6 @@ function slotLabel(slot: number | undefined, mySlot: number | undefined): string
   return slotIsSelf(slot, mySlot) ? '我' : `玩家${(slot % 128) + 1}`
 }
 
-/** 频道符号：只有队友看得见 vs 双方都看得见。别用汉字，浮层很窄。 */
-const TEAM_CHAT_SYMBOL = '⚔'
-const ALL_CHAT_SYMBOL = '🌐'
 
 function slotHero(slot: number | undefined): string {
   if (slot === undefined) return ''
@@ -234,13 +232,6 @@ function slotRelation(
   return channel === 12 ? '队友' : '玩家'
 }
 
-/** 一条待上屏的聊天：正文 + 是不是自己说的（朗读要据此跳过）。 */
-export interface ChatLine {
-  text: string
-  own: boolean
-  /** 说话人的英雄（GSI 才知道）。朗读要念「XXX 说 ……」，不念方括号和频道符号。 */
-  speaker?: string
-}
 
 function recordChatEvents(payload: GsiPayload): ChatLine[] {
   const events = payload.events
@@ -266,14 +257,15 @@ function recordChatEvents(payload: GsiPayload): ChatLine[] {
     const hero = slotHero(event.player_id)
     const relation = slotRelation(event.player_id, mySlot, myTeam, event.channel_type)
     recordChatEvent(event, mySlot, label, hero, relation)
-    // 行格式：[英雄] [关系] [昵称] 频道符号 正文，一眼看清谁发的、哪边的、谁看得见。
-    const symbol = event.channel_type === 11 ? ALL_CHAT_SYMBOL : TEAM_CHAT_SYMBOL
-    const head = `${hero ? `[${hero}] ` : ''}[${relation}] [${label}] ${symbol}`
+    // 只组装值：展示串由 renderChatLine 拼、正文就是 event.message，下游不再拆回来。
     if (typeof event.message === 'string' && event.message.trim())
       accepted.push({
-        text: `${head} ${event.message}`,
-        own: event.player_id !== undefined && slotIsSelf(event.player_id, mySlot),
-        ...(hero ? { speaker: hero } : {})
+        ...(hero ? { hero } : {}),
+        relation,
+        speaker: label,
+        channel: event.channel_type === 11 ? 'all' : 'team',
+        body: event.message.trim(),
+        own: event.player_id !== undefined && slotIsSelf(event.player_id, mySlot)
       })
   }
   return accepted
@@ -322,14 +314,6 @@ export interface GsiDrive {
  * 纯判定：从「上一帧是否在打」和这一帧的 payload 得出要不要开/停捕获。
  * 只认翻转，所以用户中途手动停掉捕获之后不会被下一帧心跳又拉起来。
  */
-/**
- * 一局结束要不要把捕获停掉：自动模式停——屏幕上的聊天没了，轮询只是在空转烧 OCR，
- * 下一局 GSI 会再把捕获拉起来。手动模式不动：那里的「开始捕获」是用户自己的开关，
- * 替他关掉只会让热键静默失效。
- */
-export function shouldStopCaptureOnMatchEnd(mode: 'auto' | 'manual'): boolean {
-  return mode === 'auto'
-}
 
 export function decideGsi(prevLive: boolean, payload: GsiPayload): GsiDrive {
   const state = payload.map?.game_state ?? null
@@ -405,10 +389,10 @@ export function gsiStatus(): GsiStatus {
 /** 侧效应边界：探针注入假的实现，就不必真的去开关捕获。 */
 export interface GsiEffects {
   startCapture(): void | Promise<void>
-  /** 返回是否真的停了：手动模式下会拒绝（见 shouldStopCaptureOnMatchEnd）。 */
-  stopCapture(): boolean | Promise<boolean>
+  /** 一局结束：停捕获，并把这一局的账本清干净。返回是否真的停了。 */
+  endMatch(): boolean | Promise<boolean>
   rememberNickname(name: string): void
-  /** 把去重后的聊天正文交给捕获服务（只有 chatSource='gsi' 时才接）。 */
+  /** 把去重后的聊天正文交给捕获服务。这里的去重只管 GSI 一次事件推 26 遍那件事。 */
   pushChat(messages: ChatLine[]): void
 }
 
@@ -419,7 +403,7 @@ function defaultEffects(): GsiEffects {
       if (!loadSettings().autoStartCapture) return
       getCaptureService().start()
     },
-    stopCapture: () => {
+    endMatch: () => {
       const capture = getCaptureService()
       capture.stop()
       // 局末是明确信号：顺手清屏，别让上一局的话挂到下一局去。
@@ -432,10 +416,8 @@ function defaultEffects(): GsiEffects {
       saveSettings({ myNicknames: [...settings.myNicknames, name].slice(-8) })
     },
     pushChat: (messages) => {
-      // 只有用户明确选了 GSI 正文、且服务当下就在自动模式时才上屏：手动模式是「拍一张照」的语义。
-      // 模式问服务本身而不是设置，刚切换的那一刻才不会按旧值判断。
-      // 不再看模式：手动模式说的是「抓屏拍一张照」，而 GSI 正文根本没有快照这回事。
-      // 以前这里要求自动模式，结果用户一手动切正文源，推送就全被静默吞掉。
+      // 不再看模式：手动模式是「抓屏拍一张照」的语义，GSI 正文根本没有快照这回事；
+      // 以前要求自动模式，用户一换正文来源，推送就被静默吞掉。
       getCaptureService().pushMessages(messages)
     }
   }
@@ -473,6 +455,18 @@ function countStop(result: boolean | Promise<boolean>): void {
       () => undefined
     )
   }
+}
+
+/**
+ * 一局结束的共同收场：停捕获、清账本、落小结。
+ * POST_GAME 和心跳超时是同一件事的两条入口，次序写两遍就一定会漏：漏掉清账本，
+ * 上一局的话会挂到下一局；漏掉小结，这一局就没有可复盘的文件。
+ */
+function closeMatch(effects: GsiEffects): void {
+  runtime.startedByGsi = false
+  countStop(effects.endMatch())
+  // 局末立刻落一次小结：这是唯一能复盘整局的时机。
+  flushFrameSummary()
 }
 
 /** 处理一次推送。拆出来是为了让探针能直接喂 payload，不必绕 HTTP。 */
@@ -515,28 +509,21 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
     runtime.autoStarts += 1
     void effects.startCapture()
   } else if (decision.drive === 'stop') {
-    // 不再问「捕获是谁开的」：一局结束就停。模式判断在 effects 里，手动模式会拒绝。
-    runtime.startedByGsi = false
-    countStop(effects.stopCapture())
-    // 局末立刻落一次小结：这是唯一能复盘整局的时机。
-    flushFrameSummary()
+    closeMatch(effects)
   }
   return decision
 }
 
 /** 游戏关掉之后不会再有推送，也不能让捕获一直空转。 */
-function armWatchdog(): void {
+function armWatchdog(effects: GsiEffects): void {
   if (runtime.watchdog !== null) clearInterval(runtime.watchdog)
   runtime.watchdog = setInterval(() => {
     if (!runtime.live || runtime.lastAt === null) return
     if (Date.now() - runtime.lastAt < HEARTBEAT_TIMEOUT_MS) return
     runtime.live = false
+    // 捕获不是 GSI 开的就别替用户停；是它开的，收场必须和 POST_GAME 走同一条路。
     if (!runtime.startedByGsi) return
-    runtime.startedByGsi = false
-    // 和「一局正常结束」同一条规则：自动模式才停。
-    const capture = getCaptureService()
-    capture.stop()
-    runtime.autoStops += 1
+    closeMatch(effects)
   }, 10_000)
 }
 
@@ -593,7 +580,7 @@ export async function startGsi(options: StartGsiOptions = {}): Promise<GsiStatus
   runtime.live = false
   runtime.startedByGsi = false
   runtime.lastAt = null
-  armWatchdog()
+  armWatchdog(effects)
   if (options.writeConfig !== false) runtime.config = await ensureGsiConfig(runtime.port)
   return gsiStatus()
 }

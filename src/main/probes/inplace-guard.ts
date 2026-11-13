@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import {
   INPLACE_STALE_MS,
   decideInPlaceDelivery,
@@ -88,5 +88,5 @@ export async function runInPlaceGuardProbe(): Promise<void> {
   console.log(
     `INPLACE_GUARD_PROBE ${JSON.stringify({ ok: failed.length === 0, passed: cases.length - failed.length, failed: failed.length })}`
   )
-  app.exit(failed.length > 0 ? 1 : 0)
+  exitProbe(!(failed.length > 0 ))
 }

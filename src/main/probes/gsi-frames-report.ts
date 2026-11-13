@@ -1,3 +1,4 @@
+import { exitProbe } from './harness'
 import { app } from 'electron'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -47,7 +48,7 @@ export async function runGsiFramesReportProbe(): Promise<void> {
         error: '还没有小结文件：先打一局（或让应用收到任意 GSI 帧），应用会自动写出'
       })
     )
-    app.exit(1)
+    exitProbe(false)
     return
   }
 
@@ -59,7 +60,7 @@ export async function runGsiFramesReportProbe(): Promise<void> {
       'GSI_FRAMES_REPORT',
       JSON.stringify({ ok: false, file, error: '小结文件解析失败', detail: String(error) })
     )
-    app.exit(1)
+    exitProbe(false)
     return
   }
 
@@ -87,5 +88,5 @@ export async function runGsiFramesReportProbe(): Promise<void> {
   if (summary.events.length > 0) {
     console.log('GSI_FRAMES_EVENTS', JSON.stringify(summary.events.map((item) => item.samples[0])))
   }
-  app.exit(summary.frames > 0 ? 0 : 1)
+  exitProbe(summary.frames > 0 )
 }

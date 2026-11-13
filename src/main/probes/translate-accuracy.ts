@@ -4,7 +4,7 @@
  * - @shared/translate-fidelity：拉丁 token 保真守卫（zh-en 全查，en-zh 只盯 keep 词表）
  * - instructionsFor / SYSTEM_PROMPTS：示例驱动的方向提示词真的进了两个方向的会话指令
  */
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import {
   GLOSSARY,
   glossaryFor,
@@ -231,5 +231,5 @@ export async function runTranslateAccuracyProbe(): Promise<void> {
   for (const item of checks) {
     console.log(`  ${item.ok ? 'ok  ' : 'FAIL'} ${item.name}${item.detail ? `  (${item.detail})` : ''}`)
   }
-  app.exit(failed.length === 0 ? 0 : 1)
+  exitProbe(failed.length === 0 )
 }

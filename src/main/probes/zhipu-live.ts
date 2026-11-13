@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { errorMessage } from '@shared/errors'
 import { PROVIDER_PRESETS, type ProviderConfig, type TranslateDirection } from '@shared/ipc'
 import { looksLikeCommentary, replyWithinLimits } from '../services/providers'
@@ -48,8 +48,9 @@ function hasCjk(text: string): boolean {
 export async function runZhipuLiveProbe(): Promise<void> {
   const key = (process.env.ZHIPU_API_KEY ?? '').trim()
   if (key.length === 0) {
+    // 跳过既不是通过也不是失败：结论是那行 SKIP，不是退出码。
     console.log('ZHIPU_LIVE_PROBE SKIP | 没有设置环境变量 ZHIPU_API_KEY')
-    app.exit(0)
+    exitProbe(true)
     return
   }
 
@@ -135,5 +136,5 @@ export async function runZhipuLiveProbe(): Promise<void> {
         latency: status.latency
       })
   )
-  app.exit(failed === 0 && failure === null ? 0 : 1)
+  exitProbe(failed === 0 && failure === null )
 }

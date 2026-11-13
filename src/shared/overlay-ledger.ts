@@ -35,10 +35,18 @@ export function fadeRows(rows: LedgerRow[], now: number): LedgerRow[] {
   return rows.map((row) => ({ ...row, dim: now - row.ts >= FADE_AFTER_MS }))
 }
 
-/** 未读计数：收起时来新行 +1，展开或未收起恒 0。 */
-export function nextUnread(count: number, collapsed: boolean, incoming: boolean): number {
-  if (!collapsed) return 0
-  return incoming ? count + 1 : count
+/**
+ * 未读计数：收起且面板没开时才累加；展开或呼出面板时看得到行，一律归零。
+ * 累加与清零在同一个纯函数里——分成两处写过一次事故：累加处把「收起」写死成 true，
+ * 清零靠另一个 effect 追，两边的条件谁改都不会提醒对方。
+ */
+export function nextUnread(
+  count: number,
+  view: { collapsed: boolean; panelOpen: boolean },
+  incoming: number
+): number {
+  if (!view.collapsed || view.panelOpen) return 0
+  return count + incoming
 }
 
 /**

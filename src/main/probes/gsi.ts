@@ -1,15 +1,15 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { request } from 'node:http'
 import {
   decideGsi,
   gsiStatus,
-  shouldStopCaptureOnMatchEnd,
   startGsi,
   stopGsi,
   type GsiEffects,
   type GsiPayload
 } from '../services/gsi'
 import { cfgBody } from '../services/gsi-config'
+import { renderChatLine } from '@shared/chat-line'
 
 /** 直接打本地端口：绕开全局 fetch（它被代理感知层换过，localhost 不该走代理）。 */
 function post(port: number, payload: unknown): Promise<number> {
@@ -61,7 +61,7 @@ export async function runGsiProbe(): Promise<void> {
     startCapture: () => {
       events.starts += 1
     },
-    stopCapture: () => {
+    endMatch: () => {
       events.stops += 1
       return true
     },
@@ -70,8 +70,9 @@ export async function runGsiProbe(): Promise<void> {
     },
     pushChat: (messages) => {
       // 自己发的行会带上 own：朗读要据此跳过，探针也顺带把它记下来断言。
-      ownLines.push(...messages.filter((line) => line.own).map((line) => line.text))
-      events.pushed.push(...messages.map((line) => line.text))
+      // 捕获服务收的是值；上屏串只在上屏那一层拼，这里为了比对才调 renderChatLine。
+      ownLines.push(...messages.filter((line) => line.own).map((line) => renderChatLine(line)))
+      events.pushed.push(...messages.map((line) => renderChatLine(line)))
     }
   }
 
@@ -212,8 +213,6 @@ export async function runGsiProbe(): Promise<void> {
   ]
   const chatOk =
     events.pushed.length === chatWant.length && chatWant.every((line) => events.pushed.includes(line))
-  // 局末停捕获只对自动模式生效，手动模式的开关留给用户。
-  const modeRuleOk = shouldStopCaptureOnMatchEnd('auto') && !shouldStopCaptureOnMatchEnd('manual')
   // 阵容与清理：局末清缓存后名单必须变空，否则下一局会看到上局的英雄。
   // 自己发的行必须带 own：朗读靠这个标记跳过，漏了就变成「念自己的话」。
   const ownOk = ownLines.length === 2 && ownLines.every((line) => line.includes('[我]'))
@@ -228,7 +227,6 @@ export async function runGsiProbe(): Promise<void> {
     afterPostGame.roster.length === 0
   const ok =
     failed.length === 0 &&
-    modeRuleOk &&
     rosterOk &&
     ownOk &&
     chatOk &&
@@ -275,5 +273,5 @@ export async function runGsiProbe(): Promise<void> {
       listeningAfterStop: afterStop.listening
     })
   )
-  app.exit(ok ? 0 : 1)
+  exitProbe(ok )
 }

@@ -61,6 +61,11 @@ guessing the fields costs a rework round.
   fails on someone else's build output is a hook everybody skips.
 - Probes: the catalogue (one line per probe, what it pins) lives in `docs/PROBES.md` — read the matching line before touching that seam.
   `taskkill /F /IM electron.exe` first (a leftover process holds the single-instance lock and the probe exits silently — the tell is exit 0 after ~3 s with no `PASS` lines), then `npx electron out/main/index.js --<probe>`. `cmd /c "taskkill …"` is unreliable from bash (the quoting collapses and cmd just prints its banner); `powershell -NoProfile -Command "Stop-Process -Name electron -Force"` always works.
+  The list is generated: `src/main/probes/registry.ts` holds one row per probe (flag, summary, run fn) and `index.ts`
+  dispatches from it — add a probe by adding a row, then `npm run probes:doc`; `npm run check:probes` (inside `lint`)
+  fails when the catalogue drifts. Exit codes and the flush-before-exit rule live in `src/main/probes/harness.ts`
+  (`exitProbe` / `finishProbe` / `reportProbe`): never call `app.exit(0)` unconditionally — that is how a failed probe
+  used to look green.
 
 
 ## Panel

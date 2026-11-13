@@ -66,6 +66,29 @@ check(
     '译 1ms · 播 1.6s'
 )
 
+// —— 录音闸（voice-capture-gate）：这条判定决定「你说的话有没有被送去识别」，阈值不许漂 ——
+const { MIN_SPEECH_MS, SILENCE_RMS, captureLevel, judgeCapture } = await import('../src/shared/voice-capture-gate.ts')
+const quiet = judgeCapture({ frames: 1600, sampleRate: 16_000, rms: 0.001 })
+check('录音闸：太短先判短（先看时长再看音量）', quiet.reason === 'too-short' && !quiet.ok, quiet.detail)
+check(
+  '录音闸：够长但没声音算静音',
+  judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: SILENCE_RMS - 0.001 }).reason === 'silent',
+  String(SILENCE_RMS)
+)
+check('录音闸：只看阈值下沿，等于阈值就放过', judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: SILENCE_RMS }).ok)
+check(
+  '录音闸：理由只有两种，拒绝时都带一句给人看的话',
+  (quiet.line === '录音太短，已忽略' && quiet.line.length > 0) ||
+    judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: 0 }).line.startsWith('没有检测到语音')
+)
+check(
+  '录音闸：0.3 秒是下沿（299 毫秒丢、300 毫秒过）',
+  judgeCapture({ frames: (16_000 * (MIN_SPEECH_MS - 1)) / 1000, sampleRate: 16_000, rms: 0.5 }).reason === 'too-short' &&
+    judgeCapture({ frames: (16_000 * MIN_SPEECH_MS) / 1000, sampleRate: 16_000, rms: 0.5 }).ok
+)
+check('录音闸：RMS 按块累计，不是取最后一块', Math.abs(captureLevel([new Float32Array(4).fill(0.5)], 4) - 0.5) < 1e-6)
+check('录音闸：没有帧就没有音量（不除零）', captureLevel([], 0) === 0)
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

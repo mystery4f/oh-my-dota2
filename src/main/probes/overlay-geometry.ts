@@ -1,5 +1,5 @@
+import { exitProbe } from './harness'
 import { captureHint } from '@shared/overlay-hint'
-import { app } from 'electron'
 import {
   KEEP_VISIBLE_PX,
   OVERLAY_MIN_WIDTH,
@@ -15,7 +15,8 @@ import {
   SNAP_PX,
   resizeFromRight
 } from '@shared/overlay-geometry'
-import { reduceOverlay, type OverlayState } from '@shared/overlay-state'
+import { nextUnread } from '@shared/overlay-ledger'
+import { reduceOverlay, stageLine, type OverlayState } from '@shared/overlay-state'
 
 const WORK = { x: 0, y: 0, width: 1920, height: 1040 }
 
@@ -36,7 +37,7 @@ interface Case {
 export function runOverlayGeometryProbe(): void {
   const cases: Case[] = []
 
-  const push = (name: string, ok: boolean, detail: string): void => {
+  const push = (name: string, ok: boolean, detail = ''): void => {
     cases.push({ name, ok, detail })
   }
 
@@ -139,6 +140,18 @@ export function runOverlayGeometryProbe(): void {
   // 防截屏会吞掉部分鼠标事件（WDA_EXCLUDEFROMCAPTURE），所以它只能跟「不可操作」同义。
   push('锁定就挡截图', shouldProtectContent(true, false) === true, 'locked=true')
   push('面板开着不挡截图', shouldProtectContent(true, true) === false, 'locked+panel')
+
+  // 阶段行只显示一句话，优先级曾写死在 JSX 的 if 链里（探针够不着），所以搬成纯函数。
+  push('阶段行：一次性反馈盖过 hint', stageLine({ message: '录音中', hint: '引擎缺失', locked: true })?.text === '录音中')
+  push('阶段行：hint 是要动手的话，上警示色', stageLine({ message: null, hint: '引擎缺失', locked: true })?.warn === true)
+  push('阶段行：锁定后不提示拖动', stageLine({ message: null, hint: null, locked: true }) === null)
+  push('阶段行：解锁才提示可拖动', stageLine({ message: null, hint: null, locked: false })?.text.startsWith('未锁定') === true)
+  push('阶段行：空串不算一条反馈', stageLine({ message: '', hint: null, locked: true }) === null)
+
+  // 未读计数的累加与清零在同一个纯函数里：收起且面板没开才数。
+  push('未读：收起且没开面板才累加', nextUnread(2, { collapsed: true, panelOpen: false }, 3) === 5)
+  push('未读：展开清零', nextUnread(5, { collapsed: false, panelOpen: false }, 2) === 0)
+  push('未读：呼出面板清零（它就是让人看行的）', nextUnread(5, { collapsed: true, panelOpen: true }, 2) === 0)
 
   // 贴边吸附：只在真正靠边时生效，不能把「想放中间」的位置拽走。
   const snapL = snapToEdges({ x: 6, y: 300, width: 400, height: 300 }, WORK)
@@ -249,5 +262,5 @@ export function runOverlayGeometryProbe(): void {
   console.log(
     `OVERLAY_GEOMETRY_PROBE ${JSON.stringify({ ok: failed.length === 0, passed: cases.length - failed.length, failed: failed.length })}`
   )
-  app.exit(failed.length > 0 ? 1 : 0)
+  exitProbe(!(failed.length > 0 ))
 }

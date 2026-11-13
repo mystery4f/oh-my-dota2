@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { HOTWORD_LIMIT, extractHotwordDiff, joinHotwords, mergeHotwords, parseHotwords } from '@shared/asr-hotwords'
 
 /**
@@ -57,5 +57,5 @@ export function runAsrHotwordsProbe(): void {
     console.log(`${item.ok ? 'PASS' : 'FAIL'} | ${item.name} | ${item.detail}`)
   }
   console.log(`ASR_HOTWORDS_PROBE ${cases.length - failed}/${cases.length} PASS`)
-  app.exit(failed > 0 ? 1 : 0)
+  exitProbe(!(failed > 0 ))
 }

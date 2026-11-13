@@ -24,6 +24,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from 'no
 import { basename, dirname, join } from 'node:path'
 import type { FtLedgerEntry } from '@shared/train/asr-ft'
 import { TRAIN_RUN_STATUSES, type TrainRunRecord, type TrainRunStatus } from '@shared/train/run'
+import type { TrainTaskKind } from '@shared/train/task'
 
 /** 只留最近这么多条 run：一行几百字节到几十 KB，多到上千条才会明显占盘。 */
 export const TRAIN_RUN_KEEP = 200
@@ -368,9 +369,14 @@ export function loadTrainRun(id: string): TrainRunRecord | null {
   return row === undefined ? null : runFromRow(row)
 }
 
-/** 最新在前：面板的列表顺序就是这个顺序，不靠调用方再排。 */
-export function listTrainRuns(): TrainRunRecord[] {
-  return rows<RunRow>('SELECT * FROM runs ORDER BY started_at DESC, id DESC')
+/**
+ * 最新在前：面板的列表顺序就是这个顺序，不靠调用方再排。
+ * 传 kind 只取那一种训练的记录——识别的「上次失败」不能是音色训练留下的。
+ */
+export function listTrainRuns(kind?: TrainTaskKind): TrainRunRecord[] {
+  const order = 'ORDER BY started_at DESC, id DESC'
+  const sql = kind === undefined ? `SELECT * FROM runs ${order}` : `SELECT * FROM runs WHERE kind = ? ${order}`
+  return rows<RunRow>(sql, ...(kind === undefined ? [] : [kind]))
     .map(runFromRow)
     .filter((run): run is TrainRunRecord => run !== null)
 }

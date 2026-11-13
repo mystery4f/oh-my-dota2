@@ -1,7 +1,7 @@
+import { exitProbe } from './harness'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { app } from 'electron'
 import { createNdjsonWorker, type NdjsonReply } from '../services/voice/worker'
 
 /**
@@ -122,5 +122,5 @@ export async function runVoiceWorkerProbe(): Promise<void> {
     console.log(`${item.ok ? 'PASS' : 'FAIL'} | ${item.name} | ${item.detail}`)
   }
   console.log(`VOICE_WORKER_PROBE ${cases.length - failed}/${cases.length} PASS`)
-  app.exit(failed > 0 ? 1 : 0)
+  exitProbe(!(failed > 0 ))
 }

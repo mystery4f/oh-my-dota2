@@ -11,6 +11,7 @@ import type { AsrCheckState } from '@shared/train/asr-check'
 import type { GvDatasetJudgement, GvRegisterPayload, GvRegisterResult } from '@shared/train/gv'
 import type { TrainLogPage, TrainSnapshot, TrainStartRequest, TrainStartResult } from '@shared/train/task'
 import type { TrainRunRecord } from '@shared/train/run'
+import type { TrainTaskKind } from '@shared/train/task'
 import type { AsrState } from '@shared/asr/models'
 import type { FtScriptGroup, FtScriptState } from '@shared/train/recording'
 import type { FtCorrectionInput, FtCorrectionSaveResult } from '@shared/train/corrections'
@@ -219,7 +220,10 @@ export interface TranslationCacheCounts {
 export interface CaptureEntry {
   id: string
   ts: number
+  /** 上屏的展示串（`[队友] [昵称] ⚔ 正文`）：给眼睛看，翻译不读它。 */
   original: string
+  /** 要翻译的正文：只有这一份，与展示串分开。 */
+  body: string
   translated: string | null
   /** 原文已推送、译文还在路上——渲染层先显示原文，译文到达后就地替换。 */
   pending?: boolean
@@ -766,7 +770,8 @@ export const ipcContract = {
   trainStart: invoke<[TrainStartRequest], TrainStartResult>(IPC.TRAIN_START),
   trainStop: invoke<[], TrainStartResult>(IPC.TRAIN_STOP),
   trainSnapshot: invoke<[], TrainSnapshot>(IPC.TRAIN_SNAPSHOT),
-  trainRuns: invoke<[], TrainRunRecord[]>(IPC.TRAIN_RUNS),
+  /** 传 kind 只取那一种训练的记录：识别页的「上次失败」不能是音色训练留下的。 */
+  trainRuns: invoke<[kind?: TrainTaskKind], TrainRunRecord[]>(IPC.TRAIN_RUNS),
   trainRun: invoke<[string], TrainRunRecord | null>(IPC.TRAIN_RUN),
   trainLog: invoke<[{ limit?: number }], TrainLogPage>(IPC.TRAIN_LOG),
   onTrainState: listen<TrainSnapshot>(IPC.TRAIN_STATE),

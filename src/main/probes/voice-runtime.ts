@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { app } from 'electron'
+import { probeCases, exitProbe } from './harness'
 import {
   type ModelFileSizes,
   type VoiceRuntimeJson,
@@ -32,9 +32,7 @@ interface Row {
 
 const cases: Row[] = []
 
-function push(name: string, ok: boolean, detail: string): void {
-  cases.push({ name, ok, detail })
-}
+const { push } = probeCases(cases)
 
 async function withServer(handler: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void, run: (url: string) => Promise<void>): Promise<void> {
   const server: Server = createServer(handler)
@@ -260,7 +258,7 @@ export async function runVoiceRuntimeProbe(): Promise<void> {
     console.log(`${item.ok ? 'PASS' : 'FAIL'} | ${item.name} | ${item.detail}`)
   }
   console.log(`VOICE_RUNTIME_PROBE ${cases.length - failed}/${cases.length} PASS`)
-  app.exit(failed > 0 ? 1 : 0)
+  exitProbe(!(failed > 0), cases)
 }
 
 function existsSyncPart(path: string): boolean {

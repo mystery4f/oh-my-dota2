@@ -367,7 +367,8 @@ const implemented = {
     {
       id: 'c1',
       ts: Date.now() - 60000,
-      original: '中路不见了',
+      original: '[muerta] [队友] [队友A] ⚔ 中路不见了',
+      body: '中路不见了',
       translated: 'mid is missing',
       hero: 'muerta'
     }

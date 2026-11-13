@@ -1,3 +1,4 @@
+import { exitProbe } from './harness'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
@@ -176,8 +177,10 @@ export async function runMatchReportProbe(): Promise<void> {
     hints.push('没有重复帧：可能是手动灌的合成数据，或事件去重窗口被改过')
   }
 
+  // 一帧都没抓到就不是「看过了」：报告探针也得给出真假。
+  const ok = unique.length > 0 && chatRows.length > 0
   console.log('MATCH_REPORT', JSON.stringify(report))
   for (const hint of hints) console.log(`  ! ${hint}`)
   console.log(`  GSI ${unique.length} 句 / ${chatRows.length} 帧，重复最多 ${report.gsi.repeats.max} 帧`)
-  app.exit(0)
+  exitProbe(ok)
 }

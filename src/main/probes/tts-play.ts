@@ -1,3 +1,4 @@
+import { exitProbe } from './harness'
 import { BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
@@ -20,17 +21,17 @@ const OFFLINE_PROBE_VOICE: OfflineVoiceId = 'eula'
 export async function runTtsPlayProbe(): Promise<void> {
   // 先验「该不该念、念什么」这条纯逻辑：它坏了，合成和播放再正常也是静音。
   const speakCases = [
-    { name: '中文原话（不翻译也要念）', entry: { id: '1', ts: 0, pending: false, original: '[All] 队友甲: 小心中路，他们可能在打肉山', translated: null }, want: '小心中路，他们可能在打肉山' },
-    { name: '英文译文优先', entry: { id: '2', ts: 0, pending: false, original: '[Team] X: push top', translated: '推上路' }, want: '推上路' },
-    { name: '有英雄名就念「谁说」', entry: { id: '5', ts: 0, pending: false, original: '[lina] [队友] [队友甲] ⚔ push top', translated: '推上路', speaker: 'lina' }, want: '莉娜说，推上路' },
-    { name: '中文原话也带英雄名', entry: { id: '6', ts: 0, pending: false, original: '[pudge] [敌方] [敌人乙] 🌐 中路没人', translated: null, speaker: 'nevermore' }, want: '影魔说，中路没人' },
-    { name: '没有英雄名就念座位标签（玩家N）', entry: { id: '10', ts: 0, pending: false, original: '[队友] [玩家2] ⚔ why', translated: '为什么' }, want: '玩家2说，为什么' },
-    { name: '阵营未知（所有人频道）也念座位标签', entry: { id: '13', ts: 0, pending: false, original: '[玩家] [玩家8] 🌐 end', translated: null }, want: '玩家8说，end' },
-    { name: '有昵称就念昵称', entry: { id: '12', ts: 0, pending: false, original: '[敌方] [敌人B] 🌐 lol', translated: '哈哈' }, want: '敌人B说，哈哈' },
-    { name: '队友同理', entry: { id: '11', ts: 0, pending: false, original: '[队友] [队友A] ⚔ push now', translated: '现在推' }, want: '队友A说，现在推' },
-    { name: '自己说的不念（哪怕带英雄名）', entry: { id: '8', ts: 0, pending: false, own: true, original: '[nyx_assassin] [我] [Balance(Bot)] 🌐 ::', translated: null, speaker: 'nyx_assassin' }, want: null },
-    { name: '还没翻完不念', entry: { id: '3', ts: 0, pending: true, original: '[Team] X: push top' }, want: null },
-    { name: '整行只有符号不念', entry: { id: '4', ts: 0, pending: false, original: '[All] ⚔ 🌐' }, want: null }
+    { name: '中文原话（不翻译也要念）', entry: { id: '1', ts: 0, pending: false, original: '[All] 队友甲: 小心中路，他们可能在打肉山', body: '小心中路，他们可能在打肉山', translated: null }, want: '小心中路，他们可能在打肉山' },
+    { name: '英文译文优先', entry: { id: '2', ts: 0, pending: false, original: '[Team] X: push top', body: 'push top', translated: '推上路' }, want: '推上路' },
+    { name: '有英雄名就念「谁说」', entry: { id: '5', ts: 0, pending: false, original: '[lina] [队友] [队友甲] ⚔ push top', body: 'push top', translated: '推上路', speaker: 'lina' }, want: '莉娜说，推上路' },
+    { name: '中文原话也带英雄名', entry: { id: '6', ts: 0, pending: false, original: '[pudge] [敌方] [敌人乙] 🌐 中路没人', body: '中路没人', translated: null, speaker: 'nevermore' }, want: '影魔说，中路没人' },
+    { name: '没有英雄名就念座位标签（玩家N）', entry: { id: '10', ts: 0, pending: false, original: '[队友] [玩家2] ⚔ why', body: 'why', translated: '为什么', speaker: '玩家2' }, want: '玩家2说，为什么' },
+    { name: '阵营未知（所有人频道）也念座位标签', entry: { id: '13', ts: 0, pending: false, original: '[玩家] [玩家8] 🌐 end', body: 'end', translated: null, speaker: '玩家8' }, want: '玩家8说，end' },
+    { name: '有昵称就念昵称', entry: { id: '12', ts: 0, pending: false, original: '[敌方] [敌人B] 🌐 lol', body: 'lol', translated: '哈哈', speaker: '敌人B' }, want: '敌人B说，哈哈' },
+    { name: '队友同理', entry: { id: '11', ts: 0, pending: false, original: '[队友] [队友A] ⚔ push now', body: 'push now', translated: '现在推', speaker: '队友A' }, want: '队友A说，现在推' },
+    { name: '自己说的不念（哪怕带英雄名）', entry: { id: '8', ts: 0, pending: false, own: true, original: '[nyx_assassin] [我] [Balance(Bot)] 🌐 ::', body: '::', translated: null, speaker: 'nyx_assassin' }, want: null },
+    { name: '还没翻完不念', entry: { id: '3', ts: 0, pending: true, original: '[Team] X: push top', body: 'push top' }, want: null },
+    { name: '整行只有符号不念', entry: { id: '4', ts: 0, pending: false, original: '[All] ⚔ 🌐', body: '' }, want: null }
   ]
   const speakRows = speakCases.map((item) => {
     const got = decideSpeak(item.entry as never, { readAloud: true, voice: '', rate: 1, pitch: 1 })
@@ -292,10 +293,23 @@ console.log('TTS_CACHE_CASES', JSON.stringify({ cacheOk, rows: cacheRows }))
   const expectedPlays = Number(Boolean(audio)) + Number(Boolean(offlineWav))
   const failed = logs.filter((line) => line.includes('VOICE_PLAY_FAILED'))
   const broken = logs.filter((line) => line.includes('VOICE_AUDIO_ERROR'))
+  // 这一行以前无论成败都退 0：报告里的故障看起来和全通过一样。
+  const ok =
+    speakOk &&
+    staleOk &&
+    engineOk &&
+    ownOk &&
+    prefixOk &&
+    skipOk &&
+    backlogOk &&
+    cacheOk &&
+    splitOk &&
+    broken.length === 0 &&
+    (expectedPlays === 0 || playOkCount >= expectedPlays)
   console.log(
     'TTS_PLAY_RESULT',
     JSON.stringify({
-      ok: speakOk && staleOk && engineOk && ownOk && prefixOk && skipOk && backlogOk && cacheOk && splitOk && broken.length === 0 && (expectedPlays === 0 || playOkCount >= expectedPlays),
+      ok,
       prefixOk,
       speakOk,
       staleOk,
@@ -308,6 +322,5 @@ console.log('TTS_CACHE_CASES', JSON.stringify({ cacheOk, rows: cacheRows }))
     })
   )
   win.destroy()
-  const { app } = await import('electron')
-  app.exit(0)
+  exitProbe(ok)
 }

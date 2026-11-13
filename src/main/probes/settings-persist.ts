@@ -1,3 +1,4 @@
+import { exitProbe } from './harness'
 import { app } from 'electron'
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -427,5 +428,5 @@ export async function runSettingsPersistProbe(): Promise<void> {
   for (const item of checks) {
     console.log(`  ${item.ok ? 'ok  ' : 'FAIL'} ${item.name}${item.detail ? `  (${item.detail})` : ''}`)
   }
-  app.exit(failed.length === 0 ? 0 : 1)
+  exitProbe(failed.length === 0 )
 }

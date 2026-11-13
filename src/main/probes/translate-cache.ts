@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import {
   clearTranslationCache,
@@ -110,7 +110,7 @@ export async function runTranslateCacheProbe(): Promise<void> {
     origin: 'capture'
   })
   const marks: boolean[] = []
-  const markedLines = await translateLines(probeProvider, ['词库命中测试'], 'zh-en', marks)
+  const markedLines = await translateLines(probeProvider, ['词库命中测试'], 'zh-en', { marks })
   add(
     '标出词库命中',
     marks[0] === true && markedLines[0] === 'cache hit',
@@ -256,5 +256,5 @@ export async function runTranslateCacheProbe(): Promise<void> {
   for (const row of insights.top) {
     console.log(`  top ${row.hits}× [${row.origin}/${row.direction}] ${row.a} → ${row.b}`)
   }
-  app.exit(failed.length === 0 ? 0 : 1)
+  exitProbe(failed.length === 0 )
 }

@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { exitProbe } from './harness'
 import { DEFAULT_EDGE_VOICE, synthesizeEdge } from '../services/voice/edge'
 import { splitForSpeech } from '../services/voice/speech-pipeline'
 
@@ -68,7 +68,7 @@ export async function runTtsBenchProbe(): Promise<void> {
       rows
     })
   )
-  // app.exit 会立刻掐断管道，stdout 里的结果就丢了；先让日志刷出去再退。
+  // 收尾统一走 harness：它先让日志刷出去再退出，不再各自记这条注意事项。
   await new Promise((resolve) => setTimeout(resolve, 500))
-  app.exit(pitchOk && segmentsOk && ok.length > 0 ? 0 : 1)
+  exitProbe(pitchOk && segmentsOk && ok.length > 0 )
 }
