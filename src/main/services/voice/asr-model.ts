@@ -13,6 +13,7 @@ import {
 import type { OfflineStatus } from '@shared/ipc'
 import { loadSettings, saveSettings } from '../settings'
 import { hfMirrorRepoFileUrl } from '@shared/voice-runtime'
+import { hotwordEcho, hotwordPrompt } from '@shared/asr-hotwords'
 import { createInstallJob } from '../install-job'
 import { downloadResumable } from '../net/download'
 import { sha256File } from './runtime'
@@ -221,7 +222,8 @@ export async function transcribeAsr(wavPath: string): Promise<{ text: string } |
   if (!active?.ready) return null
   if (!sherpaNodeBinary()) return null
   const spec = engineSpecOf(active)
-  const hotwords = spec.hotwords === 'prompt' ? loadSettings().asrHotwords : ''
+  // 热词是解码提示，不是「说过的词」：单字与子串词先剔掉再喂，否则一段底噪就能让模型去念表。
+  const hotwords = spec.hotwords === 'prompt' ? hotwordPrompt(loadSettings().asrHotwords) : ''
   const result = await sherpaTranscribe({
     kind: sherpaKindFor(active),
     dir: asrModelDir(active),
@@ -229,5 +231,11 @@ export async function transcribeAsr(wavPath: string): Promise<{ text: string } |
     hotwords
   })
   if (!result) return null
+  // 热词回声：模型没听到话，只把提示念了一遍（实测：1 s 底噪 + 整表 = 整表原样输出）。
+  // 当成「这句没有识别到」处理——空串走已有的 skip 路：不翻译、不声出，也不进纠错样本。
+  if (hotwords && hotwordEcho(result.text, hotwords)) {
+    console.log(`ASR_HOTWORD_ECHO len=${result.text.length} text=${JSON.stringify(result.text.slice(0, 80))}`)
+    return { text: '' }
+  }
   return { text: spec.joinChars ? result.text.replace(/\s+/g, '') : result.text }
 }

@@ -1,5 +1,14 @@
 import { exitProbe } from './harness'
-import { HOTWORD_LIMIT, extractHotwordDiff, joinHotwords, mergeHotwords, parseHotwords } from '@shared/asr-hotwords'
+import {
+  HOTWORD_LIMIT,
+  HOTWORD_PROMPT_LIMIT,
+  extractHotwordDiff,
+  hotwordEcho,
+  hotwordPrompt,
+  joinHotwords,
+  mergeHotwords,
+  parseHotwords
+} from '@shared/asr-hotwords'
 
 /**
  * `--asr-hotwords-probe`：热词纯函数缝的全量行为锁（解析/差异提取/合并）。
@@ -39,6 +48,27 @@ export function runAsrHotwordsProbe(): void {
   push('完全没改 → 空', extractHotwordDiff('一样的', '一样的').length === 0, '')
   push('全删 → 新文本没有可留的片段 → 空', extractHotwordDiff('守肉山拿盾', '').length === 0, '')
   push('整句重写 → 收进片段（上限 8 个）', extractHotwordDiff('', '肉山,买活,高地,推塔,开雾,反补,正补,帕克,斧王,先知').length === 8, '')
+
+  // —— 回声：模型没听到话，把提示念了一遍（2026-11-13 线上 bug） ——
+  const table = '肉山,野,野怪,上路,中路,下路,神符,符,打钱'
+  const echo = '肉山 野 野怪 上路 中路 下路 神符 符 打钱'
+  push('整表被念一遍 → 认成回声', hotwordEcho(echo, table), JSON.stringify(hotwordEcho(echo, table)))
+  push('真句子含一个热词 → 不是回声', !hotwordEcho('我们打肉山', table), '')
+  push('只有一个片段 → 不是回声', !hotwordEcho('肉山', table), '')
+  push('出现表外的词 → 不是回声', !hotwordEcho('肉山 帕克', table), '')
+  push('空输出 → 不是回声', !hotwordEcho('', table), '')
+  push(
+    '末尾多一个句号 → 仍是回声',
+    hotwordEcho('肉山 野怪 上路 中路 下路 神符 打钱。', '肉山,野怪,上路,中路,下路,神符,打钱'),
+    ''
+  )
+
+  // —— 提示串：单字与子串词先剔掉 ——
+  push('单字热词不进提示', hotwordPrompt('肉山,野,野怪,符') === '肉山,野怪', hotwordPrompt('肉山,野,野怪,符'))
+  push('只有一个词时原样保留', hotwordPrompt('肉山') === '肉山', hotwordPrompt('肉山'))
+  push('空表 → 空串', hotwordPrompt('') === '', '')
+  const many = joinHotwords(Array.from({ length: 30 }, (_, i) => `关键词${String(i).padStart(2, '0')}`))
+  push(`提示条数封顶 ${HOTWORD_PROMPT_LIMIT}`, parseHotwords(hotwordPrompt(many)).length === HOTWORD_PROMPT_LIMIT, String(parseHotwords(hotwordPrompt(many)).length))
 
   // —— 合并：去重追加 ——
   push('新词追加到表尾', mergeHotwords('肉山', ['买活', '高地']) === '肉山,买活,高地', mergeHotwords('肉山', ['买活', '高地']))
