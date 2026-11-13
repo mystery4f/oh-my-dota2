@@ -330,6 +330,8 @@ export interface VoiceTranscribeResult {
   ok: boolean
   text: string
   error?: string
+  /** 识别成功却没有可用文本时的一句说明（例如把热词表念了一遍被丢弃）；与 error 互斥。 */
+  note?: string
   /** 原音票据：纠错（`voice:correction`）凭它取回这段录音；没留录音时缺省。 */
   utteranceId?: string
   /** 识别耗时（毫秒）；渲染层把它随 voiceReply 显式带回主进程计时。 */

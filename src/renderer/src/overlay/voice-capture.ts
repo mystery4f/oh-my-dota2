@@ -143,7 +143,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     const result = await window.api.transcribeAudio(encodeWav16k(chunks, rate), recordDevice)
     const transcript = result.text.trim()
     if (!result.ok || !transcript) {
-      const transcriptError = result.error ?? '未识别到语音'
+      const transcriptError = result.error ?? result.note ?? '未识别到语音'
       fail('🎤 ' + transcriptError, transcriptError, 2200)
       return
     }

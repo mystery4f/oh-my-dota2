@@ -217,7 +217,7 @@ export function removeActiveAsrModel(): { ok: boolean; error: string | null } {
  * 转写一段 16k 单声道 PCM16 WAV。返回 null = 这句不识别（调用方画一行错误）。
  * 热词只喂给声明了 prompt 的引擎；FunASR 家族输出的空格分隔单字按表里 joinChars 拼回去。
  */
-export async function transcribeAsr(wavPath: string): Promise<{ text: string } | null> {
+export async function transcribeAsr(wavPath: string): Promise<{ text: string; dropped?: 'hotword-echo' } | null> {
   const active = activeAsrModel()
   if (!active?.ready) return null
   if (!sherpaNodeBinary()) return null
@@ -235,7 +235,7 @@ export async function transcribeAsr(wavPath: string): Promise<{ text: string } |
   // 当成「这句没有识别到」处理——空串走已有的 skip 路：不翻译、不声出，也不进纠错样本。
   if (hotwords && hotwordEcho(result.text, hotwords)) {
     console.log(`ASR_HOTWORD_ECHO len=${result.text.length} text=${JSON.stringify(result.text.slice(0, 80))}`)
-    return { text: '' }
+    return { text: '', dropped: 'hotword-echo' }
   }
   return { text: spec.joinChars ? result.text.replace(/\s+/g, '') : result.text }
 }

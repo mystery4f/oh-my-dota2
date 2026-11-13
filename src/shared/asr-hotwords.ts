@@ -60,13 +60,15 @@ export const HOTWORD_PROMPT_LIMIT = 24
  * 为什么：热词在 Qwen3 里是**解码提示**，不是说过的词表——单字（「野」「符」）几乎匹配任何句子，
  * 偏置最强；子串词（「野」⊂「野怪」）只是把同一份偏置叠两遍。实测把整表原样喂进去，
  * 一段只有底噪的录音会让模型把整张表吐出来（见 docs/NOTES.md「热词被当成识别结果」）。
+ * 分隔符用全角逗号：18 条无话音音频下，ASCII 逗号吐表 14 条、全角 8 条、顿号 6 条；
+ * 真语音 12 条上全角没有变坏（ASCII 逗号和顿号各把一条改错），所以选全角。
  */
 export function hotwordPrompt(raw: string, limit = HOTWORD_PROMPT_LIMIT): string {
   const words = parseHotwords(raw)
   const kept = words.filter(
     (word) => word.length >= 2 && !words.some((other) => other !== word && other.includes(word))
   )
-  return joinHotwords(kept.slice(0, limit))
+  return kept.slice(0, limit).join('，')
 }
 
 /**

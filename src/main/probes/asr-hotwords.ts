@@ -78,7 +78,7 @@ export function runAsrHotwordsProbe(): void {
   push('整句里带热词 → 放过', !hotwordEcho('我们打肉山野怪', '肉山,野怪,上路,中路,下路,神符,打钱'), '')
 
   // —— 提示串：单字与子串词先剔掉 ——
-  push('单字热词不进提示', hotwordPrompt('肉山,野,野怪,符') === '肉山,野怪', hotwordPrompt('肉山,野,野怪,符'))
+  push('单字热词不进提示', hotwordPrompt('肉山,野,野怪,符') === '肉山，野怪', hotwordPrompt('肉山,野,野怪,符'))
   push('只有一个词时原样保留', hotwordPrompt('肉山') === '肉山', hotwordPrompt('肉山'))
   push('空表 → 空串', hotwordPrompt('') === '', '')
   const many = joinHotwords(Array.from({ length: 30 }, (_, i) => `关键词${String(i).padStart(2, '0')}`))

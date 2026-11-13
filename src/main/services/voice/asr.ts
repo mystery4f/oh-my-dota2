@@ -10,6 +10,7 @@ import { stashUtterance } from './corrections'
  * 这里只负责把「没有模型 / 这份没就绪 / 这句识别失败」翻译成用户能照着做的话。
  */
 const NO_MODEL = '没有可用的识别模型：到面板「语音」下载模型，或把模型目录放进 asr-models/'
+const ECHO_NOTE = '听到的是热词表，已丢弃（没听到人声）'
 
 export async function transcribeWav(wavPath: string): Promise<VoiceTranscribeResult> {
   const model = activeAsrModel()
@@ -23,7 +24,9 @@ export async function transcribeWav(wavPath: string): Promise<VoiceTranscribeRes
     }
   }
   const result = await transcribeAsr(wavPath)
-  return result ? { ok: true, text: result.text } : { ok: false, text: '', error: `${spec.label} 识别失败` }
+  if (!result) return { ok: false, text: '', error: `${spec.label} 识别失败` }
+  // 回声被拦下时说一句人话：这一句是「听到了热词表，不是听到了人」，不是「没听到」。
+  return result.dropped === 'hotword-echo' ? { ok: true, text: '', note: ECHO_NOTE } : { ok: true, text: result.text }
 }
 
 /**
