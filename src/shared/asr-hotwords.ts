@@ -71,21 +71,47 @@ export function hotwordPrompt(raw: string, limit = HOTWORD_PROMPT_LIMIT): string
 
 /**
  * 这段转写是不是「把热词表念了一遍」，而不是真的听到了话。
- * 判据贴着实测的失败形态写：输出被切成 ≥2 个片段、每片都在表里、且覆盖到表的一半以上。
- * 真说过话不会这样——中文句子里没有分隔符，整句只会是一个片段，单片段一律放过。
+ * 两种实测形态都要认：
+ * - 带分隔符：`肉山 野怪 上路 中路 下路 神符 打钱。` —— 切成 ≥2 片、每片都在表里、覆盖一半以上；
+ * - 连成一串：`肉山野怪上路中路下路神符打钱` —— 中文没有空格，模型常把整表粘成一句，
+ *   切成片段只有一片，必须换判据：整串能严丝合缝切成表里的词，且用到的词不止一个。
+ * 真说过话不会这样：「我们打肉山」第一个字就不在表里，「肉山野怪」这种两词粘连按单数放过。
  */
 export function hotwordEcho(text: string, hotwords: string): boolean {
   const words = parseHotwords(hotwords).map(bareWord)
   if (words.length < 2) return false
   const pieces = parseHotwords(text).map(bareWord).filter((piece) => piece.length > 0)
-  if (pieces.length < 2) return false
-  if (!pieces.every((piece) => words.includes(piece))) return false
-  return pieces.length * 2 >= words.length
+  if (pieces.length >= 2 && pieces.every((piece) => words.includes(piece)) && pieces.length * 2 >= words.length) {
+    return true
+  }
+  // 粘连形态：去掉标点与空白后，看整串能不能不用剩余字符地拼成表里的词。
+  const joined = bareWord(text)
+  if (!joined) return false
+  const used = coverByWords(joined, words)
+  if (!Number.isFinite(used)) return false
+  return used >= 3 || used * 2 >= words.length
 }
 
 /** 比之前先去掉标点：模型念表时常在末尾补一个句号（实测「…打钱。」），带标点就漏判。 */
 function bareWord(word: string): string {
   return word.replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+/**
+ * 目标串能否**恰好**由表里的词拼成，返回最少用几个词；拼不满返回 Infinity。
+ * 用 DP 而不是贪心：`上路` 与 `上路高地` 同时在表里时，贪心会先吃长的再拼不上。
+ */
+function coverByWords(target: string, words: string[]): number {
+  const best: number[] = Array.from({ length: target.length + 1 }, () => Number.POSITIVE_INFINITY)
+  best[0] = 0
+  for (let end = 1; end <= target.length; end++) {
+    for (const word of words) {
+      if (word.length > end) continue
+      if (!target.startsWith(word, end - word.length)) continue
+      best[end] = Math.min(best[end], best[end - word.length] + 1)
+    }
+  }
+  return best[target.length]
 }
 
 /**
