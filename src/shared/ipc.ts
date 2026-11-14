@@ -1,3 +1,4 @@
+import type { DotaDisplayMode } from './dota-video'
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
 import type { VoiceChainTiming } from './voice-timing'
 import type { VoiceStageEvent } from './voice-stage'
@@ -295,6 +296,15 @@ export interface CaptureStatus {
   lastError: string | null
 }
 
+/**
+ * Dota 2 的显示模式快照。`mode` 为 null 表示没读到（游戏没启动过 / 路径找不到），
+ * `warning` 是面板要显示的那句话，null 表示无需提示。
+ */
+export interface DotaDisplaySnapshot {
+  mode: DotaDisplayMode | null
+  warning: string | null
+}
+
 /** 翻译延迟分布：服务端首字节能从 1.3s 抖到 31s，单次数字没有意义，分位数才有。 */
 export interface TranslationLatency {
   count: number
@@ -401,6 +411,8 @@ export const IPC = {
   CAPTURE_START: 'capture:start',
   CAPTURE_STOP: 'capture:stop',
   CAPTURE_STATUS: 'capture:status',
+  /** Dota 2 自己的显示模式：独占全屏时任何浮层都画不上去，面板要能把这句话说出来。 */
+  DOTA_DISPLAY: 'dota:display',
   /** 手动触发一次「拍屏 → OCR → 翻译 → 重建译文框」。 */
   /** 手动模式整屏重建（渲染层先清空再填充）。 */
   CAPTURE_REPLACE: 'capture:replace',
@@ -697,6 +709,7 @@ export const ipcContract = {
   captureStart: invoke<[], CaptureStatus>(IPC.CAPTURE_START),
   captureStop: invoke<[], CaptureStatus>(IPC.CAPTURE_STOP),
   captureStatus: invoke<[], CaptureStatus>(IPC.CAPTURE_STATUS),
+  dotaDisplay: invoke<[], DotaDisplaySnapshot>(IPC.DOTA_DISPLAY),
   onCaptureEntries: listen<CaptureEntry[]>(IPC.CAPTURE_ENTRIES),
   onCaptureUpdate: listen<CaptureEntry[]>(IPC.CAPTURE_UPDATE),
   onCaptureReplace: listen<CaptureEntry[]>(IPC.CAPTURE_REPLACE),

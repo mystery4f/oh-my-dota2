@@ -14,6 +14,7 @@ import { runAsrEnginesProbe } from './asr-engines'
 import { runAsrHotwordsProbe } from './asr-hotwords'
 import { runAsrSwapProbe } from './asr-swap'
 import { runChatBlockProbe } from './chat-block'
+import { runDotaDisplayProbe } from './dota-display'
 import { runGsiDumpProbe } from './gsi-dump'
 import { runGsiProbe } from './gsi'
 import { runGsiFramesReportProbe } from './gsi-frames-report'
@@ -90,6 +91,12 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the pure line rules: `renderChatLine`/`withChatBody` round trip, translate-or-not, and the nickname regression',
     run: runChatBlockProbe
+  },
+  {
+    flag: '--dota-display-probe',
+    summary:
+      'reads Dota 2 `video.txt` and says whether the game is exclusive-fullscreen (nothing can draw over it)',
+    run: runDotaDisplayProbe
   },
   {
     flag: '--gsi-probe',

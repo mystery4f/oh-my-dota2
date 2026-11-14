@@ -1,4 +1,5 @@
 import { app, clipboard, ipcMain, shell } from 'electron'
+import { dotaDisplayWarning } from '@shared/dota-video'
 import { errorMessage } from '@shared/errors'
 import { IPC, ipcContract, type MainHandlers, type OpenExternalResult } from '@shared/ipc'
 import { translateInPlace, voiceReply } from './services/reply/reply-service'
@@ -73,6 +74,7 @@ import { closeGvWebui, openGvWebui, registerGvWeights, scanGvDatasets } from './
 import { discoverSovitsHome } from './services/voice/sovits-server'
 import { startTrain } from './services/train/start'
 import { gsiStatus } from './services/gsi'
+import { dotaDisplayMode } from './services/gsi-config'
 
 /**
 /** 语音运行时状态快照：handler 表与广播共用同一份拼装，别处不要再各拼一份。 */
@@ -120,6 +122,11 @@ const handlers: MainHandlers = {
   captureStart: () => getCaptureService().start(),
   captureStop: () => getCaptureService().stop(),
   captureStatus: () => ({ ...getCaptureService().status(), gsi: gsiStatus() }),
+  // 独占全屏上任何窗口都画不上去：这句话要在面板里说出来，否则用户只能自己猜浮层为什么不见了。
+  dotaDisplay: async () => {
+    const mode = await dotaDisplayMode()
+    return { mode, warning: dotaDisplayWarning(mode) }
+  },
   appVersion: () => app.getVersion(),
   appOpenExternal: (url) => openExternalSafe(url),
   updateCheck: () => checkForUpdates(),

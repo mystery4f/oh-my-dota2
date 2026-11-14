@@ -68,6 +68,23 @@ check(
 
 // —— 录音闸（voice-capture-gate）：这条判定决定「你说的话有没有被送去识别」，阈值不许漂 ——
 const { MIN_SPEECH_MS, SILENCE_RMS, captureLevel, judgeCapture } = await import('../src/shared/voice-capture-gate.ts')
+// —— Dota 2 显示模式：独占全屏上任何窗口都画不上去，「浮层不见了」最常是它 ——
+const { DOTA_DISPLAY_LABEL, dotaDisplayWarning, parseDotaVideoMode } = await import('../src/shared/dota-video.ts')
+const EXCLUSIVE = '"setting.fullscreen"\t\t"1"\n"setting.nowindowborder"\t\t"1"'
+const BORDERLESS = '"setting.fullscreen"\t\t"0"\n"setting.nowindowborder"\t\t"1"'
+const WINDOWED = '"setting.fullscreen"\t\t"0"\n"setting.nowindowborder"\t\t"0"'
+check('显示模式：fullscreen=1 就是独占全屏（nowindowborder 拦不住它）', parseDotaVideoMode(EXCLUSIVE) === 'exclusive')
+check('显示模式：fullscreen=0 且无边框 = 全屏窗口', parseDotaVideoMode(BORDERLESS) === 'borderless')
+check('显示模式：fullscreen=0 且有边框 = 窗口', parseDotaVideoMode(WINDOWED) === 'windowed')
+check('显示模式：缺关键项就认不出来（不猜）', parseDotaVideoMode('"setting.aspectratiomode"\t\t"1"') === null)
+check(
+  '显示模式：只有独占全屏要警告，其余不说废话',
+  dotaDisplayWarning('exclusive')?.includes('全屏窗口') === true &&
+    dotaDisplayWarning('borderless') === null &&
+    dotaDisplayWarning('windowed') === null
+)
+check('显示模式：读不到也要说一句，别让人以为没这条检查', dotaDisplayWarning(null) !== null)
+check('显示模式：三种模式都有中文名', Object.values(DOTA_DISPLAY_LABEL).every((label) => label.length > 0))
 const quiet = judgeCapture({ frames: 1600, sampleRate: 16_000, rms: 0.001 })
 check('录音闸：太短先判短（先看时长再看音量）', quiet.reason === 'too-short' && !quiet.ok, quiet.detail)
 check(

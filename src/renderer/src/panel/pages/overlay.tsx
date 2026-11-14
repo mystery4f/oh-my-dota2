@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { OverlayStatus } from '@shared/ipc'
+import type { DotaDisplaySnapshot, OverlayStatus } from '@shared/ipc'
+import { DOTA_DISPLAY_LABEL } from '@shared/dota-video'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, StatusPill } from '../components/primitives'
@@ -25,10 +26,13 @@ const EMPTY_OVERLAY: OverlayStatus = {
 export function OverlayPage(): React.ReactElement {
   const { settings, update, loadError } = useSettings()
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
+  const [dota, setDota] = useState<DotaDisplaySnapshot>({ mode: null, warning: null })
   const save = useSaveFlash()
 
   useEffect(() => {
     void window.api.overlayStatus().then(setOverlay)
+    // 显示模式是游戏写的文件，只在打开这一页时读一次：切回游戏改完再回来就是新值。
+    void window.api.dotaDisplay().then(setDota)
     return window.api.onOverlayState(setOverlay)
   }, [])
 
@@ -147,6 +151,17 @@ export function OverlayPage(): React.ReactElement {
               {settings.autoStartCapture ? '自动' : '手动'}
             </StatusPill>
           </Row>
+          <Row
+            label="Dota 2 显示模式"
+            hint="浮层被游戏画面盖住时先看这里：独占全屏上任何窗口都画不上去"
+          >
+            <StatusPill tone={dota.warning === null ? 'ready' : 'warn'}>
+              {dota.mode === null ? '没读到' : DOTA_DISPLAY_LABEL[dota.mode]}
+            </StatusPill>
+          </Row>
+          {dota.warning === null ? null : (
+            <div className="px-4 pb-3 text-xs leading-relaxed text-amber-500">{dota.warning}</div>
+          )}
           <Row
             label="我的昵称"
             htmlFor="v2-nicknames"

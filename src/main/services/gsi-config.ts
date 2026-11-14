@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { errorMessage } from '@shared/errors'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { parseDotaVideoMode, type DotaDisplayMode } from '@shared/dota-video'
 
 /**
  * 往 Dota 2 的 `cfg/gamestate_integration/` 里放一份 GSI 配置。
@@ -121,6 +122,40 @@ async function findCfgDir(): Promise<string | null> {
   }
   return null
 }
+
+/**
+ * 读 Dota 2 的显示模式（独占全屏 / 全屏窗口 / 窗口）。
+ *
+ * 浮层「看不见」最常不是置顶写错了，而是游戏跑在独占全屏——独占交换链上什么都画不上去。
+ * 这份设置只有游戏自己写：`userdata/<账号>/570/local/cfg/video.txt`，多个账号时取最新改动的那份
+ * （用户切账号或改设置时会重写，旧文件的时间戳会停在原地）。
+ * 纯解析在 `@shared/dota-video`，这里只负责找文件。
+ */
+export async function dotaDisplayMode(): Promise<DotaDisplayMode | null> {
+  let newest: { at: number; text: string } | null = null
+  for (const root of await libraryRoots()) {
+    const userdata = join(root, 'userdata')
+    if (!existsSync(userdata)) continue
+    let accounts: string[] = []
+    try {
+      accounts = await readdir(userdata)
+    } catch {
+      continue
+    }
+    for (const account of accounts) {
+      const file = join(userdata, account, '570', 'local', 'cfg', 'video.txt')
+      try {
+        const info = await stat(file)
+        if (newest !== null && info.mtimeMs <= newest.at) continue
+        newest = { at: info.mtimeMs, text: await readFile(file, 'utf8') }
+      } catch {
+        // 这个账号没玩过 / 文件读不动：换下一个。
+      }
+    }
+  }
+  return newest === null ? null : parseDotaVideoMode(newest.text)
+}
+
 
 export async function ensureGsiConfig(port: number): Promise<GsiConfigResult> {
   const dir = await findCfgDir()

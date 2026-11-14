@@ -282,6 +282,11 @@ it and nothing happened". The overlay and the pause hint print key names from th
   Pass no `forward` option: it forwards mouse-move messages to the page, so a locked overlay still
   lights its hover styles and looks clickable while clicks go to the game. Locked means invisible to
   the mouse — no highlight, no drag, no wheel; only the summon panel makes it clickable again.
+- "The game covers the overlay" is almost never a z-order bug: exclusive fullscreen is a DXGI swapchain no
+  window can draw over, and `setAlwaysOnTop` cannot fix it. Read the game's own
+  `<steam>/userdata/<account>/570/local/cfg/video.txt` (`setting.fullscreen = 1`) — `--dota-display-probe`
+  answers it in one command, and the panel's 浮层 → Dota 2 显示模式 row says it in Chinese
+  (`src/shared/dota-video.ts`). 全屏窗口 is still a normal window, so the overlay works there.
 - Hiding the overlay is not an A/B for "the overlay repaint is the cost": `startVoiceCapture()` and
   `toggleVoiceCapture()` both call `show()` when the window is hidden, so it reappears the moment you speak
   (`overlayCollapsed` is ignored by that path too — set it through the panel, then check the settings file).

@@ -29,6 +29,7 @@ npx electron out/main/index.js --<probe-name>
   - `--tts-pipeline-probe` the synthesis→delivery pipeline behind `speakPipeline` with fake injected engines
   - `--tts-play-probe` the full speak delivery chain: decideSpeak cases, engine propagation, cache and backlog
   - `--chat-block-probe` the pure line rules: `renderChatLine`/`withChatBody` round trip, translate-or-not, and the nickname regression
+  - `--dota-display-probe` reads Dota 2 `video.txt` and says whether the game is exclusive-fullscreen (nothing can draw over it)
   - `--gsi-probe` Game State Integration listener: pure verdict cases + a real HTTP round trip (no game needed)
   - `--settings-persist-probe` panel choices survive a restart: sentinel round trip per field, no cross-field clobber
   - `--sovits-refs-probe` the sovits reference library reader (`listSovitsRefs`) against temp fixtures
