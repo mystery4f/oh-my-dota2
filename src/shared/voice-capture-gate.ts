@@ -15,6 +15,21 @@ export const MIN_SPEECH_MS = 300
 /** 静音阈值：whisper 对纯静音会幻觉出文本，先量 RMS 再决定送不送。 */
 export const SILENCE_RMS = 0.012
 
+/**
+ * 麦闲置租约：松开之后麦克风再留这么久，下一次按下即刻可用。
+ *
+ * 为什么需要它：getUserMedia 要几百毫秒到一秒多（列设备、切设备时更久），
+ * 而按住说话的一次按下常常只有两三百毫秒——松开赶在开麦完成之前，这条录音就只能丢，
+ * 观感正是「热键有时没反应，得按久一点」。留一路挂起的流，第二次按下就没有这段延迟。
+ * 两分钟是「一局里两次说话之间」的量级；超时就关掉，不让麦克风一直开着。
+ */
+export const MIC_WARM_LEASE_MS = 120_000
+
+/** 挂起的流还能不能用：租约没过期，轨道还活着（设备被拔掉时 readyState 会变 ended）。 */
+export function canReuseMic(ageMs: number, readyState: string | undefined): boolean {
+  return ageMs >= 0 && ageMs < MIC_WARM_LEASE_MS && readyState === 'live'
+}
+
 /** 拒绝理由只有两种，别在调用点再拼字符串。 */
 export type CaptureRejection = 'too-short' | 'silent'
 

@@ -67,7 +67,9 @@ check(
 )
 
 // —— 录音闸（voice-capture-gate）：这条判定决定「你说的话有没有被送去识别」，阈值不许漂 ——
-const { MIN_SPEECH_MS, SILENCE_RMS, captureLevel, judgeCapture } = await import('../src/shared/voice-capture-gate.ts')
+const { MIN_SPEECH_MS, SILENCE_RMS, MIC_WARM_LEASE_MS, canReuseMic, captureLevel, judgeCapture } = await import(
+  '../src/shared/voice-capture-gate.ts'
+)
 // —— Dota 2 显示模式：独占全屏上任何窗口都画不上去，「浮层不见了」最常是它 ——
 const { DOTA_DISPLAY_LABEL, dotaDisplayWarning, parseDotaVideoMode } = await import('../src/shared/dota-video.ts')
 const EXCLUSIVE = '"setting.fullscreen"\t\t"1"\n"setting.nowindowborder"\t\t"1"'
@@ -105,6 +107,10 @@ check(
 )
 check('录音闸：RMS 按块累计，不是取最后一块', Math.abs(captureLevel([new Float32Array(4).fill(0.5)], 4) - 0.5) < 1e-6)
 check('录音闸：没有帧就没有音量（不除零）', captureLevel([], 0) === 0)
+check('麦租约：刚松开的流可以复用', canReuseMic(0, 'live'))
+check('麦租约：租约内可以复用，到点就不能', canReuseMic(MIC_WARM_LEASE_MS - 1, 'live') && !canReuseMic(MIC_WARM_LEASE_MS, 'live'))
+check('麦租约：设备拔了就不复用（ended）', !canReuseMic(0, 'ended') && !canReuseMic(0, undefined))
+check('麦租约：时间倒流不当成新鲜', !canReuseMic(-1, 'live'))
 
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)

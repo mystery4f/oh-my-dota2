@@ -13,7 +13,13 @@ export interface PcmRecorder {
   /** 原始输入流：describeCaptureDevice 需要它来报「这次开的哪台麦克风」。 */
   readonly stream: MediaStream
   readonly sampleRate: number
-  /** 拆图并交出攒下的 PCM；重复调用安全，之后返回空段。 */
+  /** 取走攒下的 PCM 并清空缓冲；设备还开着，下一次按下可以接着用（麦克风复用）。 */
+  take(): PcmChunks
+  /** 闲置挂起：图还在、设备还开着，但不再收音频——闲置租约里不白占 CPU。 */
+  suspend(): void
+  /** 从闲置回到录音，顺手清掉挂起期间残留的那半段。 */
+  resume(): void
+  /** 拆图并交出攒下的 PCM（= take + close）；重复调用安全，之后返回空段。 */
   stop(): PcmChunks
 }
 
@@ -26,7 +32,7 @@ export interface PcmRecorder {
  */
 export async function startPcmRecorder(onChunk?: (chunk: Float32Array) => void): Promise<PcmRecorder> {
   const stream = await openMicStream()
-  const chunks: Float32Array[] = []
+  let chunks: Float32Array[] = []
   let ctx: AudioContext
   let node: ScriptProcessorNode
   try {
@@ -44,19 +50,36 @@ export async function startPcmRecorder(onChunk?: (chunk: Float32Array) => void):
     throw err
   }
   let stopped = false
+  const take = (): PcmChunks => {
+    const out = { chunks, sampleRate: ctx.sampleRate }
+    chunks = []
+    return out
+  }
   return {
     stream,
     get sampleRate(): number {
       return ctx.sampleRate
     },
+    take,
+    suspend(): void {
+      if (stopped) return
+      // 只停音频线程，设备仍开着：下一次按下不必再走一遍 getUserMedia（那才是「按了没反应」的来源）。
+      void ctx.suspend().catch(() => undefined)
+    },
+    resume(): void {
+      if (stopped) return
+      take()
+      void ctx.resume().catch(() => undefined)
+    },
     stop(): PcmChunks {
+      const out = take()
       if (!stopped) {
         stopped = true
         node.disconnect()
         stream.getTracks().forEach((track) => track.stop())
         void ctx.close().catch(() => undefined)
       }
-      return { chunks, sampleRate: ctx.sampleRate }
+      return out
     }
   }
 }

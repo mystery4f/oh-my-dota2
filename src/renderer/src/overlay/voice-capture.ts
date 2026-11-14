@@ -1,6 +1,6 @@
 import { recordingStageLine, type CaptureMode } from '@shared/hotkeys'
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
-import { captureLevel, judgeCapture } from '@shared/voice-capture-gate'
+import { MIC_WARM_LEASE_MS, canReuseMic, captureLevel, judgeCapture } from '@shared/voice-capture-gate'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
@@ -43,6 +43,63 @@ async function openRecorder(): Promise<PcmRecorder> {
   })
 }
 
+/**
+ * 闲置的麦克风：松开之后留一路挂起的流，下一次按下不再等 getUserMedia。
+ *
+ * 不做这件事的代价就是「热键有时没反应，得按久一点」：一次按下常只有两三百毫秒，
+ * 而开麦要几百毫秒到一秒多，松开赶在开麦完成之前这条录音只能丢（见 start 里的 stopWhileStarting）。
+ * 租约到期就关，不常驻占着设备。
+ */
+let warm: { recorder: PcmRecorder; at: number } | null = null
+let warmTimer: ReturnType<typeof setTimeout> | null = null
+
+function closeWarm(): void {
+  if (warmTimer !== null) {
+    clearTimeout(warmTimer)
+    warmTimer = null
+  }
+  if (warm === null) return
+  const { recorder } = warm
+  warm = null
+  recorder.stop()
+}
+
+/** 停录后把流挂起，而不是关掉：挂起不占 CPU（AudioContext 停了），设备还开着。 */
+function park(recorder: PcmRecorder): void {
+  closeWarm()
+  recorder.suspend()
+  warm = { recorder, at: Date.now() }
+  warmTimer = setTimeout(() => {
+    warmTimer = null
+    closeWarm()
+  }, MIC_WARM_LEASE_MS)
+}
+
+/** 拿一台能录的麦克风：先看挂起的那路还活着没有，不活再走一次 getUserMedia。 */
+async function acquireRecorder(): Promise<{ recorder: PcmRecorder; openMs: number }> {
+  if (warm !== null) {
+    const age = Date.now() - warm.at
+    const track = warm.recorder.stream.getAudioTracks()[0]
+    if (canReuseMic(age, track?.readyState)) {
+      const { recorder } = warm
+      warm = null
+      if (warmTimer !== null) {
+        clearTimeout(warmTimer)
+        warmTimer = null
+      }
+      recorder.resume()
+      console.log('VOICE_MIC_REUSE', JSON.stringify({ ageMs: age }))
+      return { recorder, openMs: 0 }
+    }
+    closeWarm()
+  }
+  const startedAt = Date.now()
+  const recorder = await openRecorder()
+  const openMs = Date.now() - startedAt
+  console.log('VOICE_MIC_OPEN_MS', JSON.stringify({ openMs }))
+  return { recorder, openMs }
+}
+
 /** 语音行就地补齐所需的全部信息：同一行从「识别原文」长成「译文 + 已播」。 */
 export interface VoiceRowPatch {
   id: string
@@ -82,8 +139,11 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     starting = true
     stopWhileStarting = false
     let opened: PcmRecorder
+    let openMs = 0
     try {
-      opened = await openRecorder()
+      const acquired = await acquireRecorder()
+      opened = acquired.recorder
+      openMs = acquired.openMs
     } catch (err) {
       starting = false
       const timedOut = err instanceof Error && err.message === '麦克风打开超时'
@@ -101,8 +161,10 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     if (stopWhileStarting) {
       // 松开赶在开麦完成之前：这条停不能装没看见——丢了它，观感就是「松开了还在录」。
       stopWhileStarting = false
-      opened.stop()
+      // 这条录音没救（松开时流还没开），但流本身留下：下一次按下就是即时可用，别连丢两次。
+      park(opened)
       recorder = null
+      console.log('VOICE_CAPTURE_DROP', JSON.stringify({ reason: 'release-before-open', openMs }))
       fail('松开太快，麦克风还没就绪，已忽略', '松开时麦克风还没就绪', 1800)
       return
     }
@@ -130,8 +192,10 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     window.api.reportVoiceState(false)
     if (recordTimer) clearTimeout(recordTimer)
     recordTimer = null
-    const { chunks, sampleRate: rate } = recorder?.stop() ?? { chunks: [], sampleRate: 48_000 }
+    const parked = recorder
+    const { chunks, sampleRate: rate } = parked?.take() ?? { chunks: [], sampleRate: 48_000 }
     recorder = null
+    if (parked !== null) park(parked)
     const frames = chunks.reduce((total, chunk) => total + chunk.length, 0)
     const rms = captureLevel(chunks, frames)
     const verdict = judgeCapture({ frames, sampleRate: rate, rms })

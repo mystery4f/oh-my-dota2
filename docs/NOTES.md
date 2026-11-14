@@ -338,6 +338,15 @@
 - 根因：`openMicStream()` 第一步是不带 deviceId 的 `getUserMedia({ audio: MIC_CONSTRAINTS })`，打中的是系统默认输入。默认一旦是蓝牙耳机（本例 LINKLIKE Cloudpods），Windows 就把整条蓝牙从音乐模式（A2DP）切到通话模式（HFP），正在放的游戏音频被掐断；随后代码再换成「麦克风阵列」重开一次，蓝牙切回 A2DP——**一次对讲断两下**，音频引擎两次重配，也就卡两下。
 - 修法两层：系统层把「声音输入」默认改成内置麦克风阵列，立刻不卡（用户实测）；代码层让这件事不依赖系统设置——`src/renderer/src/lib/mic.ts` 用 localStorage 记住上次选中的 deviceId（键 `oh-my-dota2.captureDeviceId`），之后直接 `deviceId: { exact }` 开麦，不再先碰默认设备；`warmMic()` 在浮层入口 `src/renderer/src/overlay/overlay-main.tsx` 预热一次，把「第一次的代价」挪到开局前。缓存失效（设备拔掉）时清掉缓存、退回原来的探测流程。
 - 教训：**蓝牙耳机的麦克风和它的音乐输出是互斥的**，任何「临时开一下麦」的代码都会让用户听到断声。这类问题看症状就能分辨：声音**彻底**消失一两秒再回来是链路重配，不是增益或缓冲的小抖动。另外 `default` / `communications` 只是伪设备，真正可用的是「麦克风阵列」——`pickCaptureDevice` 本来就选对了，错的是选之前那次「先按默认开一次」。
+
+### 按住说话「有时没反应，得按久一点」= 松开赶在开麦完成之前
+
+- 症状：按住模式（`voiceCaptureMode: hold`）下按一下热键偶尔毫无反应，按住久一点才录上；热键本身没换、也没被占用。
+- 排除顺序（先排除「按不到」再怀疑「录不上」）：`--hold-watch-probe` 里 120 毫秒的轻敲也能产生一按一放，`HOTKEY_HOLD_READY` 也正常，所以按键边沿不是问题；问题在开麦这一侧。
+- 根因：`startPcmRecorder()` 每次都要走一次 `getUserMedia`（`openMicStream` 在有偏好设备时会**连开两次**、探测设备时还要再开一次并 `enumerateDevices`），实测几百毫秒到一秒多；而按住说话的一次按下常常只有两三百毫秒——松开（`HOLD 0`）赶在 `recording = true` 之前到达，只能按 `stopWhileStarting` 记一笔，开麦回来时把这段录音**丢掉**（`松开太快，麦克风还没就绪，已忽略`）。用户看到的「按久一点才有反应」其实是「按得比开麦快就白按」。
+- 修法：`src/renderer/src/lib/pcm-recorder.ts` 把「开流」和「收音频」拆开——`take()` 取走并清空、`suspend()`/`resume()` 挂起与恢复、`stop()` 仍是一次性关闭（训练页的用法不变）；`src/renderer/src/overlay/voice-capture.ts` 松手后不再关流，而是 `park()` 成一路挂起的麦克风，租约 `MIC_WARM_LEASE_MS`（`src/shared/voice-capture-gate.ts`，两分钟，纯函数 `canReuseMic` 判「租约内且 `readyState === 'live'`」），下一次按下零延迟复用；连「松开太快被丢」那条也改成 `park()`——**丢的是这条录音，不是麦克风**，所以再按一次立刻就有反应。
+- 留痕：`VOICE_MIC_OPEN_MS {openMs}`（每次真开流都打，用来判断到底是开麦慢还是别的问题）、`VOICE_MIC_REUSE {ageMs}`（复用命中）、`VOICE_CAPTURE_DROP {reason:'release-before-open', openMs}`（丢了一条）。下次再有人说「热键没反应」，先看这三行，别再猜按键。
+- 没做的：不在启动时就常驻开麦（麦克风指示灯一直亮），也不按「对局开始」预热——两种都会让用户在没说话时也占着设备；两分钟租约是折中。
 ## ASR 微调（Qwen3）
 
 ### G15 试点：底模 13/20 → 微调 19/20
