@@ -1,6 +1,6 @@
 import { recordingStageLine, type CaptureMode } from '@shared/hotkeys'
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
-import { MIC_WARM_LEASE_MS, canReuseMic, captureLevel, judgeCapture } from '@shared/voice-capture-gate'
+import { MIC_WARM_LEASE_MS, canReuseMic, captureLevel, capturePeak, judgeCapture, rejectLine } from '@shared/voice-capture-gate'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
@@ -198,9 +198,16 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     if (parked !== null) park(parked)
     const frames = chunks.reduce((total, chunk) => total + chunk.length, 0)
     const rms = captureLevel(chunks, frames)
-    const verdict = judgeCapture({ frames, sampleRate: rate, rms })
+    const peak = capturePeak(chunks, frames, rate)
+    const verdict = judgeCapture({ frames, sampleRate: rate, rms, peak })
     if (!verdict.ok) {
-      fail(verdict.line, verdict.detail, 1800)
+      // 丢了一条录音必须留痕：那句话本身说不出是哪台设备、多响，事后只能靠这一行还原现场。
+      const mic = parked === null ? '' : await describeCaptureDevice(parked.stream)
+      console.log(
+        'VOICE_CAPTURE_REJECT',
+        JSON.stringify({ reason: verdict.reason, ms: Math.round(rate > 0 ? (frames / rate) * 1000 : 0), rms, peak, mic })
+      )
+      fail(rejectLine(verdict, mic.split('|')[0] ?? ''), verdict.detail, 1800)
       return
     }
     sink.stage('识别中…')

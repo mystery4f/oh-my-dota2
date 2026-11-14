@@ -67,7 +67,7 @@ check(
 )
 
 // —— 录音闸（voice-capture-gate）：这条判定决定「你说的话有没有被送去识别」，阈值不许漂 ——
-const { MIN_SPEECH_MS, SILENCE_RMS, MIC_WARM_LEASE_MS, canReuseMic, captureLevel, judgeCapture } = await import(
+const { MIN_SPEECH_MS, SILENCE_RMS, MIC_WARM_LEASE_MS, canReuseMic, captureLevel, capturePeak, judgeCapture, rejectLine } = await import(
   '../src/shared/voice-capture-gate.ts'
 )
 // —— Dota 2 显示模式：独占全屏上任何窗口都画不上去，「浮层不见了」最常是它 ——
@@ -87,30 +87,73 @@ check(
 )
 check('显示模式：读不到也要说一句，别让人以为没这条检查', dotaDisplayWarning(null) !== null)
 check('显示模式：三种模式都有中文名', Object.values(DOTA_DISPLAY_LABEL).every((label) => label.length > 0))
-const quiet = judgeCapture({ frames: 1600, sampleRate: 16_000, rms: 0.001 })
+const quiet = judgeCapture({ frames: 1600, sampleRate: 16_000, rms: 0.001, peak: 0.001 })
 check('录音闸：太短先判短（先看时长再看音量）', quiet.reason === 'too-short' && !quiet.ok, quiet.detail)
+const hushed = judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: SILENCE_RMS - 0.004, peak: SILENCE_RMS - 0.001 })
+check('录音闸：够长但没声音算静音', hushed.reason === 'silent', String(SILENCE_RMS))
+check('录音闸：只看阈值下沿，等于阈值就放过', judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: SILENCE_RMS, peak: SILENCE_RMS }).ok)
 check(
-  '录音闸：够长但没声音算静音',
-  judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: SILENCE_RMS - 0.001 }).reason === 'silent',
-  String(SILENCE_RMS)
-)
-check('录音闸：只看阈值下沿，等于阈值就放过', judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: SILENCE_RMS }).ok)
-check(
-  '录音闸：理由只有两种，拒绝时都带一句给人看的话',
-  (quiet.line === '录音太短，已忽略' && quiet.line.length > 0) ||
-    judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: 0 }).line.startsWith('没有检测到语音')
+  '录音闸：三种理由各有一句给人看的话，且不重复',
+  [quiet.line, hushed.line, judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: 0, peak: 0 }).line].every((line) => line.length > 0) &&
+    new Set([quiet.line, hushed.line, judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: 0, peak: 0 }).line]).size === 3
 )
 check(
   '录音闸：0.3 秒是下沿（299 毫秒丢、300 毫秒过）',
-  judgeCapture({ frames: (16_000 * (MIN_SPEECH_MS - 1)) / 1000, sampleRate: 16_000, rms: 0.5 }).reason === 'too-short' &&
-    judgeCapture({ frames: (16_000 * MIN_SPEECH_MS) / 1000, sampleRate: 16_000, rms: 0.5 }).ok
+  judgeCapture({ frames: (16_000 * (MIN_SPEECH_MS - 1)) / 1000, sampleRate: 16_000, rms: 0.5, peak: 0.5 }).reason === 'too-short' &&
+    judgeCapture({ frames: (16_000 * MIN_SPEECH_MS) / 1000, sampleRate: 16_000, rms: 0.5, peak: 0.5 }).ok
 )
 check('录音闸：RMS 按块累计，不是取最后一块', Math.abs(captureLevel([new Float32Array(4).fill(0.5)], 4) - 0.5) < 1e-6)
 check('录音闸：没有帧就没有音量（不除零）', captureLevel([], 0) === 0)
+
+// 判定改成看「最响的那 100 毫秒」：一句话常常只占整段录音的一小截，平均会被前后的静音拖下水。
+// makeTake 按毫秒攒样本，安静段与说话段分开摆——造出来的形态就是真实按住的形态。
+const makeTake = (segments, rate = 16_000) => {
+  const chunks = segments.map(({ ms, amp }) => new Float32Array(Math.round((rate * ms) / 1000)).fill(amp))
+  const frames = chunks.reduce((total, chunk) => total + chunk.length, 0)
+  return { chunks, frames, rate }
+}
+const wordInLongHold = makeTake([
+  { ms: 1500, amp: 0.0005 },
+  { ms: 200, amp: 0.02 },
+  { ms: 300, amp: 0.0005 }
+])
+const holdRms = captureLevel(wordInLongHold.chunks, wordInLongHold.frames)
+const holdPeak = capturePeak(wordInLongHold.chunks, wordInLongHold.frames, wordInLongHold.rate)
+check(
+  '录音闸：长按住只说了一个词也算说了（整段平均会被静音拖到阈值下）',
+  holdRms < SILENCE_RMS && holdPeak > SILENCE_RMS && judgeCapture({ frames: wordInLongHold.frames, sampleRate: wordInLongHold.rate, rms: holdRms, peak: holdPeak }).ok,
+  `mean=${holdRms.toFixed(5)} peak=${holdPeak.toFixed(5)}`
+)
+check(
+  '录音闸：最响窗取的是峰值窗，不是整段平均',
+  Math.abs(capturePeak([new Float32Array(16).fill(0.5)], 16, 16_000) - 0.5) < 1e-6 &&
+    Math.abs(capturePeak([], 0, 16_000)) === 0
+)
+const dead = judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: 0, peak: 0 })
+check(
+  '录音闸：全零单独判成「设备没声音」，不再和「说话太轻」混成一句',
+  dead.reason === 'no-signal' && dead.line !== judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: 0.004, peak: 0.006 }).line,
+  dead.line
+)
+check(
+  '录音闸：全零也要先看时长（误触还是误触）',
+  judgeCapture({ frames: 1600, sampleRate: 16_000, rms: 0, peak: 0 }).reason === 'too-short'
+)
+check(
+  '录音闸：有一点底噪但没人说话，仍算没检测到语音',
+  judgeCapture({ frames: 16_000, sampleRate: 16_000, rms: 0.004, peak: 0.006 }).reason === 'silent'
+)
 check('麦租约：刚松开的流可以复用', canReuseMic(0, 'live'))
 check('麦租约：租约内可以复用，到点就不能', canReuseMic(MIC_WARM_LEASE_MS - 1, 'live') && !canReuseMic(MIC_WARM_LEASE_MS, 'live'))
 check('麦租约：设备拔了就不复用（ended）', !canReuseMic(0, 'ended') && !canReuseMic(0, undefined))
 check('麦租约：时间倒流不当成新鲜', !canReuseMic(-1, 'live'))
+// 设备没声音时把设备名摆到用户眼前：他要改的是系统输入，不是再喊一遍。
+check(
+  '录音闸：设备静音时那行带上设备名',
+  rejectLine(dead, '麦克风阵列 (智音技术)') === `麦克风没有声音：检查输入设备（麦克风阵列 (智音技术)）`
+)
+check('录音闸：读不到设备名就不加空括号', rejectLine(dead, '') === dead.line)
+check('录音闸：只是太轻时不提设备（说了等于没说）', rejectLine(hushed, '麦克风阵列') === hushed.line)
 
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)

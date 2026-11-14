@@ -246,7 +246,8 @@
 - 修法：锁定本来就有 `overlayLocked` 持久化；补 `overlayCollapsed`（toggleCollapse 两个分支各自 saveSettings）和 `overlayVisible`（toggle 藏时写 false；show() 亮出后写 true）。启动时 `whenReady` 里 `startup.overlayVisible` 为真才 `show()`——浮层从不自动弹出，只还原用户上次的选择。收起态下 show() 先 reposition 再套 `miniGeometry`，重启见面也是小图标不是整块。
 - 教训：显示状态要在「用户动作发生的当下」持久化（toggle/show 里），而不是退出时快照——强制退出（dev:stop 的 Stop-Process）不走 will-quit，退出时快照必丢。
 ### 静音时 whisper 输出 `[BLANK_AUDIO]` 幻觉
-- 修法：录音段先算全段 RMS，低于 0.012 直接提示「没有检测到语音」；转写结果再过滤 `[BLANK_AUDIO]` 等标记。
+- 修法：录音段取**最响的那 100 毫秒**的音量（不是整段平均——按住两秒只说一个词，平均值会被前后静音拖到阈值下）：低于 0.0005 判「麦克风没有声音：检查输入设备」（数字静音：端点选错、系统没授权、设备静音键），低于 0.012 判「没有检测到语音」，都直接丢掉这段并留一行 `VOICE_CAPTURE_REJECT`；转写结果再过滤 `[BLANK_AUDIO]` 等标记。
+- 实测（2026-11-14）：`data/asr-ft` 里 86 条真实说话的录音，整段平均最小 0.0216、最响 100ms 窗最小 0.0782——两者差 3.6 倍，用平均判会把「说了一个词」判成没说话。
 
 
 ### 热词被当成识别结果（Qwen3 把提示念了一遍）

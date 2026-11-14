@@ -66,7 +66,7 @@
 关键文件职责：
 
 - `src/renderer/src/lib/mic.ts` — `openMicStream()`、`warmMic()`、`setMicDevicePreference()`、`describeCaptureDevice()`；`pickCaptureDevice()` 在 `src/shared/mic.ts`，负责过滤虚拟声卡与 default/communications 端点。
-- `src/renderer/src/overlay/voice-capture.ts` — 录音、静音判定（`SILENCE_RMS 0.012`、最短 `300ms`）、编码 WAV、调 `transcribeAudio` 与 `voiceReply`。
+- `src/renderer/src/overlay/voice-capture.ts` — 录音、编码 WAV、调 `transcribeAudio` 与 `voiceReply`；「算不算话」的判定本身在 `src/shared/voice-capture-gate.ts`（最响 100ms 窗：`NO_SIGNAL_RMS 0.0005` 判设备没声音、`SILENCE_RMS 0.012` 判没检测到语音、最短 `300ms`）。
 - `src/main/services/voice/chain-timing.ts` — 计时票与 `VoiceChainMeta`（`mic` 现在是必填）。
 - `src/main/services/voice/speech-pipeline.ts` — 分句 `splitForSpeech`，每 20 字一段、一次合成。
 - `src/shared/overlay-geometry.ts` — `shouldIgnoreMouse(locked, panelOpen)`，穿透规则的唯一出处。
