@@ -17,7 +17,7 @@ import { captureHint } from '@shared/overlay-hint'
 import { warmEdge } from './services/voice/edge'
 import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-server'
 import { autoVoicePackSetup } from './services/voice/sovits-voicepack'
-import { PROBES, renderProbeCatalogue } from './probes/registry'
+import { PROBES, ciProbeFlags, renderProbeCatalogue } from './probes/registry'
 import { startGsi, stopGsi } from './services/gsi'
 import { startUpdateCheck } from './services/updater'
 import { registerIpc } from './ipc'
@@ -176,6 +176,12 @@ app.whenReady().then(() => {
   const probeRun = PROBES.some((probe) => process.argv.includes(probe.flag)) || process.argv.some((arg) => arg.endsWith('-selftest'))
   if (process.argv.includes('--probes-md')) {
     console.log(renderProbeCatalogue())
+    app.exit(0)
+    return
+  }
+  // CI 的清单也问表：一次一行，工作流循环跑，谁都不用再手抄一份。
+  if (process.argv.includes('--probes-ci')) {
+    console.log(ciProbeFlags().join('\n'))
     app.exit(0)
     return
   }

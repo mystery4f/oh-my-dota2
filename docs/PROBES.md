@@ -1,24 +1,23 @@
 # Probes
-CI runs the pure subset — `train`, `voice-out`, `voice-chain`, `tts-pipeline`, `sovits-refs`, `sovits-voicepack`, `chat-block`, `translate-cache`, `overlay-geometry` — in the `probes` job of `.github/workflows/ci.yml`. A probe added to that list must need no window, no network and no model; anything that does stays manual.
+CI runs the subset whose row in `src/main/probes/registry.ts` carries `ci: true` — `npx electron out/main/index.js --probes-ci` prints those flags, and the `Pure probes` step of `.github/workflows/ci.yml` loops over them. A row earns the mark only if the probe needs no window, no network and no model; anything that does stays manual.
 
-One probe per seam. Each runs as a plain Node program through Electron, needs no game, no window and no network unless the line says so; a probe prints PASS/FAIL lines and a summary count, exit code 0 only when every case passed.
+One probe per seam. Each runs as a plain Node program through Electron, needs no game, no window and no network unless the line says so; a probe prints PASS/FAIL lines and a summary count, and exits 0 only when every case passed *and* at least one case ran (`src/main/probes/harness.ts` owns that verdict, so an unconditional `app.exit(0)` is an eslint error inside `src/main/probes/`).
 
 Run one with:
 
 ```bash
-taskkill /F /IM electron.exe   # a leftover process holds the single-instance lock and the probe exits silently
-npx electron out/main/index.js --<probe-name>
+npm run probe -- --<probe-name>
 ```
 
- keeps the working rules; this file keeps the catalogue. Add a probe when a new pure seam appears, and update its line here instead of growing the agent notes.
+The wrapper kills a leftover electron first (such a process holds the single-instance lock and the probe would exit silently) and hands back the probe's own exit code; `npm run probe:raw -- --<probe-name>` skips the convenience. `AGENTS.md` keeps the working rules; this file keeps the catalogue. Add a probe when a new pure seam appears — one row in the registry, then `npm run probes:doc`.
+
 
 ## Catalogue
 
-- Probes (run `taskkill /F /IM electron.exe` first — a leftover process holds the single-instance lock
-  and the probe exits silently). A probe process must skip ambient wiring: no whole-table hotkey
+- Probes (use `npm run probe -- --<probe>`: it clears the leftover electron that would otherwise hold
+  the single-instance lock and make the probe exit silently). A probe process must skip ambient wiring: no whole-table hotkey
   registration, no resident bridges, no timers — `installHotkeys` overwriting a probe's own watcher is
-  how `--hold-watch-probe` failed its first run, so guard the entry with `if (!probeRun)`:
-  `npx electron out/main/index.js --<probe>`
+  how `--hold-watch-probe` failed its first run, so guard the entry with `if (!probeRun)`.
 <!-- probes:start -->
   <!-- 这一段由 `npm run probes:doc` 生成，别手改；改表见 src/main/probes/registry.ts -->
   - `--inplace-probe` resident input bridge ping

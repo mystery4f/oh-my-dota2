@@ -64,13 +64,14 @@ jobs:
         run: npm run build
 
       - name: Pure probes
+        shell: bash
         run: |
-          npx electron out/main/index.js --train-probe
-          npx electron out/main/index.js --voice-out-probe
-          npx electron out/main/index.js --voice-chain-probe
-          npx electron out/main/index.js --tts-pipeline-probe
-          npx electron out/main/index.js --sovits-refs-probe
-          npx electron out/main/index.js --sovits-voicepack-probe
-          npx electron out/main/index.js --chat-block-probe
-          npx electron out/main/index.js --translate-cache-probe
-          npx electron out/main/index.js --overlay-geometry-probe
+          set -euo pipefail
+          # 清单问应用自己（registry 里标了 `ci: true` 的那几条）：以前这里手抄 9 行，
+          # 和 docs/PROBES.md 一样会跟真表漂移，漏掉的探针就再也没人跑过。
+          npx electron out/main/index.js --probes-ci | grep '^--' > "$RUNNER_TEMP/probes.txt"
+          echo "CI 要跑 $(wc -l < "$RUNNER_TEMP/probes.txt") 条探针"
+          while read -r flag; do
+            echo "== $flag"
+            npx electron out/main/index.js "$flag"
+          done < "$RUNNER_TEMP/probes.txt"

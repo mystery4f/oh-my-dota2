@@ -15,11 +15,16 @@ const END = '<!-- probes:end -->'
 function readRegistry() {
   const source = readFileSync(REGISTRY, 'utf8')
   const rows = []
-  // 摘要可能跨行、也可以用 `+` 拼起来，所以先吃到 `run:` 再拼字符串字面量。
-  const pattern = /flag: '(--[a-z-]+)',\s*summary:\s*([\s\S]*?)\n\s*run:/g
+  // 摘要可能跨行、也可以用 `+` 拼起来，所以从 flag 往后吃到本行的 `run:` 再拼字符串字面量；
+  // 中间允许出现别的字段（`ci: true` 就是夹在 flag 和 summary 之间的那种），字段顺序不该绑死解析。
+  const pattern = /flag: '(--[a-z-]+)'/g
   let match
   while ((match = pattern.exec(source)) !== null) {
-    const literals = match[2].match(/'([^']*)'/g) ?? []
+    const rest = source.slice(match.index)
+    const summaryAt = rest.indexOf('summary:')
+    const runAt = rest.indexOf('run:')
+    if (summaryAt === -1 || runAt === -1 || summaryAt > runAt) continue
+    const literals = rest.slice(summaryAt, runAt).match(/'([^']*)'/g) ?? []
     const summary = literals.map((item) => item.slice(1, -1)).join('')
     rows.push({ flag: match[1], summary })
   }

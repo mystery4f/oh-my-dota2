@@ -47,6 +47,14 @@ export interface ProbeEntry {
   /** 目录里的那一行说明（写进 `docs/PROBES.md`，英文与那份文档一致）。 */
   summary: string
   run: () => void | Promise<void>
+  /**
+   * 进 CI：标在「便宜、不碰硬件、不读用户数据」的探针上。
+   *
+   * 这份标记以前是 `ci.yml` 里的第三份手写清单（9 个 `npx electron …` 一行一个），
+   * 和 `docs/PROBES.md` 一样会跟真表漂移；现在 CI 自己来问表（`--probes-ci`），
+   * 加一个进 CI 的探针只改这一行。
+   */
+  ci?: true
 }
 
 export const PROBES: readonly ProbeEntry[] = [
@@ -78,6 +86,7 @@ export const PROBES: readonly ProbeEntry[] = [
   },
   {
     flag: '--tts-pipeline-probe',
+    ci: true,
     summary: 'the synthesis→delivery pipeline behind `speakPipeline` with fake injected engines',
     run: runTtsPipelineProbe
   },
@@ -88,6 +97,7 @@ export const PROBES: readonly ProbeEntry[] = [
   },
   {
     flag: '--chat-block-probe',
+    ci: true,
     summary:
       'the pure line rules: `renderChatLine`/`withChatBody` round trip, translate-or-not, and the nickname regression',
     run: runChatBlockProbe
@@ -110,11 +120,13 @@ export const PROBES: readonly ProbeEntry[] = [
   },
   {
     flag: '--sovits-refs-probe',
+    ci: true,
     summary: 'the sovits reference library reader (`listSovitsRefs`) against temp fixtures',
     run: runSovitsRefsProbe
   },
   {
     flag: '--sovits-voicepack-probe',
+    ci: true,
     summary: 'the voice pack pipeline with zero network and zero engine: plan, install, state, delete',
     run: runSovitsVoicepackProbe
   },
@@ -135,6 +147,7 @@ export const PROBES: readonly ProbeEntry[] = [
   },
   {
     flag: '--translate-cache-probe',
+    ci: true,
     summary: 'the translation ledger stores one pair per translation and answers in both directions',
     run: runTranslateCacheProbe
   },
@@ -145,6 +158,7 @@ export const PROBES: readonly ProbeEntry[] = [
   },
   {
     flag: '--overlay-geometry-probe',
+    ci: true,
     summary: "pure arithmetic of the overlay's geometry, hint priority, state reduction and unread counting",
     run: runOverlayGeometryProbe
   },
@@ -160,11 +174,13 @@ export const PROBES: readonly ProbeEntry[] = [
   },
   {
     flag: '--voice-out-probe',
+    ci: true,
     summary: 'the pure 声出 decision seam (`src/shared/voice-out.ts`) plus readiness reasons',
     run: runVoiceOutProbe
   },
   {
     flag: '--voice-chain-probe',
+    ci: true,
     summary: 'the 对讲 timing account (`src/shared/voice-timing.ts` + `chain-timing.ts`), zero network',
     run: runVoiceChainProbe
   },
@@ -185,6 +201,7 @@ export const PROBES: readonly ProbeEntry[] = [
   },
   {
     flag: '--train-probe',
+    ci: true,
     summary: 'the pure training decision seam (`src/shared/train.ts`): mutexes, preflight, run state',
     run: runTrainProbe
   },
@@ -218,4 +235,9 @@ export const PROBES: readonly ProbeEntry[] = [
 /** 目录正文：`docs/PROBES.md` 的清单段落由它生成，别处不再手写一份。 */
 export function renderProbeCatalogue(): string {
   return PROBES.map((probe) => `- \`${probe.flag}\` ${probe.summary}`).join('\n')
+}
+
+/** CI 要跑的那几条：`--probes-ci` 打出来，工作流照着跑，不再自己维护一份清单。 */
+export function ciProbeFlags(): string[] {
+  return PROBES.filter((probe) => probe.ci === true).map((probe) => probe.flag)
 }

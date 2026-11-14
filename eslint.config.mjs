@@ -42,6 +42,20 @@ export default tseslint.config(
       }
     }
   },
+  {
+    // 探针的退出码就是它的结论：`app.exit(0)` 无论成败都退 0，失败看起来和全通过一样
+    // （这正是「探针静默退 0」那类假绿灯的来源）。要退就调 harness 的 exitProbe / finishProbe，
+    // 由它统一判「有没有断言跑过」再决定退出码；harness 自己是唯一允许碰 app.exit 的地方。
+    files: ['src/main/probes/**/*.ts'],
+    ignores: ['src/main/probes/harness.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        { object: 'app', property: 'exit', message: '探针用 harness 的 exitProbe/finishProbe，别自己 app.exit' },
+        { object: 'process', property: 'exit', message: '探针用 harness 的 exitProbe/finishProbe，别自己 process.exit' }
+      ]
+    }
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
