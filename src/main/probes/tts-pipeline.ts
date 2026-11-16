@@ -164,18 +164,35 @@ export async function runTtsPipelineProbe(): Promise<void> {
     push('GV：P 豁免代际、播完接 B，A 全程未合成', seen.join('|') === '前排的|新来的' && JSON.stringify(f.calls) === JSON.stringify(['sovits:前排的', 'sovits:新来的']) && p.delivered === 1 && b.delivered === 1, JSON.stringify({ calls: f.calls, seen }))
   }
 
-  // —— GV：不预取，播放期间不碰显卡（段间多一次合成等待）——
+  // —— GV：不预取，播放期间不碰显卡（下一段合成的唯一触发点是上一段播完）——
   {
     const f = makeFake()
     const seen: string[] = []
-    const outcome = speakPipeline(base('sovits', '甲，乙，丙', { split: true, segmentChars: 2, adapters: f.adapters }), (segment) => { seen.push(segment.text) })
+    // 播放闸：onSegment 交回一个「这段还在播」的 promise，由测试手动放行——真实声出腿就是这样
+    // await 播完的（voice-out 的 onSegment 等 player.play 结束）。用同步 onSegment 建模等于
+    // 「播放瞬间结束」，那这条断言永远不可能成立。
+    const plays: (() => void)[] = []
+    const outcome = speakPipeline(
+      base('sovits', '甲，乙，丙', { split: true, segmentChars: 2, adapters: f.adapters }),
+      (segment) => {
+        seen.push(segment.text)
+        return new Promise<void>((resolve) => plays.push(resolve))
+      }
+    )
     f.gates.get('sovits:甲，')!.open(wav('甲'))
     await tick()
     push('GV：本段出声时不发下一段的合成', !f.calls.includes('sovits:乙，') && seen.join('') === '甲，', JSON.stringify({ calls: f.calls, seen }))
+    plays[0]!()
+    await tick()
+    push('GV：本段收尾才轮到下一段合成', f.calls.includes('sovits:乙，') && !f.calls.includes('sovits:丙'), JSON.stringify({ calls: f.calls, seen }))
     f.gates.get('sovits:乙，')!.open(wav('乙'))
     await tick()
-    push('GV：本段收尾才轮到下一段合成', f.calls.includes('sovits:丙') && seen.join('') === '甲，乙，', JSON.stringify({ calls: f.calls, seen }))
+    plays[1]!()
+    await tick()
+    push('GV：第三段等第二段播完才发车', f.calls.includes('sovits:丙') && seen.join('') === '甲，乙，', JSON.stringify({ calls: f.calls, seen }))
     f.gates.get('sovits:丙')!.open(wav('丙'))
+    await tick()
+    plays[2]!()
     const o = await outcome
     push('GV：三段全出', o.delivered === 3 && seen.join('') === '甲，乙，丙', JSON.stringify(o))
   }

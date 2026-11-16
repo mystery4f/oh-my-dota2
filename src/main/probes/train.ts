@@ -461,7 +461,7 @@ async function correctionsCases(): Promise<void> {
       datasetSource === null ? '安装版没有 src/，跳过' : 'buildCorrectionEntries + existsSync 在'
     )
   } finally {
-    closeTrainStore()
+    dropTemp(root)
   }
 }
 
@@ -475,6 +475,17 @@ const cases: Row[] = []
 
 function push(name: string, ok: boolean, detail: string): void {
   cases.push({ name, ok, detail })
+}
+
+/** 临时目录清理：先关账本句柄（Windows 上句柄还开着，unlink 就是 EBUSY），
+ * 清不掉也只留一行痕迹——一个残留的临时目录不该把探针变成「卡死」，更不该凭空变红。 */
+function dropTemp(root: string): void {
+  closeTrainStore()
+  try {
+    rmSync(root, { recursive: true, force: true })
+  } catch (error) {
+    console.log('TRAIN_PROBE_TEMP_LEFT', JSON.stringify({ root, error: String(error) }))
+  }
 }
 
 export async function runTrainProbe(): Promise<void> {
@@ -566,7 +577,7 @@ export async function runTrainProbe(): Promise<void> {
       JSON.stringify({ ok: holdStart.ok, terminal, holds })
     )
   } finally {
-    rmSync(holdRoot, { recursive: true, force: true })
+    dropTemp(holdRoot)
   }
   const ledgerWiring = recordLedgerWiring()
   push(
@@ -1505,7 +1516,7 @@ function scriptEditorCases(): void {
       picked.ok ? picked.weight : picked.broken.join(','),
     )
   } finally {
-    rmSync(weightDir, { recursive: true, force: true })
+    dropTemp(weightDir)
   }
 }
 
@@ -1922,7 +1933,6 @@ function storeCases(): void {
       fx?.restoreUserData()
     }
   } finally {
-    closeTrainStore()
-    rmSync(root, { recursive: true, force: true })
+    dropTemp(root)
   }
 }

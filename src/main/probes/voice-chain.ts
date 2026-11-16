@@ -52,7 +52,9 @@ export async function runVoiceChainProbe(): Promise<void> {
 
   // —— 五段都量到 ——
   // —— 五段都量到 ——
-  const timer = new ChainTimer({ startedAt: Date.now(), ms: 700, mic: '' })
+  // 识别那段是真的花掉的 700ms：起点必须在回复开始之前，totalMs 才会把它算进去——
+  // 起点写成「现在」再填 ms:700 是自相矛盾的模型（耗时 700 却没过去 700ms 时间）。
+  const timer = new ChainTimer({ startedAt: Date.now() - 700, ms: 700, mic: '' })
   await delay(25)
   timer.noteTranslated()
   await delay(25)
