@@ -115,9 +115,10 @@ export async function runTranslateAccuracyProbe(): Promise<void> {
     JSON.stringify(latinTokenViolations('mid hp low', '中路没血', 'zh-en'))
   )
   add(
-    'en-zh keep 词被译成中文',
-    deepEqualJson(latinTokenViolations('bkb is ready', '黑皇杖好了', 'en-zh'), ['bkb']),
-    JSON.stringify(latinTokenViolations('bkb is ready', '黑皇杖好了', 'en-zh'))
+    'en-zh 保真词译成中文不算违例（rosh→肉山、smoke→开雾）',
+    latinTokenViolations('careful mid, they smoke rosh', '小心中路，他们开雾打肉山', 'en-zh').length === 0 &&
+      latinTokenViolations('bkb is ready', '黑皇杖好了', 'en-zh').length === 0,
+    JSON.stringify(latinTokenViolations('careful mid, they smoke rosh', '小心中路，他们开雾打肉山', 'en-zh'))
   )
   add(
     'en-zh 非 keep 词不强制',
@@ -125,7 +126,13 @@ export async function runTranslateAccuracyProbe(): Promise<void> {
       latinTokenViolations('heart', '龙心', 'en-zh').length === 0
   )
   add('en-zh keep 词存活即通过', latinTokenViolations('gg wp', 'gg wp', 'en-zh').length === 0)
-  add('auto-zh 同 en-zh 规则', deepEqualJson(latinTokenViolations('gg', '干得漂亮', 'auto-zh'), ['gg']))
+  add(
+    'en-zh 译文还是纯拉丁时保真词必须在场（复读/抄错缩写）',
+    deepEqualJson(latinTokenViolations('bkb is ready', 'ready', 'en-zh'), ['bkb']) &&
+      deepEqualJson(latinTokenViolations('bkb is ready', 'bkg ready', 'en-zh'), ['bkb']),
+    JSON.stringify(latinTokenViolations('bkb is ready', 'ready', 'en-zh'))
+  )
+  add('auto-zh 同 en-zh 规则', latinTokenViolations('gg', '干得漂亮', 'auto-zh').length === 0)
   add(
     '空译文全报',
     deepEqualJson(latinTokenViolations('bkb还差200块钱', '', 'zh-en'), ['bkb', '200'])

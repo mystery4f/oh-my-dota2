@@ -5,11 +5,16 @@
  * - zh-en（中→英）：源文里每一个拉丁 token 和每一段数字都必须出现在译文里
  *   （不区分大小写的包含判断 —— 包含判断偏宽松，宁可漏报也不误杀好译文）。
  * - en-zh / auto-zh（英→中）：只盯保真词表（keepVerbatim 词条 ∪ JARGON_KEEP）：
- *   源文里有 bkb/rosh/gg 这类缩写时译文必须留着它们，普通英文单词（heart、tiny）
- *   本来就该译成中文，不参与判定。
+ *   普通英文单词（heart、tiny）本来就该译成中文，不参与判定；保真词只有在译文
+ *   还是纯拉丁时才必须在场（模型复读原文/抄错缩写 bkb→bkg）。译文含汉字就说明
+ *   真的译成了中文，rosh→肉山、smoke→开雾、bkb→黑皇杖都是对的，缺拉丁 token
+ *   不算违例——按包含判定去比，守卫会把好译文扔掉、回退成英文原文交出去。
  */
 import { KEEP_VERBATIM_TOKENS } from './dota-glossary'
 import type { TranslateDirection } from './ipc'
+
+/** 汉字：en-zh 方向判断「这句到底译成中文了吗」的唯一依据。 */
+const HAN = /\p{Script=Han}/u
 
 /** 违例 token 列表（按源文出现顺序去重）；空数组 = 通过。 */
 export function latinTokenViolations(source: string, target: string, direction: TranslateDirection): string[] {
@@ -21,6 +26,8 @@ export function latinTokenViolations(source: string, target: string, direction: 
     if (checkEverything || KEEP_VERBATIM_TOKENS.has(token)) tokens.add(token)
   }
   if (checkEverything) for (const match of source.matchAll(/\d+/g)) tokens.add(match[0])
+  // en-zh / auto-zh：含汉字的译文已经译过，保真词的「中文形态」判不出来，别硬要求拉丁原文。
+  if (!checkEverything && HAN.test(target)) return []
   const violations: string[] = []
   for (const token of tokens) if (!haystack.includes(token)) violations.push(token)
   return violations
