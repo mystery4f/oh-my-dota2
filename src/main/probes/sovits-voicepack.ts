@@ -3,7 +3,7 @@ import { errorMessage } from '@shared/errors'
 import { createServer, type Server } from 'node:http'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { applySovitsVoice } from '../services/voice/sovits-server'
 import {
   cleanupStalePackFiles,
@@ -267,9 +267,13 @@ export async function runSovitsVoicepackProbe(): Promise<void> {
         sovitsWeightsPath: join(weightsRoot, 'windranger', 'sovits.pth')
       })
       push('切权重先 GPT 后 SoVITS', ok && calls[0].startsWith('/set_gpt_weights?') && calls[1].startsWith('/set_sovits_weights?'), calls.join('|'))
+      // 断言解出来的路径，而不是某种编码文本：实现的编码器是 URLSearchParams
+      // （`~`→%7E、空格→+），拿 encodeURIComponent 的产物去比，撞上 CI 的
+      // RUNNER~1 短路径就假红——要锁的是「真把绝对路径发出去了」。
+      const sentPath = new URL(calls[0], 'http://127.0.0.1').searchParams.get('weights_path') ?? ''
       push(
         '权重走绝对路径参数',
-        calls[0].includes(encodeURIComponent(join(weightsRoot, 'windranger', 'gpt.ckpt'))),
+        sentPath === join(weightsRoot, 'windranger', 'gpt.ckpt') && isAbsolute(sentPath),
         calls[0]
       )
       const countBefore = calls.length
