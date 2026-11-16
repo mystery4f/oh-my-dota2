@@ -59,11 +59,17 @@ function run(label, bin, args) {
   }
 }
 
+/** 安装包文件名：`oh-my-dota2-<版本>-x64.exe`。版本号必须容得下预发布尾巴——
+ * 夜间包的版本是 CI 盖的 `1.1.1-nightly.20261116-115835`，只认纯数字版本会把
+ * 真打出来的包判成「没产出」，Nightly 就这样红了整整一周。
+ * `-x64.__uninstaller.exe` 这类中间产物天然不匹配（结尾不是 `-x64.exe`）。 */
+const INSTALLER_NAME = /^oh-my-dota2-\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?-x64\.exe$/
+
 /** dist/ 里最新的安装包（排除 `__uninstaller` 中间产物与 blockmap）。 */
 function latestInstaller() {
   if (!existsSync(DIST)) return null
   const found = readdirSync(DIST)
-    .filter((name) => /^oh-my-dota2-[\d.]+-x64\.exe$/.test(name))
+    .filter((name) => INSTALLER_NAME.test(name))
     .map((name) => join(DIST, name))
     .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)
