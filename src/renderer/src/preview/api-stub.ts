@@ -697,7 +697,17 @@ const implemented = {
       corrections: judgeCorrectionSamples(stubCorrections),
       install: null,
       // 预览里挑两句「稿子改了但没重录」的样本，好让琥珀色行与增量置灰看得见。
-      scriptStale: ['G14-L02', 'G14-L05']
+      scriptStale: ['G14-L02', 'G14-L05'],
+      // 数据体检（#104）：预览里给一份「录了但没有声音」的样本，让健康告警和时长分布看得见。
+      health: {
+        takes: 6,
+        duration: { minMs: 620, medianMs: 900, maxMs: 2200, totalMs: 6800 },
+        issues: [
+          { kind: 'unusable', label: '1 条录不出话（静音 1）', keys: ['G14-L02'], detail: 'G14-L02 静音' },
+          { kind: 'missing', label: '稿子里还有 2 句没录', keys: ['G15-L04', 'G15-L07'], detail: 'G15-L04、G15-L07' }
+        ],
+        ok: false
+      }
     }
   },
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),

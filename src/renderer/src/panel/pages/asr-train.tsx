@@ -14,6 +14,7 @@ import {
   takeLineId
 } from '@shared/train/recording'
 import { CORRECTION_GROUP } from '@shared/train/corrections'
+import { healthLine } from '@shared/train/dataset-health'
 import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
@@ -623,6 +624,23 @@ export function AsrTrainPage(): React.ReactElement {
                   </div>
                 </Row>
 
+                {/* 数据体检（#104）：重复句、录不出话、缺句，开训前就该看见。
+                    判据与 `--dataset-health-probe` 是同一份（shared/train/dataset-health.ts），面板不自己判。 */}
+                <Row label="数据体检" stacked hint={status?.health ? healthLine(status.health) : '还在统计录音目录'}>
+                  {status?.health && status.health.takes > 0 ? (
+                    <>
+                      <p className="py-1 text-xs text-slate-400">
+                        时长 最短 {secOf(status.health.duration.minMs)} · 中位{' '}
+                        {secOf(status.health.duration.medianMs)} · 最长 {secOf(status.health.duration.maxMs)}
+                      </p>
+                      {status.health.issues.map((issue) => (
+                        <p key={issue.kind} className="py-1 text-xs text-amber-300">
+                          {issue.label}：{issue.keys.join('、')}
+                        </p>
+                      ))}
+                    </>
+                  ) : null}
+                </Row>
                 <Row label="打包数据集" hint={note || '已录句子 × 稿子 → 训练/验证两份 jsonl，训练脚本直接吃'}>
                   <Button
                     size="sm"
@@ -801,4 +819,9 @@ export function AsrTrainPage(): React.ReactElement {
       <AsrCheckDialog open={checkOpen} onClose={() => setCheckOpen(false)} />
     </>
   )
+}
+
+/** 体检里的时长按秒显示到一位小数：200 毫秒的误触录音不该被写成「0s」。 */
+function secOf(ms: number): string {
+  return `${Math.round(ms / 100) / 10}s`
 }

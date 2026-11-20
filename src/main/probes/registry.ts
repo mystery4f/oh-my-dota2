@@ -43,6 +43,7 @@ import { runTtsPlayProbe } from './tts-play'
 import { runTtsVoicesProbe } from './tts-voices'
 import { runVoiceChainProbe } from './voice-chain'
 import { runLogBundleProbe } from './log-bundle'
+import { runDatasetHealthProbe } from './dataset-health'
 import { runVoiceOutProbe } from './voice-out'
 import { runVoiceRuntimeProbe } from './voice-runtime'
 import { runVoiceWorkerProbe } from './voice-worker'
@@ -231,6 +232,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the diagnostic bundle (`src/shared/log-bundle.ts` + `services/zip.ts`): masking, manifest, missing files, byte-stable archive',
     run: runLogBundleProbe
+  },
+  {
+    flag: '--dataset-health-probe',
+    ci: true,
+    summary:
+      'the pre-training dataset health check (`src/shared/train/dataset-health.ts` + `services/train/wav-facts.ts`): duplicate lines, takes that carry no speech, missing script lines, duration distribution',
+    run: runDatasetHealthProbe
   },
   {
     flag: '--asr-hotwords-probe',

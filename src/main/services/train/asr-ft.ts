@@ -56,6 +56,7 @@ import { locateWorkerScript } from '../voice/runtime'
 import { resetSherpaWorker } from '../voice/sherpa-asr'
 import { currentFtLedger, prepareFtDataset } from './ft-dataset'
 import { ftRecList, readFtScript } from './ft-record'
+import { currentFtDatasetHealth } from './ft-health'
 import { copyAsrFtScripts } from './asr-ft-install'
 import { correctionSamplesStatus } from '../voice/corrections'
 import {
@@ -349,7 +350,10 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
     estimateBasis: estimate.fresh.basis,
     // 需要重录的句子：稿子文本和账本里落的不一致，就是「改了稿但没重录」。
     // 面板据此把行染成琥珀色；「增量」能不能接同样看文本（谱系判据），两处口径一致。
-    scriptStale: scriptStaleKeys((await readFtScript()).groups, listDatasetEntries())
+    scriptStale: scriptStaleKeys((await readFtScript()).groups, listDatasetEntries()),
+    // 数据体检（#104）：判据在 shared/train/dataset-health.ts，这里只喂磁盘事实；
+    // 结果是录音目录指纹缓存过的，面板几秒轮询一次不会反复扫 wav。
+    health: await currentFtDatasetHealth()
   }
 }
 

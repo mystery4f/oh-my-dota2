@@ -15,6 +15,7 @@
 import { ASR_ENGINE_LIST, ASR_ENGINES, type AsrEngineId } from '../asr/engines'
 import { WAV_BYTES_PER_MS, WAV_HEADER_BYTES } from '../wav'
 import type { FtCorrectionSamples } from './corrections'
+import type { FtDatasetHealth } from './dataset-health'
 import { holdoutTakes } from './dataset'
 import { scriptTextForKey, type FtScriptGroup } from './recording'
 
@@ -503,6 +504,8 @@ export interface AsrFtStatusResult {
   estimateBasis: string
   /** 稿子改了、但这条录音还是按旧文本录的键（Gxx-Lnn）：面板把这些行标成「需重录」。 */
   scriptStale: string[]
+  /** 开训前的数据体检（#104）：重复句、录不出话的录音、稿子里还没录的句子，外加时长分布。 */
+  health: FtDatasetHealth
 }
 
 /** 开训闸门看到的两件事实：显存提示，以及上一轮的权重是否真的能接（增量）。panel 只显示，不自己推。 */

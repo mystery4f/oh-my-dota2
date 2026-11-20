@@ -361,6 +361,53 @@ check(
   historyCopyText(HISTORY_ROWS[0]) === '[队友] [阿杰] ⚔ 中路miss' && historyCopyText(HISTORY_ROWS[1]) === 'ward'
 )
 
+// —— 数据体检（dataset-health）：重复/录不出话/缺句三类，判据不许在别处再写一遍 ——
+const { HEALTH_KEYS_SHOWN, healthLine, judgeDatasetHealth } = await import('../src/shared/train/dataset-health.ts')
+const HEALTH_TAKES = [
+  { key: 'G01-L01', text: '中路 miss', frames: 16_000, sampleRate: 16_000, rms: 0.2, peak: 0.4 },
+  { key: 'G01-L02', text: '中路  miss ', frames: 16_000, sampleRate: 16_000, rms: 0.2, peak: 0.4 },
+  { key: 'G01-L03', text: '撤退', frames: 16_000, sampleRate: 16_000, rms: 0, peak: 0 }
+]
+const healthDirty = judgeDatasetHealth({ takes: HEALTH_TAKES, expected: ['G01-L01', 'G01-L02', 'G01-L03', 'G01-L04'] })
+check(
+  '数据体检：重复 + 静音 + 缺句正好报三类，顺序固定',
+  healthDirty.issues.map((issue) => issue.kind).join(',') === 'duplicate,unusable,missing',
+  healthDirty.issues.map((issue) => issue.kind).join(',')
+)
+check('数据体检：空白与大小写不把同一句算成两句', healthDirty.issues[0].keys.join(',') === 'G01-L01,G01-L02')
+check('数据体检：全零录音算「录不出话」而不是缺句', healthDirty.issues[1].keys.join(',') === 'G01-L03')
+check('数据体检：缺句只点名稿子里没录的那条', healthDirty.issues[2].keys.join(',') === 'G01-L04')
+check(
+  '数据体检：干净目录一条都不报',
+  judgeDatasetHealth({ takes: HEALTH_TAKES.slice(0, 1), expected: ['G01-L01'] }).ok
+)
+check(
+  `数据体检：缺句点名上限 ${HEALTH_KEYS_SHOWN} 条，计数仍是准数`,
+  (() => {
+    const many = judgeDatasetHealth({
+      takes: [],
+      expected: Array.from({ length: 20 }, (_, index) => `G09-L${String(index + 1).padStart(2, '0')}`)
+    })
+    return many.issues[0].keys.length === HEALTH_KEYS_SHOWN && many.issues[0].label.includes('20 句')
+  })()
+)
+check(
+  '数据体检：时长分布是四条（最短/中位/最长/合计）',
+  (() => {
+    const health = judgeDatasetHealth({ takes: HEALTH_TAKES, expected: ['G01-L01'] })
+    return (
+      health.duration.minMs === 1000 &&
+      health.duration.medianMs === 1000 &&
+      health.duration.maxMs === 1000 &&
+      health.duration.totalMs === 3000
+    )
+  })()
+)
+check(
+  '数据体检：面板那一行没问题时说清条目与时长',
+  healthLine(judgeDatasetHealth({ takes: HEALTH_TAKES.slice(0, 1), expected: ['G01-L01'] })) ===
+    '1 条 · 共 1 秒 · 没有重复/静音/缺句'
+)
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

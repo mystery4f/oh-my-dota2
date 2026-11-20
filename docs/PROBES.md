@@ -49,6 +49,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--voice-out-probe` the pure 声出 decision seam (`src/shared/voice-out.ts`) plus readiness reasons
   - `--voice-chain-probe` the 对讲 timing account (`src/shared/voice-timing.ts` + `chain-timing.ts`), zero network
   - `--log-bundle-probe` the diagnostic bundle (`src/shared/log-bundle.ts` + `services/zip.ts`): masking, manifest, missing files, byte-stable archive
+  - `--dataset-health-probe` the pre-training dataset health check (`src/shared/train/dataset-health.ts` + `services/train/wav-facts.ts`): duplicate lines, takes that carry no speech, missing script lines, duration distribution
   - `--asr-hotwords-probe` the pure hotword seam (`src/shared/asr-hotwords.ts`): parse, diff, merge, cap
   - `--provider-reasoning-probe` the pure 推理 toggle seam (`src/shared/provider-reasoning.ts`), zero network and zero model
   - `--zhipu-live-probe` runs the real wrapped pipeline (warm-up → durable session + ledger) against zhipu
