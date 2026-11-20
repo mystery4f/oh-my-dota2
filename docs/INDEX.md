@@ -36,6 +36,7 @@ tags: [docs, index]
 | `docs/IDEAS.md` | 功能想法池（未排期） | 现行 |
 | `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 那一轮的待验收项 | 历史快照 |
 | `docs/HANDOFF-2026-11-10.md` | 架构走查实施交接：待跑的三个探针、探针盖不到的手测项、环境坑 | 现行 |
+| `docs/REQ-backlog-2026-11.md` | 需求账本：候选池逐条现状证据 + 期望，末尾标注落成的 issue 编号（取票顺序看 issue 号） | 现行 |
 | `docs/HANDOFF.md` | 讲话卡顿与浮层鼠标的常驻交接：麦克风选型根因、已推提交、未真机验证的改动、环境坑（每轮直接改这一份） | 现行 |
 
 ## 设计与规范
@@ -102,6 +103,7 @@ tags: [docs, index]
 | `docs/adr/voice-readiness-mutation-broadcast.md` | 声出就绪的重算改由语音域变更点广播触发，handler 表不再逐个包刷新（选参考那次漏刷新的事故根因） |
 | `docs/adr/voice-stage-trace.md` | 对讲行的阶段留痕：短段靠标记留存而不是停留（实测翻译 1ms、合成 0–2ms），事件走快照，结算后收掉后缀，起播拆账落盘 |
 | `docs/adr/translate-guard-telemetry.md` | 保真守卫只报三段计数（blocked / recovered / gaveUp）：漏检率测不出来，事件攒批写 `logs/translate-guard.jsonl`，记账本战绩同批拍快照 |
+| `docs/adr/first-run-checklist.md` | 上手检查六步证据链：每步给可核对证据，最后一步只认真游戏帧（cfg 只在 Dota 启动时读），外加多 Steam 库 / 中文路径 / 移动硬盘三处加固 |
 
 ## 协作约定
 

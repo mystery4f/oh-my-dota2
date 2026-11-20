@@ -1,4 +1,5 @@
 import type { DotaDisplayMode } from './dota-video'
+import type { FirstRunReport } from './first-run'
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
 import type { VoiceChainTiming } from './voice-timing'
 import type { VoiceStageEvent } from './voice-stage'
@@ -413,6 +414,8 @@ export const IPC = {
   CAPTURE_STATUS: 'capture:status',
   /** Dota 2 自己的显示模式：独占全屏时任何浮层都画不上去，面板要能把这句话说出来。 */
   DOTA_DISPLAY: 'dota:display',
+  /** 首次上手检查：六步的证据快照（空数据目录 → 第一局），面板总览直接画。 */
+  FIRST_RUN: 'first-run:report',
   /** 手动触发一次「拍屏 → OCR → 翻译 → 重建译文框」。 */
   /** 手动模式整屏重建（渲染层先清空再填充）。 */
   CAPTURE_REPLACE: 'capture:replace',
@@ -710,6 +713,8 @@ export const ipcContract = {
   captureStop: invoke<[], CaptureStatus>(IPC.CAPTURE_STOP),
   captureStatus: invoke<[], CaptureStatus>(IPC.CAPTURE_STATUS),
   dotaDisplay: invoke<[], DotaDisplaySnapshot>(IPC.DOTA_DISPLAY),
+  /** 首次上手检查：六步证据快照，总览页直接画（不缓存，每次问都现凑）。 */
+  firstRunReport: invoke<[], FirstRunReport>(IPC.FIRST_RUN),
   onCaptureEntries: listen<CaptureEntry[]>(IPC.CAPTURE_ENTRIES),
   onCaptureUpdate: listen<CaptureEntry[]>(IPC.CAPTURE_UPDATE),
   onCaptureReplace: listen<CaptureEntry[]>(IPC.CAPTURE_REPLACE),

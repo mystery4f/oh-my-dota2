@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { errorMessage } from '@shared/errors'
 import type {
   AppSettings,
   CaptureStatus,
@@ -8,8 +7,8 @@ import type {
   TranslatorStatus
 } from '@shared/ipc'
 
-/** 自检结果的一行：真连了一次服务，成功就带延迟。 */
-type CheckRow = { label: string; ok: boolean; detail: string }
+import type { FirstRunReport, FirstRunStep } from '@shared/first-run'
+import type { SectionId } from '../sections'
 import { Button } from '@/components/ui/button'
 import { CollapsibleGroup, Group, Row, StatusPill, Panel } from '../components/primitives'
 
@@ -42,37 +41,60 @@ function formatLatency(status: TranslatorStatus | null): string {
 }
 
 /**
- * 总览只回答一个问题：现在有没有东西坏了。
- * 四条链路 + 被占用的热键 + 一键自检；其余设置一律不在这一页重复。
+ * 六种状态只有四种颜色：颜色只表达「要不要动手」。ok 绿、pending 灰（等他动手或等游戏）、
+ * blocked 红、unknown 灰（快照还没到，和 pending 一样不该抢眼）。
  */
-export function OverviewPage(): React.ReactElement {
+const STEP_TONE: Record<FirstRunStep['state'], 'ready' | 'idle' | 'bad'> = {
+  ok: 'ready',
+  pending: 'idle',
+  blocked: 'bad',
+  unknown: 'idle'
+}
+
+const STEP_LABEL: Record<FirstRunStep['state'], string> = {
+  ok: '有证据',
+  pending: '待完成',
+  blocked: '卡住了',
+  unknown: '未知'
+}
+/**
+ * 总览只回答一个问题：现在有没有东西坏了。
+ * 四条链路 + 上手检查 + 被占用的热键；其余设置一律不在这一页重复。
+ * 上手检查那一段是给新用户一个人看的一条链：空数据目录到第一局，六步各自带证据。
+ */
+export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => void }): React.ReactElement {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [capture, setCapture] = useState<CaptureStatus | null>(null)
   const [translator, setTranslator] = useState<TranslatorStatus | null>(null)
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
   const [hotkeys, setHotkeys] = useState<HotkeysResult | null>(null)
-  const [rows, setRows] = useState<CheckRow[] | null>(null)
+  const [firstRun, setFirstRun] = useState<FirstRunReport | null>(null)
   const [busy, setBusy] = useState(false)
 
   const refresh = async (): Promise<void> => {
-    const [nextSettings, nextCapture, nextTranslator, nextHotkeys] = await Promise.all([
+    const [nextSettings, nextCapture, nextTranslator, nextHotkeys, nextFirstRun] = await Promise.all([
       window.api.getSettings(),
       window.api.captureStatus(),
       window.api.translatorStatus(),
-      window.api.getHotkeys()
+      window.api.getHotkeys(),
+      window.api.firstRunReport()
     ])
     setSettings(nextSettings)
     setCapture(nextCapture)
     setTranslator(nextTranslator)
     setHotkeys(nextHotkeys)
+    setFirstRun(nextFirstRun)
   }
 
   useEffect(() => {
     void refresh()
     const offOverlay = window.api.onOverlayState(setOverlay)
+    // 上手检查也要跟着刷：GSI 帧、下载进度、热键占用都是随时变的，
+    // 不刷就会出现「面板说还没进游戏，其实刚打了一局」。
     const timer = window.setInterval(() => {
       void window.api.captureStatus().then(setCapture)
       void window.api.translatorStatus().then(setTranslator)
+      void window.api.firstRunReport().then(setFirstRun)
     }, 3000)
     return () => {
       offOverlay()
@@ -80,29 +102,24 @@ export function OverviewPage(): React.ReactElement {
     }
   }, [])
 
-  const selfCheck = async (): Promise<void> => {
+  /**
+   * 上手检查那一步的按钮：能做就当场做（真连一次、开始下载），
+   * 做不了的只是换一页去填（Key / 热键 / 模型目录），绝不在这一页重复别处的设置。
+   */
+  const runStep = async (step: FirstRunStep): Promise<void> => {
+    if (step.action === null) return
+    if (step.action === 'open-engine') return onNavigate('engine')
+    if (step.action === 'open-asr') return onNavigate('asr')
+    if (step.action === 'open-hotkeys') return onNavigate('hotkeys')
     setBusy(true)
-    const next: CheckRow[] = []
     try {
-      const current = settings ?? (await window.api.getSettings())
-      try {
-        const result = await window.api.testProvider(current.provider)
-        next.push({
-          label: '模型服务',
-          ok: result.ok,
-          detail: `${result.ok ? `${result.latencyMs ?? 0} ms` : result.message} · ${current.provider.model}`
-        })
-      } catch (err) {
-        next.push({ label: '模型服务', ok: false, detail: errorMessage(err) })
+      if (step.action === 'test-provider') {
+        const current = settings ?? (await window.api.getSettings())
+        await window.api.testProvider(current.provider)
+      } else {
+        await window.api.asrDownload()
       }
-      const captureStatus = await window.api.captureStatus()
-      next.push({
-        label: '对局正文',
-        ok: captureStatus.running,
-        detail: captureStatus.running ? `监听中 · ${captureStatus.totalEntries} 条` : '已停止'
-      })
-      setRows(next)
-      await refresh()
+      setFirstRun(await window.api.firstRunReport())
     } finally {
       setBusy(false)
     }
@@ -160,26 +177,43 @@ export function OverviewPage(): React.ReactElement {
           </Group>
         ) : null}
 
-        <Group label="自检">
+        <Group label="上手检查">
           <Row
-            label="模型服务 + 对局正文"
-            hint={rows ? undefined : '点一下真连一次模型、读一次监听状态'}
-            stacked={Boolean(rows)}
+            label={firstRun ? `${firstRun.done}/${firstRun.steps.length} 步有证据` : '读取中…'}
+            hint="从空数据目录到第一局：每一步都要能核对——路径、延迟、几秒前收到帧、哪个键被占"
+            stacked
           >
-            <Button onClick={() => void selfCheck()} disabled={busy}>
-              {busy ? '检查中…' : '一键自检'}
-            </Button>
-            {rows ? (
-              <div className="mt-2 space-y-1">
-                {rows.map((row) => (
-                  <div key={row.label} className="flex items-center gap-2 text-sm">
-                    <StatusPill tone={row.ok ? 'ready' : 'bad'}>{row.ok ? '通过' : '失败'}</StatusPill>
-                    <span className="w-28 shrink-0 text-muted-foreground">{row.label}</span>
-                    <span className="truncate">{row.detail}</span>
+            {firstRun === null ? (
+              <span className="text-sm text-muted-foreground">正在读现状…</span>
+            ) : (
+              <div className="space-y-2">
+                {firstRun.steps.map((step) => (
+                  <div key={step.id} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <StatusPill tone={STEP_TONE[step.state]}>
+                        {STEP_LABEL[step.state]}
+                      </StatusPill>
+                      <span className="w-20 shrink-0 text-sm text-muted-foreground">{step.label}</span>
+                      <span className="min-w-0 flex-1 break-all text-sm">{step.evidence}</span>
+                      {step.action === null ? null : (
+                        <Button
+                          className="shrink-0"
+                          onClick={() => void runStep(step)}
+                          disabled={busy}
+                        >
+                          {step.actionLabel}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
+                {firstRun.open === 0 ? (
+                  <span className="text-sm text-muted-foreground">
+                    六步齐了：进对局后这几行会自己变成「游戏连上」的证据。
+                  </span>
+                ) : null}
               </div>
-            ) : null}
+            )}
           </Row>
         </Group>
 

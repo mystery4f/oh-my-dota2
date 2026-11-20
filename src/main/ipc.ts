@@ -6,6 +6,7 @@ import { translateInPlace, voiceReply } from './services/reply/reply-service'
 import { generatePanelSuggestions } from './services/reply/panel-suggestions'
 import { loadSettings, saveSettings } from './services/settings'
 import { hotkeysState, saveHotkeysState } from './services/hotkeys'
+import { firstRunReport, recordProviderProbe } from './services/first-run'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
 import { testProvider, translateText } from './services/providers'
@@ -105,7 +106,12 @@ const handlers: MainHandlers = {
   setSettings: (patch) => saveSettings(patch),
   getHotkeys: () => hotkeysState(),
   setHotkeys: (map) => saveHotkeysState(map),
-  testProvider: (provider) => testProvider(provider),
+  // 真连一次的结果要留下来：上手检查那一步只认「key 真能用」，不认「key 已填」。
+  testProvider: async (provider) => {
+    const result = await testProvider(provider)
+    recordProviderProbe(provider, result)
+    return result
+  },
   translate: (text, direction) =>
     translateTry(loadSettings().provider, text, direction ?? 'en-zh').catch(() =>
       // 会话层失败时退回直连，保证「翻译试用」永远能给出结果或明确报错。
@@ -122,6 +128,7 @@ const handlers: MainHandlers = {
   captureStart: () => getCaptureService().start(),
   captureStop: () => getCaptureService().stop(),
   captureStatus: () => ({ ...getCaptureService().status(), gsi: gsiStatus() }),
+  firstRunReport: () => firstRunReport(),
   // 独占全屏上任何窗口都画不上去：这句话要在面板里说出来，否则用户只能自己猜浮层为什么不见了。
   dotaDisplay: async () => {
     const mode = await dotaDisplayMode()

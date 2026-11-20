@@ -76,29 +76,97 @@ export function cfgBody(port: number): string {
   ].join('\n')
 }
 
-function steamRegistryPath(): Promise<string | null> {
+/**
+ * Steam 可能登记的注册表位置：先用户级（Steam 自己写的），再机器级（绿色安装版的 InstallPath）。
+ * 只问一个键是不够的——Steam 装在 D 盘时 HKCU 里可能根本没有 `SteamPath`。
+ */
+const STEAM_REG_KEYS: readonly (readonly [string, string])[] = [
+  ['HKCU\\Software\\Valve\\Steam', 'SteamPath'],
+  ['HKLM\\SOFTWARE\\WOW6432Node\\Valve\\Steam', 'InstallPath'],
+  ['HKLM\\SOFTWARE\\Valve\\Steam', 'InstallPath']
+]
+
+/** `reg query` 的原始输出（不猜编码：中文路径按 utf8 解出来是乱码，见 `decodeRegOutput`）。 */
+function regQuery(key: string, name: string): Promise<Buffer | null> {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') return resolve(null)
     execFile(
       'reg',
-      ['query', 'HKCU\\Software\\Valve\\Steam', '/v', 'SteamPath'],
-      { windowsHide: true },
-      (error, stdout) => {
-        if (error) return resolve(null)
-        const match = /SteamPath\s+REG_SZ\s+(.+)/i.exec(stdout)
-        // 注册表里存的是正斜杠。
-        resolve(match ? match[1].trim().replace(/\//g, '\\') : null)
-      }
+      ['query', key, '/v', name],
+      { windowsHide: true, encoding: 'buffer' },
+      (error, stdout) => resolve(error ? null : (stdout as unknown as Buffer))
     )
   })
 }
 
-async function libraryRoots(): Promise<string[]> {
+/**
+ * 同一次查询给出两种解码：reg.exe 按控制台代码页输出，中文 Windows 上是 GBK，
+ * 而我们第一反应是 utf8。两个都试、再用 `existsSync` 验真——
+ * 解错的路径会直接落到「不存在」，不会拿一串乱码去拼目录。
+ */
+function decodeRegOutput(raw: Buffer): string[] {
+  const out: string[] = []
+  for (const label of ['utf-8', 'gbk']) {
+    try {
+      out.push(new TextDecoder(label).decode(raw))
+    } catch {
+      // 这个运行时没带该解码器（小体积 ICU 构建）：跳过，反正还有 existsSync 兜底。
+    }
+  }
+  return out
+}
+
+/** 注册表里所有能验真的 Steam 根，去重后按发现顺序返回。 */
+async function registrySteamPaths(): Promise<string[]> {
+  const found = new Set<string>()
+  for (const [key, name] of STEAM_REG_KEYS) {
+    const raw = await regQuery(key, name)
+    if (raw === null) continue
+    const pattern = new RegExp(`${name}\\s+REG_SZ\\s+(.+)`, 'i')
+    for (const text of decodeRegOutput(raw)) {
+      const match = pattern.exec(text)
+      if (match === null) continue
+      // 注册表里存的是正斜杠（Steam 自己写的那种）。
+      const path = match[1].trim().replace(/\//g, '\\').replace(/\\+$/, '')
+      if (path !== '' && existsSync(path)) found.add(path)
+    }
+  }
+  return [...found]
+}
+
+/** Dota 2 的 game/dota 目录在不在：这是「这个根是不是真装着游戏」的唯一判据。 */
+function hasDota(root: string): boolean {
+  return existsSync(join(root, 'steamapps', 'common', 'dota 2 beta', 'game', 'dota'))
+}
+
+/**
+ * 兜底扫描：注册表读不到或解不出来时（Steam 装在移动硬盘、绿色版、中文路径），
+ * 扫盘符找 `steamapps`。只在第一条路失败后才调用——正常启动不该为兜底付 78 次 stat。
+ */
+function scannedSteamRoots(): string[] {
+  if (process.platform !== 'win32') return []
+  const found: string[] = []
+  for (let code = 65; code <= 90; code += 1) {
+    const drive = `${String.fromCharCode(code)}:\\`
+    for (const candidate of [
+      join(drive, 'Steam'),
+      join(drive, 'SteamLibrary'),
+      join(drive, 'Program Files (x86)', 'Steam'),
+      join(drive, 'Program Files', 'Steam')
+    ])
+      if (existsSync(join(candidate, 'steamapps'))) found.push(candidate)
+  }
+  return found
+}
+
+async function libraryRoots(extra: readonly string[] = []): Promise<string[]> {
   const roots = new Set<string>()
-  const steam = await steamRegistryPath()
-  if (steam) roots.add(steam)
+  for (const steam of await registrySteamPaths()) roots.add(steam)
   const programFiles = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'
   roots.add(join(programFiles, 'Steam'))
+  // 兜底扫描给进来的根：只在注册表那条路失败时才有内容。
+  for (const root of extra) roots.add(root)
+  // 候选只在开头取一次：vdf 里读出来的库根可能还有自己的 vdf，展开一轮就够（不做递归）。
   const candidates = [...roots]
   for (const root of candidates) {
     const vdf = join(root, 'steamapps', 'libraryfolders.vdf')
@@ -114,13 +182,17 @@ async function libraryRoots(): Promise<string[]> {
   return [...roots]
 }
 
-/** 在所有 Steam 库目录里找 Dota 2 的 gamestate_integration 目录。 */
+/**
+ * 在所有 Steam 库目录里找 Dota 2 的 gamestate_integration 目录。
+ *
+ * 两条路：注册表给的那些根，找不到再扫盘符（Steam 在移动硬盘、绿色版、注册表被清过）。
+ * 扫描只在失败后发生——正常启动不该为一个兜底路径付 26×4 次 stat。
+ */
 async function findCfgDir(): Promise<string | null> {
-  for (const root of await libraryRoots()) {
-    const dir = join(root, CFG_DIR)
-    if (existsSync(join(root, 'steamapps', 'common', 'dota 2 beta', 'game', 'dota'))) return dir
-  }
-  return null
+  const known = (await libraryRoots()).find(hasDota)
+  if (known !== undefined) return join(known, CFG_DIR)
+  const widened = (await libraryRoots(scannedSteamRoots())).find(hasDota)
+  return widened === undefined ? null : join(widened, CFG_DIR)
 }
 
 /**

@@ -24,6 +24,7 @@ import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
 import { estimateFtCost, summarizePendingTakes } from '@shared/train/asr-ft'
 import type { AsrCheckState } from '@shared/train/asr-check'
 import { judgeCorrectionSamples } from '@shared/train/corrections'
+import { judgeFirstRun } from '@shared/first-run'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
@@ -373,6 +374,41 @@ const implemented = {
       hero: 'muerta'
     }
   ],
+  /**
+   * 上手检查：桩里直接跑真判断（`judgeFirstRun` 是纯函数），只编造「主进程的现状」。
+   * `?firstRun=empty` 让预览停在「空数据目录」那一屏——没这个开关，六步永远全是绿的，
+   * 新用户看到的那一面就永远没人检查。
+   */
+  firstRunReport: async () => {
+    const empty = query.get('firstRun') === 'empty'
+    return judgeFirstRun({
+      provider: {
+        id: settings.provider.id,
+        model: settings.provider.model,
+        hasKey: !empty,
+        lastTest: empty
+          ? null
+          : { providerId: settings.provider.id, model: settings.provider.model, ok: true, message: 'ok', latencyMs: 640 }
+      },
+      gsi: empty
+        ? { configPath: null, configError: '没找到 Dota 2 安装目录（Steam 装在别的盘？）', lastAt: null, gameState: null }
+        : { configPath: 'D:\\Steam\\steamapps\\common\\dota 2 beta\\game\\dota\\cfg\\gamestate_integration', configError: null, lastAt: Date.now() - 4000, gameState: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS' },
+      asr: {
+        ready: !empty,
+        downloading: false,
+        progress: 0,
+        error: null,
+        dir: 'C:\\stub\\data\\asr-models\\paraformer',
+        expectedBytes: empty ? 227_330_205 + 75_354 : null
+      },
+      hotkeys: {
+        rejected: hotkeyPayload().actions.filter((action) => action.verdict === 'rejected').map((action) => ({ label: action.label, display: action.display })),
+        total: hotkeyPayload().actions.length
+      },
+      dataDir: 'C:\\stub\\data',
+      now: Date.now()
+    })
+  },
   captureStatus: async () => ({
     running: true,
     source: 'gsi',

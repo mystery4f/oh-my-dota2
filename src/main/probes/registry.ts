@@ -31,6 +31,7 @@ import { runTrainProbe } from './train'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
 import { runTranslateGuardProbe } from './translate-guard'
+import { runFirstRunProbe } from './first-run'
 import { runTtsBenchProbe } from './tts-bench'
 import { runTtsOfflineProbe } from './tts-offline'
 import { runTtsPipelineProbe } from './tts-pipeline'
@@ -158,6 +159,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the fidelity guard telemetry: blocked / recovered / gaveUp counts, dirty jsonl lines, and one batched write',
     run: runTranslateGuardProbe
+  },
+  {
+    flag: '--first-run-probe',
+    ci: true,
+    summary:
+      'the first-run checklist: six steps, what counts as evidence in each, and why the last one needs the real game',
+    run: runFirstRunProbe
   },
   {
     flag: '--translate-accuracy-probe',

@@ -68,7 +68,8 @@ export function PanelApp(): React.ReactElement {
       case 'overlay':
         return <OverlayPage />
       case 'overview':
-        return <OverviewPage />
+        // 上手检查的「去填 Key / 换键」要能换页：导航只有壳知道，页面只拿到这一条回执。
+        return <OverviewPage onNavigate={select} />
       case 'talk':
         return <TalkPage onOpenVoicePacks={() => setPacksOpen(true)} />
       case 'chatout':
