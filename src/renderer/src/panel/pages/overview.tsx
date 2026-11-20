@@ -8,6 +8,9 @@ import type {
 } from '@shared/ipc'
 
 import type { FirstRunReport, FirstRunStep } from '@shared/first-run'
+import type { EnvDeviceCounts, EnvReport } from '@shared/env-report'
+import { envCounted } from '@shared/env-report'
+import type { EnvState } from '@shared/env-report'
 import type { SectionId } from '../sections'
 import { Button } from '@/components/ui/button'
 import { CollapsibleGroup, Group, Row, StatusPill, Panel } from '../components/primitives'
@@ -57,6 +60,20 @@ const STEP_LABEL: Record<FirstRunStep['state'], string> = {
   blocked: '卡住了',
   unknown: '未知'
 }
+/** 这台机器的状态配色：warn 不算坏（琥珀），unknown 灰（没数据不是问题）。 */
+const ENV_TONE: Record<EnvState, 'ready' | 'warn' | 'bad' | 'idle'> = {
+  ok: 'ready',
+  warn: 'warn',
+  bad: 'bad',
+  unknown: 'idle'
+}
+
+const ENV_STATE_LABEL: Record<EnvState, string> = {
+  ok: '正常',
+  warn: '偏紧',
+  bad: '有问题',
+  unknown: '测不到'
+}
 /**
  * 总览只回答一个问题：现在有没有东西坏了。
  * 四条链路 + 上手检查 + 被占用的热键；其余设置一律不在这一页重复。
@@ -69,6 +86,8 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
   const [overlay, setOverlay] = useState<OverlayStatus>(EMPTY_OVERLAY)
   const [hotkeys, setHotkeys] = useState<HotkeysResult | null>(null)
   const [firstRun, setFirstRun] = useState<FirstRunReport | null>(null)
+  const [env, setEnv] = useState<EnvReport | null>(null)
+  const [envBusy, setEnvBusy] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const refresh = async (): Promise<void> => {
@@ -88,6 +107,7 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
 
   useEffect(() => {
     void refresh()
+    void runEnv()
     const offOverlay = window.api.onOverlayState(setOverlay)
     // 上手检查也要跟着刷：GSI 帧、下载进度、热键占用都是随时变的，
     // 不刷就会出现「面板说还没进游戏，其实刚打了一局」。
@@ -122,6 +142,21 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
       setFirstRun(await window.api.firstRunReport())
     } finally {
       setBusy(false)
+    }
+  }
+
+  /** 「这台机器」只在进总览时测一次 + 手动刷新（pm 定的口径，不加后台轮询）。 */
+  const runEnv = async (): Promise<void> => {
+    setEnvBusy(true)
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices().catch(() => [] as MediaDeviceInfo[])
+      const counts: EnvDeviceCounts = {
+        micCount: all.filter((d) => d.kind === 'audioinput').length,
+        speakerCount: all.filter((d) => d.kind === 'audiooutput').length
+      }
+      setEnv(await window.api.envReport(counts))
+    } finally {
+      setEnvBusy(false)
     }
   }
 
@@ -234,6 +269,43 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
                 ) : null}
               </div>
             )}
+          </Row>
+        </Group>
+        <Group label="这台机器">
+          <Row
+            label={env ? `${envCounted(env)}/6 行有数据` : '正在读现状…'}
+            hint="识别/训练吃 CPU 和内存，模型和产物占磁盘，正文走 32123 端口，对讲靠设备：哪一行出事，先看这一页。"
+            stacked
+          >
+            {env === null ? (
+              <span className="text-sm text-muted-foreground">正在读现状…</span>
+            ) : (
+              <div className="space-y-2">
+                {env.rows.map((row) => (
+                  <div key={row.id} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <StatusPill tone={ENV_TONE[row.state]}>
+                        {ENV_STATE_LABEL[row.state]}
+                      </StatusPill>
+                      <span className="w-20 shrink-0 text-sm text-muted-foreground">{row.label}</span>
+                      <span className="min-w-0 flex-1 break-all text-sm">{row.value ?? row.gap ?? '—'}</span>
+                    </div>
+                    <div className="pl-[5.5rem] text-xs text-muted-foreground">
+                      {row.value === null ? `${row.gap}；为什么在意：${row.why}` : row.why}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="pt-2">
+              <Button
+                className="shrink-0"
+                onClick={() => void runEnv()}
+                disabled={envBusy}
+              >
+                {envBusy ? '测一次…' : '再测一次'}
+              </Button>
+            </div>
           </Row>
         </Group>
 

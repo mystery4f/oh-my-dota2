@@ -7,6 +7,7 @@ import { generatePanelSuggestions } from './services/reply/panel-suggestions'
 import { loadSettings, saveSettings } from './services/settings'
 import { hotkeysState, saveHotkeysState } from './services/hotkeys'
 import { firstRunReport, recordProviderProbe } from './services/first-run'
+import { envReport } from './services/env-report'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
 import { testProvider, translateText } from './services/providers'
@@ -136,6 +137,7 @@ const handlers: MainHandlers = {
   captureStop: () => getCaptureService().stop(),
   captureStatus: () => ({ ...getCaptureService().status(), gsi: gsiStatus() }),
   firstRunReport: () => firstRunReport(),
+  envReport: (devices) => envReport(devices ?? { micCount: null, speakerCount: null }),
   // 独占全屏上任何窗口都画不上去：这句话要在面板里说出来，否则用户只能自己猜浮层为什么不见了。
   dotaDisplay: async () => {
     const mode = await dotaDisplayMode()

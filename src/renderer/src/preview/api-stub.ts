@@ -28,6 +28,7 @@ import { judgeCorrectionSamples } from '@shared/train/corrections'
 import { mergePlan, rankCandidates, type HotwordCandidate, type HotwordSuggestions } from '@shared/asr-hotword-candidates'
 import { judgeFirstRun } from '@shared/first-run'
 import { judgeGsiStall, gsiStallWarning } from '@shared/gsi-stall'
+import { judgeEnv } from '@shared/env-report'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
@@ -469,6 +470,26 @@ const implemented = {
       },
       dataDir: 'C:\\stub\\data',
       now: Date.now()
+    })
+  },
+  /**
+   * 这台机器：桩里也跑真判据（`judgeEnv` 纯函数），只编造主进程能量的和省心假值。
+   * `?mach=warn` 切到「内存偏紧 + 端口空闲、被别人占了不知道」那一屏。
+   */
+  envReport: async (devices) => {
+    const warnMode = query.get('mach') === 'warn'
+    return judgeEnv({
+      cpuModel: 'Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz',
+      cpuCores: 12,
+      freeMemBytes: warnMode ? 1_073_741_824 : 5_642_354_688,
+      totalMemBytes: 17_179_869_184,
+      diskFreeBytes: 123_456_543_232,
+      diskTotalBytes: 512_110_190_592,
+      diskPath: 'C:\\stub\\data',
+      gsiPort: 32123,
+      portOwner: warnMode ? 'other' : 'ours',
+      micCount: devices?.micCount ?? 1,
+      speakerCount: devices?.speakerCount ?? 1
     })
   },
   captureStatus: async () => {

@@ -360,6 +360,13 @@ check(
   '历史过滤：复制的是整行（有译文抄译文，否则原文）',
   historyCopyText(HISTORY_ROWS[0]) === '[队友] [阿杰] ⚔ 中路miss' && historyCopyText(HISTORY_ROWS[1]) === 'ward'
 )
+// —— 机器体检（ticket 77）：状态配色、判据不动数字、设备数与端口 ——
+const { judgeEnv, envCounted, envTroubled } = await import('../src/shared/env-report.ts')
+check('体检：内存偏紧是 warn 不是 bad', judgeEnv({ cpuModel: 'x', cpuCores: 8, freeMemBytes: 1024 ** 3, totalMemBytes: 8000 * 1024 ** 2, diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 100 * 1024 ** 3, diskPath: 'D:', gsiPort: 32123, portOwner: 'ours', micCount: 1, speakerCount: 1 }).rows.find((r) => r.id === 'memory').state === 'warn')
+check('体检：磁盘偏紧是 warn 不是 bad', judgeEnv({ cpuModel: 'x', cpuCores: 8, freeMemBytes: 8 * 1024 ** 3, totalMemBytes: 16 * 1024 ** 3, diskFreeBytes: 3 * 1024 ** 3, diskTotalBytes: 100 * 1024 ** 3, diskPath: 'D:', gsiPort: 32123, portOwner: 'ours', micCount: 1, speakerCount: 1 }).rows.find((r) => r.id === 'disk').state === 'warn')
+check('体检：端口被别人占是 bad，空着是 warn，本应用是 ok', (() => { const mk = (portOwner) => judgeEnv({ cpuModel: 'x', cpuCores: 8, freeMemBytes: 8 * 1024 ** 3, totalMemBytes: 16 * 1024 ** 3, diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 100 * 1024 ** 3, diskPath: 'D:', gsiPort: 32123, portOwner, micCount: 1, speakerCount: 1 }).rows.find((r) => r.id === 'port').state; return mk('other') === 'bad' && mk('free') === 'warn' && mk('ours') === 'ok' })())
+check('体检：counted 只数有数据的行，troubled 只数偏紧/有问题', (() => { const rep = judgeEnv({ cpuModel: 'x', cpuCores: 8, freeMemBytes: 1024 ** 3, totalMemBytes: 8000 * 1024 ** 2, diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 100 * 1024 ** 3, diskPath: 'D:', gsiPort: 32123, portOwner: null, micCount: null, speakerCount: 1 }); const mem = rep.rows.find((r) => r.id === 'memory'); const port = rep.rows.find((r) => r.id === 'port'); const mic = rep.rows.find((r) => r.id === 'mic'); return envCounted(rep) === 4 && envTroubled(rep).length === 1 && envTroubled(rep)[0].id === 'memory' && envCounted({ at: '', rows: [mem, port, mic] }) === 1 })())
+check('体检：设备 0 个是 warn（会录到静音），null 是 unknown 且带原因', (() => { const rep = judgeEnv({ cpuModel: 'x', cpuCores: 8, freeMemBytes: 8 * 1024 ** 3, totalMemBytes: 16 * 1024 ** 3, diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 100 * 1024 ** 3, diskPath: 'D:', gsiPort: 32123, portOwner: 'ours', micCount: 0, speakerCount: null }).rows; return rep.find((r) => r.id === 'mic').state === 'warn' && rep.find((r) => r.id === 'speaker').state === 'unknown' && rep.find((r) => r.id === 'speaker').gap !== null })())
 
 // —— 数据体检（dataset-health）：重复/录不出话/缺句三类，判据不许在别处再写一遍 ——
 const { HEALTH_KEYS_SHOWN, healthLine, judgeDatasetHealth } = await import('../src/shared/train/dataset-health.ts')

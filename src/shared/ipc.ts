@@ -7,6 +7,7 @@ import type { VoiceChainTiming } from './voice-timing'
 import type { VoiceStageEvent } from './voice-stage'
 import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
+import type { EnvDeviceCounts, EnvReport } from './env-report'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
@@ -427,6 +428,8 @@ export const IPC = {
   DOTA_DISPLAY: 'dota:display',
   /** 首次上手检查：六步的证据快照（空数据目录 → 第一局），面板总览直接画。 */
   FIRST_RUN: 'first-run:report',
+  /** 这台机器的体检：CPU / 内存 / 磁盘 / 端口 / 设备数，每行一句话说清为什么值得看。 */
+  ENV_REPORT: 'env:report',
   /** 手动触发一次「拍屏 → OCR → 翻译 → 重建译文框」。 */
   /** 手动模式整屏重建（渲染层先清空再填充）。 */
   CAPTURE_REPLACE: 'capture:replace',
@@ -734,6 +737,7 @@ export const ipcContract = {
   dotaDisplay: invoke<[], DotaDisplaySnapshot>(IPC.DOTA_DISPLAY),
   /** 首次上手检查：六步证据快照，总览页直接画（不缓存，每次问都现凑）。 */
   firstRunReport: invoke<[], FirstRunReport>(IPC.FIRST_RUN),
+  envReport: invoke<[EnvDeviceCounts], EnvReport>(IPC.ENV_REPORT),
   onCaptureEntries: listen<CaptureEntry[]>(IPC.CAPTURE_ENTRIES),
   onCaptureUpdate: listen<CaptureEntry[]>(IPC.CAPTURE_UPDATE),
   onCaptureReplace: listen<CaptureEntry[]>(IPC.CAPTURE_REPLACE),
