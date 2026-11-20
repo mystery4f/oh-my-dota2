@@ -95,3 +95,15 @@
 本账本的作用是：他做完手上的，按优先级从这里取票，而不是我口头派单。
 
 新增或关闭一条，必须回来改这份账本；账本与 issue 不一致时以 issue 为准，并当天修账本。
+
+## 语音同传（2026-11-21 追加，调研后落票）
+
+老板要的「中英同传语音室」拆成两档，「听」先量测、「说」直接做。调研结论（证据都在仓库里）：
+
+- **进程级音频捕获不存在**：Windows/Chromium 只给整系统环回（`getDisplayMedia({audio:true})`，Win10+），Electron 拿不到「只抓 Dota 语音通道」。队友声音必然与音效、音乐混在一起。
+- **但降噪与切句的积木已经在依赖里**：`node_modules/sherpa-onnx-node/vad.js`、`non-streaming-speech-denoiser.js`、`online-speech-denoiser.js` 全都有，而 `resources/asr-sherpa-worker.cjs` 一个都没用（今天只喂整段 wav）。
+- **「说」的地基齐了**：`ttsOutputDevice`（`src/shared/settings-shape.ts:30`）能选设备，`src/main/probes/voice-out.ts:224` 能认 VB-Cable 端点，`src/renderer/src/lib/mic.ts:38` 已处理「默认输入被设成虚拟声卡」；本机实测装了 `VB-Audio Virtual Cable`。
+- **单位是句不是词**：ASR 仍是 `sherpa.OfflineRecognizer`（`resources/asr-sherpa-worker.cjs:88`），同传的基本单位只能是说完一句。
+
+落票：#127（听：可行性量测，允许结论为做不到）、#128（说：中文进、英语出）、#129（半双工防自听）、#130（一个开关 + 一句隐私说明）。
+依赖既有票：#90 虚拟声卡一键装、#91 热切输出设备、#88 播报队列与打断、#84 方向判定。
