@@ -18,6 +18,7 @@ registerHooks({ resolve: pureResolve })
 const { gradeAsrCheck, gradeSpoken, summarizeAsrCheck } = await import('../src/shared/train/asr-check.ts')
 const { formatCer, measureCer, normalizeSpoken, rankByCer, summarizeCer, summarizeCerByCohort } = await import('../src/shared/train/cer.ts')
 const { FT_TARGET_STEPS, deriveFtEpochsFor, deriveFtResumeEpochs } = await import('../src/shared/train/asr-ft.ts')
+const { DEVICE_ID_PLACEHOLDER, maskLogText, wantedLogFiles } = await import('../src/shared/log-bundle.ts')
 const {
   EMPTY_TALLY,
   CANDIDATE_LIMIT,
@@ -304,6 +305,35 @@ check(
 )
 check('录音闸：读不到设备名就不加空括号', rejectLine(dead, '') === dead.line)
 check('录音闸：只是太轻时不提设备（说了等于没说）', rejectLine(hushed, '麦克风阵列') === hushed.line)
+
+// —— 诊断包脱敏（#111）：昵称与设备 id 换成占位，其余原样 ——
+const maskedChat = maskLogText(
+  ['{"name":"小明","text":"nice"}', '{"name":"红红","text":"gg"}', '{"name":"小明","text":"再来一把"}'].join('\n'),
+  true
+)
+check(
+  '诊断包：昵称按首次出现编号，同名同号',
+  maskedChat.text.split('\n')[0].includes('"name":"玩家1"') &&
+    maskedChat.text.split('\n')[1].includes('"name":"玩家2"') &&
+    maskedChat.text.split('\n')[2].includes('"name":"玩家1"'),
+  maskedChat.text.split('\n').join(' | ')
+)
+check('诊断包：原文昵称不在包里', !maskedChat.text.includes('小明') && !maskedChat.text.includes('红红'))
+check(
+  '诊断包：设备 id 变占位，设备名留着',
+  (() => {
+    const out = maskLogText('{"mic":"麦克风 (Realtek)|a1b2c3d4"}', true)
+    return out.text === `{"mic":"麦克风 (Realtek)|${DEVICE_ID_PLACEHOLDER}"}` && !out.text.includes('a1b2c3d4')
+  })()
+)
+check('诊断包：译文与句子不被动（只换身份键）', maskLogText('{"text":"打得不错","act":"idle"}', true).text === '{"text":"打得不错","act":"idle"}')
+check('诊断包：没有身份字段的那份不算脱敏', !maskLogText('{"grabMs":18}', true).masked)
+check('诊断包：显式关掉时原文保留', maskLogText('{"name":"小明"}', false).text === '{"name":"小明"}')
+check(
+  '诊断包：只收表里点名的文件，顺序按表',
+  wantedLogFiles(['voice-chain.jsonl', 'nope.txt', 'inplace.log']).map((f) => f.name).join(',') ===
+    'inplace.log,voice-chain.jsonl'
+)
 
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)

@@ -1,4 +1,5 @@
 import type { DotaDisplayMode } from './dota-video'
+import type { LogBundleResult } from './log-bundle'
 import type { FirstRunReport } from './first-run'
 import type { HotwordApplyResult, HotwordSuggestions } from './asr-hotword-candidates'
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
@@ -24,6 +25,8 @@ import type { AppSettings } from './settings-shape'
 
 // 读稿的类型归纯缝（解析与来源选择都在那里），契约只把它们带出来给渲染端。
 export type { FtScriptGroup, FtScriptLine, FtScriptState } from '@shared/train/recording'
+// 诊断包（#111）：收集/脱敏/manifest 都在 ./log-bundle，契约把结果类型带出来给面板。
+export type { LogBundleFile, LogBundleManifest, LogBundleResult } from './log-bundle'
 
 /** 一条录音：key 形如 G01-L03（free 组是 G21-T01），durationMs 由 16k mono wav 字节数推算。 */
 export interface FtRecInfo {
@@ -555,7 +558,9 @@ export const IPC = {
   OVERLAY_SNAP: 'overlay:snap',
   OVERLAY_LOCK: 'overlay:lock',
   OVERLAY_OPACITY: 'overlay:opacity',
-  OVERLAY_STATE: 'overlay:state'
+  OVERLAY_STATE: 'overlay:state',
+  // 诊断包（#111）：把 logs/ 里的证据打成一个 zip，带 manifest、版本与构建戳，默认脱敏。
+  LOG_BUNDLE_EXPORT: 'log:bundle-export'
 } as const
 
 /** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
@@ -834,7 +839,9 @@ export const ipcContract = {
   ftAsrftInstall: invoke<[], AsrFtInstallState>(IPC.FT_ASRFT_INSTALL),
   ftAsrftApply: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_APPLY),
   ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK),
-  ftAsrftResetBase: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_RESET_BASE)
+  ftAsrftResetBase: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_RESET_BASE),
+  /** 一键导出诊断包；成功了也要把 missing 摆在面板上（缺哪几份日志）。 */
+  logBundleExport: invoke<[], LogBundleResult>(IPC.LOG_BUNDLE_EXPORT)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

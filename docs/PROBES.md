@@ -48,6 +48,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--hold-watch-probe` the hold-to-talk signal chain end to end with no window and no mic (F13 via the resident watcher)
   - `--voice-out-probe` the pure 声出 decision seam (`src/shared/voice-out.ts`) plus readiness reasons
   - `--voice-chain-probe` the 对讲 timing account (`src/shared/voice-timing.ts` + `chain-timing.ts`), zero network
+  - `--log-bundle-probe` the diagnostic bundle (`src/shared/log-bundle.ts` + `services/zip.ts`): masking, manifest, missing files, byte-stable archive
   - `--asr-hotwords-probe` the pure hotword seam (`src/shared/asr-hotwords.ts`): parse, diff, merge, cap
   - `--provider-reasoning-probe` the pure 推理 toggle seam (`src/shared/provider-reasoning.ts`), zero network and zero model
   - `--zhipu-live-probe` runs the real wrapped pipeline (warm-up → durable session + ledger) against zhipu

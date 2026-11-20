@@ -76,6 +76,7 @@ import {
   resetAsrFtToBase,
   rollbackAsrFtModel
 } from './services/train/asr-ft'
+import { exportLogBundle } from './services/log-bundle'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
 import { closeGvWebui, openGvWebui, registerGvWeights, scanGvDatasets } from './services/train/gv'
 import { discoverSovitsHome } from './services/voice/sovits-server'
@@ -295,7 +296,8 @@ const handlers: MainHandlers = {
   },
   ftAsrftApply: () => applyAsrFtModel(),
   ftAsrftRollback: () => rollbackAsrFtModel(),
-  ftAsrftResetBase: () => resetAsrFtToBase()
+  ftAsrftResetBase: () => resetAsrFtToBase(),
+  logBundleExport: () => exportLogBundle()
 }
 
 export function registerIpc(): void {

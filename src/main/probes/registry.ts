@@ -42,6 +42,7 @@ import { runTtsPipelineProbe } from './tts-pipeline'
 import { runTtsPlayProbe } from './tts-play'
 import { runTtsVoicesProbe } from './tts-voices'
 import { runVoiceChainProbe } from './voice-chain'
+import { runLogBundleProbe } from './log-bundle'
 import { runVoiceOutProbe } from './voice-out'
 import { runVoiceRuntimeProbe } from './voice-runtime'
 import { runVoiceWorkerProbe } from './voice-worker'
@@ -223,6 +224,13 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the 对讲 timing account (`src/shared/voice-timing.ts` + `chain-timing.ts`), zero network',
     run: runVoiceChainProbe
+  },
+  {
+    flag: '--log-bundle-probe',
+    ci: true,
+    summary:
+      'the diagnostic bundle (`src/shared/log-bundle.ts` + `services/zip.ts`): masking, manifest, missing files, byte-stable archive',
+    run: runLogBundleProbe
   },
   {
     flag: '--asr-hotwords-probe',

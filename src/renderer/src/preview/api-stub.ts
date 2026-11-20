@@ -396,6 +396,15 @@ const implemented = {
   appOpenExternal: async () => ({ ok: true, error: null }),
   updateCheck: async () => ({ channel: 'stable', status: 'dev', version: '0.0.0' }),
   updateInstall: async () => true,
+  // 诊断包（#111）：夹具假装收了 3 份、缺 2 份，好让面板的「缺哪几份」也走一遍。
+  logBundleExport: async () => ({
+    ok: true,
+    path: 'data/logs/export/log-bundle-20260101-000000.zip',
+    bytes: 18_432,
+    files: 3,
+    missing: ['voice-chain.jsonl', 'capture-ticks.jsonl'],
+    error: null
+  }),
   onUpdateStatus: (callback) => {
     callback({ channel: 'stable', status: 'dev', version: '0.0.0' })
     return () => {}
