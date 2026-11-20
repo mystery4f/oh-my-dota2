@@ -24,6 +24,15 @@ export function loadSettings(): AppSettings {
   }
 }
 
+/**
+ * 存档里的「表」只认普通对象：字符串/数组/数字展开时会把下标当成 id（`"garbage"` → 7 个假家），
+ * 坏值一律当没写，让基座的值原样留下——设置文件是用户数据，坏一处不该炸整个面板。
+ */
+function tablePatch<T extends object>(value: unknown): Partial<T> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
+  return value as Partial<T>
+}
+
 /** 缺省值 + 存档的合并：读写两条路共用，避免「读时兜底、写时不兜底」的双份定义。 */
 /** 当前值 + 增量的合并：读盘（基座=缺省值）与写盘（基座=现值）两条路共用，避免「读时兜底、写时不兜底」的双份定义。 */
 function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
@@ -32,8 +41,10 @@ function mergeSettings(base: AppSettings, patch: Partial<AppSettings>): AppSetti
     ...patch,
     provider: { ...base.provider, ...(patch.provider ?? {}) } as ProviderConfig,
     // key 表与推理开关表按 id 深合并（#43）：增量只提一个家时，没提到的 id 保持原样。
-    providerKeys: { ...base.providerKeys, ...(patch.providerKeys ?? {}) },
-    providerReasoning: { ...base.providerReasoning, ...(patch.providerReasoning ?? {}) },
+    // 两张表都只认对象：手编文件里躺个字符串时，展开会把每个字符当成 provider id
+    // （`providerReasoning: "garbage"` → `{0:'g',1:'a',…}`），面板与仲裁都会看到一堆假家。
+    providerKeys: { ...base.providerKeys, ...tablePatch(patch.providerKeys) },
+    providerReasoning: { ...base.providerReasoning, ...tablePatch(patch.providerReasoning) },
     // 热键表要按动作深合并：浅合并会让「只改一个键」的存档把另外四个动作抹成 undefined。
     // 具体哪一项该回落默认交给 normalizeHotkeyMap 逐项兜底（未知 id 丢掉、非法值回默认）。
     hotkeys: normalizeHotkeyMap({ ...base.hotkeys, ...(patch.hotkeys ?? {}) })
