@@ -646,6 +646,26 @@ check(
   packOk.ok && glossaryStatusOf(packOk.pack, '演示词表.json', ['演示词表']).name === '演示词表' && glossaryPackLine(glossaryStatusOf(packOk.pack)).includes('演示词表')
 )
 
+
+// —— 短句/长句分流（asr-routing）：短走快、长走准、可关、带原因 ——
+{
+  const { routeAsrClip, routingLine, routingLogRecord, ASR_ROUTE_SHORT_ENGINE, ASR_ROUTE_LONG_ENGINE } = await import('../src/shared/asr-routing.ts')
+  const base = { ruleOn: true, shortReady: true, longReady: true }
+  const short = routeAsrClip({ ...base, durationMs: 1000, activeEngine: 'qwen3' })
+  check('短句走 paraformer 且切换', short.engine === ASR_ROUTE_SHORT_ENGINE && short.switched && short.reason === 'short', `${short.engine}/${short.reason}`)
+  const long = routeAsrClip({ ...base, durationMs: 5000, activeEngine: 'paraformer' })
+  check('长句走 qwen3 且切换', long.engine === ASR_ROUTE_LONG_ENGINE && long.switched && long.reason === 'long', `${long.engine}/${long.reason}`)
+  const off = routeAsrClip({ ...base, ruleOn: false, activeEngine: 'qwen3' })
+  check('规则关着回单引擎', off.engine === 'qwen3' && !off.switched && off.reason === 'rule-off', off.reason)
+  const missing = routeAsrClip({ ...base, durationMs: 1000, activeEngine: 'qwen3', shortReady: false })
+  check('目标没装好留现役', missing.engine === 'qwen3' && !missing.switched && missing.reason === 'target-missing', missing.reason)
+  const odd = routeAsrClip({ ...base, activeEngine: 'qwen3-other' })
+  check('现役不在这对里不插手', odd.engine === 'qwen3-other' && !odd.switched && odd.reason === 'not-a-pair', odd.reason)
+  check('routingLine 说清原因', routingLine(short, 'qwen3').includes('短句走快引擎'), routingLine(short, 'qwen3'))
+  const rec = routingLogRecord(short, 'qwen3')
+  check('日志记录字段齐全', rec.from === 'qwen3' && rec.to === ASR_ROUTE_SHORT_ENGINE && rec.reason === 'short' && typeof rec.note === 'string', JSON.stringify(rec))
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

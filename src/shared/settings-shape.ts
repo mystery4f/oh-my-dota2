@@ -81,6 +81,11 @@ export interface AppSettings {
    * 关掉 = 纠错只并热词，不写任何文件。
    */
   asrCorrectionsToDataset: boolean
+  /**
+   * 短句/长句分流（#122）：短句走 paraformer（快、不带标点），长句走 qwen3（准）。
+   * 默认关——两副模型都在场才有意义，而且每次换引擎要重载识别器。
+   */
+  asrRouteShortLong: boolean
   /** 训练窗口记住的任务类型：demo 演示任务；gv-gpt/gv-sovits/asr-ft 在 T3/T5 接入。 */
   trainKind: 'demo' | 'asr-ft' | 'gv-gpt' | 'gv-sovits'
   /** 训练窗口记住的数据集标识（T3 起是登记名，现在只是记下来下次自动填）。 */
@@ -255,6 +260,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   asrHotwords: '',
   /** 纠错样本默认开：它只是把用户已经改对的句子留成训练数据，不改变任何现有行为。 */
   asrCorrectionsToDataset: true,
+  asrRouteShortLong: false,
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
   autoStartCapture: true,

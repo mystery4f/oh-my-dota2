@@ -14,6 +14,8 @@ import type { OfflineStatus } from '@shared/ipc'
 import { loadSettings, saveSettings } from '../settings'
 import { hfMirrorRepoFileUrl } from '@shared/voice-runtime'
 import { hotwordEcho, hotwordPrompt } from '@shared/asr-hotwords'
+import { ASR_ROUTE_LONG_ENGINE, ASR_ROUTE_SHORT_ENGINE, routeAsrClip, routingLogRecord } from '@shared/asr-routing'
+import { WAV_BYTES_PER_MS, WAV_HEADER_BYTES } from '@shared/wav'
 import { createInstallJob } from '../install-job'
 import { downloadResumable } from '../net/download'
 import { sha256File } from './runtime'
@@ -217,16 +219,49 @@ export function removeActiveAsrModel(): { ok: boolean; error: string | null } {
  * 转写一段 16k 单声道 PCM16 WAV。返回 null = 这句不识别（调用方画一行错误）。
  * 热词只喂给声明了 prompt 的引擎；FunASR 家族输出的空格分隔单字按表里 joinChars 拼回去。
  */
+/**
+ * 这段 wav 多长（毫秒）：录音器固定 44 字节头 + 16 kHz 单声道 PCM16（32 字节/毫秒），
+ * 按字节数算就是准的，不用解 PCM。读不到文件按 0 处理（分流会判成短句）。
+ */
+function wavDurationMs(wavPath: string): number {
+  try {
+    const bytes = statSync(wavPath).size - WAV_HEADER_BYTES
+    return bytes > 0 ? Math.round(bytes / WAV_BYTES_PER_MS) : 0
+  } catch {
+    return 0
+  }
+}
+
 export async function transcribeAsr(wavPath: string): Promise<{ text: string; dropped?: 'hotword-echo' } | null> {
-  const active = activeAsrModel()
+  // 一次扫描同时拿到现役模型与「两副模型在不在场」，分流才不会为了判 ready 再扫一遍目录。
+  const settings = loadSettings()
+  const models = collectAsrModels(dirFacts())
+  const active = pickActiveAsrModel(models, settings.asrActiveModel)
   if (!active?.ready) return null
   if (!sherpaNodeBinary()) return null
-  const spec = engineSpecOf(active)
+  const readyOf = (engine: string): boolean => models.some((model) => model.engineId === engine && model.ready)
+  const decision = routeAsrClip({
+    durationMs: wavDurationMs(wavPath),
+    activeEngine: active.engineId,
+    ruleOn: settings.asrRouteShortLong === true,
+    shortReady: readyOf(ASR_ROUTE_SHORT_ENGINE),
+    longReady: readyOf(ASR_ROUTE_LONG_ENGINE)
+  })
+  // 分流要换的那副引擎必须自己有一份 ready 模型；找不到就留在现役（routeAsrClip 已经判过 ready，
+  // 这里挑的是那份模型本身——目录可能不是规范目录，比如训练转正的 copy）。
+  const target =
+    decision.engine === active.engineId
+      ? active
+      : models.find((model) => model.engineId === decision.engine && model.ready) ?? active
+  const spec = engineSpecOf(target)
+  // 每次转写都打一行：换没换、为什么。票面要求「每次切换都带原因记下来」，
+  // 不换也记，面板才能解释「为什么这句没用快引擎」。
+  console.log('ASR_ROUTE ' + JSON.stringify(routingLogRecord(decision, active.engineId)))
   // 热词是解码提示，不是「说过的词」：单字与子串词先剔掉再喂，否则一段底噪就能让模型去念表。
-  const hotwords = spec.hotwords === 'prompt' ? hotwordPrompt(loadSettings().asrHotwords) : ''
+  const hotwords = spec.hotwords === 'prompt' ? hotwordPrompt(settings.asrHotwords) : ''
   const result = await sherpaTranscribe({
-    kind: sherpaKindFor(active),
-    dir: asrModelDir(active),
+    kind: sherpaKindFor(target),
+    dir: asrModelDir(target),
     wav: wavPath,
     hotwords
   })

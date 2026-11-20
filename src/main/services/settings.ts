@@ -106,6 +106,10 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     if (typeof merged.asrCorrectionsToDataset !== 'boolean') {
       merged.asrCorrectionsToDataset = DEFAULT_SETTINGS.asrCorrectionsToDataset
     }
+    // 短句/长句分流（#122）：只认布尔，缺省/乱填都按关（多一副模型在场才谈得上分流）。
+    if (typeof merged.asrRouteShortLong !== 'boolean') {
+      merged.asrRouteShortLong = DEFAULT_SETTINGS.asrRouteShortLong
+    }
     // 训练窗口记忆：kind 乱值打回 demo，dataset 只认字符串。
     merged.trainKind = normalizeTrainKind(merged.trainKind)
     if (typeof merged.trainDataset !== 'string') merged.trainDataset = DEFAULT_SETTINGS.trainDataset

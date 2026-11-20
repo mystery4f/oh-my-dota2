@@ -15,6 +15,8 @@ import {
 } from '@shared/train/recording'
 import { CORRECTION_GROUP } from '@shared/train/corrections'
 import { healthLine } from '@shared/train/dataset-health'
+import { routingHint } from '@shared/asr-routing'
+import type { AsrState } from '@shared/asr/models'
 import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
@@ -71,7 +73,11 @@ export function AsrTrainPage(): React.ReactElement {
   const { settings, update } = useSettings()
   // 现役引擎名（设置里的 id 是 `<engine>:<rel>`）：训练目标与它不同时，页面上要说清「训完才切」。
   const activeEngineLabel = ASR_ENGINES[settings?.asrActiveModel.split(':')[0] as AsrEngineId]?.label ?? ''
+  // 现役引擎 id 本身（分流说明要用它）：设置里是 `<engine>:<rel>`。
+  const activeEngine = (settings?.asrActiveModel.split(':')[0] as AsrEngineId | undefined) ?? 'qwen3'
   const save = useSaveFlash()
+  // 分流要两副模型都在场才谈得上（缺的那档会留在现役），所以现役这一步自己读一次模型快照。
+  const [asrModels, setAsrModels] = React.useState<AsrState | null>(null)
   // 开训方式：增量微调 / 全量重训。默认接上一轮（常态是「补新录的错」），
   // 只有上一轮权重不在时才落回重训——那是没得选，不是替用户改主意。
   const [mode, setMode] = React.useState<AsrFtMode>('incremental')
@@ -114,6 +120,11 @@ export function AsrTrainPage(): React.ReactElement {
   const refreshAll = React.useCallback(async (): Promise<void> => {
     await Promise.all([refreshRecs(), refreshStatus(), refreshRuns()])
   }, [refreshRecs, refreshRuns, refreshStatus])
+
+  // 分流说明要讲「缺哪副模型」，读一次模型快照就够（换模型走另一步，回来重挂页面）。
+  React.useEffect(() => {
+    void window.api.asrModels().then(setAsrModels)
+  }, [])
 
   const load = React.useCallback(async (): Promise<TrainSnapshot> => {
     const [nextScript, nextSnapshot, nextFacts] = await Promise.all([
@@ -784,6 +795,29 @@ export function AsrTrainPage(): React.ReactElement {
                   <StatusPill tone={status?.swap.activeExists ? 'ready' : 'warn'}>
                     {status?.swap.activeExists ? '已就位' : '缺模型'}
                   </StatusPill>
+                </Row>
+                <Row
+                  label="短句/长句分流"
+                  stacked
+                  hint={routingHint(
+                    activeEngine,
+                    (asrModels?.models ?? []).some((model) => model.engineId === 'paraformer' && model.ready),
+                    (asrModels?.models ?? []).some((model) => model.engineId === 'qwen3' && model.ready)
+                  )}
+                >
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-amber-500"
+                      checked={settings?.asrRouteShortLong === true}
+                      onChange={(event) => {
+                        void save.wrap(update({ asrRouteShortLong: event.target.checked }))
+                      }}
+                    />
+                    <StatusPill tone={settings?.asrRouteShortLong ? 'ready' : 'idle'}>
+                      {settings?.asrRouteShortLong ? '分流' : '单引擎'}
+                    </StatusPill>
+                  </label>
                 </Row>
                 <Row label="最近导出" hint={status?.swap.lastExportDir ?? '还没有导出的权重'} />
                 <Row

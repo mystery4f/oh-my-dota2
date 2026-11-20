@@ -50,6 +50,7 @@ import { runGlossaryPackProbe } from './glossary-pack'
 import { runMicHealthProbe } from './mic-health'
 import { runOverlayDigestProbe } from './overlay-digest'
 import { runKeyNounProbe } from './key-nouns'
+import { runAsrRoutingProbe } from './asr-routing'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
 import { runSpeechQueueProbe } from './speech-queue'
@@ -268,6 +269,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the combat-digest line (`src/shared/overlay-digest.ts`): every fragment quoted from an existing chat row (nothing invented, no model call), intent-first pick in chronological order, and the setting that hides the rows',
     run: runOverlayDigestProbe
+  },
+  {
+    flag: '--asr-routing-probe',
+    ci: true,
+    summary:
+      'the short/long ASR routing (`src/shared/asr-routing.ts`): short clips go to the fast engine (paraformer), long ones to the accurate one (qwen3), the rule can be switched off, and every switch is logged with its reason',
+    run: runAsrRoutingProbe
   },
   {
     flag: '--mic-health-probe',
