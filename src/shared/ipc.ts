@@ -513,6 +513,7 @@ export const IPC = {
   ASR_CHECK_START: 'asr-check:start',
   ASR_CHECK_STOP: 'asr-check:stop',
   ASR_CHECK_STATE: 'asr-check:state',
+  ASR_CHECK_CORRECT: 'asr-check:correct',
   // ASR 微调闭环（T5）：环境状态 / 换模 / 回滚，训练+导出走 TRAIN_START/STOP。
   FT_ASRFT_STATUS: 'ft:asrft-status',
   FT_ASRFT_FACTS: 'ft:asrft-facts',
@@ -818,6 +819,8 @@ export const ipcContract = {
   asrCheckStart: invoke<[], AsrCheckState>(IPC.ASR_CHECK_START),
   asrCheckStop: invoke<[], AsrCheckState>(IPC.ASR_CHECK_STOP),
   asrCheckState: invoke<[], AsrCheckState>(IPC.ASR_CHECK_STATE),
+  /** 把比对的答案改回人耳听到的样子：写进账本（新修订），下次打包与下次比对都用它。 */
+  asrCheckCorrect: invoke<[string, string], { ok: boolean; revision?: number; error?: string }>(IPC.ASR_CHECK_CORRECT),
   ftAsrftStatus: invoke<[], AsrFtStatusResult>(IPC.FT_ASRFT_STATUS),
   ftAsrftFacts: invoke<[], AsrFtFacts>(IPC.FT_ASRFT_FACTS),
   ftAsrftInstall: invoke<[], AsrFtInstallState>(IPC.FT_ASRFT_INSTALL),

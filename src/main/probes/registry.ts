@@ -31,6 +31,7 @@ import { runSettingsPersistProbe } from './settings-persist'
 import { runSovitsRefsProbe } from './sovits-refs'
 import { runSovitsVoicepackProbe } from './sovits-voicepack'
 import { runTrainProbe } from './train'
+import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
 import { runTranslateGuardProbe } from './translate-guard'
@@ -243,6 +244,11 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the pure training decision seam (`src/shared/train.ts`): mutexes, preflight, run state',
     run: runTrainProbe
+  },
+  {
+    flag: '--asr-check-live-probe',
+    summary: 'runs the real model over the ledger recordings and prints the CER ranking split into train / eval',
+    run: runAsrCheckLiveProbe
   },
   {
     flag: '--voice-runtime-probe',

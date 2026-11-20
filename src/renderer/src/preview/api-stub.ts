@@ -22,7 +22,8 @@ import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type VoiceChain
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
 import { estimateFtCost, summarizePendingTakes } from '@shared/train/asr-ft'
-import type { AsrCheckState } from '@shared/train/asr-check'
+import { gradeAsrCheck, type AsrCheckItem, type AsrCheckState } from '@shared/train/asr-check'
+import type { CerCohort } from '@shared/train/cer'
 import { judgeCorrectionSamples } from '@shared/train/corrections'
 import { mergePlan, rankCandidates, type HotwordCandidate, type HotwordSuggestions } from '@shared/asr-hotword-candidates'
 import { judgeFirstRun } from '@shared/first-run'
@@ -186,9 +187,17 @@ const sovitsStatus: Awaited<ReturnType<WindowApi['sovitsStatus']>> = {
  * 训练记录：一条正在跑的 ASR、一条已应用的 GV，覆盖列表、指标折线、产物行三种渲染。
  * 时间用相对量，预览里永远像刚跑完。
  */
+/**
+ * 一条假比对：分档与 CER 都走真函数，只把「识别结果」编出来。
+ * 假数据自己算 distance 的话，面板上的 CER 一改口径就和真机对不上了。
+ */
+function stubCheck(key: string, expected: string, actual: string, cohort: CerCohort): AsrCheckItem {
+  return { ...gradeAsrCheck(key, expected, actual), cohort }
+}
+
 const stubNow = Date.now()
 // 全量识别比对的假结果：三条一致、一条差 1 字、一条明显错，够看清弹层的样子。
-const stubAsrCheck: AsrCheckState = {
+let stubAsrCheck: AsrCheckState = {
   running: false,
   done: 5,
   total: 5,
@@ -198,11 +207,11 @@ const stubAsrCheck: AsrCheckState = {
   error: null,
   canceled: false,
   items: [
-    { key: 'G14-L01', expected: '我的跳刀还没好', actual: '我的跳刀还没好。', grade: 'same', distance: 0 },
-    { key: 'G14-L02', expected: '我没到还在冷却', actual: '我没到还在冷却。', grade: 'same', distance: 0 },
-    { key: 'G15-L04', expected: '我的真视有了，能排眼', actual: '我的镇也有了，人排也。', grade: 'near', distance: 2 },
-    { key: 'G20-L12', expected: '对面在偷盾，快回来', actual: '对面在偷蹲快回来。', grade: 'near', distance: 1 },
-    { key: 'G99-T01', expected: '我方高地塔要掉了先撤', actual: '我们高地要掉了。', grade: 'wrong', distance: 4 }
+    stubCheck('G14-L01', '我的跳刀还没好', '我的跳刀还没好。', 'train'),
+    stubCheck('G14-L02', '我没到还在冷却', '我没到还在冷却。', 'train'),
+    stubCheck('G15-L04', '我的真视有了，能排眼', '我的镇也有了，人排也。', 'train'),
+    stubCheck('G20-L12', '对面在偷盾，快回来', '对面在偷蹲快回来。', 'eval'),
+    stubCheck('G99-T01', '我方高地塔要掉了先撤', '我们高地要掉了。', 'eval')
   ]
 }
 
@@ -258,6 +267,21 @@ const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
     { at: stubNow - 60_000, text: 'stub: epoch 21/66 loss=0.412' },
     { at: stubNow - 30_000, text: 'stub: epoch 22/66 loss=0.398' }
   ]
+}
+// `?train=idle` 时训练不占着：比对按钮平时被「正在训练」挡着，没有这个开关就看不到弹层。
+if (query.get('train') === 'idle') {
+  stubTrainSnapshot.task = {
+    id: 'train-stub',
+    kind: 'asr-ft',
+    dataset: '地图-20261108010000',
+    status: 'idle',
+    progress: 0,
+    stage: '',
+    startedAt: stubNow - 12 * 60 * 1000,
+    endedAt: stubNow,
+    inference: 'released'
+  }
+  stubTrainSnapshot.logs = []
 }
 
 /**
@@ -579,6 +603,15 @@ const implemented = {
   asrCheckStart: async () => stubAsrCheck,
   asrCheckStop: async () => stubAsrCheck,
   asrCheckState: async () => stubAsrCheck,
+  asrCheckCorrect: async (key, text) => {
+    const clean = String(text ?? '').trim()
+    if (clean === '') return { ok: false, error: '改完的句子不能是空的' }
+    stubAsrCheck = {
+      ...stubAsrCheck,
+      items: stubAsrCheck.items.map((item) => (item.key === key ? { ...item, expected: clean } : item))
+    }
+    return { ok: true, revision: 2 }
+  },
   ftAsrftStatus: async () => {
     const engine = stubFinetuneEngine()
     const finetune = engine.finetune as NonNullable<AsrEngineSpec['finetune']>

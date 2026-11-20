@@ -15,7 +15,8 @@ import { pureResolve } from './pure-resolve.mjs'
 
 // 先装钩子再 import：`src/shared/` 的 import 不带扩展名，Node 解析器需要被补全一次。
 registerHooks({ resolve: pureResolve })
-const { gradeAsrCheck, gradeSpoken, normalizeSpoken, summarizeAsrCheck } = await import('../src/shared/train/asr-check.ts')
+const { gradeAsrCheck, gradeSpoken, summarizeAsrCheck } = await import('../src/shared/train/asr-check.ts')
+const { formatCer, measureCer, normalizeSpoken, rankByCer, summarizeCer, summarizeCerByCohort } = await import('../src/shared/train/cer.ts')
 const { FT_TARGET_STEPS, deriveFtEpochsFor, deriveFtResumeEpochs } = await import('../src/shared/train/asr-ft.ts')
 const {
   EMPTY_TALLY,
@@ -43,6 +44,57 @@ check('比对：差 1 字算差一点', gradeSpoken('对面在偷盾，快回来
 check('比对：差得多算明显错', gradeSpoken('我方高地塔要掉了先撤', '我们高地要掉了。').grade === 'wrong')
 check('比对：归一化后全角标点也去掉', normalizeSpoken('Ａ，Ｂ。') === 'ａｂ'.toLowerCase())
 
+// —— 逐条 CER（#47）：口径与排名只在 cer.ts，这里和探针各守一份用例 ——
+check('CER：标点与空白不算字', measureCer('我回家补蓝，可以出来一起打', '我回家补蓝可以出来一起打').distance === 0, '')
+check(
+  'CER：错两字 2/13',
+  (() => {
+    const m = measureCer('我回家补下蓝可以出来一起打', '我回家补蓝可以出来一起大')
+    return m.distance === 2 && m.chars === 13 && m.cer === 2 / 13
+  })(),
+  ''
+)
+check(
+  'CER：原文空而识别有字算全错，两空算对',
+  measureCer('', '跳刀').cer === 1 && measureCer('', '').cer === 0,
+  ''
+)
+check(
+  'CER：排名从差到好，同率大字先',
+  (() => {
+    const rows = rankByCer([
+      { key: 'a', distance: 2, chars: 100, cer: 0.02 },
+      { key: 'b', distance: 4, chars: 100, cer: 0.04 },
+      { key: 'c', distance: 1, chars: 25, cer: 0.04 },
+      { key: 'd', distance: 0, chars: 10, cer: 0 }
+    ])
+    return rows.map((row) => row.key).join() === 'b,c,a,d'
+  })(),
+  ''
+)
+check(
+  'CER：合计不取平均，是总错字÷总字数',
+  (() => {
+    const s = summarizeCer([
+      { key: 'a', distance: 0, chars: 100, cer: 0 },
+      { key: 'b', distance: 1, chars: 1, cer: 1 }
+    ])
+    return s.distance === 1 && s.chars === 101 && s.cer === 1 / 101
+  })(),
+  ''
+)
+check(
+  'CER：训练/留出必须分开报',
+  (() => {
+    const m = summarizeCerByCohort([
+      { key: 'a', cohort: 'train', distance: 0, chars: 10, cer: 0 },
+      { key: 'b', cohort: 'eval', distance: 2, chars: 10, cer: 0.2 }
+    ])
+    return m.train.rows === 1 && m.eval.cer === 0.2 && m.unknown.rows === 0
+  })(),
+  ''
+)
+check('CER：百分比四档', formatCer(0) === '0%' && formatCer(0.004) === '0.4%' && formatCer(0.061) === '6.1%' && formatCer(0.4) === '40%', '')
 const summary = summarizeAsrCheck([
   gradeAsrCheck('a', '我的跳刀还没好', '我的跳刀还没好。'),
   gradeAsrCheck('b', '对面在偷盾，快回来', '对面在偷蹲快回来。'),

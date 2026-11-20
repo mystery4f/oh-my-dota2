@@ -94,6 +94,12 @@ first, then record. No training window, no `train:open` channel. A run is
 recorded take; metrics read back from the artifacts), the gate is `src/shared/train/preflight.ts`
 (only `block` disables 开始训练), and mic capture stays in `panel/use-recorder.ts`. File list,
 artifact paths and parser details: `docs/ARCH-notes.md`, `docs/PLAN-train-v3.md`.
+「测一遍」(全量识别比对 in the 数据 step) runs the active model over the ledger and ranks rows by CER —
+`src/shared/train/cer.ts` owns `normalizeSpoken` / `spokenDistance` / `measureCer` / `rankByCer` /
+`summarizeCer` (one place, so grading and CER cannot drift apart), and it reports three cohorts separately:
+`train` (a fine-tune run consumed it — memory), `eval` (the held-out tail of `splitTrainEval` — generalisation),
+`unknown` (no run_id). Never collapse them into one number. A corrected row is written back to the ledger
+(`correctAsrCheckItem`, new revision) because that text is both the training label and the next answer key.
 
 
 ## Hotkeys

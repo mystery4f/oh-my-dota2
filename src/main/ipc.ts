@@ -68,7 +68,7 @@ import {
   saveFtScript
 } from './services/train/ft-record'
 import { prepareFtDataset } from './services/train/ft-dataset'
-import { asrCheckState, startAsrCheck, stopAsrCheck } from './services/train/asr-check'
+import { asrCheckState, correctAsrCheckItem, startAsrCheck, stopAsrCheck } from './services/train/asr-check'
 import {
   applyAsrFtModel,
   asrFtFacts,
@@ -282,6 +282,7 @@ const handlers: MainHandlers = {
   asrCheckStart: () => startAsrCheck(),
   asrCheckStop: () => stopAsrCheck(),
   asrCheckState: () => asrCheckState(),
+  asrCheckCorrect: (key, text) => correctAsrCheckItem(String(key ?? ''), String(text ?? '')),
   // ASR 微调闭环（T5）：环境状态、应用新模型、回滚。
   ftAsrftStatus: async () => ({ ...(await asrFtStatus()), install: asrFtInstallState() }),
   // 开训闸门看到的事实：显存提示与「上次能不能续训」，panel 只显示不自己推。

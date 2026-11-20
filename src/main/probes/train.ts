@@ -57,6 +57,7 @@ import {
   type TrainTaskStatus
 } from '@shared/train/task'
 import { parseTrainProgress } from '@shared/train/progress'
+import { formatCer, measureCer, rankByCer, summarizeCer, summarizeCerByCohort, type CerRow } from '@shared/train/cer'
 import {
   asrFtRollbackSteps,
   asrFtSwapSteps,
@@ -111,6 +112,7 @@ import {
 } from '@shared/train/run'
 import { judgeAsrPreflight, judgeGvPreflight, preflightBlocks } from '@shared/train/preflight'
 import { gradeAsrCheck, gradeSpoken, summarizeAsrCheck } from '@shared/train/asr-check'
+import { correctAsrCheckItem } from '../services/train/asr-check'
 import { pickLatestUvAsset, planAsrFtInstallSteps, resolveUvWheelUrl, uvWheelCandidates } from '../services/train/asr-ft-install'
 import {
   applyAsrFtModel,
@@ -969,6 +971,50 @@ export async function runTrainProbe(): Promise<void> {
   )
   const splitBig = splitTrainEval([1, 2, 3, 4, 5].map((no) => ({ key: `G01-L${String(no).padStart(2, '0')}`, wavPath: `w${no}`, text: `t${no}` })))
   push('够量时尾部 2 条进验证', splitBig.train.length === 3 && splitBig.eval.length === 2 && splitBig.eval[0].wavPath === 'w4', `train=${splitBig.train.length} eval=${splitBig.eval.length}`)
+  // —— 逐条 CER（#47「测一遍」）：错几个字要换成可比的分母，训练见过与留出没见过要分开数 ——
+  const cerSame = measureCer('今天天气不错，适合出门走走。', '今天天气不错，适合出门走走')
+  push(
+    '标点不算错：带标点与去标点同 CER 0',
+    cerSame.cer === 0 && cerSame.distance === 0 && cerSame.chars === 12,
+    JSON.stringify(cerSame),
+  )
+  const cerTwo = measureCer('我回家补下蓝可以出来一起打', '我回家补蓝，可以出来一起大')
+  push(
+    '错两个字：CER = 2 / 13',
+    cerTwo.distance === 2 && cerTwo.chars === 13 && Math.abs(cerTwo.cer - 2 / 13) < 1e-9,
+    JSON.stringify(cerTwo),
+  )
+  const cerEmpty = measureCer('', '随便说点什么')
+  push('原文为空而识别有字：记全错 1，不给 Infinity', cerEmpty.cer === 1 && cerEmpty.chars === 0, JSON.stringify(cerEmpty))
+  const cerEmptyBoth = measureCer('，。', '')
+  push('原文只有标点、识别也空：0 错', cerEmptyBoth.cer === 0, JSON.stringify(cerEmptyBoth))
+  const cerRank: CerRow[] = [
+    { key: 'G01-L01', cohort: 'train', ...measureCer('一二三四五六七八九十', '一二三四五六七八九十') },
+    { key: 'G01-L02', cohort: 'eval', ...measureCer('一二三四', '一二三九') },
+    { key: 'G01-L03', cohort: 'train', ...measureCer('一二三四五六七八九十', '一二三九五六七八九十') },
+  ]
+  const ranked = rankByCer(cerRank)
+  push(
+    '排名：错得狠的先；同率时字数多的先',
+    ranked[0].key === 'G01-L02' && ranked[1].key === 'G01-L03' && ranked[2].key === 'G01-L01',
+    ranked.map((row) => `${row.key}:${formatCer(row.cer)}`).join(' '),
+  )
+  const cerByCohort = summarizeCerByCohort(cerRank)
+  push(
+    '两个数分开数：训练 1 错 / 留出 1 错，不合并',
+    cerByCohort.train.distance === 1 && cerByCohort.eval.distance === 1 && cerByCohort.train.rows === 2 && cerByCohort.eval.rows === 1,
+    JSON.stringify(cerByCohort),
+  )
+  push(
+    '合计 CER 是「总错字 ÷ 总字数」而不是各条平均',
+    Math.abs(summarizeCer(cerRank).cer - 2 / 24) < 1e-9,
+    `cer=${summarizeCer(cerRank).cer} chars=${summarizeCer(cerRank).chars}`,
+  )
+  push(
+    '格式：0 错写 0%，小数按量级留位',
+    formatCer(0) === '0%' && formatCer(0.0032) === '0.3%' && formatCer(0.0325) === '3.3%' && formatCer(0.32) === '32%',
+    [formatCer(0), formatCer(0.0032), formatCer(0.0325), formatCer(0.32)].join(' '),
+  )
   // —— 录音判定（T4a 录音面板）：开停/收尾/命名全在共享缝 ——
   const t0 = 1_000_000
   const st0 = initialRecordingState(t0)
@@ -1695,6 +1741,37 @@ function storeCases(): void {
       corrected?.revision === 2 && corrected.runId === null && g14Rows().length === 3,
       `rev=${corrected?.revision} rows=${g14Rows().length}`
     )
+    // —— 比对答案改回账本（#47「测一遍」）：改完必须落账本，下一次打包与下一次比对都读新文本 ——
+    const correctedBack = correctAsrCheckItem('G14-L01', '第一句（改稿）已修正')
+    push(
+      '比对：改答案写回账本 = 新修订，打包读到的就是改后的文本',
+      correctedBack.ok === true && correctedBack.revision === 3 && findDatasetEntry('G14-L01')?.text === '第一句（改稿）已修正',
+      JSON.stringify(correctedBack)
+    )
+    push(
+      '比对：空白答案写不回去',
+      correctAsrCheckItem('G14-L01', '   ').ok === false,
+      JSON.stringify(correctAsrCheckItem('G14-L01', ''))
+    )
+    push(
+      '比对：改一句不动别的行',
+      findDatasetEntry('G14-L02')?.text === '第二句',
+      findDatasetEntry('G14-L02')?.text ?? 'null'
+    )
+    push(
+      '比对：改回与账本相同的文本 = 不插新修订',
+      correctAsrCheckItem('G14-L01', '第一句（改稿）已修正').revision === 3,
+      'same-text → same revision'
+    )
+    correctAsrCheckItem('G14-L01', '第一句（改稿）')
+    const correctEcho = findDatasetEntry('G14-L01')
+    push(
+      '比对：队列归位为旧文本后修订递增',
+      correctEcho?.revision === 4 && correctEcho.text === '第一句（改稿）',
+      `rev=${correctEcho?.revision} text=${correctEcho?.text}`
+    )
+    // 开跑/停止的门是现有「标点不算差异」那段测的（它先跑、立刻断言，不与异步转写抢）；这里只验落账。
+    // （本段之后还有一个 in-flight 的转写 run，再自己 startAsrCheck 会跟它打架，探针里不这么做。）
     const g14Trained = (): number => g14Rows().filter((entry) => entry.runId !== null).length
     push('账本：没训过的条目 run_id 为空', g14Trained() === 0, `${g14Trained()}`)
     const marked = markDatasetEntryTrained('G14-L02', 1, newest.id)

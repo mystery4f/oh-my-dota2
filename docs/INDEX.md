@@ -87,6 +87,7 @@ tags: [docs, index]
 | `docs/adr/train-crash-reconcile.md` | 训练被中断后的收尾：退出时杀进程树并记失败，启动时把僵住的 running 行改判、删掉没有产物的 .next，脚本开训前从仓库刷新 |
 | `docs/adr/asr-ft-disk-reclaim.md` | 训练残留的统一回收：启动时只留最新一份导出产物与一份能接着训的 run 目录，其余连半成品删掉 |
 | `docs/adr/asr-check-batch.md` | 全量识别比对：数据步一个按钮 + 弹层，用现役模型跑全库、归一化后判一致，结果不落库 |
+| `docs/adr/asr-check-cer.md` | 逐条 CER：三档不够用；CER 口径一处写、合计取总错字÷总字数、训练见过/留出/未记切分分开报、改稿写回账本 |
 | `docs/adr/asr-finetune-leg.md` | 识别微调成为正式训练腿（两引擎、增量、底模保留、转正/回滚）；热词只给支持提示的引擎。取代 `asr-hotwords-not-finetune.md` |
 | `docs/adr/asr-hotwords-not-finetune.md` | 识别个性化走热词注入；两次更正（Qwen3 可微调、后续切 FunASR paraformer）。**已被 `asr-finetune-leg.md` 取代**，留作决策历史 |
 | `docs/adr/domain-models-out-of-ipc.md` | 领域模型迁出 IPC 契约文件：供应商/音色/设置形状各归各家，契约只留通道表，字段声明表按删除测试否决 |
