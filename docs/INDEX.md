@@ -104,6 +104,7 @@ tags: [docs, index]
 | `docs/adr/voice-stage-trace.md` | 对讲行的阶段留痕：短段靠标记留存而不是停留（实测翻译 1ms、合成 0–2ms），事件走快照，结算后收掉后缀，起播拆账落盘 |
 | `docs/adr/translate-guard-telemetry.md` | 保真守卫只报三段计数（blocked / recovered / gaveUp）：漏检率测不出来，事件攒批写 `logs/translate-guard.jsonl`，记账本战绩同批拍快照 |
 | `docs/adr/first-run-checklist.md` | 上手检查六步证据链：每步给可核对证据，最后一步只认真游戏帧（cfg 只在 Dota 启动时读），外加多 Steam 库 / 中文路径 / 移动硬盘三处加固 |
+| `docs/adr/match-attribution.md` | 一行话属于哪一局：voice-chain 每行带 `matchid`（`liveMatchId()` 只认 90 秒内的活帧，拿不到写显式 null 不猜），gsi-summary 按局归档 `<matchid>.json` 只留 20 份且当前局永不删 |
 
 ## 协作约定
 

@@ -3,6 +3,7 @@ import { app } from 'electron'
 import type { VoiceStage, VoiceStageMark, VoiceStageProgress } from '@shared/voice-stage'
 import type { VoiceChainTiming } from '@shared/voice-timing'
 import { appendCappedJsonl } from '../logs/jsonl'
+import { liveMatchId } from '../gsi-match'
 
 /**
  * 对讲计时（voice-reply-latency）：谁在等、等在哪一段。
@@ -117,10 +118,22 @@ export interface VoiceChainMeta {
  * 一句一行的真机证据：控制台一行给开发，logs/voice-chain.jsonl 一份给「慢在哪一段」的回填。
  * 返回同一份计时，直接塞进 VoiceReplyResult 交给浮层与面板。
  */
-export function reportChainTiming(timer: ChainTimer, meta: VoiceChainMeta): VoiceChainTiming {
+export function reportChainTiming(
+  timer: ChainTimer,
+  meta: VoiceChainMeta,
+  matchId: string | null = liveMatchId()
+): VoiceChainTiming {
   const timing = timer.timing()
   const prep = timer.prep()
-  const record = { at: new Date().toISOString(), ...meta, ...timing, ...(prep === null ? {} : { prep }) }
+  // `matchid` 永远是显式的：不知道就是 null（菜单 / 录像 / GSI 断了），不是「没有这一局」，
+  // 也绝不是上一个 matchid——猜错会把两局混成一个故事，比没有归属更糟。
+  const record = {
+    at: new Date().toISOString(),
+    matchid: matchId,
+    ...meta,
+    ...timing,
+    ...(prep === null ? {} : { prep })
+  }
   console.log('VOICE_CHAIN_TIMING', JSON.stringify(record))
   appendCappedJsonl(join(app.getPath('userData'), 'logs', 'voice-chain.jsonl'), record)
   return timing

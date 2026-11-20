@@ -39,6 +39,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--translate-cache-probe` the translation ledger stores one pair per translation and answers in both directions
   - `--translate-guard-probe` the fidelity guard telemetry: blocked / recovered / gaveUp counts, dirty jsonl lines, and one batched write
   - `--first-run-probe` the first-run checklist: six steps, what counts as evidence in each, and why the last one needs the real game
+  - `--match-attribution-probe` which match a row belongs to: one archive per match, the live summary holding only the current one, and null instead of a guessed id
   - `--translate-accuracy-probe` runs the real provider over a fixed line set and reports per-line accuracy and latency
   - `--overlay-geometry-probe` 
   - `--hotkey-probe` the global-hotkey seam with zero window and zero game: accelerator round trip and collisions

@@ -22,6 +22,7 @@ import { runHoldWatchProbe } from './hold-watch'
 import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
 import { runMatchReportProbe } from './match-report'
+import { runMatchAttributionProbe } from './match-attribution'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runProviderReasoningProbe } from './provider-reasoning'
 import { runSettingsPersistProbe } from './settings-persist'
@@ -166,6 +167,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the first-run checklist: six steps, what counts as evidence in each, and why the last one needs the real game',
     run: runFirstRunProbe
+  },
+  {
+    flag: '--match-attribution-probe',
+    ci: true,
+    summary:
+      'which match a row belongs to: one archive per match, the live summary holding only the current one, and null instead of a guessed id',
+    run: runMatchAttributionProbe
   },
   {
     flag: '--translate-accuracy-probe',

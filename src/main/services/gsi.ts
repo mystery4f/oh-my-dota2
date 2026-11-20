@@ -6,6 +6,7 @@ import { loadSettings, saveSettings } from './settings'
 import { appendCappedJsonl } from './logs/jsonl'
 import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
+import { noteLiveMatch } from './gsi-match'
 import type { GsiStatusView } from '../../shared/ipc'
 import { buildRoster, rosterLine } from './team-intel'
 import type { ChatLine } from '@shared/chat-line'
@@ -480,6 +481,8 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
     runtime.matchId = decision.matchId
   }
   runtime.lastAt = Date.now()
+  // 这一帧属于哪一局：对讲计时等写行的人只读这里（`liveMatchId()`），不自己问 GSI。
+  noteLiveMatch(decision.matchId)
   // 每一帧都记进小结账本：真对局时不可能去抢 32123 端口，只能在应用里攒。
   recordFrameSummary(payload)
   recordDraft(payload)
