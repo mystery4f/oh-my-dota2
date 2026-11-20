@@ -8,6 +8,7 @@ import type { VoiceStageEvent } from './voice-stage'
 import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
+import type { QualityReport } from './quality-report'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
@@ -28,6 +29,8 @@ import type { AppSettings } from './settings-shape'
 export type { FtScriptGroup, FtScriptLine, FtScriptState } from '@shared/train/recording'
 // 诊断包（#111）：收集/脱敏/manifest 都在 ./log-bundle，契约把结果类型带出来给面板。
 export type { LogBundleFile, LogBundleManifest, LogBundleResult } from './log-bundle'
+// 周度质量卡（#110）：计数口径与文案都在 ./quality-report，契约把类型带出来给面板。
+export type { QualityCache, QualityGuard, QualityReport } from './quality-report'
 
 /** 一条录音：key 形如 G01-L03（free 组是 G21-T01），durationMs 由 16k mono wav 字节数推算。 */
 export interface FtRecInfo {
@@ -587,7 +590,9 @@ export const IPC = {
   // 诊断包（#111）：把 logs/ 里的证据打成一个 zip，带 manifest、版本与构建戳，默认脱敏。
   LOG_BUNDLE_EXPORT: 'log:bundle-export',
   // 方向更正（#84）：浮层点一下方向标，改的是「这一句该往哪翻」，只记在这一局里。
-  TRANSLATE_DIRECTION: 'translate:direction-override'
+  TRANSLATE_DIRECTION: 'translate:direction-override',
+  // 周度质量卡（#110）：守卫计数 + 记账本命中，主进程现读两份 jsonl 现算。
+  QUALITY_REPORT: 'translate:quality-report'
 } as const
 
 /** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
@@ -874,7 +879,9 @@ export const ipcContract = {
    * 方向更正（#84）：把「这一句」改判成另一个方向并记住，返回重新翻出来的译文。
    * 失败时 `translated` 为 null 且 `error` 说明原因，但更正本身已经记住了。
    */
-  translateDirection: invoke<[DirectionCorrection], DirectionCorrectionResult>(IPC.TRANSLATE_DIRECTION)
+  translateDirection: invoke<[DirectionCorrection], DirectionCorrectionResult>(IPC.TRANSLATE_DIRECTION),
+  /** 周度质量卡：守卫抓了几次 + 记账本白拿几次，面板只画不猜（口径在 @shared/quality-report）。 */
+  qualityReport: invoke<[], QualityReport>(IPC.QUALITY_REPORT)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

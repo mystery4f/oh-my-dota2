@@ -46,6 +46,7 @@ import { runLogBundleProbe } from './log-bundle'
 import { runDatasetHealthProbe } from './dataset-health'
 import { runKeyNounProbe } from './key-nouns'
 import { runTranslateDirectionProbe } from './translate-direction'
+import { runQualityReportProbe } from './quality-report'
 import { runVoiceOutProbe } from './voice-out'
 import { runVoiceRuntimeProbe } from './voice-runtime'
 import { runVoiceWorkerProbe } from './voice-worker'
@@ -255,6 +256,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'per-line translation direction (`src/shared/translate-direction.ts`): Han share decides zh-en vs en-zh, digits and punctuation stay out of the denominator, and a manual correction applies to that one line for the rest of the session',
     run: runTranslateDirectionProbe
+  },
+  {
+    flag: '--quality-report-probe',
+    ci: true,
+    summary:
+      'the weekly quality card (`src/shared/quality-report.ts`): guard counts read line for line off `logs/translate-guard.jsonl`, cache snapshots off `logs/translate-cache.jsonl`, no invented miss rate, and a missing log file reads as zero instead of an error',
+    run: runQualityReportProbe
   },
   {
     flag: '--asr-hotwords-probe',

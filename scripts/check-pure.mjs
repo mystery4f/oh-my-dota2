@@ -453,6 +453,35 @@ correctDirection('need mjollnir', 'en-zh')
 check('方向：更正回原来的方向就等于撤销', directionOverrideCount() === 0)
 forgetDirections()
 check('方向：方向标写中→英 / 英→中', directionLabel('zh-en') === '中→英' && directionLabel('en-zh') === '英→中')
+
+// —— 周度质量卡（quality-report）：守卫按行数、记账本取最新一行，文案不许暗示漏检率 ——
+const { qualityReportOf, guardLine, cacheLine, qualityFootnote, parseCacheSnapshot, summarizeCacheSnapshots } = await import(
+  '../src/shared/quality-report.ts'
+)
+const guarded = qualityReportOf({
+  guardText: [
+    { at: '2026-01-01T00:00:01.000Z', via: 'session', direction: 'en-zh', tokens: ['bkb'], retryTokens: [], outcome: 'recovered' },
+    { at: '2026-01-01T00:00:02.000Z', via: 'direct', direction: 'zh-en', tokens: ['gank'], retryTokens: ['gank'], outcome: 'gaveup' }
+  ]
+    .map((row) => JSON.stringify(row))
+    .join('\n'),
+  cacheText: [
+    { at: '2026-01-01T00:00:00.000Z', pairs: 10, lifetimeHits: 40, hitRatio: 0.8, sessionHits: 2, sessionMisses: 2 },
+    { at: '2026-01-01T00:01:00.000Z', pairs: 16, lifetimeHits: 64, hitRatio: 0.8, sessionHits: 9, sessionMisses: 3 }
+  ]
+    .map((row) => JSON.stringify(row))
+    .join('\n')
+})
+check('质量卡：空日志给 0，不抛也不返回 null', qualityReportOf({}).guard.caught === 0 && qualityReportOf({}).cache.snapshots === 0)
+check('质量卡：守卫按行数算拦下、救回、退回原文', guarded.guard.caught === 2 && guarded.guard.recovered === 1 && guarded.guard.gaveUp === 1)
+check('质量卡：记账本取最新一行的累计与本次运行', guarded.cache.pairs === 16 && guarded.cache.sessionHits === 9 && guarded.cache.sessionMisses === 3)
+check('质量卡：命中占比 = 9/(9+3)', guarded.cache.sessionRatio === 0.75)
+check('质量卡：半截行与非对象整行丢掉', parseCacheSnapshot('{"pairs":3') === null && parseCacheSnapshot('42') === null)
+check('质量卡：没有快照时占比给 0 而不是 NaN', summarizeCacheSnapshots([]).sessionRatio === 0)
+check('质量卡：守卫文案不带百分号也不含「率」', !guardLine(guarded.guard).includes('%') && !guardLine(guarded.guard).includes('率'))
+check('质量卡：守卫文案照实写次数', guardLine(guarded.guard) === '拦下 2 次 · 救回 1 次 · 退回原文 1 次')
+check('质量卡：记账本文案写命中占比', cacheLine(guarded.cache) === '本次运行白拿 9 次 · 现翻 3 次 · 命中占比 75%')
+check('质量卡：小字写累计与快照次数', qualityFootnote(guarded.cache).includes('16 对') && qualityFootnote(guarded.cache).includes('2 次快照'))
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

@@ -412,6 +412,19 @@ const implemented = {
     direction: request.direction,
     translated: request.direction === 'en-zh' ? '（桩）按英→中重翻的一句' : '(stub) retranslated the other way'
   }),
+  // 周度质量卡（#110）：夹具给两段有数可看的样本，空日志那一支由探针管，预览不用。
+  qualityReport: async () => ({
+    guard: { caught: 3, recovered: 2, gaveUp: 1, tokens: [{ token: 'bkb', count: 2 }, { token: 'gg', count: 1 }] },
+    cache: {
+      snapshots: 4,
+      pairs: 128,
+      lifetimeHits: 512,
+      hitRatio: 0.8,
+      sessionHits: 12,
+      sessionMisses: 8,
+      sessionRatio: 0.6
+    }
+  }),
   onUpdateStatus: (callback) => {
     callback({ channel: 'stable', status: 'dev', version: '0.0.0' })
     return () => {}

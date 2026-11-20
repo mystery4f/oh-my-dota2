@@ -79,6 +79,7 @@ import {
 } from './services/train/asr-ft'
 import { exportLogBundle } from './services/log-bundle'
 import { correctLineDirection } from './services/session/direction-correction'
+import { readQualityReport } from './services/session/quality-report'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
 import { closeGvWebui, openGvWebui, registerGvWeights, scanGvDatasets } from './services/train/gv'
 import { discoverSovitsHome } from './services/voice/sovits-server'
@@ -301,7 +302,8 @@ const handlers: MainHandlers = {
   ftAsrftRollback: () => rollbackAsrFtModel(),
   ftAsrftResetBase: () => resetAsrFtToBase(),
   logBundleExport: () => exportLogBundle(),
-  translateDirection: (request) => correctLineDirection(request)
+  translateDirection: (request) => correctLineDirection(request),
+  qualityReport: () => readQualityReport()
 }
 
 export function registerIpc(): void {

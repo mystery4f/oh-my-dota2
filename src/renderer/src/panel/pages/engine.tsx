@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { errorMessage } from '@shared/errors'
+import { cacheLine, guardLine, qualityFootnote, type QualityReport } from '@shared/quality-report'
 import {
   PROVIDER_PRESETS,
   type ProviderId,
@@ -27,6 +28,7 @@ export function EnginePage(): React.ReactElement {
   const test = useTestState()
   const cache = useCacheClear()
   const save = useSaveFlash()
+  const quality = useQualityCard()
 
   if (settings === null) {
     return (
@@ -208,6 +210,23 @@ export function EnginePage(): React.ReactElement {
             ) : null}
           </Row>
         </Group>
+        <Group label="质量">
+          <Row
+            label="保真守卫"
+            hint={quality.report === null ? '读取日志中…' : guardLine(quality.report.guard)}
+          >
+            <Button variant="outline" size="sm" onClick={() => void quality.refresh()} disabled={quality.busy}>
+              {quality.busy ? '读取中…' : '刷新'}
+            </Button>
+          </Row>
+          <Row
+            label="翻译记账本"
+            hint={quality.report === null ? '读取日志中…' : cacheLine(quality.report.cache)}
+          />
+          <p className="px-4 pb-3 text-xs text-muted-foreground">
+            {quality.flash || (quality.report === null ? '' : qualityFootnote(quality.report.cache))}
+          </p>
+        </Group>
       </Panel>
 
       <TrialBench />
@@ -281,6 +300,39 @@ function useCacheClear(): {
   }
 
   return { busy, flash, confirm, inspect, clear, cancel: () => setConfirm(null) }
+}
+
+/**
+ * 质量卡：进页面读一次两份日志，之后靠「刷新」重读。
+ * 文案全部来自 @shared/quality-report——面板不自己算占比、也不自己编「漏检」这类没有分母的数。
+ */
+function useQualityCard(): {
+  report: QualityReport | null
+  flash: string
+  busy: boolean
+  refresh: () => Promise<void>
+} {
+  const [report, setReport] = useState<QualityReport | null>(null)
+  const [flash, setFlash] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  // 用 useCallback 固定身份，挂载时的 useEffect 才能只跑一次（exhaustive-deps 也就没有可抱怨的）。
+  const refresh = useCallback(async (): Promise<void> => {
+    setBusy(true)
+    try {
+      setReport(await window.api.qualityReport())
+      setFlash('')
+    } catch (e) {
+      setFlash(`读取日志失败：${errorMessage(e)}`)
+    }
+    setBusy(false)
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  return { report, flash, busy, refresh }
 }
 
 function ConfirmClear({
