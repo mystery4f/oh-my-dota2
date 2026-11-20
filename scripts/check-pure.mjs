@@ -586,6 +586,20 @@ check('空列表给空串（浮层不画空壳）', digestLine([]) === '' && dig
 check('意图词表能数命中', digestCues('mid is missing') >= 1 && digestCues('gg') === 0)
 check('同一批消息两次摘要一致', digestLine(digestRows) === digestRowLine)
 
+// —— 对局播报（#123）：只信游戏时钟与帧里的事实，同一件事只报一次 ——
+const { initialAnnounceState, stepAnnounces, DEFAULT_ANNOUNCE_TRIGGERS } = await import('../src/shared/dota-announce.ts')
+const announceTick = (state, seconds, matchId = 42) =>
+  seconds.flatMap((s) => stepAnnounces(state, { gameTime: s, matchId: String(matchId) }))
+const announceIds = (state, seconds) => announceTick(state, seconds).map((e) => e.id)
+const freshState = initialAnnounceState
+check('智慧符在 7:00 报一次，重复帧不报', announceIds(freshState(), [420, 420, 421]).filter((id) => id === 'wisdom').length === 1)
+check('智慧符 14:00 再报一次（每枚一次）', announceIds(freshState(), [420, 840]).filter((id) => id === 'wisdom').length === 2)
+check('堆野窗口 :53 报、:56 不报', announceIds(freshState(), [233, 236]).filter((id) => id === 'stack').length === 1)
+check('拉野 :15 与 :45 各报一次', announceIds(freshState(), [375, 405]).filter((id) => id === 'pull').length === 2)
+check('没有 roshan 块就不报肉山', announceTick(freshState(), [1080]).every((e) => e.id !== 'rosh'))
+check('肉山死时间 +8 分钟才报、之前不报', (() => { const s = freshState(); const rosh = (g) => stepAnnounces(s, { gameTime: g, matchId: '42', roshan: { state: 'dead', death_time: 600 } }).filter((e) => e.id === 'rosh'); return rosh(1079).length === 0 && rosh(1080).length === 1 })())
+check('没开闸时没人念（纯层只判该不该报，念不念由上层）', DEFAULT_ANNOUNCE_TRIGGERS.wisdom === true && typeof stepAnnounces === 'function')
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

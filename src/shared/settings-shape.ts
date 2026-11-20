@@ -7,6 +7,7 @@ import { DEFAULT_CAPTURE_MODE, DEFAULT_HOTKEYS, type CaptureMode, type HotkeyAct
 import type { ProviderConfig, ProviderId } from './providers'
 import type { OfflineVoiceId, SpeakMode, VoiceOutEngine } from './voices'
 import type { OverlayTextMode, OverlayGeometry, ReplyTone } from './ipc'
+import type { DotaAnnounceTriggers } from './dota-announce'
 
 export interface AppSettings {
   provider: ProviderConfig
@@ -116,6 +117,13 @@ export interface AppSettings {
    * 想核对发音、或单人练英雄时打开它。
    */
   ttsReadOwn: boolean
+  /**
+   * 对局播报总闸（#123）：智慧符、肉山窗口、堆野/拉野窗口用朗读同款嗓子念出来。
+   * 默认关——关着时连状态机都不进，语音管线一次都不碰；开着再按 announceTriggers 逐条筛。
+   */
+  announceTotal: boolean
+  /** 逐事件开关：没写的键按缺省（全开）。总闸关着时这里怎么设都不出声。 */
+  announceTriggers?: Partial<DotaAnnounceTriggers>
   /**
    * 丢弃积压：默认开。GPT-SoVITS 在本机显卡上推理，游戏正吃满显卡时一句要 5–7 s，
    * 聊天刷屏时排队会把显卡按住几十秒——游戏掉帧、读到的也是过时的旧消息。
@@ -253,6 +261,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   crossToneLookup: true,
   ttsReadAloud: false,
   ttsReadOwn: false,
+  announceTotal: false,
+  announceTriggers: { wisdom: true, rosh: true, stack: true, pull: true },
   ttsDropBacklog: true,
   ttsSpeakPrefix: 'front',
   ttsSpeakSegmentChars: 30,

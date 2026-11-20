@@ -4,6 +4,7 @@ import { app } from 'electron'
 import { getCaptureService } from './capture/capturer'
 import { loadSettings, saveSettings } from './settings'
 import { appendCappedJsonl } from './logs/jsonl'
+import { announceFrameOf, feedLiveAnnouncement } from './voice/announce'
 import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
 import { noteLiveMatch } from './gsi-match'
@@ -302,6 +303,11 @@ export interface GsiPayload {
   hero?: { id?: number; name?: string }
   /** cfg 开了 `"draft" "1"` 才有：选人阶段的 BP 数据。是否带 slot→英雄映射未验证，见 recordDraft。 */
   draft?: Record<string, unknown>
+  /**
+   * cfg 开了 `"roshan" "1"` 才有（#123 播报用）：state=alive/dead，death_time 是它这死的游戏时间。
+   * 真局是否推、键名是否一致以落盘帧为准，缺了就留 null，绝不猜。
+   */
+  roshan?: { state?: string; death_time?: number; respawn_time?: number }
 }
 
 export interface GsiDrive {
@@ -532,6 +538,8 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
   recordFrameSummary(payload)
   recordDraft(payload)
   recordPlayer(payload)
+  // 对局播报（#123）：总闸关着时是空调用，状态机也跟着走——打开那一刻才不会把整局补报出来。
+  feedLiveAnnouncement(announceFrameOf(payload))
   // 一局结束就清掉 slot→昵称：下一局同号位换人，缓存着旧名字会张冠李戴。
   // matchid 变了同样算「一局结束」：没等到 POST_GAME 就进下一局（秒排/重连）时，
   // 光靠 drive=stop 清不掉，旧名字和新号位对不上就是假情报。

@@ -10,6 +10,7 @@
  * 常驻桥、预热）整体跳过；`--tts-bench` 这类不是探针风格的命令也在表里，所以判定不靠后缀。
  */
 import { runInPlaceProbe, runReplyLatencyProbe } from './latency'
+import { runAnnounceProbe } from './announce'
 import { runAsrEnginesProbe } from './asr-engines'
 import { runAsrHotwordsProbe } from './asr-hotwords'
 import { runAsrSwapProbe } from './asr-swap'
@@ -259,6 +260,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the microphone health gate (`src/shared/mic-health.ts`): a dead or muted device is judged before the voice chain starts, a take with no frames never reaches ASR, and the level bar is a monotone RMS mapping',
     run: runMicHealthProbe
+  },
+  {
+    flag: '--announce-probe',
+    ci: true,
+    summary:
+      'game-state announcements (src/shared/dota-announce.ts + src/main/services/voice/announce.ts): wisdom rune / Roshan window / stack and pull windows each fire exactly once per occurrence from the game clock alone, a switched-off trigger stays silent, and with the master switch off the voice pipeline is never called',
+    run: runAnnounceProbe
   },
   {
     flag: '--key-noun-probe',

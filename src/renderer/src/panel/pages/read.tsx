@@ -20,6 +20,14 @@ type SpeakPrefix = 'front' | 'back' | 'off'
 
 const PREVIEW_LINE = '小心，他们可能在打肉山，快回来'
 
+/** 对局播报的逐条开关：顺序就是面板上的顺序，语义在 @shared/dota-announce。 */
+const ANNOUNCE_ROWS = [
+  { id: 'wisdom', label: '智慧符' },
+  { id: 'rosh', label: '肉山' },
+  { id: 'stack', label: '堆野' },
+  { id: 'pull', label: '拉野' }
+] as const
+
 /** 朗读页：我听别人说。引擎、嗓子、说话人念法都在这里调，试听当场验证。 */
 export function ReadPage({
   onOpenVoicePacks
@@ -83,6 +91,43 @@ export function ReadPage({
             >
               {settings.ttsReadAloud ? '开' : '关'}
             </Button>
+            <SaveFlash flash={save.flash} error={save.error} />
+          </Row>
+        </Group>
+        <Group label="对局播报">
+          <Row
+            label="播报游戏状态"
+            hint="智慧符、肉山复活窗口、堆野与拉野窗口，用这里选定的嗓子念；关掉时语音管线一次都不碰"
+          >
+            <Button
+              variant={settings.announceTotal ? 'secondary' : 'outline'}
+              size="sm"
+              onClick={() => void save.wrap(update({ announceTotal: !settings.announceTotal }))}
+            >
+              {settings.announceTotal ? '开' : '关'}
+            </Button>
+            <SaveFlash flash={save.flash} error={save.error} />
+          </Row>
+          <Row label="逐条开关" hint="总开关关着时这里怎么点都不出声；每条每局各报一次，不重复">
+            {ANNOUNCE_ROWS.map((item) => {
+              const on = settings.announceTriggers?.[item.id] !== false
+              return (
+                <Button
+                  key={item.id}
+                  variant={on ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() =>
+                    void save.wrap(
+                      update({
+                        announceTriggers: { ...settings.announceTriggers, [item.id]: !on }
+                      })
+                    )
+                  }
+                >
+                  {item.label}
+                </Button>
+              )
+            })}
             <SaveFlash flash={save.flash} error={save.error} />
           </Row>
         </Group>
