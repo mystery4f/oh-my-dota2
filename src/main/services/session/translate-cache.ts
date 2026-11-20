@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { hasHan, normalizeLine } from '@shared/chat-line'
+import { appendCappedJsonl } from '../logs/jsonl'
 
 /**
  * 翻译记账本：一次翻译同时记下「你好 ↔ hello」这对，两个方向都能直接命中。
@@ -607,4 +608,31 @@ function round2(part: number, whole: number): number {
 
 export function translationCacheStats(): { entries: number; persisted: boolean } & typeof stats {
   return { entries: translationCacheSize(), persisted: db !== null, ...stats }
+}
+
+/**
+ * 战绩快照一行（`logs/translate-cache.jsonl`），给周报用：这个迭代到底白拿了多少次模型调用。
+ *
+ * `hitRatio` / `pairs` / `hits` 来自库里的累计列（跨进程可信）；`sessionHits` / `sessionMisses`
+ * 是本进程的计数器，两次快照相减就是区间增量。两套口径分开命名，不混成一个数。
+ * 快照由主进程 60 秒拍一次、退出前再拍一次，这里不自己养定时器。
+ */
+export function snapshotTranslationStats(): void {
+  const counters = translationCacheStats()
+  const insights = translationInsights(0)
+  appendCappedJsonl(
+    join(app.getPath('userData'), 'logs', 'translate-cache.jsonl'),
+    {
+      at: new Date().toISOString(),
+      pairs: insights.pairs,
+      lifetimeHits: insights.hits,
+      hitRatio: insights.hitRatio,
+      sessionHits: counters.hits,
+      sessionMisses: counters.misses,
+      writes: counters.writes,
+      evicted: counters.evicted,
+      persisted: counters.persisted
+    },
+    256 * 1024
+  )
 }

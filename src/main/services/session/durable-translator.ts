@@ -35,6 +35,7 @@ import {
   writeTranslation,
   type TranslationOrigin
 } from './translate-cache'
+import { reportGuardEvent } from './guard-telemetry'
 
 import { latencySummary, trackLatency, type LatencySummary } from './translator-latency'
 /** Longest block sent to the model in one submission; longer ticks are split. */
@@ -499,7 +500,7 @@ async function translateWithSession(
       // 重试前清历史：把写坏缩写的回合从会话里抹掉，别让它变成下一句的范例。
       await resetHistory(direction, tone, scope)
       return ensureTerminalPunct(text, await submitOnce())
-    })
+    }, reportGuardEvent)
     trackLatency(Date.now() - startedAt, 'session', 1)
     return translated
   })
@@ -604,7 +605,8 @@ async function translateDirect(
     output = ensureTerminalPunct(text, output)
     // 直连同样过保真守卫（对冲赢家、冷却兜底都走这里），判定与会话车道共用一份。
     output = await guardedTranslate(text, output, direction, 'direct', async () =>
-      ensureTerminalPunct(text, await translateText(provider, text, direction, maxWords))
+      ensureTerminalPunct(text, await translateText(provider, text, direction, maxWords)),
+      reportGuardEvent
     )
     trackLatency(Date.now() - startedAt, 'direct', 1)
     return output

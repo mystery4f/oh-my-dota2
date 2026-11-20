@@ -28,6 +28,8 @@ import { reconcileTrainState } from './services/train/reconcile'
 import { loadSettings, onSettingsSaved } from './services/settings'
 import { hotkeysState, installHotkeys, releaseHotkeys, onHotkeysSaved } from './services/hotkeys'
 import { resetSessionsOnBoot, warmTranslator } from './services/session/durable-translator'
+import { flushGuardTelemetry } from './services/session/guard-telemetry'
+import { snapshotTranslationStats } from './services/session/translate-cache'
 import { translateInPlace } from './services/reply/reply-service'
 import { suppressExperimentalSqliteWarning } from './services/session/warnings'
 import { getOverlayManager } from './windows/overlay'
@@ -288,6 +290,14 @@ app.whenReady().then(() => {
     }, 3000)
   }
 
+  // 周报口径：守卫违例与记账本命中各拍一行到 logs/。数字都是累计值，一分钟一轮够用；
+  // 快照之间做差就是区间增量，不靠采样密度也能读。
+  if (!probeRun) {
+    setInterval(() => {
+      flushGuardTelemetry()
+      snapshotTranslationStats()
+    }, 60_000)
+  }
 
   // 写后联动挂在属主发出的观察者缝上（settings/hotkeys），handler 表只做转发。
   onSettingsSaved(() => {
@@ -308,6 +318,9 @@ app.on('window-all-closed', () => {})
 
 app.on('will-quit', () => {
   quitting = true
+  // 遥测的最后一箱：60 秒定时器可能刚好没走到，退出前各拍一次再落盘。
+  flushGuardTelemetry()
+  snapshotTranslationStats()
   // 训练进程是 python 子进程，父进程退出不会带走它：先杀树再记账，别留一个跑到天亮的孤儿。
   trainManagerIfStarted()?.shutdown()
   releaseHotkeys()

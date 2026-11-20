@@ -30,6 +30,7 @@ import { runSovitsVoicepackProbe } from './sovits-voicepack'
 import { runTrainProbe } from './train'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
+import { runTranslateGuardProbe } from './translate-guard'
 import { runTtsBenchProbe } from './tts-bench'
 import { runTtsOfflineProbe } from './tts-offline'
 import { runTtsPipelineProbe } from './tts-pipeline'
@@ -150,6 +151,13 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the translation ledger stores one pair per translation and answers in both directions',
     run: runTranslateCacheProbe
+  },
+  {
+    flag: '--translate-guard-probe',
+    ci: true,
+    summary:
+      'the fidelity guard telemetry: blocked / recovered / gaveUp counts, dirty jsonl lines, and one batched write',
+    run: runTranslateGuardProbe
   },
   {
     flag: '--translate-accuracy-probe',

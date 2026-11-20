@@ -12,6 +12,7 @@
  */
 import { KEEP_VERBATIM_TOKENS } from './dota-glossary'
 import type { TranslateDirection } from './ipc'
+import type { GuardEvent } from './guard-telemetry'
 
 /** 汉字：en-zh 方向判断「这句到底译成中文了吗」的唯一依据。 */
 const HAN = /\p{Script=Han}/u
@@ -71,7 +72,9 @@ export async function guardedTranslate(
   first: string,
   direction: TranslateDirection,
   via: 'session' | 'direct',
-  retry: () => Promise<string>
+  retry: () => Promise<string>,
+  /** 遥测出口：只有判违例才会被调用一次（结局已经定下来），正常译文一次都不调。 */
+  report?: (event: GuardEvent) => void
 ): Promise<string> {
   const violations = latinTokenViolations(source, first, direction)
   if (violations.length === 0) return first
@@ -80,7 +83,18 @@ export async function guardedTranslate(
   const again = latinTokenViolations(source, translated, direction)
   if (again.length > 0) {
     console.log('TRANSLATE_GUARD_GIVEUP', JSON.stringify({ tokens: again, translated: translated.slice(0, 200), via }))
+    reportGuard(report, { at: new Date().toISOString(), via, direction, tokens: violations, retryTokens: again, outcome: 'gaveup' })
     return source
   }
+  reportGuard(report, { at: new Date().toISOString(), via, direction, tokens: violations, retryTokens: [], outcome: 'recovered' })
   return translated
+}
+
+/** 遥测坏了不能反过来毁掉译文：出口抛错就当没接。 */
+function reportGuard(report: ((event: GuardEvent) => void) | undefined, event: GuardEvent): void {
+  try {
+    report?.(event)
+  } catch {
+    // 守卫的结果已经定了，投递失败只丢一条计数。
+  }
 }
