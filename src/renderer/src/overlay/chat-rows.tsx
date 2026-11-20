@@ -50,7 +50,14 @@ function ChatRow(props: {
         (row.error !== undefined ? (
           <div className="trans err">✕ {row.error}</div>
         ) : (
-          <div className={row.cached ? 'trans cached' : 'trans'}>{row.translated}</div>
+          <div className={row.cached ? 'trans cached' : 'trans'}>
+            {row.translated}
+            {row.keyNouns !== undefined && row.keyNouns.length > 0 && (
+              <span className="keynoun" title={`译文没提到：${row.keyNouns.join('、')}`}>
+                ？{row.keyNouns.join('、')}
+              </span>
+            )}
+          </div>
         ))}
       {spoken && <div className={spoken.ok ? 'spoken ok' : 'spoken err'}>{spoken.text}</div>}
     </div>

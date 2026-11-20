@@ -124,6 +124,18 @@
   line-height: 1.5;
   vertical-align: 1px;
 }
+/* 译文丢了源文点名的英雄/物品：问一句，不改译文。暖色小字，排在译文末尾。 */
+.keynoun {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(251, 146, 60, 0.16);
+  color: #fdba74;
+  font-size: 10px;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
 /* 翻失败的行：红字 + ✕。 */
 .trans.err {
   color: #f87171;

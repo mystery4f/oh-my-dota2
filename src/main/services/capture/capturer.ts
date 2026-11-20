@@ -15,6 +15,7 @@ import { loadSettings } from '../settings'
 import { broadcastToWindows } from '../../windows/broadcast'
 
 import { HISTORY_MAX_ROWS } from '@shared/overlay-ledger'
+import { flagKeyNouns, keyNounsOf, type KeyNoun } from '@shared/key-nouns'
 /**
  * 存续窗口：同一句话在 60 条内重复出现就不再上屏。
  * Dota 的 GSI 会连推 26 帧左右，这里也顺手兜住重复投递。
@@ -235,6 +236,9 @@ export class ChatCaptureService {
 
     // 谁真的被送去翻译了：只有这些行在失败时该背「翻译服务不可用」的标记。
     const attempted = new Set(pending.map((item) => item.index))
+    // 翻译前先拿原句对一次词表：清单抽好放这儿，翻译完只核对它，别让译文的用词反过来决定该找什么。
+    const expected = new Map<number, KeyNoun[]>()
+    for (const item of pending) expected.set(item.index, keyNounsOf(item.body, 'auto-zh'))
     const translated = new Map<number, string>()
     const cachedRows = new Map<number, boolean>()
     if (pending.length > 0) {
@@ -266,7 +270,15 @@ export class ChatCaptureService {
       const failed = firstError !== null && attempted.has(index)
       if (!value) return failed ? { ...row, error: firstError ?? undefined } : row
       const restored = withChatBody(row.original, row.body, value)
-      const entry = { ...row, translated: restored || null }
+      // 翻译完只核对翻译前那份清单：缺了在条目上留个「？」，译文本身一个字不动。
+      const missing = flagKeyNouns(expected.get(index) ?? [], restored || value).keyNouns
+      if (missing.length > 0)
+        console.log('TRANSLATE_KEY_NOUN', JSON.stringify({ missing, line: row.body.slice(0, 80) }))
+      const entry: CaptureEntry = {
+        ...row,
+        translated: restored || null,
+        ...(missing.length > 0 ? { keyNouns: missing } : {})
+      }
       return cachedRows.get(index) === true ? { ...entry, cached: true } : entry
     })
     if (firstError) this.lastError = firstError

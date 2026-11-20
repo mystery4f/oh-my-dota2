@@ -245,6 +245,11 @@ export interface CaptureEntry {
   speaker?: string
   /** 这行进了翻译队列却没翻成（服务不可达、鉴权失败…）：渲染层要显示出来，不能假装还在翻。 */
   error?: string
+  /**
+   * 译文丢了源文点名的英雄/物品（`@shared/key-nouns` 的核对结果，中文名）：
+   * 浮层打「？」问一句，译文本身一个字不改——去留由人定。
+   */
+  keyNouns?: string[]
 }
 /** 原地替换结果：draft = 从游戏聊天框读到的中文，translated = 写回聊天框的英文。 */
 export interface InPlaceResult {

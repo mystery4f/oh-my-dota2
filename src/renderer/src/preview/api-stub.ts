@@ -431,10 +431,11 @@ const implemented = {
     {
       id: 'c1',
       ts: Date.now() - 60000,
-      original: '[muerta] [队友] [队友A] ⚔ 中路不见了',
-      body: '中路不见了',
-      translated: 'mid is missing',
-      hero: 'muerta'
+      original: '[muerta] [队友] [队友A] ⚔ 雷锤还没出，跳刀也差一点',
+      body: '雷锤还没出，跳刀也差一点',
+      translated: 'mjollnir not ready yet',
+      hero: 'muerta',
+      keyNouns: ['跳刀']
     }
   ],
   /**

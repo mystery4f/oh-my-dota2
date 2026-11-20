@@ -415,6 +415,26 @@ check(
   healthLine(judgeDatasetHealth({ takes: HEALTH_TAKES.slice(0, 1), expected: ['G01-L01'] })) ===
     '1 条 · 共 1 秒 · 没有重复/静音/缺句'
 )
+
+// —— 关键名词（key-nouns）：翻译前抽清单、翻译后只核对，缺了标一次且不改译文 ——
+const { flagKeyNouns, keyNounsOf } = await import('../src/shared/key-nouns.ts')
+const mjollnirNouns = keyNounsOf('need mjollnir top', 'auto-zh')
+check(
+  '关键名词：翻译前抽清单只认英雄/物品全名，术语不进清单',
+  mjollnirNouns.map((noun) => noun.zh).join(',') === '雷锤' && keyNounsOf('push mid now', 'auto-zh').length === 0,
+  mjollnirNouns.map((noun) => noun.zh).join(',')
+)
+const lostNoun = flagKeyNouns(mjollnirNouns, '需要上路')
+check('关键名词：译文丢掉物品名就标一次', lostNoun.keyNouns.join(',') === '雷锤', lostNoun.keyNouns.join(','))
+check('关键名词：标记不改译文（原文一字不差）', lostNoun.text === '需要上路', lostNoun.text)
+check('关键名词：干净的译文一条都不标', flagKeyNouns(mjollnirNouns, '需要雷锤上路').keyNouns.length === 0)
+check('关键名词：英文原名留在译文里也算没丢', flagKeyNouns(mjollnirNouns, 'mjollnir 上路').keyNouns.length === 0)
+check(
+  '关键名词：zh-en 方向按中文侧点名',
+  flagKeyNouns(keyNounsOf('雷锤还没出', 'zh-en'), 'not ready').keyNouns.join(',') === '雷锤',
+  flagKeyNouns(keyNounsOf('雷锤还没出', 'zh-en'), 'not ready').keyNouns.join(',')
+)
+check('关键名词：词边界内的假命中不算（tinyhouse ≠ tiny）', keyNounsOf('tinyhouse next door', 'auto-zh').length === 0)
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
