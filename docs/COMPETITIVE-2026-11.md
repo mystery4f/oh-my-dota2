@@ -93,7 +93,8 @@ tags: [docs, product, competitive]
 判读：这条线的活人都在做**「替你计时、替你播报、替你摆到第二块屏」**，没有一个人碰「把队友的话翻出来给你听」。
 前两件正是我们零成本能吃下的——计时表是静态知识，播报我们有现成的嘴。
 
-已落票：#123（计时播报，P1，ready-for-agent）、#124（副屏看板，P2，needs-triage）、#125（复核 GSI draft，P2，needs-triage）。
+已落票：#123（计时播报，P1，ready-for-agent）、#124（副屏看板，P2，needs-triage）、#125（复核 GSI draft，P2，needs-triage）、
+#131（补丁看守，P1，ready-for-agent）、#132（局势带，P2，needs-triage）、#133（README 不注入声明，P3，needs-triage）。
 
 ## 三条威胁
 
