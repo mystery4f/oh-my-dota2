@@ -1,4 +1,5 @@
 import { recordingStageLine, type CaptureMode } from '@shared/hotkeys'
+import { setRingRecording } from './voice-ring-store'
 import type { CaptureEntry, VoiceChainSummary } from '@shared/ipc'
 import { MIC_WARM_LEASE_MS, canReuseMic, captureLevel, capturePeak, judgeCapture, rejectLine } from '@shared/voice-capture-gate'
 import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
@@ -169,6 +170,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       return
     }
     recording = true
+    setRingRecording(true)
     window.api.reportVoiceState(true)
     sink.stage(recordingStageLine(sink.voiceCaptureMode(), sink.voiceCaptureKey()))
     recordTimer = setTimeout(() => void stop(), RECORD_MAX_MS)
@@ -189,6 +191,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     }
     if (!recording) return
     recording = false
+    setRingRecording(false)
     window.api.reportVoiceState(false)
     if (recordTimer) clearTimeout(recordTimer)
     recordTimer = null

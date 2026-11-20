@@ -122,6 +122,7 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
 - `overlayCollapse` (default `Alt+Shift+B`) collapse / expand the overlay to its 132x34 icon
 - `inplaceSend` (default `Alt+Shift+T`) the only text out: reads the game chat draft (Chinese typed, not yet sent), translates, pastes back and presses Enter
 - `overlayPanel` (default `Alt+Shift+H`) summon panel: the overlay temporarily becomes an interactive sheet (history 200 rows / quick phrases / AI suggestions, click a row to copy); pressing again or Esc closes it and restores click-through
+- Voice-capture three-state ring (#94): the stage line starts with a small ring in `src/renderer/src/overlay/voice-ring.tsx` — hollow=idle, filled=recording, waves=speaking; shapes differ so a grey screenshot still tells them apart. Recording/speaking truth lives once in `voice-ring-store.ts`; `voice-capture.ts` and `speech.ts` only call `setRingRecording`/`setRingSpeaking` (keep that, never revert to bare assignment — the ring and the speech queue both read it).
 - `voiceCapture` (default `Alt+Shift+V`) record → speech chain: speak Chinese → the active recognition model (`asrActiveModel`:
   Qwen3 or Paraformer) transcribes → translate → the reply is spoken through voice-out. How it is pressed is
   `voiceCaptureMode` (`hold` by default; the panel's 热键 → 语音对讲怎么按): **hold** = recording runs while the chord is

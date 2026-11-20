@@ -508,6 +508,22 @@ check(
 )
 check('Steam 库：展示名标出「没装 Dota」', libraryLabel({ root: 'D:\\SteamLibrary', hasDota: false }).includes('没装 Dota'))
 
+// —— 对讲三态环（voice-ring）：形状区分状态，录音压过朗读（#94） ——
+const { voiceRingState, voiceRingView } = await import('../src/shared/voice-ring.ts')
+const idleRing = voiceRingView({ recording: false, speaking: false })
+const recordingRing = voiceRingView({ recording: true, speaking: false })
+const speakingRing = voiceRingView({ recording: false, speaking: true })
+const bothRing = voiceRingView({ recording: true, speaking: true })
+check('三态环：空闲/录音/朗读各自成态', idleRing.state === 'idle' && recordingRing.state === 'recording' && speakingRing.state === 'speaking')
+check(
+  '三态环：形状三者互不相同（灰度截图也分得清）',
+  new Set([idleRing.shape, recordingRing.shape, speakingRing.shape]).size === 3
+)
+check('三态环：标签各不相同', new Set([idleRing.label, recordingRing.label, speakingRing.label]).size === 3)
+check('三态环：录音时同时也在朗读，显示录音（按着热键最要紧的是「我在被录」）', bothRing.state === 'recording' && voiceRingState({ recording: true, speaking: true }) === 'recording')
+check('三态环：只有录音与朗读会动，空闲不动', idleRing.pulse === false && recordingRing.pulse && speakingRing.pulse)
+check('三态环：朗读态读屏文案说「正在朗读」，不说「已恢复」', speakingRing.aria.includes('正在朗读') && !/已恢复|已修复/.test(speakingRing.aria))
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

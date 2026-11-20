@@ -4,6 +4,7 @@ import type { CaptureEntry, OverlayStatus, VoiceChainSummary } from '@shared/ipc
 import { fadeRows, nextUnread, pushEntry, type LedgerRow } from '@shared/overlay-ledger'
 import type { SpokenStatus } from '@shared/voice-out'
 import { formatStageTrace } from '@shared/voice-stage'
+import { VoiceRing } from './voice-ring'
 import { ChatRows } from './chat-rows'
 import { beginDrag } from './drag'
 import { MiniIcon } from './mini-icon'
@@ -226,12 +227,18 @@ export function App(): JSX.Element {
   )
 }
 
-/** 阶段行：选哪一句话由共享纯函数决定（stageLine），这里只画。 */
+/**
+ * 阶段行：选哪一句话由共享纯函数决定（stageLine），这里只画。
+ *
+ * 三态环（#94）挂在同一行前面而不是浮到正文上：它跟着 #stage 一起在列末尾，聊天行永远压不到它，
+ * 它也不会盖住聊天行；空闲时组件自己返回 null，不占位。
+ */
 function StageLine(props: { status: OverlayStatus; stage: string | null }): JSX.Element | null {
   const line = stageLine({ message: props.stage, hint: props.status.hint ?? null, locked: props.status.locked })
-  if (line === null) return null
+  if (line === null) return <VoiceRing />
   return (
     <div id="stage" className={line.warn ? 'warn' : undefined}>
+      <VoiceRing />
       {line.text}
     </div>
   )

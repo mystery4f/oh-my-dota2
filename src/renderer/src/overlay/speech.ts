@@ -1,5 +1,6 @@
 import type { SpeakPayload } from '@shared/ipc'
 import { errorMessage } from '@shared/errors'
+import { setRingSpeaking } from './voice-ring-store'
 
 /**
  * 朗读队列（渲染进程侧）：speechSynthesis 只在这边有，system 引擎的出声归这里；
@@ -10,6 +11,12 @@ const SPEAK_QUEUE_MAX = 6
 
 const speakQueue: SpeakPayload[] = []
 let speaking = false
+
+/** 改本地标志的同时告诉三态环（#94）：两处各记一遍迟早对不上，所以只留这一个入口。 */
+function markSpeaking(on: boolean): void {
+  speaking = on
+  setRingSpeaking(on)
+}
 
 function pickVoice(lang: 'zh' | 'en', wanted: string): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices()
@@ -29,20 +36,20 @@ function pumpSpeech(): void {
   // 用户对「一下这个声音一下那个声音」的反馈就是这么来的——音色跳变比漏一句更刺耳。
   if (next.engine !== 'system' && !next.audio) {
     console.log('VOICE_SKIP_NO_AUDIO', next.text)
-    speaking = false
+    markSpeaking(false)
     pumpSpeech()
     return
   }
   // 主进程合成好的音频（edge=mp3，offline=wav）：直接播，音色比系统嗓子好听一个时代。
   if (next.audio) {
-    speaking = true
+    markSpeaking(true)
     const player = new Audio(`data:${next.audioMime ?? 'audio/mpeg'};base64,${next.audio}`)
     // onerror 和 play() 拒绝可能接连都来：只认第一次，第二次会提前泵下一句造成双声道。
     let settled = false
     const done = (): void => {
       if (settled) return
       settled = true
-      speaking = false
+      markSpeaking(false)
       pumpSpeech()
     }
     player.onended = done
@@ -66,9 +73,9 @@ function pumpSpeech(): void {
   utter.rate = next.rate
   const voice = pickVoice(next.lang, next.voice)
   if (voice) utter.voice = voice
-  speaking = true
+  markSpeaking(true)
   const done = (): void => {
-    speaking = false
+    markSpeaking(false)
     pumpSpeech()
   }
   utter.onend = done

@@ -42,6 +42,28 @@
 #stage.warn {
   color: rgba(253, 230, 138, 0.95);
 }
+/* ── 对讲三态环（#94）：形状区分状态，灰度也能分清 ────────────────── */
+.voice-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.72);
+}
+.voice-ring svg {
+  fill: currentcolor;
+  stroke: currentcolor;
+}
+.voice-ring-filled { color: rgba(248, 113, 113, 0.95); }
+.voice-ring-waves { color: rgba(125, 211, 252, 0.95); }
+.voice-ring-pulsing svg { animation: voice-ring-pulse 1.1s ease-in-out infinite; }
+@keyframes voice-ring-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
 
 /* ── 消息行 ─────────────────────────────────────────────────────────── */
 #list {
