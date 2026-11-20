@@ -182,6 +182,16 @@ const handlers: MainHandlers = {
   reportVoiceState: (recording) => {
     broadcast(IPC.VOICE_RECORD_STATE, { recording: Boolean(recording) })
   },
+  // #96：采集端（浮层）边录边报电平/掉线，主进程只转手——面板订阅同一条广播就够。
+  reportMicHealth: (event) => {
+    broadcast(IPC.MIC_HEALTH, {
+      recording: Boolean(event?.recording),
+      level: Number(event?.level ?? 0),
+      dead: Boolean(event?.dead),
+      reason: event?.reason ?? null,
+      label: String(event?.label ?? '')
+    })
+  },
   reportVoiceChain: (result) => {
     broadcast(IPC.VOICE_CHAIN_RESULT, result)
   },

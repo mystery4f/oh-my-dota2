@@ -27,6 +27,8 @@ export function App(): JSX.Element {
   /** 对讲行的阶段留痕：主进程每完成一段发一份快照，这里只格式化，渲染端不自己算时间。 */
   const [traceById, setTraceById] = useState<Record<string, string>>({})
   const [stage, setStageText] = useState<string | null>(null)
+  // 麦克风电平（#96）：录着的时候每块 PCM 刷一次，停录归零。
+  const [level, setLevel] = useState(0)
 
   // 阶段行的一次性反馈：给了 holdMs 就到点自动收起，下一条顶掉上一条的计时（旧模块级 setter 换成组件内 ref）。
   const stageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -141,6 +143,7 @@ export function App(): JSX.Element {
         }
       },
       stage: showStage,
+      level: setLevel,
       reportChain: (result: VoiceChainSummary) => window.api.reportVoiceChain(result),
       voiceCaptureKey: () => statusRef.current?.hotkeys.voiceCapture ?? '',
       voiceCaptureMode: () => statusRef.current?.voiceCaptureMode ?? 'hold'
@@ -214,7 +217,7 @@ export function App(): JSX.Element {
         <>
           {!status.locked && <Toolbar status={status} onStatus={onStatus} />}
           <ChatRows rows={rows} spokenById={spokenById} traceById={traceById} status={status} />
-          <StageLine status={status} stage={stage} />
+          <StageLine status={status} stage={stage} level={level} />
           {!status.locked && (
             <>
               <div id="resize-left" onPointerDown={(e) => beginDrag(status, 'left', e.nativeEvent, onStatus)} />
@@ -233,12 +236,19 @@ export function App(): JSX.Element {
  * 三态环（#94）挂在同一行前面而不是浮到正文上：它跟着 #stage 一起在列末尾，聊天行永远压不到它，
  * 它也不会盖住聊天行；空闲时组件自己返回 null，不占位。
  */
-function StageLine(props: { status: OverlayStatus; stage: string | null }): JSX.Element | null {
+function StageLine(props: { status: OverlayStatus; stage: string | null; level?: number }): JSX.Element | null {
   const line = stageLine({ message: props.stage, hint: props.status.hint ?? null, locked: props.status.locked })
-  if (line === null) return <VoiceRing />
+  // 电平条（#96）：只有真在收声（level > 0）才占位，空闲时这一行和以前一模一样。
+  const meter = props.level !== undefined && props.level > 0 ? (
+    <span className="mic-meter" title={`麦克风电平 ${props.level}%`}>
+      <i style={{ width: `${props.level}%` }} />
+    </span>
+  ) : null
+  if (line === null) return <>{meter}<VoiceRing /></>
   return (
     <div id="stage" className={line.warn ? 'warn' : undefined}>
       <VoiceRing />
+      {meter}
       {line.text}
     </div>
   )

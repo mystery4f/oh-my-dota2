@@ -44,6 +44,7 @@ import { runTtsVoicesProbe } from './tts-voices'
 import { runVoiceChainProbe } from './voice-chain'
 import { runLogBundleProbe } from './log-bundle'
 import { runDatasetHealthProbe } from './dataset-health'
+import { runMicHealthProbe } from './mic-health'
 import { runKeyNounProbe } from './key-nouns'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
@@ -243,6 +244,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the pre-training dataset health check (`src/shared/train/dataset-health.ts` + `services/train/wav-facts.ts`): duplicate lines, takes that carry no speech, missing script lines, duration distribution',
     run: runDatasetHealthProbe
+  },
+  {
+    flag: '--mic-health-probe',
+    ci: true,
+    summary:
+      'the microphone health gate (`src/shared/mic-health.ts`): a dead or muted device is judged before the voice chain starts, a take with no frames never reaches ASR, and the level bar is a monotone RMS mapping',
+    run: runMicHealthProbe
   },
   {
     flag: '--key-noun-probe',

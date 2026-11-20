@@ -17,6 +17,7 @@ import {
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { formatChainTiming } from '@shared/voice-timing'
 import { queueLine, stopLine, type SpeechQueueSnapshot } from '@shared/speech-queue'
+import type { MicHealthEvent } from '@shared/mic-health'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
 import {
@@ -78,6 +79,8 @@ export function TalkPage({
   const [queueBusy, setQueueBusy] = useState(false)
   const [stopNote, setStopNote] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
+  // 麦克风健康（#96）：浮层边录边报，面板只画（电平条 + 掉线提示）。
+  const [micHealth, setMicHealth] = useState<MicHealthEvent | null>(null)
   const [log, setLog] = useState<LogEntry[]>([])
   const [editingAt, setEditingAt] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
@@ -105,6 +108,7 @@ export function TalkPage({
 
   useEffect(() => window.api.onVoiceChainResult((r) => setLog((l) => [{ ...r, at: Date.now() }, ...l].slice(0, 6))), [])
   useEffect(() => window.api.onVoiceRecordState((s) => setRecording(s.recording)), [])
+  useEffect(() => window.api.onMicHealth(setMicHealth), [])
   useEffect(() => {
     // 运行时状态：进页问一次，装的时候主进程广播各阶段，不再轮询。
     void window.api.voiceRuntimeStatus().then(setRuntime)
@@ -312,6 +316,27 @@ export function TalkPage({
                 <option value={settings.micDevice}>（已保存，当前未接入）</option>
               ) : null}
             </select>
+          </Row>
+          <Row
+            label="麦克风电平"
+            stacked
+            hint="录着的时候跟着声音走；设备掉了这里立刻报，下一次开麦自动回退到默认设备。"
+          >
+            {micHealth?.recording ? (
+              <span className="flex items-center gap-2">
+                <span className="h-1.5 w-40 overflow-hidden rounded bg-muted">
+                  <span
+                    className="block h-full rounded bg-emerald-400 transition-[width] duration-100"
+                    style={{ width: `${micHealth.level}%` }}
+                  />
+                </span>
+                <span className="text-xs text-muted-foreground">{micHealth.level}%</span>
+              </span>
+            ) : micHealth?.dead ? (
+              <StatusPill tone="warn">设备没声音</StatusPill>
+            ) : (
+              <StatusPill tone="idle">空闲</StatusPill>
+            )}
           </Row>
           <Row label="识别引擎" stacked hint={engineHint}>
             <select

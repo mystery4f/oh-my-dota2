@@ -19,6 +19,11 @@ export interface PcmRecorder {
   suspend(): void
   /** 从闲置回到录音，顺手清掉挂起期间残留的那半段。 */
   resume(): void
+  /**
+   * 换一块 PCM 的监听者（#96 电平条）：挂起的流是上一次开麦时建的，
+   * 监听者只能换不能重绑——否则麦克风复用时电平条永远是静止的。
+   */
+  setChunkListener(listener: ((chunk: Float32Array) => void) | null): void
   /** 拆图并交出攒下的 PCM（= take + close）；重复调用安全，之后返回空段。 */
   stop(): PcmChunks
 }
@@ -32,6 +37,8 @@ export interface PcmRecorder {
  */
 export async function startPcmRecorder(onChunk?: (chunk: Float32Array) => void): Promise<PcmRecorder> {
   const stream = await openMicStream()
+  // 可变引用：挂起的流被复用时 setChunkListener 换掉它，不用重建音频图。
+  let listener = onChunk
   let chunks: Float32Array[] = []
   let ctx: AudioContext
   let node: ScriptProcessorNode
@@ -41,7 +48,7 @@ export async function startPcmRecorder(onChunk?: (chunk: Float32Array) => void):
     node.onaudioprocess = (event): void => {
       const input = event.inputBuffer.getChannelData(0)
       chunks.push(new Float32Array(input))
-      onChunk?.(input)
+      listener?.(input)
     }
     ctx.createMediaStreamSource(stream).connect(node)
     node.connect(ctx.destination)
@@ -65,6 +72,9 @@ export async function startPcmRecorder(onChunk?: (chunk: Float32Array) => void):
       if (stopped) return
       // 只停音频线程，设备仍开着：下一次按下不必再走一遍 getUserMedia（那才是「按了没反应」的来源）。
       void ctx.suspend().catch(() => undefined)
+    },
+    setChunkListener(next: ((chunk: Float32Array) => void) | null): void {
+      listener = next ?? undefined
     },
     resume(): void {
       if (stopped) return

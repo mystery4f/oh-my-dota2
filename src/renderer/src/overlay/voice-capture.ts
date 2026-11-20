@@ -6,6 +6,7 @@ import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
 import { describeCaptureDevice } from '../lib/mic'
+import { levelPercent, micDead, micDeadNotice, shouldRunChain, type MicDeadReason } from '@shared/mic-health'
 import { startPcmRecorder, type PcmRecorder } from '../lib/pcm-recorder'
 
 /** 录音上限：一条对讲顶多 20 秒，超时自动停——忘记停也不会一直占着麦克风。 */
@@ -116,6 +117,8 @@ export interface VoiceCaptureSink {
   stage(label: string | null, holdMs?: number): void
   reportChain(result: VoiceChainSummary): void
   voiceCaptureKey(): string
+  /** 录音电平（#96）：0..100，浮层画条用；不接不影响链路。 */
+  level?(percent: number): void
   /** 按住 / 敲一下：横幅文案靠它区分「松开结束」与「再按一下结束」。 */
   voiceCaptureMode(): CaptureMode
 }
@@ -130,10 +133,67 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
   /** 本次录音实际用的输入设备（label|id 前 8 位），随转写一起交给主进程进日志。 */
   let recordDevice = ''
   let recordTimer: ReturnType<typeof setTimeout> | null = null
+  /** 电平广播节流：每块都发（~85ms）会把 IPC 塞满，150ms 一条够画条了。 */
+  let levelSentAt = 0
+  /** 设备在录音中断开：这条录音不进链，提示已经由 dropDevice 落过。 */
+  let deadAbort = false
+  let deadReason: MicDeadReason = 'ended'
+  let deadLabel = ''
+  /** 本次开麦挂上的轨道监听：停录/掉线时摘掉，别让旧流的事件打到新录音上。 */
+  let trackHook: { track: MediaStreamTrack; onLost: () => void } | null = null
   /** 开麦进行中：松开（HOLD 0）可能赶在 recording=true 之前到。 */
   let starting = false
   /** 开麦期间收到的松开：开麦回来后立刻收掉这条录音，不让它变成「松开还在录」。 */
   let stopWhileStarting = false
+
+  function reportHealth(event: { recording: boolean; level: number; dead: boolean; reason: MicDeadReason | null; label: string }): void {
+    window.api.reportMicHealth(event)
+  }
+
+  function stopTrackHook(): void {
+    if (trackHook === null) return
+    trackHook.track.removeEventListener('ended', trackHook.onLost)
+    trackHook.track.removeEventListener('mute', trackHook.onLost)
+    trackHook = null
+  }
+
+  /**
+   * 录着录着设备没了（拔线 / 驱动重启 / 系统静音）：立刻报，这条录音绝不进链。
+   * 「立刻」就是验收那条「设备掉线要马上报」——不等松开、不等整条录完再判。
+   */
+  function dropDevice(reason: MicDeadReason): void {
+    deadAbort = true
+    deadReason = reason
+    deadLabel = trackHook?.track.label ?? ''
+    const label = deadLabel
+    stopTrackHook()
+    console.log('MIC_DEAD', JSON.stringify({ reason, phase: 'recording', label }))
+    fail('🎤 ' + micDeadNotice(label), micDeadNotice(label), 3000)
+    void stop()
+  }
+
+  /** 每块 PCM：算电平、节流上报，并顺手复核设备还在不在。 */
+  function feedLevel(chunk: Float32Array): void {
+    if (!recording) return
+    let energy = 0
+    for (let i = 0; i < chunk.length; i += 1) energy += chunk[i] * chunk[i]
+    const rms = chunk.length > 0 ? Math.sqrt(energy / chunk.length) : 0
+    const level = levelPercent(rms)
+    sink.level?.(level)
+    const track = trackHook?.track
+    if (track && track.readyState !== 'live') {
+      dropDevice('ended')
+      return
+    }
+    if (track?.muted) {
+      dropDevice('muted')
+      return
+    }
+    const now = Date.now()
+    if (now - levelSentAt < 150) return
+    levelSentAt = now
+    reportHealth({ recording: true, level, dead: false, reason: null, label: recordDevice.split('|')[0] ?? '' })
+  }
 
   async function start(): Promise<void> {
     if (recording || starting) return
@@ -159,6 +219,26 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     }
     recorder = opened
     starting = false
+    // 开麦这一刻先问设备：轨道不是活的就是坏的——这一路进不了链，也就不会有「录完才发现没声」。
+    const track = opened.stream.getAudioTracks()[0]
+    const facts = { readyState: track?.readyState ?? 'ended', muted: track?.muted ?? true }
+    if (micDead(facts)) {
+      const reason: MicDeadReason = facts.readyState === 'live' ? 'muted' : 'ended'
+      const label = track?.label ?? ''
+      recorder = null
+      opened.stop()
+      console.log('MIC_DEAD', JSON.stringify({ reason, phase: 'open', label }))
+      reportHealth({ recording: false, level: 0, dead: true, reason, label })
+      fail('🎤 ' + micDeadNotice(label), micDeadNotice(label), 3000)
+      return
+    }
+    opened.setChunkListener(feedLevel)
+    if (track) {
+      const onLost = (): void => dropDevice(track.readyState === 'live' ? 'muted' : 'ended')
+      track.addEventListener('ended', onLost)
+      track.addEventListener('mute', onLost)
+      trackHook = { track, onLost }
+    }
     if (stopWhileStarting) {
       // 松开赶在开麦完成之前：这条停不能装没看见——丢了它，观感就是「松开了还在录」。
       stopWhileStarting = false
@@ -172,6 +252,8 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     recording = true
     setRingRecording(true)
     window.api.reportVoiceState(true)
+    levelSentAt = 0
+    reportHealth({ recording: true, level: 0, dead: false, reason: null, label: '' })
     sink.stage(recordingStageLine(sink.voiceCaptureMode(), sink.voiceCaptureKey()))
     recordTimer = setTimeout(() => void stop(), RECORD_MAX_MS)
     // 设备名只进日志：挪到 recording=true 之后异步补齐，别再撑大「松开撞上开麦」的竞态窗口。
@@ -198,12 +280,23 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     const parked = recorder
     const { chunks, sampleRate: rate } = parked?.take() ?? { chunks: [], sampleRate: 48_000 }
     recorder = null
+    parked?.setChunkListener(null)
+    stopTrackHook()
+    if (deadAbort) {
+      // 设备在录音中断开：这条录音是半条，进链只会送出一句残缺的话——提示已经落过了。
+      deadAbort = false
+      parked?.stop()
+      reportHealth({ recording: false, level: 0, dead: true, reason: deadReason, label: deadLabel })
+      return
+    }
     if (parked !== null) park(parked)
+    reportHealth({ recording: false, level: 0, dead: false, reason: null, label: recordDevice.split('|')[0] ?? '' })
     const frames = chunks.reduce((total, chunk) => total + chunk.length, 0)
     const rms = captureLevel(chunks, frames)
     const peak = capturePeak(chunks, frames, rate)
     const verdict = judgeCapture({ frames, sampleRate: rate, rms, peak })
-    if (!verdict.ok) {
+    // 双保险：判定说不行、或根本一帧都没录到，都不进链（0 帧的录音永远到不了 ASR）。
+    if (!shouldRunChain({ ok: verdict.ok, frames })) {
       // 丢了一条录音必须留痕：那句话本身说不出是哪台设备、多响，事后只能靠这一行还原现场。
       const mic = parked === null ? '' : await describeCaptureDevice(parked.stream)
       console.log(

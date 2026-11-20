@@ -11,6 +11,7 @@ import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { QualityReport } from './quality-report'
 import type { SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
 import type { GsiLibrariesView, GsiLibrarySetResult } from './gsi-lib'
+import type { MicHealthEvent } from './mic-health'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
@@ -35,6 +36,8 @@ export type { LogBundleFile, LogBundleManifest, LogBundleResult } from './log-bu
 export type { QualityCache, QualityGuard, QualityReport } from './quality-report'
 // 语音队列（#88）：快照口径在 ./speech-queue，面板只画不数。
 export type { SpeechQueueLane, SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
+// 麦克风健康（#96）：掉线判定/电平换算都在 ./mic-health，面板只画。
+export type { MicDeadReason, MicHealthEvent, StreamFacts } from './mic-health'
 
 /** 一条录音：key 形如 G01-L03（free 组是 G21-T01），durationMs 由 16k mono wav 字节数推算。 */
 export interface FtRecInfo {
@@ -604,7 +607,9 @@ export const IPC = {
   // 语音队列（#88）：正在读哪句、余几句；停止清空排队，正在读的读到段尾就停。
   SPEECH_QUEUE: 'speech:queue',
   SPEECH_QUEUE_STATE: 'speech:queue-state',
-  SPEECH_STOP: 'speech:stop'
+  SPEECH_STOP: 'speech:stop',
+  // 麦克风健康（#96）：浮层边录边报电平和掉线，主进程转广播给面板。
+  MIC_HEALTH: 'mic:health'
 } as const
 
 /** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
@@ -899,7 +904,10 @@ export const ipcContract = {
   /** 语音队列（#88）：现取快照；STOP 清空排队并停正在读的这句。 */
   speechQueue: invoke<[], SpeechQueueSnapshot>(IPC.SPEECH_QUEUE),
   onSpeechQueue: listen<SpeechQueueSnapshot>(IPC.SPEECH_QUEUE_STATE),
-  speechStop: invoke<[], SpeechStopResult>(IPC.SPEECH_STOP)
+  speechStop: invoke<[], SpeechStopResult>(IPC.SPEECH_STOP),
+  /** 麦克风健康（#96）：采集端上报，主进程转手广播；面板只收不发。 */
+  reportMicHealth: send<[MicHealthEvent]>(IPC.MIC_HEALTH),
+  onMicHealth: listen<MicHealthEvent>(IPC.MIC_HEALTH)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

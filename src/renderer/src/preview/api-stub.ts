@@ -426,6 +426,14 @@ const implemented = {
       sessionRatio: 0.6
     }
   }),
+  // 麦克风健康（#96）：预览里没人开麦，上报渠道照走（这是个 send，不是 invoke）；?micDead=1 时先发一条掉线，面板那一行就有提示可看。
+  reportMicHealth: () => {},
+  onMicHealth: (cb) => {
+    // ?micDead=1 看掉线提示；?micLive=1 看电平条（桩发一条 62% 的录音事件）。
+    if (query.has('micDead')) setTimeout(() => cb({ recording: false, level: 0, dead: true, reason: 'ended', label: '麦克风 (Realtek(R) Audio)' }), 150)
+    if (query.has('micLive')) setTimeout(() => cb({ recording: true, level: 62, dead: false, reason: null, label: '麦克风阵列 (Realtek(R) Audio)' }), 150)
+    return () => {}
+  },
   // 语音队列（#88）：桩给一份「正在读 + 后头两句」的快照，停止回一句清掉了两条。
   speechQueue: async () => ({
     speaking: `你走中路,我下路`,

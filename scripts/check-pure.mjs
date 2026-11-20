@@ -535,6 +535,17 @@ check('队列文案：只排队没在说', queueLine({ speaking: null, pending: 
 check('停止回执：边读边清', stopLine({ cleared: 2, interrupted: true }) === '这句读到段尾 · 清掉 2 句排队')
 check('停止回执：什么都没在说', stopLine({ cleared: 0, interrupted: false }) === '本来就没在说')
 
+// —— 麦克风健康（#96）：掉线判定、无帧不进链、电平换算 ——
+const { levelPercent, micDead, micDeadNotice, shouldRunChain } = await import('../src/shared/mic-health.ts')
+check('麦克风：轨道 ended 判为坏', micDead({ readyState: 'ended', muted: false }))
+check('麦克风：被系统静音也判为坏', micDead({ readyState: 'live', muted: true }))
+check('麦克风：活的且没静音放行', !micDead({ readyState: 'live', muted: false }))
+check('麦克风：掉线提示带设备名、说清没声音', micDeadNotice('麦克风阵列 (Realtek)').includes('麦克风阵列') && micDeadNotice('').includes('没声音'))
+check('链路门：0 帧永远不进 ASR（判成立也不进）', !shouldRunChain({ ok: true, frames: 0 }) && !shouldRunChain({ ok: false, frames: 24_000 }))
+check('链路门：有帧且判定成立才进', shouldRunChain({ ok: true, frames: 24_000 }))
+check('电平：0/负数/NaN 都是 0，0.1 顶满', levelPercent(0) === 0 && levelPercent(-3) === 0 && levelPercent(Number.NaN) === 0 && levelPercent(0.4) === 100)
+check('电平：说话量级落在六成上下', levelPercent(0.05) >= 55 && levelPercent(0.05) <= 65)
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
