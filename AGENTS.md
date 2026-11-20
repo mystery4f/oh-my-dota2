@@ -69,6 +69,9 @@ guessing the fields costs a rework round.
   (`exitProbe` / `finishProbe` / `reportProbe`): never call `app.exit(0)` unconditionally — that is how a failed probe
   used to look green, and eslint now rejects `app.exit` / `process.exit` anywhere under `src/main/probes/`.
 
+`--train-probe` pins the training decision seam: mutexes, preflight, run state, VRAM advisory
+  (`judgeFtVram`/`ftVramNote` four-case), export completeness (`missingFtExportFiles` three-case),
+  dataset split (`splitTrainEval` holds out the tail), and CER grading (cohorts never merged).
 
 ## Panel
 

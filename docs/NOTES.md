@@ -395,6 +395,21 @@
 - **备料附件丢失秒退**：`TrainManager.start()` 原来只把 kind/dataset 传给 `deriveTrainPlan`，丢掉备料挂上的 `asrFt`/`gvResolved` 附件 → 必报「环境没就绪」，且发生在写日志之前，现场全丢。修法：整份 request 透传 + `appendTrainLog()` 把训练状态机落盘 `logs/train.log`（4 MB 滚动）。
 - **续训 max_steps 陷阱**：HF Trainer 拿 `--resume_from` 恢复 global_step 后，若本轮 `--epochs` 折算的 max_steps ≤ 已到步数，**整轮跳过不训练直接退场**（一行 `epoch` 都不跑）。续训轮数必须保证总步数 > 上次 checkpoint（应用按「上次步数 + 200」重算）。
 - **账本与续训对账**：每次开跑把逐条 key+bytes+mtimeMs 指纹写进 `train/runs.db` 的 `dataset_entries`（外加 run 目录里的 `run.json`）；开训前逐条对账，重录/删除过就**拒启动并点名**（#63 起：增量模式拒绝并把原因给到面板，绝不静默落回全新训练——旧文案「静默新开」已不成立）；「应用新模型」按 exportDir 对上回写 applied——账本只前进不回退，缺文件静默跳过，记账不能反过来挡训练。
+### 显存门槛从「拒绝开训」降成「先提醒」（2026-11-21）
+- 症状：8G 卡（RTX 4060，8188 MiB）上点「开始训练」被一句「显存不足」直接挡住，可同一台机器上换一轮参数其实能跑完；关掉 GV 推理、关掉浏览器也还是不让开。
+- 根因：门槛是硬判——`judgeFtVram()` 用 `freeMiB >= FT_TRAIN_NEED_MIB`（6400 MiB）决定能不能开训。但这台机器上实测：失败时刻整卡已用 6724 MiB，把 GPT-SoVITS 停掉之后仍占着 4019 MiB（别的进程），「关程序凑够 6.4G」根本凑不到。硬拦的后果是把本来能跑的训练永久挡在门外，而且用户没有任何办法去满足它。
+- 修法：判断保留、后果降级。`judgeFtVram()` 照旧返回 `{ok, freeMiB, holders}`（`holders` 只收占用 ≥200 MiB 的进程，用来点名是谁占着），`ftVramNote()` 把它翻成一句人话提示：够用返回 `null`，不够返回「显存偏紧：整卡已用 X / Y MiB，可空出约 Z MiB（训练建议 6400 MiB）…照常开跑；真不够会在训练里报 CUDA OOM，那时关掉占卡程序再点一次。」`ftVramGuard()`（主进程，`nvidia-smi --query-gpu=memory.total,memory.used` + `--query-compute-apps`）把提示塞进 `resolveAsrFtTrainRequest()` 的 `warning` 字段，`TrainManager.start()` 把它写成训练日志的第一行——于是它既在开跑前可见，也留在日志里，事后能对上「为什么这次 OOM」。真不够时训练自己的 CUDA OOM 报错才是最终判据。
+- 探针钉住四态：够用 `ok`、7000 已用判 `bad`、`ftVramNote` 在 6724 已用且排除自家进程后给出「照常开跑」、够用时返回 `null`（`src/main/probes/train.ts`）。
+
+### 导出腿没写完就转正 = 识别 worker 直接加载失败（2026-11-21）
+- 症状：训练跑完、导出腿还在写最后一件时点「应用新模型」，界面说成功，下一句识别直接报加载失败，得手动把备份目录覆盖回去。
+- 根因：换模判据只看「导出目录存在吗」，不看里面凑没凑齐 sherpa 要的那几件。导出是逐件落盘的（conv_frontend → encoder → decoder），中途断掉时目录里已经有前两件，`lastExportDir` 也是有效的，于是残缺目录被 `rename` 成了现役。
+- 修法：`FT_MODEL_FILES`（= `ftArtifactTargets('qwen3')`，三件 int8 onnx）配上 `missingFtExportFiles(names, engineId)`，在 `applyAsrFtModel()` 里逐件点名，缺任何一件就拒绝转正并说清缺谁：「导出没跑完（缺 encoder.int8.onnx、decoder.int8.onnx）：重新点一次「开始训练」，等导出完成再应用」。注意引擎 id 必须显式传：不传默认按 qwen3 的三件查，拿去查 paraformer 的导出目录会把 `model.int8.onnx` + `tokens.txt` 判成缺件（2026-11-09 实测）。探针三例：齐 → 0 缺；只有 fp32 分片 → 缺两件；空目录 → 缺三件。
+
+### 全新装机第一次「应用新模型」必失败（2026-11-21）
+- 症状：干净安装（`asr-models/` 这个目录从来没存在过）上跑完第一轮微调，点「应用新模型」必失败，报「导出产物缺 tokenizer 词表文件，备份和原始模型目录里也没得借」。
+- 根因：两件事叠在一起。一是转正时把整个导出目录拷进 `qwen3-asr.next`——导出目录里有 3–5 GB 的 fp32 external-data 分片，拷一次现役目录翻几倍，下一轮换模还要再拷一遍；二是借用链当年只找 `bak` 与 `asr-models/*`，而新装机这两处都没有 qwen3 的词表，用户真正有的那份是「对讲」下载到 `voice-runtime/models/qwen3-asr/` 的官方模型——它根本没在链上。
+- 修法：只拷引擎表声明的三件 int8（`finetune.artifacts[].from → to`），词表单独借。兜底链固定成 `[刚备份的上一版, asr-models 下任何目录, shippedModelDir(), 训练底模目录]`，其中 `shippedModelDir()` 就是 `voice-runtime/models/<现役模型名>`——新装机的词表从这里借得到。`tokenizer` 这一项目标是目录、源可能是平铺布局，所以交给 `ensureTokenizerFiles()` 逐件拼（`tokenizer_config.json` / `vocab.json` / `merges.txt` 各找 `src/tokenizer/f` 与 `src/f`），三件齐才算成功，缺一件就抛「导出产物缺 tokenizer 词表文件…」而不是装个坏目录。`paraformer` 的 `tokens.txt` 走同一条 `finetune.borrow` 循环。
 ## GV 微调（GPT-SoVITS v2pro 包）
 
 ### 训练命令真相源（读自上游 webui.py，2026-11-04）
@@ -431,6 +446,17 @@
 - 修法：Nightly 标签改成 `v<package.json version>`，即 `v1.0.0-nightly.20261024-194835`。这样
   `semver.prerelease()[0] === 'nightly'`，既通过 `semver.valid`，又自动对上 `nightly.yml` 这个通道文件名。
   验证方式：`curl -s https://github.com/<owner>/<repo>/releases.atom | grep -o 'releases/tag/[^"]*'` 看到形如 `v1.0.0-nightly.…` 的标签即成立。
+
+### 只想换 JS 却要重装整个包（`pack-win --swap`）
+- 症状：改一行主进程逻辑，验证一次就得跑一遍 NSIS 安装，一两分钟起步，还得关掉正在跑的应用。
+- 根因：`pack:win` 走 electron-builder 的 NSIS 目标，它重写整个安装目录；而真正变了的只有 `resources/app.asar` 一个文件（Electron 与原生依赖都没动）。
+- 修法：`node scripts/pack-win.mjs --swap` 只做两件事——`electron-builder --dir` 打包到临时目录，然后把其中 `resources/app.asar` 拷进安装目录，动手前把旧的存成 `app.asar.bak`。换完重开应用即生效；回滚就是把 `app.asar.bak` 覆盖回去。整包安装仍然走 `npm run pack:win`。
+- 注意：只适用于纯 JS/TS 改动。换了 Electron 版本、增删了原生依赖或改了 `build/installer.nsh`，必须走整包。
+
+### 打包机上的镜像只设一个变量不够（`unable to verify the first certificate`）
+- 症状：国内机器上 `npm run pack:win` 报 `unable to verify the first certificate`，或者卡在下载 Electron zip 上直到超时。
+- 根因：这里有两个不同的下载者。`electron` 的 postinstall 下 Electron 二进制，认 `ELECTRON_MIRROR`；`electron-builder` 自己还要下 NSIS、winCodeSign 等 builder binaries，认的是 `ELECTRON_BUILDER_BINARIES_MIRROR`。只设后者，前面那步仍然直连 GitHub。
+- 修法：两个都设——`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`、`ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/`。脚本里都有默认值，所以清掉这两个变量反而会走默认镜像；真要让脚本不设，得显式传空串。
 
 
 ## 聊天数据源
