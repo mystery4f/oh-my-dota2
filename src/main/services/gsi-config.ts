@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseDotaVideoMode, type DotaDisplayMode } from '@shared/dota-video'
+import { loadSettings, saveSettings } from './settings'
+import { resolveGsiRoot, type GsiLibrariesView, type GsiLibrarySetResult } from '@shared/gsi-lib'
 
 /**
  * 往 Dota 2 的 `cfg/gamestate_integration/` 里放一份 GSI 配置。
@@ -188,13 +190,59 @@ async function libraryRoots(extra: readonly string[] = []): Promise<string[]> {
  * 两条路：注册表给的那些根，找不到再扫盘符（Steam 在移动硬盘、绿色版、注册表被清过）。
  * 扫描只在失败后发生——正常启动不该为一个兜底路径付 26×4 次 stat。
  */
-async function findCfgDir(): Promise<string | null> {
-  const known = (await libraryRoots()).find(hasDota)
-  if (known !== undefined) return join(known, CFG_DIR)
-  const widened = (await libraryRoots(scannedSteamRoots())).find(hasDota)
-  return widened === undefined ? null : join(widened, CFG_DIR)
+/** 枚举到的所有 Steam 库根（注册表 + vdf 展开，可能包含没装 Dota 的库）。 */
+/** 枚举到的所有 Steam 库根（注册表 + vdf 展开，可能包含没装 Dota 的库）。 */
+export async function listLibraries(): Promise<string[]> {
+  const known = await libraryRoots()
+  // 注册表给的路子里已经有人装了 Dota 就不再扫盘符：正常启动不该为兜底付 26×4 次 stat。
+  if (known.some(hasDota)) return [...new Set(known)]
+  const widened = await libraryRoots(scannedSteamRoots())
+  return [...new Set([...known, ...widened])]
 }
 
+/** 面板要的一整份：哪些库、选的是哪个、这次会落到哪（含「选的库不在了」）。 */
+export async function gsiLibrariesView(): Promise<GsiLibrariesView> {
+  const roots = (await listLibraries()).map((root) => ({ root, hasDota: hasDota(root) }))
+  const chosen = loadSettings().gsiLibraryRoot
+  return { roots, chosen, resolve: resolveGsiRoot(roots, chosen) }
+}
+
+/**
+ * 记住用户选的库并立刻写一遍 cfg。
+ *
+ * 传空串 = 回到自动。选的库必须在枚举结果里且真的装 Dota——否则保存一个写不进 cfg 的路径，
+ * 而用户以为已经生效，那是最难查的一类「我选了啊」（#78）。
+ */
+export async function setGsiLibrary(root: string, port: number): Promise<GsiLibrarySetResult> {
+  const wanted = root.trim()
+  if (wanted !== '') {
+    const view = await gsiLibrariesView()
+    const info = view.roots.find((item) => item.root === wanted)
+    if (info === undefined) return { ok: false, error: `这个目录不在 Steam 库里：${wanted}` }
+    if (!info.hasDota) return { ok: false, error: `这个库里没有 Dota 2（缺 steamapps/common/dota 2 beta）：${wanted}` }
+  }
+  saveSettings({ gsiLibraryRoot: wanted })
+  const ensured = await ensureGsiConfig(port)
+  return { ok: ensured.error === null, error: ensured.error ?? undefined, path: ensured.path }
+}
+
+interface CfgDirPick {
+  dir: string | null
+  /** 用户选过、但现在找不到（或没装 Dota）的那个库根；非空时调用方必须报出来。 */
+  missing: string | null
+}
+
+/**
+ * 决定写进哪个库的 gamestate_integration。
+ *
+ * 选了库就只认那个库：它被拔掉/改盘符时报「路径缺失」，**绝不**悄悄改写到别的库——
+ * 那样用户在「为什么我选了 D 盘却写到 C 盘」上永远查不到线索（#78）。
+ */
+async function pickCfgDir(): Promise<CfgDirPick> {
+  const view = await gsiLibrariesView()
+  if (view.resolve.missing) return { dir: null, missing: view.chosen }
+  return { dir: view.resolve.root === null ? null : join(view.resolve.root, CFG_DIR), missing: null }
+}
 /**
  * 读 Dota 2 的显示模式（独占全屏 / 全屏窗口 / 窗口）。
  *
@@ -230,7 +278,16 @@ export async function dotaDisplayMode(): Promise<DotaDisplayMode | null> {
 
 
 export async function ensureGsiConfig(port: number): Promise<GsiConfigResult> {
-  const dir = await findCfgDir()
+  const pick = await pickCfgDir()
+  if (pick.missing !== null) {
+    // 选了库就必须写进那个库：报缺失让人重选，而不是悄悄换一个库（#78）。
+    return {
+      path: null,
+      error: `选的 Steam 库找不到了：${pick.missing}（盘符变了或盘没插？在面板里重选，或清掉选择让应用自动找）`,
+      written: false
+    }
+  }
+  const dir = pick.dir
   if (!dir) {
     return { path: null, error: '没找到 Dota 2 安装目录（可以手动把 cfg 放进 cfg/gamestate_integration/）', written: false }
   }

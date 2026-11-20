@@ -84,8 +84,8 @@ import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-inst
 import { closeGvWebui, openGvWebui, registerGvWeights, scanGvDatasets } from './services/train/gv'
 import { discoverSovitsHome } from './services/voice/sovits-server'
 import { startTrain } from './services/train/start'
-import { gsiStatus } from './services/gsi'
-import { dotaDisplayMode } from './services/gsi-config'
+import { GSI_PORT, gsiStatus } from './services/gsi'
+import { dotaDisplayMode, gsiLibrariesView, setGsiLibrary } from './services/gsi-config'
 
 /**
 /** 语音运行时状态快照：handler 表与广播共用同一份拼装，别处不要再各拼一份。 */
@@ -140,6 +140,8 @@ const handlers: MainHandlers = {
   captureStatus: () => ({ ...getCaptureService().status(), gsi: gsiStatus() }),
   firstRunReport: () => firstRunReport(),
   envReport: (devices) => envReport(devices ?? { micCount: null, speakerCount: null }),
+  gsiLibraries: () => gsiLibrariesView(),
+  gsiSetLibrary: (root) => setGsiLibrary(String(root ?? ''), GSI_PORT),
   // 独占全屏上任何窗口都画不上去：这句话要在面板里说出来，否则用户只能自己猜浮层为什么不见了。
   dotaDisplay: async () => {
     const mode = await dotaDisplayMode()

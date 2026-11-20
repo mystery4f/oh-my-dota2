@@ -184,6 +184,12 @@ export interface AppSettings {
    * 单独一项而不是五个平铺字段——面板一次改整张表，平铺就要五个归一化分支加五处探针。
    */
   hotkeys: Record<HotkeyActionId, string>
+/**
+   * 用户在多 Steam 库之间选定的库根（绝对路径）；空 = 自动（库里找得到 Dota 用第一个）。
+   * GSICFG 只在游戏启动时读一次，运行时挪库不会自动重算——选过就每次启动复核，
+   * 找不到所选路径时报缺失、切回自动并给出提示（#78）。
+   */
+  gsiLibraryRoot: string
 }
 
 /** 快捷短语默认表：对局里高频、通用、不需要现场组织的英文短句；面板「文出」页可改。 */
@@ -199,6 +205,8 @@ export const DEFAULT_QUICK_PHRASES: string[] = [
 ]
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  /** #78：多 Steam 库时用户选定的库根，空 = 自动。 */
+  gsiLibraryRoot: '',
   provider: {
     id: 'deepseek',
     baseUrl: 'https://api.deepseek.com',

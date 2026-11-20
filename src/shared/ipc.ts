@@ -9,6 +9,7 @@ import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { QualityReport } from './quality-report'
+import type { GsiLibrariesView, GsiLibrarySetResult } from './gsi-lib'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
@@ -455,6 +456,10 @@ export const IPC = {
   FIRST_RUN: 'first-run:report',
   /** 这台机器的体检：CPU / 内存 / 磁盘 / 端口 / 设备数，每行一句话说清为什么值得看。 */
   ENV_REPORT: 'env:report',
+  /** #78：枚举 Steam 库 + 当前选择 + 这次会写到哪。 */
+  GSI_LIBRARIES: 'gsi:libraries',
+  /** #78：记住用户在面板里挑的库（空串 = 回到自动）。 */
+  GSI_SET_LIBRARY: 'gsi:set-library',
   /** 手动触发一次「拍屏 → OCR → 翻译 → 重建译文框」。 */
   /** 手动模式整屏重建（渲染层先清空再填充）。 */
   CAPTURE_REPLACE: 'capture:replace',
@@ -767,6 +772,8 @@ export const ipcContract = {
   /** 首次上手检查：六步证据快照，总览页直接画（不缓存，每次问都现凑）。 */
   firstRunReport: invoke<[], FirstRunReport>(IPC.FIRST_RUN),
   envReport: invoke<[EnvDeviceCounts], EnvReport>(IPC.ENV_REPORT),
+  gsiLibraries: invoke<[], GsiLibrariesView>(IPC.GSI_LIBRARIES),
+  gsiSetLibrary: invoke<[string], GsiLibrarySetResult>(IPC.GSI_SET_LIBRARY),
   onCaptureEntries: listen<CaptureEntry[]>(IPC.CAPTURE_ENTRIES),
   onCaptureUpdate: listen<CaptureEntry[]>(IPC.CAPTURE_UPDATE),
   onCaptureReplace: listen<CaptureEntry[]>(IPC.CAPTURE_REPLACE),

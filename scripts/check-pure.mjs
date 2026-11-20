@@ -482,6 +482,32 @@ check('质量卡：守卫文案不带百分号也不含「率」', !guardLine(gu
 check('质量卡：守卫文案照实写次数', guardLine(guarded.guard) === '拦下 2 次 · 救回 1 次 · 退回原文 1 次')
 check('质量卡：记账本文案写命中占比', cacheLine(guarded.cache) === '本次运行白拿 9 次 · 现翻 3 次 · 命中占比 75%')
 check('质量卡：小字写累计与快照次数', qualityFootnote(guarded.cache).includes('16 对') && qualityFootnote(guarded.cache).includes('2 次快照'))
+// —— Steam 库选择（gsi-lib）：选了就只认那个库，库没了报缺失而不是偷偷换库（#78） ——
+const { libraryLabel, resolveGsiRoot } = await import('../src/shared/gsi-lib.ts')
+const twoLibs = [
+  { root: 'C:\\Steam', hasDota: true },
+  { root: 'D:\\SteamLibrary', hasDota: true }
+]
+check(
+  'Steam 库：选了第二个库就写第二个库',
+  resolveGsiRoot(twoLibs, 'D:\\SteamLibrary').root === 'D:\\SteamLibrary' &&
+    resolveGsiRoot(twoLibs, 'D:\\SteamLibrary').auto === false
+)
+check(
+  'Steam 库：选的库不在了报缺失，不退回自动',
+  resolveGsiRoot(twoLibs, 'E:\\Moved').root === null && resolveGsiRoot(twoLibs, 'E:\\Moved').missing === true
+)
+check('Steam 库：没选过就自动挑第一个装了 Dota 的', resolveGsiRoot(twoLibs, '').root === 'C:\\Steam')
+check(
+  'Steam 库：选了没装 Dota 的库也算缺失',
+  resolveGsiRoot([...twoLibs.slice(0, 1), { root: 'D:\\SteamLibrary', hasDota: false }], 'D:\\SteamLibrary').missing === true
+)
+check(
+  'Steam 库：一个装 Dota 的都没有时落点为 null',
+  resolveGsiRoot([{ root: 'D:\\SteamLibrary', hasDota: false }], '').root === null
+)
+check('Steam 库：展示名标出「没装 Dota」', libraryLabel({ root: 'D:\\SteamLibrary', hasDota: false }).includes('没装 Dota'))
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

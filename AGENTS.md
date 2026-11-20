@@ -237,6 +237,10 @@ it and nothing happened". The overlay and the pause hint print key names from th
   never touches the screen and does not need a chat region; text arrives through
   `gsi.ts` → `pushChat` → `ChatCaptureService.pushMessages()`. `ocr` is the original polling loop.
   Manual mode always uses the snapshot path regardless of the setting.
+- Multi-library Steam installs: `settings.gsiLibraryRoot` pins the chosen library root (empty = auto).
+  The cfg is written into the chosen library only — a moved/renamed library reports `路径缺失`
+  instead of silently redirecting to another library (`resolveGsiRoot`'s `missing` flag). Dota reads
+  GSI config only at launch, so the panel says the game must restart after switching libraries.
 - GSI config: the app writes `gamestate_integration_ohmydota2.cfg` into
   `<steam library>/steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration/` on startup (Steam
   path from `HKCU\Software\Valve\Steam` + `libraryfolders.vdf`). It points at `http://127.0.0.1:32123`;

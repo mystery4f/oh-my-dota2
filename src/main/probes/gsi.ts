@@ -10,7 +10,8 @@ import {
   type GsiEffects,
   type GsiPayload
 } from '../services/gsi'
-import { cfgBody } from '../services/gsi-config'
+import { cfgBody, setGsiLibrary } from '../services/gsi-config'
+import { libraryLabel, resolveGsiRoot } from '@shared/gsi-lib'
 import { renderChatLine } from '@shared/chat-line'
 
 /** 直接打本地端口：绕开全局 fetch（它被代理感知层换过，localhost 不该走代理）。 */
@@ -269,6 +270,37 @@ export async function runGsiProbe(): Promise<void> {
     diagAfterFirst[0].silentMs >= 90_000 &&
     diagAfterFirst[0].listening === true &&
     diagAfterFirst[0].port === port
+  // #78：多库时「选了哪个就写哪个」，库没了就报缺失而不是悄悄换库。
+  const twoLibs = [
+    { root: 'C:\\Steam', hasDota: true },
+    { root: 'D:\\SteamLibrary', hasDota: true }
+  ]
+  const pickSecond = resolveGsiRoot(twoLibs, 'D:\\SteamLibrary')
+  const pickMissing = resolveGsiRoot(twoLibs, 'E:\\Moved\\SteamLibrary')
+  const pickAuto = resolveGsiRoot(twoLibs, '')
+  const pickNoDota = resolveGsiRoot(
+    [
+      { root: 'C:\\Steam', hasDota: true },
+      { root: 'D:\\SteamLibrary', hasDota: false }
+    ],
+    'D:\\SteamLibrary'
+  )
+  const pickNothing = resolveGsiRoot([{ root: 'D:\\SteamLibrary', hasDota: false }], '')
+  const refusedLibrary = await setGsiLibrary('Z:\nowhere', port)
+  const libOk =
+    pickSecond.root === 'D:\\SteamLibrary' &&
+    pickSecond.auto === false &&
+    pickSecond.missing === false &&
+    pickMissing.root === null &&
+    pickMissing.missing === true &&
+    pickAuto.root === 'C:\\Steam' &&
+    pickAuto.auto === true &&
+    pickNoDota.missing === true &&
+    pickNothing.root === null &&
+    libraryLabel({ root: 'D:\\SteamLibrary', hasDota: false }).includes('没装 Dota') &&
+    refusedLibrary.ok === false &&
+    (refusedLibrary.error ?? '').includes('不在 Steam 库里')
+
   const stallOk =
     stallWorded &&
     stallNoLies &&
@@ -278,6 +310,7 @@ export async function runGsiProbe(): Promise<void> {
     recovered.state === 'fresh' &&
     diagAfterSecondStall === 2
   const ok =
+    libOk &&
     stallOk &&
     failed.length === 0 &&
     rosterOk &&
@@ -325,6 +358,7 @@ export async function runGsiProbe(): Promise<void> {
         autoStops: afterPostGame.autoStops
       },
       second: { gameState: second.gameState, matchId: second.matchId, autoStarts: second.autoStarts },
+      libraries: { pickSecond, pickMissing, pickAuto, pickNoDota, pickNothing, refused: refusedLibrary },
       stall: {
         quietWhileFresh,
         stalled: stalled.state,

@@ -29,6 +29,7 @@ import { mergePlan, rankCandidates, type HotwordCandidate, type HotwordSuggestio
 import { judgeFirstRun } from '@shared/first-run'
 import { judgeGsiStall, gsiStallWarning } from '@shared/gsi-stall'
 import { judgeEnv } from '@shared/env-report'
+import { resolveGsiRoot } from '@shared/gsi-lib'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
@@ -513,6 +514,28 @@ const implemented = {
       speakerCount: devices?.speakerCount ?? 1
     })
   },
+  /**
+   * #78 Steam 库选择器：桩里也跑真判据（`resolveGsiRoot` 纯函数）。
+   * `?libs=2` 造两个库、选的是非常用那个（面板才显示选择器）；`?libs=missing` 造「选的库没了」。
+   */
+  gsiLibraries: async () => {
+    const mode = query.get('libs')
+    const two = mode === '2' || mode === 'missing'
+    const roots = two
+      ? [
+          { root: 'C:\\Program Files (x86)\\Steam', hasDota: true },
+          { root: 'D:\\SteamLibrary', hasDota: true }
+        ]
+      : [{ root: 'C:\\Program Files (x86)\\Steam', hasDota: true }]
+    const chosen = mode === 'missing' ? 'E:\\Moved\\SteamLibrary' : two ? 'D:\\SteamLibrary' : ''
+    return { roots, chosen, resolve: resolveGsiRoot(roots, chosen) }
+  },
+  gsiSetLibrary: async (root) => ({
+    ok: true,
+    path: `${
+      root !== '' ? root : 'C:\\Program Files (x86)\\Steam'
+    }\\steamapps\\common\\dota 2 beta\\game\\dota\\cfg\\gamestate_integration\\gamestate_integration_ohmydota2.cfg`
+  }),
   captureStatus: async () => {
     const stalled = query.get('stall') === '1'
     const lastAt = stalled ? Date.now() - 7 * 60_000 : Date.now() - 4_000

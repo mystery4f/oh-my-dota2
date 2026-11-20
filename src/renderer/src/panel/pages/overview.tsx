@@ -11,6 +11,8 @@ import type { FirstRunReport, FirstRunStep } from '@shared/first-run'
 import type { EnvDeviceCounts, EnvReport } from '@shared/env-report'
 import { envCounted } from '@shared/env-report'
 import type { EnvState } from '@shared/env-report'
+import type { GsiLibrariesView } from '@shared/gsi-lib'
+import { libraryLabel } from '@shared/gsi-lib'
 import type { SectionId } from '../sections'
 import { Button } from '@/components/ui/button'
 import { CollapsibleGroup, Group, Row, StatusPill, Panel } from '../components/primitives'
@@ -88,6 +90,10 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
   const [firstRun, setFirstRun] = useState<FirstRunReport | null>(null)
   const [env, setEnv] = useState<EnvReport | null>(null)
   const [envBusy, setEnvBusy] = useState(false)
+  const [libs, setLibs] = useState<GsiLibrariesView | null>(null)
+  const [libPick, setLibPick] = useState('')
+  const [libBusy, setLibBusy] = useState(false)
+  const [libNote, setLibNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const refresh = async (): Promise<void> => {
@@ -154,9 +160,27 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
         micCount: all.filter((d) => d.kind === 'audioinput').length,
         speakerCount: all.filter((d) => d.kind === 'audiooutput').length
       }
-      setEnv(await window.api.envReport(counts))
+      const [report, libraries] = await Promise.all([
+        window.api.envReport(counts),
+        window.api.gsiLibraries().catch(() => null)
+      ])
+      setEnv(report)
+      setLibs(libraries)
+      setLibPick(libraries?.chosen ?? '')
     } finally {
       setEnvBusy(false)
+    }
+  }
+
+  /** #78：把选中的库记住并立刻重写 cfg；失败把原因摆出来，不假装成功。 */
+  const saveLibrary = async (): Promise<void> => {
+    setLibBusy(true)
+    try {
+      const result = await window.api.gsiSetLibrary(libPick)
+      setLibNote(result.ok ? `已写进：${result.path ?? '（路径未知）'}` : (result.error ?? '保存失败'))
+      if (result.ok) await runEnv()
+    } finally {
+      setLibBusy(false)
     }
   }
 
@@ -297,6 +321,37 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
                 ))}
               </div>
             )}
+            {libs !== null && (libs.roots.length > 1 || libs.resolve.missing) ? (
+              <div className="space-y-2 border-t border-border/40 pt-2">
+                <div className="flex items-center gap-2">
+                  <StatusPill tone={libs.resolve.missing ? 'bad' : 'ready'}>
+                    {libs.resolve.missing ? '路径缺失' : '已选定'}
+                  </StatusPill>
+                  <span className="w-20 shrink-0 text-sm text-muted-foreground">Steam 库</span>
+                  <select
+                    className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-sm"
+                    value={libPick}
+                    onChange={(event) => setLibPick(event.target.value)}
+                  >
+                    <option value="">自动（第一个装了 Dota 的库）</option>
+                    {libs.roots.map((info) => (
+                      <option key={info.root} value={info.root}>
+                        {libraryLabel(info)}
+                      </option>
+                    ))}
+                  </select>
+                  <Button className="shrink-0" onClick={() => void saveLibrary()} disabled={libBusy}>
+                    {libBusy ? '写入…' : '用这个库'}
+                  </Button>
+                </div>
+                <div className="pl-[5.5rem] text-xs text-muted-foreground">
+                  {libs.resolve.missing
+                    ? `上次选的库不在了：${libs.chosen}——重选一个，或选「自动」。`
+                    : 'Dota 只在启动时读 GSI 配置：换库后要重启游戏才会生效。'}
+                </div>
+                {libNote === null ? null : <div className="pl-[5.5rem] text-xs text-amber-300">{libNote}</div>}
+              </div>
+            ) : null}
             <div className="pt-2">
               <Button
                 className="shrink-0"
