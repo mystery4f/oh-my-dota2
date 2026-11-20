@@ -714,13 +714,20 @@ const implemented = {
   },
   onVoiceRecordState: () => () => {},
   voiceOutTest: async () => ({ ok: true, durationMs: 900, hint: 'stub 声出已播', sinkLabel: 'CABLE Input (VB-Audio Virtual Cable)' }),
-  voiceOutCable: async () => ({
-    installed: true,
-    endpoints: ['CABLE Input (VB-Audio Virtual Cable)', 'CABLE Output (VB-Audio Virtual Cable)'],
-    driverOnly: false,
-    error: null
-  }),
-  voiceOutCableInstall: async () => ({ ok: true, launched: true, dir: 'C:\\data\\vb-cable', error: null }),
+  // #90 三种缺口一眼可看：?cable=absent（没装）/ driverOnly（驱动在端点没出现）/ error（没查成）。
+  voiceOutCable: async () => {
+    const mode = query.get('cable')
+    if (mode === 'absent') return { installed: false, endpoints: [], driverOnly: false, error: null }
+    if (mode === 'driverOnly') return { installed: true, endpoints: [], driverOnly: true, error: null }
+    if (mode === 'error') return { installed: false, endpoints: [], driverOnly: false, error: 'PowerShell 超过 15 秒没返回' }
+    return {
+      installed: true,
+      endpoints: ['CABLE Input (VB-Audio Virtual Cable)', 'CABLE Output (VB-Audio Virtual Cable)'],
+      driverOnly: false,
+      error: null
+    }
+  },
+  voiceOutCableInstall: async () => ({ ok: true, launched: true, dir: 'C:\\data\\vb-cable', step: null, error: null }),
   overlayVoiceToggle: async () => ({ ok: true }),
   trainRuns: async () => stubTrainRuns,
   trainRun: async (id) => stubTrainRuns.find((run) => run.id === id) ?? null,

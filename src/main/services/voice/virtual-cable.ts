@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process'
+import { execFile as execFileNode } from 'node:child_process'
+import type { ExecFileException } from 'node:child_process'
 import { isVirtualCableName, matchVirtualCable, type VirtualCableStatus } from '@shared/voice-out'
 
 /**
@@ -9,6 +10,20 @@ import { isVirtualCableName, matchVirtualCable, type VirtualCableStatus } from '
  *
  * 只读一次设备清单与一个服务状态；结果缓存几秒，避免面板来回切换时反复起 PowerShell。
  */
+
+/** 探针/测试注入点：给假 execFile，每一类输出都能在离线探针里走到。ticket: #90 */
+export interface CableBackendDeps {
+  execFile: (
+    cmd: string,
+    args: string[],
+    opts: object,
+    cb: (error: ExecFileException | null, stdout: string) => void
+  ) => void
+}
+
+export function loadCableDeps(): CableBackendDeps {
+  return { execFile: execFileNode as unknown as CableBackendDeps['execFile'] }
+}
 
 const TIMEOUT_MS = 15000
 /** 检测缓存：装驱动/重启端点后重新进页面即可，不必每一帧都重查。 */
@@ -40,19 +55,24 @@ let cached: { at: number; status: VirtualCableStatus } | null = null
 /** 检测系统里有没有 VB-Cable；缓存过期或失败后调用方可以隔几秒再来一次。 */
 export async function detectVirtualCable(): Promise<VirtualCableStatus> {
   if (cached && Date.now() - cached.at < TTL_MS) return cached.status
-  const status = await query()
+  const status = await query(loadCableDeps())
   // 查询失败不缓存：下一次进来应该重新试，而不是把一次超时钉成「没装」。
   cached = status.error === null ? { at: Date.now(), status } : null
   return status
 }
 
-function query(): Promise<VirtualCableStatus> {
+/** 探针/测试入口：注入假 execFile，测每种输出都被正确解释。 */
+export async function cableProbe(deps: CableBackendDeps): Promise<VirtualCableStatus> {
+  return query(deps)
+}
+
+function query(deps: CableBackendDeps): Promise<VirtualCableStatus> {
   return new Promise((resolve) => {
-    execFile(
+    deps.execFile(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', SCRIPT],
       { timeout: TIMEOUT_MS, windowsHide: true, encoding: 'utf8', maxBuffer: 1024 * 1024 },
-      (error, stdout) => {
+      (error: ExecFileException | null, stdout: string) => {
         if (error) {
           const reason = error.killed ? `PowerShell 超过 ${TIMEOUT_MS / 1000} 秒没返回` : error.message
           resolve({ installed: false, endpoints: [], driverOnly: false, error: reason })

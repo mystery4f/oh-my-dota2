@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { app, net } from 'electron'
 import { errorMessage } from '@shared/errors'
-import type { CableInstallResult } from '@shared/voice-out'
+import type { CableInstallResult, CableInstallStep } from '@shared/voice-out'
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -132,37 +132,83 @@ function launchElevated(exe: string, dir: string): Promise<void> {
   })
 }
 
+/**
+ * 安装流程的依赖，全部可注入：主进程用默认实现，探针给假的，这样每一步失败都能走到。
+ * ticket: #90
+ */
+export interface CableInstallDeps {
+  resolvePackUrl: () => Promise<string>
+  downloadPack: (url: string, zip: string) => Promise<void>
+  extractPack: (zip: string, dir: string) => Promise<void>
+  launchElevated: (exe: string, dir: string) => Promise<void>
+}
+
+/** 步进到失败点即收场，返回那一步；能走到最后一步的就是成功。 */
+async function runInstall(deps: CableInstallDeps, dir = packDir()): Promise<CableInstallResult> {
+  try {
+    const exe = join(dir, EXE_NAME)
+    mkdirSync(dir, { recursive: true })
+    if (!existsSync(exe)) {
+      const url = await deps.resolvePackUrl().catch((err) => {
+        throw { __step: 'page' as const, __err: err } as unknown as Error
+      })
+      const zip = join(dir, 'vb-cable.zip')
+      try {
+        await deps.downloadPack(url, zip)
+      } catch (err) {
+        rmSync(zip, { force: true })
+        throw { __step: 'download' as const, __err: err } as unknown as Error
+      }
+      try {
+        await deps.extractPack(zip, dir)
+      } catch (err) {
+        throw { __step: 'extract' as const, __err: err } as unknown as Error
+      }
+      rmSync(zip, { force: true })
+      if (!existsSync(exe)) {
+        throw { __step: 'extract' as const, __err: new Error(`解压后没找到 ${EXE_NAME}`) } as unknown as Error
+      }
+    }
+    try {
+      await deps.launchElevated(exe, dir)
+    } catch (err) {
+      throw { __step: 'elevate' as const, __err: err } as unknown as Error
+    }
+    return { ok: true, launched: true, dir, step: null, error: null }
+  } catch (maybe) {
+    // 识别「步进包」并剥出那一步；不是步进包的错误（mkdir 失败这类前期件）记 unknown。
+    const step = (maybe as { __step?: CableInstallStep }).__step ?? null
+    const message = errorMessage(step === null ? (maybe as Error) : (maybe as { __err: unknown }).__err)
+    console.log('VCABLE_INSTALL_FAILED', JSON.stringify({ step, err: message, dir }))
+    return { ok: false, launched: false, dir, step, error: message }
+  }
+}
+
 let running: Promise<CableInstallResult> | null = null
 
+/** 生产依赖：页面拉最新版 → 双通道下载 → bsdtar 解压 → 提权。 */
+function liveDeps(): CableInstallDeps {
+  return {
+    resolvePackUrl: () => resolvePackUrl(),
+    downloadPack: (url, zip) => downloadPack(url, zip),
+    extractPack: (zip, dir) => extractPack(zip, dir),
+    launchElevated: (exe, dir) => launchElevated(exe, dir)
+  }
+}
+
 /** 入口：包不在就下，然后提权启动；重复点击复用同一轮。 */
-export function installVirtualCable(): Promise<CableInstallResult> {
-  running ??= runInstall().finally(() => {
+export async function installVirtualCable(): Promise<CableInstallResult> {
+  running ??= runInstall(liveDeps()).finally(() => {
     running = null
   })
   return running
 }
 
-async function runInstall(): Promise<CableInstallResult> {
-  const dir = packDir()
-  const exe = join(dir, EXE_NAME)
-  try {
-    mkdirSync(dir, { recursive: true })
-    if (!existsSync(exe)) {
-      const url = await resolvePackUrl()
-      const zip = join(dir, 'vb-cable.zip')
-      console.log('VCABLE_INSTALL_DOWNLOAD', JSON.stringify({ url, dir }))
-      await downloadPack(url, zip)
-      console.log('VCABLE_INSTALL_EXTRACT', JSON.stringify({ zip }))
-      await extractPack(zip, dir)
-      rmSync(zip, { force: true })
-    }
-    if (!existsSync(exe)) throw new Error(`解压后没找到 ${EXE_NAME}`)
-    console.log('VCABLE_INSTALL_LAUNCH', JSON.stringify({ exe }))
-    await launchElevated(exe, dir)
-    return { ok: true, launched: true, dir, error: null }
-  } catch (err) {
-    const message = errorMessage(err)
-    console.log('VCABLE_INSTALL_FAILED', JSON.stringify({ err: message, dir }))
-    return { ok: false, launched: false, dir, error: message }
-  }
+/**
+ * 探针入口：注入假依赖，测每一步失败都留痕。
+ * `dir` 让探针换到临时目录——真实数据目录里可能已经有装好的 exe，那会跳过下载/解压两步，
+ * 于是「哪一步失败」这条线有三步永远测不到（2026-11-21 就这么假绿过一轮）。
+ */
+export function installVirtualCableWithDeps(deps: CableInstallDeps, dir?: string): Promise<CableInstallResult> {
+  return runInstall(deps, dir)
 }

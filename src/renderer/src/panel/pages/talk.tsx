@@ -12,6 +12,7 @@ import {
   VOICE_OUT_VOICES,
   findCableOutput,
   isVirtualCableName,
+  judgeCableGap,
   type VirtualCableStatus
 } from '@shared/voice-out'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
@@ -172,6 +173,26 @@ export function TalkPage({
 
   // 输出设备清单里的虚拟声卡播放端；选它，声出才进得了游戏的麦克风。
   const cableOutput = findCableOutput(outputs.map((d) => ({ deviceId: d.deviceId, label: d.label })))
+  // 解构出 wrap：save 是每次渲染新建的对象字面量，进依赖数组会自激。
+  const wrap = save.wrap
+  const gap = cable
+    ? judgeCableGap(cable, settings?.ttsOutputDevice ?? '', cableOutput?.deviceId ?? null)
+    : null
+  // #90：装好且当前输出不是 CABLE 时自动选上——用户手动选过别的设备就不碰（settings 已变）。
+  // 只在「检测为已装 + 输出还没指到它」瞬间做一次，之后 settings 指向它，条件自然不再成立。
+  useEffect(() => {
+    if (
+      cable &&
+      cable.error === null &&
+      cable.installed &&
+      !cable.driverOnly &&
+      cableOutput &&
+      settings?.ttsOutputDevice !== cableOutput.deviceId
+    ) {
+      void wrap(update({ ttsOutputDevice: cableOutput.deviceId }))
+    }
+    // wrap / update 都是 useCallback 稳定的，写进来满足 exhaustive-deps 又不会自激。
+  }, [cable, cableOutput, settings?.ttsOutputDevice, wrap, update])
 
   // 纠错回路：改对了就把差异词并进热词表，下一句录音就少错一次。
   const hotwordsRef = useRef(settings?.asrHotwords ?? '')
@@ -502,35 +523,31 @@ export function TalkPage({
           >
             {cable === null ? (
               <span className="text-xs text-muted-foreground">检查中…</span>
-            ) : cable.error !== null ? (
-              <span className="text-xs text-amber-400">没查成：{cable.error}</span>
-            ) : !cable.installed ? (
-              <span className="text-xs text-amber-400">没检测到 VB-Cable：声出只会从扬声器出来，队友听不到</span>
-            ) : cable.driverOnly ? (
-              <span className="text-xs text-amber-400">驱动在，音频端点还没出现：重启一次再检测</span>
             ) : (
-              <span className="text-xs text-muted-foreground">已装：{cable.endpoints.join(' / ')}</span>
+              <span className={`text-xs ${gap!.action === 'none' ? 'text-muted-foreground' : 'text-amber-400'}`}>
+                {gap!.line}
+              </span>
             )}
             <Button size="sm" variant="outline" onClick={recheckCable}>
               重新检测
             </Button>
-            {cable && cable.error === null && (!cable.installed || cable.driverOnly) ? (
-              <Button size="sm" variant="secondary" onClick={() => setCableGuideOpen(true)}>
-                怎么装…
-              </Button>
+            {cable && gap!.action === 'install-cable' ? (
+              <>
+                <Button size="sm" variant="secondary" disabled={installingCable} onClick={installCable}>
+                  {installingCable ? '准备中…' : '一键安装'}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setCableGuideOpen(true)}>
+                  怎么装…
+                </Button>
+              </>
             ) : null}
-            {cable && cable.error === null && !cable.installed ? (
-              <Button size="sm" variant="secondary" disabled={installingCable} onClick={installCable}>
-                {installingCable ? '准备中…' : '一键安装'}
-              </Button>
-            ) : null}
-            {cableOutput && settings.ttsOutputDevice !== cableOutput.deviceId ? (
+            {cable && gap!.action === 'select-device' ? (
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => void save.wrap(update({ ttsOutputDevice: cableOutput.deviceId }))}
+                onClick={() => void save.wrap(update({ ttsOutputDevice: cableOutput?.deviceId ?? '' }))}
               >
-                设为输出
+                {gap!.actionLabel}
               </Button>
             ) : null}
           </Row>

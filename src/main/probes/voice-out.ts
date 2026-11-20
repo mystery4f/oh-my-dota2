@@ -1,8 +1,12 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { finishProbe, probeCases } from './harness'
 import { DEFAULT_SETTINGS, OFFLINE_VOICES } from '@shared/ipc'
 import { speechFailHint } from '@shared/speech-plan'
 import {
   DEFAULT_SINK_ID,
+  judgeCableGap,
   DEFAULT_SPEAK_KEY,
   DEFAULT_SPEAK_MODE,
   DEFAULT_VOICE_OUT_ENGINE,
@@ -37,7 +41,8 @@ import {
   type VoiceOutReadinessInput
 } from '@shared/voice-out-readiness'
 import { splitForSpeech } from '../services/voice/speech-pipeline'
-import { pickCablePackUrl } from '../services/voice/virtual-cable-install'
+import { installVirtualCableWithDeps, pickCablePackUrl } from '../services/voice/virtual-cable-install'
+import { cableProbe } from '../services/voice/virtual-cable'
 
 /**
  * 声出探针（--voice-out-probe）：只验「脑子」，不碰网络、不碰驱动、不开游戏。
@@ -52,7 +57,7 @@ import { pickCablePackUrl } from '../services/voice/virtual-cable-install'
 
 const { cases, push } = probeCases()
 
-export function runVoiceOutProbe(): void {
+export async function runVoiceOutProbe(): Promise<void> {
   // —— 决策一：念什么、哪个嗓、念不念 ——
   // 票 07 后没有「固定嗓」常量可引用：默认嗓 = 默认引擎经 resolveVoiceOutSynth 解析出的那把。
   const defaultSynth = resolveVoiceOutSynth(DEFAULT_VOICE_OUT_ENGINE, '', VOICE_OUT_TEST_LINE)
@@ -557,6 +562,137 @@ export function runVoiceOutProbe(): void {
       !/api_v2|refs\.json|ttsSovitsRefAudio/i.test(failHint),
     failHint
   )
+
+  // —— #90 缺口判定：把检测结果 + 选没选输出设备收敛成「缺口 + 唯一动作」 ——
+  const gapNone = judgeCableGap(
+    { installed: true, endpoints: ['CABLE Input (VB-Audio Virtual Cable)'], driverOnly: false, error: null },
+    '{cable-0}.0000',
+    '{cable-0}.0000'
+  )
+  push(
+    '缺口：装好且已选 CABLE 输出 → 无动作',
+    gapNone.action === 'none' && gapNone.line.startsWith('已装：'),
+    JSON.stringify(gapNone)
+  )
+  const gapSelect = judgeCableGap(
+    { installed: true, endpoints: ['CABLE Input (VB-Audio Virtual Cable)'], driverOnly: false, error: null },
+    '',
+    '{cable-0}.0000'
+  )
+  push(
+    '缺口：装好但输出设备没选 → 唯一的动作是设为输出，且点名端点',
+    gapSelect.action === 'select-device' && gapSelect.actionLabel === '设为输出' && gapSelect.line.includes('CABLE Input'),
+    JSON.stringify(gapSelect)
+  )
+  const gapInstall = judgeCableGap(
+    { installed: false, endpoints: [], driverOnly: false, error: null },
+    '',
+    null
+  )
+  push(
+    '缺口：没装 → 唯一动作是一键安装',
+    gapInstall.action === 'install-cable' && gapInstall.actionLabel === '一键安装',
+    JSON.stringify(gapInstall)
+  )
+  const gapReboot = judgeCableGap(
+    { installed: true, endpoints: [], driverOnly: true, error: null },
+    '',
+    null
+  )
+  push(
+    '缺口：驱动在端点没出现 → 动作是重启后重测，不是一键安装（再装一次没有用）',
+    gapReboot.action === 'reboot' && gapReboot.actionLabel === '重新检测' && gapReboot.line.includes('重启'),
+    JSON.stringify(gapReboot)
+  )
+  const gapNoEndpoint = judgeCableGap(
+    { installed: true, endpoints: ['CABLE Input (VB-Audio Virtual Cable)'], driverOnly: false, error: null },
+    '',
+    null
+  )
+  push(
+    '缺口：驱动在但渲染层还没枚举到端点 → 不给人一个写不进 deviceId 的按钮',
+    gapNoEndpoint.action === 'manual' && gapNoEndpoint.line.includes('还没出现'),
+    JSON.stringify(gapNoEndpoint)
+  )
+  const gapError = judgeCableGap(
+    { installed: false, endpoints: [], driverOnly: false, error: 'PowerShell 超时' },
+    '',
+    null
+  )
+  push(
+    '缺口：检测没跑成 → 手动重测，不当成「没装」去装驱动',
+    gapError.action === 'manual' && gapError.line.startsWith('没查成：'),
+    JSON.stringify(gapError)
+  )
+
+  // —— #90 安装四步：每步失败都报出那一步；成功时 step 为 null ——
+  // 换到临时目录：真实数据目录里可能已经有装好的 exe，会跳过下载/解压两只腿。
+  const installRoot = mkdtempSync(join(tmpdir(), 'omd2-vb-'))
+  const stepOf = (name: string) => () => Promise.reject(new Error(name))
+  const page = await installVirtualCableWithDeps(
+    {
+      resolvePackUrl: stepOf('page'),
+      downloadPack: () => Promise.resolve(),
+      extractPack: () => Promise.resolve(),
+      launchElevated: () => Promise.resolve()
+    },
+    join(installRoot, 'page')
+  )
+  push('安装：页面取不到版本 → 报 step=page', page.ok === false && page.step === 'page', JSON.stringify(page.step))
+  const dl = await installVirtualCableWithDeps(
+    {
+      resolvePackUrl: () => Promise.resolve('http://x/zip'),
+      downloadPack: () => Promise.reject(new Error('ECONNRESET')),
+      extractPack: () => Promise.resolve(),
+      launchElevated: () => Promise.resolve()
+    },
+    join(installRoot, 'download')
+  )
+  push('安装：下载断流 → 报 step=download', dl.ok === false && dl.step === 'download', JSON.stringify(dl.step))
+  const ex = await installVirtualCableWithDeps(
+    {
+      resolvePackUrl: () => Promise.resolve('http://x/zip'),
+      downloadPack: () => Promise.resolve(),
+      extractPack: () => Promise.reject(new Error('tar exit 2')),
+      launchElevated: () => Promise.resolve()
+    },
+    join(installRoot, 'extract')
+  )
+  push('安装：解压失败 → 报 step=extract', ex.ok === false && ex.step === 'extract', JSON.stringify(ex.step))
+  // 提权这一腿要 exe 已经在盘上（否则会先报 extract「解压后没找到」）。
+  const elevateDir = join(installRoot, 'elevate')
+  mkdirSync(elevateDir, { recursive: true })
+  writeFileSync(join(elevateDir, 'VBCABLE_Setup_x64.exe'), 'stub')
+  const el = await installVirtualCableWithDeps(
+    {
+      resolvePackUrl: () => Promise.resolve('http://x/zip'),
+      downloadPack: () => Promise.resolve(),
+      extractPack: () => Promise.resolve(),
+      launchElevated: () => Promise.reject(new Error('UAC 被拒'))
+    },
+    elevateDir
+  )
+  push('安装：提权被拒 → 报 step=elevate', el.ok === false && el.step === 'elevate', JSON.stringify(el.step))
+
+  // —— #90 检测输出解释：假 execFile 喂进 cableProbe，四类结果都正确归类 ——
+  const det = async (stdout: string): Promise<string> => {
+    const status = await cableProbe({
+      execFile: (_cmd, _args, _opts, cb) => cb(null, stdout)
+    })
+    if (status.error !== null) return 'error'
+    if (!status.installed) return 'absent'
+    return status.driverOnly ? 'driverOnly' : 'installed'
+  }
+  const withEndpoints = await det(
+    'NAME:CABLE Input (VB-Audio Virtual Cable)\nCIM:VB-Audio Virtual Cable\nSERVICE:Running'
+  )
+  push('检测：端点 + 驱动 + 服务都在 → 已装', withEndpoints === 'installed', withEndpoints)
+  const onlyService = await det('SERVICE:Running')
+  push('检测：只有服务 → 驱动在但没端点（driverOnly）', onlyService === 'driverOnly', onlyService)
+  const plainRealtek = await det('NAME:扬声器 (Realtek)\nCIM:Realtek(R) Audio')
+  push('检测：普通声卡 → 没装', plainRealtek === 'absent', plainRealtek)
+  const emptyOut = await det('')
+  push('检测：空输出 → 算没查成不算没装（不把超时钉成缺驱动）', emptyOut === 'error', emptyOut)
 
   finishProbe('VOICE_OUT_PROBE', cases)
 }

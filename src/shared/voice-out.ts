@@ -224,8 +224,55 @@ export interface CableInstallResult {
   launched: boolean
   /** 包的解压目录。 */
   dir: string
+  /** 失败停在哪一步；ok 时为 null。 */
+  step: CableInstallStep | null
   /** 失败原因的说明；ok 时为空。 */
   error: string | null
+}
+
+/** 一键安装的失败步。缺驱动不是安装的错，所以 `not-installed` 不进这个枚举。 */
+export type CableInstallStep = 'page' | 'download' | 'extract' | 'elevate'
+
+/** 缺口判定：在面板显示「缺什么 + 唯一的下一步」。 `userChoseDevice` 只用于是否自动选中。 */
+export interface CableGap {
+  /** 显示给用户的一句话；「安装 VB-Cable」与「重启电脑」都必须以这个动作字眼出现 */
+  line: string
+  /** 缺口对应的唯一动作 */
+  action: 'install-cable' | 'reboot' | 'manual' | 'none' | 'select-device'
+  /** 动作按钮的文案；action='none' 时为空 */
+  actionLabel: string
+}
+
+/**
+ * 把检测结果和当前选择的输出设备收敛成一个缺口。
+ * 优先级：检测没跑成（manual）→ 没装（install-cable → reboot → install-cable）→ 装好但设备没选（select-device）。
+ * 面板只渲染这一个结论，不再有第四个 if 分支各说一句话。
+ */
+export function judgeCableGap(status: VirtualCableStatus, chosenDevice: string, cableOutputId: string | null): CableGap {
+  if (status.error !== null) {
+    return { line: `没查成：${status.error}`, action: 'manual', actionLabel: '重新检测' }
+  }
+  if (!status.installed) {
+    return { line: '没检测到 VB-Cable：声出只会从扬声器出来，队友听不到', action: 'install-cable', actionLabel: '一键安装' }
+  }
+  if (status.driverOnly) {
+    return { line: '驱动装好了，音频端点还没出现：重启一次电脑再检测', action: 'reboot', actionLabel: '重新检测' }
+  }
+  // 驱动在、端点也在注册表里，但渲染层的设备清单还没出现它（刚装完没重进页面、
+  // 或者是浏览器层还没拿到设备）：这时「设为输出」没有 deviceId 可写，只能让人重测。
+  if (cableOutputId === null) {
+    const label = status.endpoints[0] ?? 'CABLE Input'
+    return {
+      line: `驱动已装，但输出设备清单里还没出现「${label}」：点重新检测；还是没有就重启一次电脑`,
+      action: 'manual',
+      actionLabel: '重新检测'
+    }
+  }
+  if (chosenDevice !== cableOutputId) {
+    const label = status.endpoints[0] ?? 'CABLE Input'
+    return { line: `驱动已装：把输出设备设为「${label}」，队友才听得到`, action: 'select-device', actionLabel: '设为输出' }
+  }
+  return { line: `已装：${status.endpoints.join(' / ')}`, action: 'none', actionLabel: '' }
 }
 
 /** 说话键的按住窗口：提前 PTT_MARGIN_MS 按下，音频结束后再过 PTT_MARGIN_MS 松开。 */

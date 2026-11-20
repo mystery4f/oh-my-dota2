@@ -17,6 +17,18 @@ from it — adding a feature is contract line + handler line + call site, and a 
 is a compile error, not a dead button. `deadChannelAudit` turns any orphan channel
 constant into a compile error too.
 
+The virtual-cable seam is two layers, never one: `src/main/services/voice/virtual-cable.ts` only answers "is the
+driver there, are the endpoints there" (PowerShell over `MMDevices` + `Win32_SoundDevice` + SCM — never the
+microphone, never a permission prompt; `execFile` is injectable so the probe feeds fake stdout), and
+`judgeCableGap()` in `src/shared/voice-out.ts` turns {detection, currently chosen device, cable endpoint id} into one
+sentence plus one button. Rules it encodes: a driver that is installed but whose endpoint has not appeared says
+"restart once and retest" and offers no install button (installing again cannot help); a renderer whose device list
+has not enumerated the endpoint yet says "retest" instead of offering a "use as output" button that would write an
+empty deviceId; and a detection that failed says "could not check: reason" — never "driver missing". Every install
+step is injectable and returns `step: 'page'|'download'|'extract'|'elevate'` plus a `VCABLE_INSTALL_FAILED` log line.
+Probe install cases run in a temp dir on purpose: the real `data/vb-cable/` may already hold the setup exe, and
+`existsSync` being true silently skips the download and extract legs.
+
 The AI provider seam lives in `src/main/services/providers/`: `openai-compat.ts` declares
 `ChatOptions`/`ChatMessage` (a `messages[]` array — there is no `system` field; system prompts
 live in `SYSTEM_PROMPTS`) plus `chatCompletion` / `translateText`; the voice-chain summary type
