@@ -24,6 +24,7 @@ import { runInPlaceGuardProbe } from './inplace-guard'
 import { runMatchReportProbe } from './match-report'
 import { runMatchAttributionProbe } from './match-attribution'
 import { runHotwordCandidatesProbe } from './hotword-candidates'
+import { runInterpretListenProbe } from './interpret-listen'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runProviderReasoningProbe } from './provider-reasoning'
 import { runSettingsPersistProbe } from './settings-persist'
@@ -182,6 +183,12 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'hotword candidates from corrections: only >=2-char diffs enter the pool, sorting by count, explicit merge, full table never silently drops',
     run: runHotwordCandidatesProbe
+  },
+  {
+    flag: '--interpret-listen-probe',
+    summary:
+      'can we hear the machine at all: loopback opens at 48 kHz, the track really carries sound, and GTCRN+VAD carve speech-sized segments',
+    run: runInterpretListenProbe
   },
   {
     flag: '--translate-accuracy-probe',

@@ -41,6 +41,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--first-run-probe` the first-run checklist: six steps, what counts as evidence in each, and why the last one needs the real game
   - `--match-attribution-probe` which match a row belongs to: one archive per match, the live summary holding only the current one, and null instead of a guessed id
   - `--hotword-candidates-probe` hotword candidates from corrections: only >=2-char diffs enter the pool, sorting by count, explicit merge, full table never silently drops
+  - `--interpret-listen-probe` can we hear the machine at all: loopback opens at 48 kHz, the track really carries sound, and GTCRN+VAD carve speech-sized segments
   - `--translate-accuracy-probe` runs the real provider over a fixed line set and reports per-line accuracy and latency
   - `--overlay-geometry-probe` 
   - `--hotkey-probe` the global-hotkey seam with zero window and zero game: accelerator round trip and collisions

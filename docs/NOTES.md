@@ -348,6 +348,27 @@
 - 修法：`src/renderer/src/lib/pcm-recorder.ts` 把「开流」和「收音频」拆开——`take()` 取走并清空、`suspend()`/`resume()` 挂起与恢复、`stop()` 仍是一次性关闭（训练页的用法不变）；`src/renderer/src/overlay/voice-capture.ts` 松手后不再关流，而是 `park()` 成一路挂起的麦克风，租约 `MIC_WARM_LEASE_MS`（`src/shared/voice-capture-gate.ts`，两分钟，纯函数 `canReuseMic` 判「租约内且 `readyState === 'live'`」），下一次按下零延迟复用；连「松开太快被丢」那条也改成 `park()`——**丢的是这条录音，不是麦克风**，所以再按一次立刻就有反应。
 - 留痕：`VOICE_MIC_OPEN_MS {openMs}`（每次真开流都打，用来判断到底是开麦慢还是别的问题）、`VOICE_MIC_REUSE {ageMs}`（复用命中）、`VOICE_CAPTURE_DROP {reason:'release-before-open', openMs}`（丢了一条）。下次再有人说「热键没反应」，先看这三行，别再猜按键。
 - 没做的：不在启动时就常驻开麦（麦克风指示灯一直亮），也不按「对局开始」预热——两种都会让用户在没说话时也占着设备；两分钟租约是折中。
+
+### 听得到游戏吗：环回能开，但快照式识别跟不上（2026-11-21 实测，#127）
+
+- 问题：想让浮层把队友语音转成中文字幕，可 Electron 拿不到「只抓某个进程」的声音，唯一的路是系统级环回（`getDisplayMedia({audio:true})`），队友语音会和音乐、技能音、播报混在一起。这一条先用探针把四个数钉住，再谈做不做。
+- 证据入口：`npm run probe -- --interpret-listen-probe`（`src/main/probes/interpret-listen.ts`），产物落 `data/logs/interpret-listen/`：`loopback-<时间>.wav` 是探针自放的 1 kHz 测试音（1.2 秒），`room-<时间>.wav` 是它随后录的 12 秒**机器真实输出**（没人叫它录什么，录的就是此刻在响的东西）。全部 16 kHz 单声道 PCM16，谁都能拿去听。
+- 数一：**能开，48 kHz**。`getDisplayMedia({audio:true, video:false})` 一次成功（不需要退回带视频的写法），`AudioContext.sampleRate` 48000、2 声道，`track.getSettings()` 报 48000/1，1.2 秒收到 57344 帧。
+- 数二：**轨道里确实是系统声音**。测试音段 RMS 0.095 对沉默段 0.029，1 kHz 与旁带 500 Hz 的功率比 **257.4**（另两次跑分别是 30.0 / 32.4 / 145.4）——探针自己在同一个窗口里放的音，被环回原样抓了回来。
+- 数三：**VAD 切得出人话，但静音判断不可靠**。`room-*.wav` 里那段 12 秒是用户真实的对局语音（转出来是「我回家补下蓝，可以出来一起打」「我觉得行」这类），silero VAD 切出 **4 段**、时长 0.48–2.59 秒，都是话的长度。同一套参数喂纯 1 kHz 稳态音（三个文件）：两个切 0 段、一个切出 0.54 秒一段——**稳态音也会偶尔被当成语音**，这是「技能音效误触发」的第一个实证，不能假装没有。
+- 数四：**延迟分两种引擎，差两个数量级**（CPU，同一台机器，12 秒素材）：
+
+  | 环节 | 耗时 | 折算 |
+  | --- | --- | --- |
+  | 环回采样 + 重采样（48k 双声道 → 16k 单声道） | 0 字差异 | 3 句已知录音往返重采样后文本一字不差 |
+  | GTCRN 降噪 | 2.0–2.2 秒 / 12 秒音频 | ≈0.18× 实时 |
+  | silero VAD 切段 | 0.12–0.18 秒 / 12 秒音频 | ≈0.015× 实时 |
+  | paraformer-zh int8（4 线程，段级） | 26–347 毫秒 / 段 | ≈0.03–0.1× 实时，**能跟** |
+  | qwen3-asr int8（2 线程，段级） | 1.2–4.3 秒 / 段 | ≈1.1–1.3× 实时，**跟不上** |
+
+  同一段音频 qwen3 整段识别 9.8–10.2 秒（12 秒素材），paraformer 245–853 毫秒。差的是引擎不是链路：qwen3 带标点、句子更整，代价是比实时还慢，做「边说边出字幕」只能选 paraformer（没标点，用 `joinChars` 拼接后再补标点或用翻译侧断句）。
+- 结论：**「能不能听到」已答：能，48 kHz 环回可用，降噪 + VAD 能把混音切成话段**。剩下没测的是「混音 vs 麦克风同一个句子的错字率」——那需要一个真人对着麦克风说同一句话，探针的 12 秒环回素材只能证明「话能被切出来并识别成人话」，不能给错误率的分母。这条等有人在局内说话时再补，不要用数字装门面。
+- 教训：`about:blank` 上 `navigator.mediaDevices` 根本不存在（不透明来源），探针窗口必须 `loadFile` 到 `overlay.html` 这种可信来源，否则第一句就是 `Cannot read properties of undefined (reading 'getDisplayMedia')`。sherpa 的 `vad.pop()` **只弹出不返回**，取内容要先 `vad.front()` 再 `pop()`，写成 `pop().start` 会 `TypeError`。
 ## ASR 微调（Qwen3）
 
 ### G15 试点：底模 13/20 → 微调 19/20
