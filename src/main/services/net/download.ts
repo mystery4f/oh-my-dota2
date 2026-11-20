@@ -1,4 +1,5 @@
 import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { judgeDownloadFailure } from '@shared/download-failure'
 import { errorMessage } from '@shared/errors'
 import { once } from 'node:events'
 import { dirname } from 'node:path'
@@ -35,19 +36,32 @@ function mirrorUrl(url: string, prefix: string): string {
 export async function tryMirrors<T>(
   url: string,
   attempt: (candidate: string, prefix: string) => Promise<T>,
-  options: { mirrors?: string[]; onError?: (candidate: string, error: string) => void } = {}
+  options: {
+    mirrors?: string[]
+    onError?: (candidate: string, error: string) => void
+    /** 真的用上了某个镜像时回调（直连成功不算）——「这次是谁给的字节」必须能说清 */
+    onUsed?: (candidate: string, prefix: string) => void
+  } = {}
 ): Promise<T> {
   let lastError = 'unknown'
   for (const prefix of options.mirrors ?? GITHUB_MIRRORS) {
     const candidate = mirrorUrl(url, prefix)
     try {
-      return await attempt(candidate, prefix)
+      const result = await attempt(candidate, prefix)
+      // 直连成功不值得记；换到镜像才记——用户报「下不动」时，这一行是唯一能回答
+      // 「到底是镜像坏了还是源没了」的证据。
+      if (prefix !== '') {
+        console.log('DOWNLOAD_MIRROR', JSON.stringify({ prefix, url, candidate }))
+        options.onUsed?.(candidate, prefix)
+      }
+      return result
     } catch (err) {
       lastError = errorMessage(err)
       options.onError?.(candidate, lastError)
     }
   }
-  throw new Error(lastError)
+  // 报错也要说清是谁的错：换镜像能不能救，取决于这句是「网络」还是「源站」。
+  throw new Error(judgeDownloadFailure(lastError).text)
 }
 
 export interface DownloadOptions {

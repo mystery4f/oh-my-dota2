@@ -277,6 +277,12 @@ it and nothing happened". The overlay and the pause hint print key names from th
   innocent. Fix lives in the game's `autoexec.cfg`; the detail and values are in `docs/NOTES.md`
   (「起播那一下游戏静音又掉帧」).
 
+- Every download goes through `src/main/services/net/download.ts` — one entry (`downloadResumable`),
+  one mirror table (`tryMirrors`), one probe (`--download-probe`). A new fetch call site that writes its own
+  `.part` handling is the bug this file exists to prevent. When a mirror is used it logs `DOWNLOAD_MIRROR`
+  with the prefix and candidate; when a server ignores `Range` the partial file is dropped, never appended to.
+  A total failure throws `judgeDownloadFailure()`'s sentence (`src/shared/download-failure.ts`): connection-level
+  errors read as 网络 (another mirror may help), status/size/hash errors as 源站 (no mirror will).
 - Batch scripts that call an external API per item (LLM review, ASR, downloads) must give every
   request its own timeout plus retries and append results as they arrive. Bare `Promise.allSettled`
   hides one hung request: 80/1012 rows in 20 minutes (≈4 hours total) became ~40 rows/minute after

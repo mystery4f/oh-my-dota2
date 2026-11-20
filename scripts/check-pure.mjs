@@ -20,6 +20,7 @@ const { formatCer, measureCer, normalizeSpoken, rankByCer, summarizeCer, summari
 const { FT_TARGET_STEPS, deriveFtEpochsFor, deriveFtResumeEpochs } = await import('../src/shared/train/asr-ft.ts')
 const { DEVICE_ID_PLACEHOLDER, maskLogText, wantedLogFiles } = await import('../src/shared/log-bundle.ts')
 const { filterHistory, historyCopyText } = await import('../src/shared/overlay-ledger.ts')
+const { judgeDownloadFailure } = await import('../src/shared/download-failure.ts')
 const {
   EMPTY_TALLY,
   CANDIDATE_LIMIT,
@@ -585,6 +586,23 @@ check('有译文用译文、没译文用原文', digestRowText({ id: 'a', origin
 check('空列表给空串（浮层不画空壳）', digestLine([]) === '' && digestLine([{ id: 'x', original: '  ', translated: null }]) === '')
 check('意图词表能数命中', digestCues('mid is missing') >= 1 && digestCues('gg') === 0)
 check('同一批消息两次摘要一致', digestLine(digestRows) === digestRowLine)
+// —— 下载失败是谁的错（#79）：换镜像能不能救，全看这一句 ——
+check(
+  '下载失败：连接被掐算网络',
+  judgeDownloadFailure('TypeError: fetch failed').kind === 'network' &&
+    judgeDownloadFailure('stall: no bytes for 60s').kind === 'network' &&
+    judgeDownloadFailure('net::ERR_CONTENT_LENGTH_MISMATCH').kind === 'network'
+)
+check(
+  '下载失败：状态码与尺寸不符算源站',
+  judgeDownloadFailure('HTTP 404').kind === 'source' && judgeDownloadFailure('size mismatch: 100/200').kind === 'source'
+)
+check(
+  '下载失败：文案里带得出「网络」「源站」两个字',
+  judgeDownloadFailure('fetch failed').text.startsWith('网络：') &&
+    judgeDownloadFailure('HTTP 500').text.startsWith('源站：') &&
+    judgeDownloadFailure('').text === '原因不明：未知错误'
+)
 
 // —— 对局播报（#123）：只信游戏时钟与帧里的事实，同一件事只报一次 ——
 const { initialAnnounceState, stepAnnounces, DEFAULT_ANNOUNCE_TRIGGERS } = await import('../src/shared/dota-announce.ts')

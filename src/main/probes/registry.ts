@@ -19,6 +19,7 @@ import { runDotaDisplayProbe } from './dota-display'
 import { runGsiDumpProbe } from './gsi-dump'
 import { runGsiProbe } from './gsi'
 import { runGsiFramesReportProbe } from './gsi-frames-report'
+import { runDownloadProbe } from './download'
 import { runHoldWatchProbe } from './hold-watch'
 import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
@@ -215,6 +216,12 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--hotkey-probe',
     summary: 'the global-hotkey seam with zero window and zero game: accelerator round trip and collisions',
     run: runHotkeyProbe
+  },
+  {
+    flag: '--download-probe',
+    ci: true,
+    summary: 'a download that drops mid-way resumes from the partial file, a source ignoring Range restarts clean, and a bad mirror falls through with the one actually used named in the log',
+    run: runDownloadProbe
   },
   {
     flag: '--hold-watch-probe',
