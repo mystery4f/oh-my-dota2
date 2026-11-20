@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app } from 'electron'
+import { logsDir } from '../logs/base-dir'
 import type { VoiceStage, VoiceStageMark, VoiceStageProgress } from '@shared/voice-stage'
 import type { VoiceChainTiming } from '@shared/voice-timing'
 import { appendCappedJsonl } from '../logs/jsonl'
@@ -135,6 +135,6 @@ export function reportChainTiming(
     ...(prep === null ? {} : { prep })
   }
   console.log('VOICE_CHAIN_TIMING', JSON.stringify(record))
-  appendCappedJsonl(join(app.getPath('userData'), 'logs', 'voice-chain.jsonl'), record)
+  appendCappedJsonl(join(logsDir(), 'voice-chain.jsonl'), record)
   return timing
 }

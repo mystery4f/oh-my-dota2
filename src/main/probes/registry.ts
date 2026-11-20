@@ -176,7 +176,7 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--match-attribution-probe',
     ci: true,
     summary:
-      'which match a row belongs to: one archive per match, the live summary holding only the current one, and null instead of a guessed id',
+      'which match a row belongs to: one archive per match, the live summary holding only the current one, null instead of a guessed id, and every synthetic row confined to a temp logs dir',
     run: runMatchAttributionProbe
   },
   {

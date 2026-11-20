@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { logsDir } from './logs/base-dir'
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { GsiPayload } from './gsi'
@@ -27,12 +27,12 @@ let currentMatch = ''
 let frames = 0
 
 export function gsiSummaryPath(): string {
-  return join(app.getPath('userData'), 'logs', FILE_NAME)
+  return join(logsDir(), FILE_NAME)
 }
 
 /** 按局归档的目录：`<userData>/gsi-summary/<matchid>.json`。 */
 export function gsiSummaryArchiveDir(): string {
-  return join(app.getPath('userData'), 'logs', ARCHIVE_DIR)
+  return join(logsDir(), ARCHIVE_DIR)
 }
 
 /** 换局就清账：否则上一局的 matchid、事件统计会污染这一局的结论。 */

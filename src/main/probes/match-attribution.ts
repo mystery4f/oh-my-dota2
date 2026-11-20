@@ -18,6 +18,7 @@ import {
   recordFrameSummary,
   resetFrameSummary
 } from '../services/gsi-frames-summary'
+import { setLogsDirForProbe } from '../services/logs/base-dir'
 import { ChainTimer, reportChainTiming } from '../services/voice/chain-timing'
 
 /**
@@ -115,40 +116,64 @@ export async function runMatchAttributionProbe(): Promise<void> {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // —— 活文件只装当前局：真走 recordFrameSummary 两局 ——
-  resetFrameSummary()
-  recordFrameSummary(frame('9100000001'))
-  recordFrameSummary(frame('9100000001'))
-  flushFrameSummary()
-  recordFrameSummary(frame('9100000002'))
-  recordFrameSummary(frame('9100000002'))
-  flushFrameSummary()
-  const live = JSON.parse(readFileSync(gsiSummaryPath(), 'utf8')) as { matchid?: string | null; frames?: number }
-  push('活文件只装最后一局（matchid 跟着换、帧数不累加）', live.matchid === '9100000002' && live.frames === 2, JSON.stringify(live))
-  const archiveDir = gsiSummaryArchiveDir()
-  const archived = JSON.parse(readFileSync(join(archiveDir, '9100000001.json'), 'utf8')) as { matchid?: string }
-  push('上一局在归档里各有一份、内容还是它自己那局', archived.matchid === '9100000001', JSON.stringify(archived))
-  rmSync(join(archiveDir, '9100000001.json'), { force: true })
-  rmSync(join(archiveDir, '9100000002.json'), { force: true })
-  resetFrameSummary()
+  // —— 活文件 / 对讲日志：全部写进假数据目录，真实 logs/ 一个字节都不碰（#126）——
+  // 探针写的都是合成的：留在真实目录里，下一局会把假 matchid 当上一局归档，
+  // 而且这里的清场写文件会把用户真实的对讲历史截成空。改指向 mkdtemp 出来的目录。
+  const realLogsDir = join(app.getPath('userData'), 'logs')
+  const realSummaryFile = join(realLogsDir, 'gsi-summary.json')
+  const realVoiceFile = join(realLogsDir, 'voice-chain.jsonl')
+  const readOrEmpty = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '')
+  const realSummaryBefore = readOrEmpty(realSummaryFile)
+  const realVoiceBefore = readOrEmpty(realVoiceFile)
+  const fakeLogs = mkdtempSync(join(tmpdir(), 'match-attribution-logs-'))
+  setLogsDirForProbe(fakeLogs)
+  try {
+    // —— 活文件只装当前局：真走 recordFrameSummary 两局 ——
+    resetFrameSummary()
+    recordFrameSummary(frame('9100000001'))
+    recordFrameSummary(frame('9100000001'))
+    flushFrameSummary()
+    recordFrameSummary(frame('9100000002'))
+    recordFrameSummary(frame('9100000002'))
+    flushFrameSummary()
+    const live = JSON.parse(readFileSync(gsiSummaryPath(), 'utf8')) as { matchid?: string | null; frames?: number }
+    push('活文件只装最后一局（matchid 跟着换、帧数不累加）', live.matchid === '9100000002' && live.frames === 2, JSON.stringify(live))
+    const archiveDir = gsiSummaryArchiveDir()
+    const archived = JSON.parse(readFileSync(join(archiveDir, '9100000001.json'), 'utf8')) as { matchid?: string }
+    push('上一局在归档里各有一份、内容还是它自己那局', archived.matchid === '9100000001', JSON.stringify(archived))
+    push('假目录真的接住了这两局（活文件与归档都在临时目录里）', existsSync(join(fakeLogs, 'gsi-summary.json')) && existsSync(join(archiveDir, '9100000002.json')), fakeLogs)
 
-  // —— 对讲行上的 matchid ——
-  const logFile = join(app.getPath('userData'), 'logs', 'voice-chain.jsonl')
-  writeFileSync(logFile, JSON.stringify({ keep: true }) + '\n')
-  noteLiveMatch('9200000001')
-  const timer = new ChainTimer(null)
-  timer.noteTranslated()
-  timer.noteFirstAudio()
-  timer.notePlayStart()
-  reportChainTiming(timer, { spoken: true, stage: null, engine: 'probe-marker', chars: 2, segments: 1, mic: '' })
-  let row = JSON.parse(readFileSync(logFile, 'utf8').trim().split('\n').pop() ?? '{}') as { matchid?: string | null }
-  push('对局中写的行带 matchid', row.matchid === '9200000001', String(row.matchid))
+    // —— 对讲行上的 matchid ——
+    const logFile = join(fakeLogs, 'voice-chain.jsonl')
+    writeFileSync(logFile, JSON.stringify({ keep: true }) + '\n')
+    noteLiveMatch('9200000001')
+    const timer = new ChainTimer(null)
+    timer.noteTranslated()
+    timer.noteFirstAudio()
+    timer.notePlayStart()
+    reportChainTiming(timer, { spoken: true, stage: null, engine: 'probe-marker', chars: 2, segments: 1, mic: '' })
+    let row = JSON.parse(readFileSync(logFile, 'utf8').trim().split('\n').pop() ?? '{}') as { matchid?: string | null }
+    push('对局中写的行带 matchid', row.matchid === '9200000001', String(row.matchid))
 
-  resetLiveMatch()
-  reportChainTiming(timer, { spoken: true, stage: null, engine: 'probe-marker', chars: 2, segments: 1, mic: '' })
-  row = JSON.parse(readFileSync(logFile, 'utf8').trim().split('\n').pop() ?? '{}') as { matchid?: string | null }
-  push('GSI 断了写的行是显式 null（不猜上一个 id、也不是缺字段）', 'matchid' in row && row.matchid === null, JSON.stringify(row))
-  writeFileSync(logFile, '')
+    resetLiveMatch()
+    reportChainTiming(timer, { spoken: true, stage: null, engine: 'probe-marker', chars: 2, segments: 1, mic: '' })
+    row = JSON.parse(readFileSync(logFile, 'utf8').trim().split('\n').pop() ?? '{}') as { matchid?: string | null }
+    push('GSI 断了写的行是显式 null（不猜上一个 id、也不是缺字段）', 'matchid' in row && row.matchid === null, JSON.stringify(row))
+  } finally {
+    setLogsDirForProbe(null)
+    resetFrameSummary()
+    rmSync(fakeLogs, { recursive: true, force: true })
+  }
+  push(
+    '探针过后真实 gsi-summary.json 逐字节没变（假对局没漏进活文件）',
+    readOrEmpty(realSummaryFile) === realSummaryBefore,
+    `${realSummaryBefore.length} → ${readOrEmpty(realSummaryFile).length} bytes`
+  )
+  push(
+    '探针过后真实 voice-chain.jsonl 没被写、也没被截断（行数与内容都不变）',
+    readOrEmpty(realVoiceFile) === realVoiceBefore && !readOrEmpty(realVoiceFile).includes('probe-marker'),
+    `${realVoiceBefore.split('\n').filter(Boolean).length} → ${readOrEmpty(realVoiceFile).split('\n').filter(Boolean).length} 行`
+  )
 
   const failed = cases.filter((item) => !item.ok)
   for (const item of cases) console.log(`${item.ok ? 'ok  ' : 'FAIL'} ${item.name}  (${item.detail})`)
