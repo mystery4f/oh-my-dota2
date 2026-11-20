@@ -103,6 +103,12 @@ artifact paths and parser details: `docs/ARCH-notes.md`, `docs/PLAN-train-v3.md`
 `train` (a fine-tune run consumed it — memory), `eval` (the held-out tail of `splitTrainEval` — generalisation),
 `unknown` (no run_id). Never collapse them into one number. A corrected row is written back to the ledger
 (`correctAsrCheckItem`, new revision) because that text is both the training label and the next answer key.
+Every engine keeps a factory copy at `asr-models/<engine>-base/` (`docs/adr/asr-base-copy.md`): promotion only
+rotates `<engine>` ↔ `<engine>.bak`, so after two promotions that copy is the only original left. It is written
+once on first use (`ensureBaseCopy`, from the shipped model or the still-pristine active dir), verified against
+the engine table's `requiredPaths`, and never repaired afterwards — a gap is only *reported* (`target.baseCopy`
+in `asrFtStatus`, the 底模副本 row in the panel). 重置为底模 stages a copy into `.next` and runs the same
+`asrFtSwapSteps`, which is why the previous weights end up in `.bak` instead of being deleted.
 
 
 ## Hotkeys

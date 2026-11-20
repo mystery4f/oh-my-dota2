@@ -201,6 +201,17 @@ export function AsrTrainPage(): React.ReactElement {
     })
   }
 
+  // 重置为底模（#69）：走的是与转正同一套步骤，所以当前权重变 .bak 而不是被删，
+  // 点错了还能用「回滚」找回上一次微调的成果。
+  const resetToBase = (): void => {
+    void runAction('重置为底模', async () => {
+      const result = await window.api.ftAsrftResetBase()
+      if (!result.ok) return result.error ?? '重置为底模失败'
+      await refreshStatus()
+      return '已换回底模：上一版权重留在备份目录，需要时还能回滚'
+    })
+  }
+
   // 自定义录音：先有文本再录。文本进读稿的 G99 组，录音走同一条通路上账，
   // 所以打包、待训、覆盖率都不用为它写第二套判据。
   const addCustomTake = (): void => {
@@ -330,6 +341,31 @@ export function AsrTrainPage(): React.ReactElement {
                     ))}
                   </div>
                 </Row>
+                  {/* 出厂权重副本（#69）：转正只轮换 <engine> ↔ .bak，两次之后就只剩这一份原件。
+                      它丢了等于「全量重训没有起点」，所以在训练目标旁边就地报出来。 */}
+                  <Row
+                    label="底模副本"
+                    hint={
+                      status
+                        ? status.target.baseCopy.ready
+                          ? status.target.baseCopy.dir
+                          : `${status.target.baseCopy.dir} · ${
+                              status.target.baseCopy.missing.length > 0
+                                ? `缺 ${status.target.baseCopy.missing.join('、')}`
+                                : '还没有（下次开训或换模时自动抄一份）'
+                            }`
+                        : '正在读状态…'
+                    }
+                  >
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={Boolean(busy) || taskRunning || status?.target.baseCopy.ready !== true}
+                      onClick={resetToBase}
+                    >
+                      重置为底模
+                    </Button>
+                  </Row>
                   {/* 训练目标和现役不同时，这句单独成行：塞进 Row 的标签列会被长底模 id 挤成竖条。 */}
                   {status && activeEngineLabel && activeEngineLabel !== status.target.label ? (
                     <p className="pb-2 text-xs leading-relaxed text-muted-foreground">

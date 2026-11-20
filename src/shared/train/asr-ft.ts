@@ -452,13 +452,44 @@ export function asrFtRollbackSteps(state: { bakExists: boolean }): AsrFtSwapOp[]
   return ['rm-active', 'restore-bak']
 }
 
+/**
+ * 底模副本的目录名（#69）：与现役目录同级，永远是 `<name>-base`。
+ * 转正只轮换 `<name>` ↔ `<name>.bak`，所以这份副本经得起两次转正，
+ * `fresh` 重训与「重置为底模」都靠它还认得原来的样子。
+ */
+export function baseCopyDirName(canonicalRel: string): string {
+  const name = canonicalRel.split('/').filter(Boolean).pop() ?? canonicalRel
+  return `${name}-base`
+}
+
+/** 底模副本缺哪几件：按引擎表的 sherpa 加载清单（`requiredPaths`）查，与换模槽位同一口径。 */
+export function missingBaseCopyFiles(names: readonly string[], engineId: AsrEngineId = 'qwen3'): string[] {
+  return ASR_ENGINES[engineId].requiredPaths.filter((name) => !names.includes(name))
+}
+
+/**
+ * 「重置为底模」的动作序列：先把副本铺成 next，再走与转正完全相同的那套步骤——
+ * 现役权重因此变成 `.bak` 而不是被删掉，人后悔了还能回滚。
+ */
+export function asrFtResetSteps(state: { activeExists: boolean; bakExists: boolean }): AsrFtSwapOp[] {
+  return asrFtSwapSteps({ ...state, nextExists: true, exportExists: false })
+}
+
 /** 窗口要的微调环境 + 换模状态（检测服务填，这里只定形状）。 */
 export interface AsrFtStatusResult {
   /** 纠错样本（#66）：自由说组里由「改对一句」攒下的样本，条数/字节与到顶提示。 */
   corrections: FtCorrectionSamples
   env: { ok: boolean; gaps: string[]; envRoot: string }
   /** 这次训练落在哪个引擎上：面板必须能说清「训的是谁」，不然用户只能猜。 */
-  target: { engineId: string; label: string; trainer: AsrFtTrainer; modelDir: string; baseModel: string }
+  target: {
+    engineId: string
+    label: string
+    trainer: AsrFtTrainer
+    modelDir: string
+    baseModel: string
+    /** 底模副本（#69）：转正永不碰它；缺失或损坏只在这里点名，绝不静默补。 */
+    baseCopy: { dir: string; ready: boolean; missing: string[] }
+  }
   swap: { activeExists: boolean; bakExists: boolean; nextExists: boolean; lastExportDir: string | null }
   /** 已训标记：最近一次微调的账本 vs 当前录音，按组算 done/total/stale（key = 组 id）。 */
   coverage: Record<string, FtCoverageGroup>

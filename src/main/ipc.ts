@@ -73,6 +73,7 @@ import {
   applyAsrFtModel,
   asrFtFacts,
   asrFtStatus,
+  resetAsrFtToBase,
   rollbackAsrFtModel
 } from './services/train/asr-ft'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
@@ -293,7 +294,8 @@ const handlers: MainHandlers = {
     return asrFtInstallState()
   },
   ftAsrftApply: () => applyAsrFtModel(),
-  ftAsrftRollback: () => rollbackAsrFtModel()
+  ftAsrftRollback: () => rollbackAsrFtModel(),
+  ftAsrftResetBase: () => resetAsrFtToBase()
 }
 
 export function registerIpc(): void {

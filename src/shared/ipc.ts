@@ -519,6 +519,7 @@ export const IPC = {
   FT_ASRFT_FACTS: 'ft:asrft-facts',
   FT_ASRFT_APPLY: 'ft:asrft-apply',
   FT_ASRFT_ROLLBACK: 'ft:asrft-rollback',
+  FT_ASRFT_RESET_BASE: 'ft:asrft-reset-base',
   FT_ASRFT_INSTALL: 'ft:asrft-install',
   TTS_SOVITS_STATUS: 'tts:sovits-status',
   TTS_SOVITS_INSTALL: 'tts:sovits-install',
@@ -825,7 +826,8 @@ export const ipcContract = {
   ftAsrftFacts: invoke<[], AsrFtFacts>(IPC.FT_ASRFT_FACTS),
   ftAsrftInstall: invoke<[], AsrFtInstallState>(IPC.FT_ASRFT_INSTALL),
   ftAsrftApply: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_APPLY),
-  ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK)
+  ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK),
+  ftAsrftResetBase: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_RESET_BASE)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

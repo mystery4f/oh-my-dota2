@@ -17,7 +17,9 @@ import {
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, sep } from 'node:path'
 import {
+  asrFtResetSteps,
   asrFtRollbackSteps,
+  baseCopyDirName,
   asrFtSwapSteps,
   deriveAsrFtEnvGaps,
   planAsrFtExportArgv,
@@ -35,6 +37,7 @@ import {
   type FtRunMeta,
   ftVramNote,
   judgeFtDataset,
+  missingBaseCopyFiles,
   missingFtExportFiles,
   ftLedgerLineage,
   type FtLineage,
@@ -175,6 +178,58 @@ function stagingDir(): string {
   return join(asrModelsRoot(), `${basename(activeRel())}.next`)
 }
 
+/**
+ * 底模副本（#69）：`asr-models/<engine>-base`，装的是引擎出厂时的推理权重。
+ * 转正只轮换 `<engine>` ↔ `<engine>.bak`，两次转正之后原始权重就只剩这一份，
+ * 所以它只由「首次使用」写入，之后谁也不许动（损坏也只报告，不静默修）。
+ */
+function baseCopyDir(): string {
+  return join(asrModelsRoot(), baseCopyDirName(activeRel()))
+}
+
+function baseCopyView(): AsrFtStatusResult['target']['baseCopy'] {
+  const dir = baseCopyDir()
+  const missing = missingBaseCopyFiles(safeReaddir(dir), finetuneEngine().id)
+  return { dir, ready: existsSync(dir) && missing.length === 0, missing }
+}
+
+/** 有没有可用的出厂权重来源：对讲下载的官方模型优先，其次仍是原样的现役目录。 */
+function baseCopySources(): string[] {
+  const engineId = finetuneEngine().id
+  return [shippedModelDir(), activeDir()].filter((dir) => dir !== baseCopyDir() && slotReady(dir, engineId))
+}
+
+/**
+ * 首次使用时把出厂权重抄一份进底模副本。已经存在（哪怕坏掉）就什么都不做：
+ * 票面要求「缺失/损坏只点名、绝不静默修」，而一旦覆盖，唯一那份原始权重就真没了。
+ */
+function ensureBaseCopy(): { ok: boolean; created: boolean; dir: string; reason?: string } {
+  const dir = baseCopyDir()
+  if (existsSync(dir)) return { ok: true, created: false, dir }
+  const source = baseCopySources()[0]
+  if (source === undefined) return { ok: false, created: false, dir, reason: '找不到出厂权重可拷' }
+  try {
+    mkdirSync(dir, { recursive: true })
+    for (const name of ftArtifactTargets(finetuneEngine().id)) cpSync(join(source, name), join(dir, name))
+    const copy = finetuneSpec().borrow.find((item) => item.path === 'tokenizer')
+    if (copy?.path === 'tokenizer') cpSync(join(source, 'tokenizer'), join(dir, 'tokenizer'), { recursive: true })
+    for (const item of finetuneSpec().borrow) {
+      if (item.recursive === true) continue
+      const from = join(source, item.path)
+      if (existsSync(from)) cpSync(from, join(dir, item.path))
+    }
+    const missing = missingBaseCopyFiles(safeReaddir(dir), finetuneEngine().id)
+    if (missing.length > 0) {
+      rmSync(dir, { recursive: true, force: true })
+      return { ok: false, created: false, dir, reason: `拷出来缺 ${missing.join('、')}（来源 ${source}）` }
+    }
+    return { ok: true, created: true, dir }
+  } catch (err) {
+    rmSync(dir, { recursive: true, force: true })
+    return { ok: false, created: false, dir, reason: errorMessage(err) }
+  }
+}
+
 function safeReaddir(dir: string): string[] {
   try {
     return readdirSync(dir)
@@ -273,7 +328,10 @@ export async function asrFtStatus(): Promise<Omit<AsrFtStatusResult, 'install'>>
       label: engine.label,
       trainer,
       modelDir: join(app.getPath('userData'), engine.canonicalRel),
-      baseModel: env.paths.baseModelId || env.paths.baseModelDir || ''
+      baseModel: env.paths.baseModelId || env.paths.baseModelDir || '',
+      // 出厂权重副本也要在面板上看得见：它丢了就等于「全量重训没有起点」，
+      // 而这件事只在两次转正之后才会暴露，越早说越好。
+      baseCopy: baseCopyView()
     },
     swap: swapView(),
     // 覆盖标记只认「被某次 run 真正吃过」的条目：库里 run_id 非空的就是。（打包过但没训的不算。）
@@ -321,7 +379,38 @@ function ensureTokenizerFiles(into: string, fallbackDirs: string[]): string | nu
   return null
 }
 
+/**
+ * 重置为底模（#69）：把副本铺成 `.next` 再走转正那套步骤，于是当前权重变成 `.bak`——
+ * 人点错了还能「回滚」回去，而不是被一次误点抹掉。
+ */
+export function resetAsrFtToBase(): AsrFtSwapResult {
+  const base = baseCopyView()
+  if (!base.ready) {
+    const lack = base.missing.length > 0 ? `缺 ${base.missing.join('、')}` : '整个目录都不在'
+    return { ok: false, error: `底模副本不完整（${lack}）：${base.dir}` }
+  }
+  const swap = swapView()
+  const next = stagingDir()
+  try {
+    rmSync(next, { recursive: true, force: true })
+    cpSync(base.dir, next, { recursive: true })
+    for (const op of asrFtResetSteps({ activeExists: swap.activeExists, bakExists: swap.bakExists })) {
+      if (op === 'rm-bak') rmSync(backupDir(), { recursive: true, force: true })
+      if (op === 'bak-active') renameSync(activeDir(), backupDir())
+      if (op === 'promote-next') renameSync(next, activeDir())
+    }
+  } catch (err) {
+    return { ok: false, error: `重置为底模失败：${errorMessage(err)}` }
+  }
+  const engine = finetuneEngine()
+  saveSettings({ asrActiveModel: `${engine.id}:${engine.canonicalRel}` })
+  resetSherpaWorker()
+  return { ok: true, error: null, model: null }
+}
 export function applyAsrFtModel(): AsrFtSwapResult {
+  // 先把出厂权重钉一份（#69）：下面 rm-bak / bak-active 一动手，原始权重就只剩这份副本。
+  // 失败不拦转正（人能继续用新模型），只在状态里留着缺口。
+  ensureBaseCopy()
   const swap = swapView()
   // .next 里可能躺着开训前备好的增量副本（#63 的 stageIncrementalSource 就落在这里），
   // 所以判据是「有导出产物」——只看 .next 会把「训练完还没导出」当成可转正。
@@ -722,6 +811,13 @@ export async function resolveAsrFtTrainRequest(mode: AsrFtMode): Promise<{
     if (!staged.ok) return { ok: false, error: staged.error }
     stagedPath = staged.stagedPath
   }
+  // 全量重训（fresh）从底模起跑（#69）：第一次点它时现役还是出厂权重，这是最后一次
+  // 免费拿到原始权重的时机——之后再想要就只能去下载。建不成就说一声，别让人以为有副本。
+  let baseNote: string | null = null
+  if (mode === 'fresh') {
+    const base = ensureBaseCopy()
+    if (!base.ok) baseNote = `底模副本没建成（${base.reason ?? '原因未知'}）：${base.dir}`
+  }
   const tuning: AsrFtTrainTuning = planFtTuning({
     mode,
     trainer,
@@ -760,7 +856,7 @@ export async function resolveAsrFtTrainRequest(mode: AsrFtMode): Promise<{
     : null
   return {
     ok: true,
-    warning: [vramNote, skippedNote].filter(Boolean).join('；') || null,
+    warning: [vramNote, skippedNote, baseNote].filter(Boolean).join('；') || null,
     request: {
       kind: 'asr-ft',
       // ASR 微调没有「数据集名」这个概念：目录名固定 ft-<时间戳>，字段留空只为满足请求契约。

@@ -1,6 +1,6 @@
 import { exitProbe } from './harness'
 import { app } from 'electron'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -59,8 +59,11 @@ import {
 import { parseTrainProgress } from '@shared/train/progress'
 import { formatCer, measureCer, rankByCer, summarizeCer, summarizeCerByCohort, type CerRow } from '@shared/train/cer'
 import {
+  asrFtResetSteps,
   asrFtRollbackSteps,
   asrFtSwapSteps,
+  baseCopyDirName,
+  missingBaseCopyFiles,
   deriveAsrFtEnvGaps,
   deriveFtEpochs,
   deriveFtIncrementalEpochs,
@@ -884,6 +887,74 @@ export async function runTrainProbe(): Promise<void> {
     JSON.stringify(asrFtSwapSteps({ activeExists: true, bakExists: false, nextExists: false, exportExists: true }))
   )
   push('换模：没有导出产物也没有 next 才是空序列', asrFtSwapSteps({ activeExists: true, bakExists: true, nextExists: false, exportExists: false }).length === 0, '[]')
+  // —— 底模副本（#69）：转正只轮换 <engine> ↔ .bak，所以副本必须经得起两次转正，且「重置为底模」走同一套步骤。
+  // 这里在临时目录里把真正的 op 序列跑一遍：真的 rename，不是纸面推演，但碰不到 userData。
+  {
+    const sand = mkdtempSync(join(tmpdir(), 'omd2-base-'))
+    const baseName = baseCopyDirName('asr-models/qwen3-asr')
+    const base = join(sand, baseName)
+    const active = join(sand, 'qwen3-asr')
+    const bak = join(sand, 'qwen3-asr.bak')
+    const next = join(sand, 'qwen3-asr.next')
+    const markBase = (): void => {
+      mkdirSync(base, { recursive: true })
+      writeFileSync(join(base, 'conv_frontend.onnx'), 'factory')
+    }
+    const promote = (): void => {
+      for (const op of asrFtSwapSteps({ activeExists: existsSync(active), bakExists: existsSync(bak), nextExists: true, exportExists: false })) {
+        if (op === 'rm-bak') rmSync(bak, { recursive: true, force: true })
+        if (op === 'bak-active') renameSync(active, bak)
+        if (op === 'promote-next') renameSync(next, active)
+      }
+    }
+    markBase()
+    // 第一轮：出厂权重在现役目录里，转正之后它进 .bak；第二轮再转正就把 .bak 删掉——
+    // 那时候「原件」只剩副本一份，这正是票面说的问题。
+    mkdirSync(active, { recursive: true })
+    writeFileSync(join(active, 'conv_frontend.onnx'), 'factory')
+    mkdirSync(next, { recursive: true })
+    writeFileSync(join(next, 'conv_frontend.onnx'), 'gen1')
+    promote()
+    mkdirSync(next, { recursive: true })
+    writeFileSync(join(next, 'conv_frontend.onnx'), 'gen2')
+    promote()
+    push(
+      '底模副本：两次转正之后原件仍在、且没有被谁改写',
+      // 第二次转正的 rm-bak 删的是「上一代」（第一代出厂权重），副本自己不在任何一条 op 里。
+      existsSync(join(base, 'conv_frontend.onnx')) &&
+        readFileSync(join(base, 'conv_frontend.onnx'), 'utf8') === 'factory' &&
+        readFileSync(join(bak, 'conv_frontend.onnx'), 'utf8') === 'gen1',
+      readFileSync(join(base, 'conv_frontend.onnx'), 'utf8')
+    )
+    // 重置回底模：现役（gen2）必须留成 .bak，而不是被删掉。
+    rmSync(next, { recursive: true, force: true })
+    cpSync(base, next, { recursive: true })
+    for (const op of asrFtResetSteps({ activeExists: existsSync(active), bakExists: existsSync(bak) })) {
+      if (op === 'rm-bak') rmSync(bak, { recursive: true, force: true })
+      if (op === 'bak-active') renameSync(active, bak)
+      if (op === 'promote-next') renameSync(next, active)
+    }
+    push(
+      '重置为底模：现役换回原件，上一版权重留在 .bak 而不是被删',
+      readFileSync(join(active, 'conv_frontend.onnx'), 'utf8') === 'factory' && readFileSync(join(bak, 'conv_frontend.onnx'), 'utf8') === 'gen2',
+      `${readFileSync(join(active, 'conv_frontend.onnx'), 'utf8')}/${readFileSync(join(bak, 'conv_frontend.onnx'), 'utf8')}`
+    )
+    // 副本损坏只点名：缺件判据来自引擎表，没有任何「补一补」的分支替它修。
+    rmSync(join(base, 'conv_frontend.onnx'), { force: true })
+    push(
+      '底模副本坏了只报不修：缺哪件就列哪件',
+      JSON.stringify(missingBaseCopyFiles(readdirSync(base), 'qwen3')) === '["conv_frontend.onnx","encoder.int8.onnx","decoder.int8.onnx","tokenizer/vocab.json","tokenizer/merges.txt"]',
+      JSON.stringify(missingBaseCopyFiles(readdirSync(base), 'qwen3'))
+    )
+    rmSync(sand, { recursive: true, force: true })
+  }
+  push(
+    '底模副本目录名与现役/备份/暂存三槽都不撞',
+    baseCopyDirName('asr-models/qwen3-asr') === 'qwen3-asr-base' &&
+      baseCopyDirName('asr-models/paraformer-zh') === 'paraformer-zh-base' &&
+      !['qwen3-asr', 'qwen3-asr.bak', 'qwen3-asr.next'].includes(baseCopyDirName('asr-models/qwen3-asr')),
+    baseCopyDirName('asr-models/paraformer-zh')
+  )
   // 回归：导出腿中途断掉时目录里已有 conv_frontend/encoder，缺 decoder.int8；
   // 那时点「应用新模型」会把残缺目录转正（识别 worker 静默死），必须逐件点名。
   push(

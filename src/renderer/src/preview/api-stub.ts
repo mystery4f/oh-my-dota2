@@ -653,7 +653,9 @@ const implemented = {
         label: engine.label,
         trainer: finetune.trainer,
         modelDir: `data/${engine.canonicalRel}`,
-        baseModel: finetune.baseModelIds[0] ?? finetune.baseModelDirs[0] ?? ''
+        baseModel: finetune.baseModelIds[0] ?? finetune.baseModelDirs[0] ?? '',
+        // 底模副本（#69）：预览给一份齐的，让「重置为底模」按钮可点；?asrModel= 切腿时目录名一起走。
+        baseCopy: { dir: `data/asr-models/${engine.canonicalRel.split('/').pop()}-base`, ready: true, missing: [] }
       },
       swap: { activeExists: true, bakExists: true, nextExists: false, lastExportDir: 'ft-stub' },
       coverage: { G14: { done: 3, total: 6, stale: 0 }, G15: { done: 1, total: 8, stale: 1 } },
@@ -670,6 +672,7 @@ const implemented = {
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
   ftAsrftApply: async () => ({ ok: true, error: null, model: 'ft-stub' }),
   ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),
+  ftAsrftResetBase: async () => ({ ok: true, error: null, model: null }),
   ftAsrftFacts: async () => ({ vramNote: null, incremental: true }),
   sovitsStatus: async () => sovitsStatus,
   sovitsInstall: async () => sovitsStatus,
