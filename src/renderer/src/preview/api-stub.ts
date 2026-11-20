@@ -426,6 +426,14 @@ const implemented = {
       sessionRatio: 0.6
     }
   }),
+  // 语音队列（#88）：桩给一份「正在读 + 后头两句」的快照，停止回一句清掉了两条。
+  speechQueue: async () => ({
+    speaking: `你走中路,我下路`,
+    pending: 2,
+    lanes: [`你走中路,我下路`, `别急,等我跳刀`].map((text) => ({ key: `stub-${text.length}`, pending: text === `你走中路,我下路` ? 0 : 1, text }))
+  }),
+  onSpeechQueue: () => () => {},
+  speechStop: async () => ({ cleared: 2, interrupted: true }),
   onUpdateStatus: (callback) => {
     callback({ channel: 'stable', status: 'dev', version: '0.0.0' })
     return () => {}

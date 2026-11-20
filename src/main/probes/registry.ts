@@ -47,6 +47,7 @@ import { runDatasetHealthProbe } from './dataset-health'
 import { runKeyNounProbe } from './key-nouns'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
+import { runSpeechQueueProbe } from './speech-queue'
 import { runVoiceOutProbe } from './voice-out'
 import { runVoiceRuntimeProbe } from './voice-runtime'
 import { runVoiceWorkerProbe } from './voice-worker'
@@ -263,6 +264,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the weekly quality card (`src/shared/quality-report.ts`): guard counts read line for line off `logs/translate-guard.jsonl`, cache snapshots off `logs/translate-cache.jsonl`, no invented miss rate, and a missing log file reads as zero instead of an error',
     run: runQualityReportProbe
+  },
+  {
+    flag: '--speech-queue-probe',
+    ci: true,
+    summary:
+      'the speech queue and barge-in stop (#88): a stop ends delivery at the current segment boundary, no later segment starts, the queue snapshot drops to zero, and the stop flag never sticks to the next utterance',
+    run: runSpeechQueueProbe
   },
   {
     flag: '--asr-hotwords-probe',

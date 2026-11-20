@@ -80,6 +80,7 @@ import {
 import { exportLogBundle } from './services/log-bundle'
 import { correctLineDirection } from './services/session/direction-correction'
 import { readQualityReport } from './services/session/quality-report'
+import { onSpeechQueueChange, speechQueueSnapshot, stopSpeech } from './services/voice/speech-pipeline'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
 import { closeGvWebui, openGvWebui, registerGvWeights, scanGvDatasets } from './services/train/gv'
 import { discoverSovitsHome } from './services/voice/sovits-server'
@@ -305,7 +306,9 @@ const handlers: MainHandlers = {
   ftAsrftResetBase: () => resetAsrFtToBase(),
   logBundleExport: () => exportLogBundle(),
   translateDirection: (request) => correctLineDirection(request),
-  qualityReport: () => readQualityReport()
+  qualityReport: () => readQualityReport(),
+  speechQueue: () => speechQueueSnapshot(),
+  speechStop: () => stopSpeech()
 }
 
 export function registerIpc(): void {
@@ -321,4 +324,6 @@ export function registerIpc(): void {
   onVoiceRuntimeProgress(() => broadcast(IPC.VOICE_RUNTIME_STATE, runtimeStatusSnapshot()))
   // #46：就绪快照变了才广播（纯缝已去过重），面板订阅即翻牌，不再自己开定时器。
   onVoiceOutReadiness((snapshot) => broadcast(IPC.VOICE_OUT_READINESS_STATE, snapshot))
+  // #88：语音队列一变就推新快照（排队/开读/读完/停止都走这）。
+  onSpeechQueueChange(() => broadcast(IPC.SPEECH_QUEUE_STATE, speechQueueSnapshot()))
 }

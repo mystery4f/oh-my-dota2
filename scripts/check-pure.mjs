@@ -524,6 +524,17 @@ check('三态环：录音时同时也在朗读，显示录音（按着热键最�
 check('三态环：只有录音与朗读会动，空闲不动', idleRing.pulse === false && recordingRing.pulse && speakingRing.pulse)
 check('三态环：朗读态读屏文案说「正在朗读」，不说「已恢复」', speakingRing.aria.includes('正在朗读') && !/已恢复|已修复/.test(speakingRing.aria))
 
+// —— 语音队列（#88）：面板只画主进程给的快照，文案由纯函数出 ——
+const { queueLine, stopLine } = await import('../src/shared/speech-queue.ts')
+check('队列文案：空闲就说空闲', queueLine({ speaking: null, pending: 0, lanes: [] }) === '空闲')
+check(
+  '队列文案：正在读并报余量',
+  queueLine({ speaking: '你走中路,我下路', pending: 2, lanes: [] }) === '正在读「你走中路,我下路」 · 余 2 句'
+)
+check('队列文案：只排队没在说', queueLine({ speaking: null, pending: 3, lanes: [] }) === '余 3 句待读')
+check('停止回执：边读边清', stopLine({ cleared: 2, interrupted: true }) === '这句读到段尾 · 清掉 2 句排队')
+check('停止回执：什么都没在说', stopLine({ cleared: 0, interrupted: false }) === '本来就没在说')
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

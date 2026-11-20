@@ -9,6 +9,7 @@ import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { QualityReport } from './quality-report'
+import type { SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
 import type { GsiLibrariesView, GsiLibrarySetResult } from './gsi-lib'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
@@ -32,6 +33,8 @@ export type { FtScriptGroup, FtScriptLine, FtScriptState } from '@shared/train/r
 export type { LogBundleFile, LogBundleManifest, LogBundleResult } from './log-bundle'
 // 周度质量卡（#110）：计数口径与文案都在 ./quality-report，契约把类型带出来给面板。
 export type { QualityCache, QualityGuard, QualityReport } from './quality-report'
+// 语音队列（#88）：快照口径在 ./speech-queue，面板只画不数。
+export type { SpeechQueueLane, SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
 
 /** 一条录音：key 形如 G01-L03（free 组是 G21-T01），durationMs 由 16k mono wav 字节数推算。 */
 export interface FtRecInfo {
@@ -597,7 +600,11 @@ export const IPC = {
   // 方向更正（#84）：浮层点一下方向标，改的是「这一句该往哪翻」，只记在这一局里。
   TRANSLATE_DIRECTION: 'translate:direction-override',
   // 周度质量卡（#110）：守卫计数 + 记账本命中，主进程现读两份 jsonl 现算。
-  QUALITY_REPORT: 'translate:quality-report'
+  QUALITY_REPORT: 'translate:quality-report',
+  // 语音队列（#88）：正在读哪句、余几句；停止清空排队，正在读的读到段尾就停。
+  SPEECH_QUEUE: 'speech:queue',
+  SPEECH_QUEUE_STATE: 'speech:queue-state',
+  SPEECH_STOP: 'speech:stop'
 } as const
 
 /** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
@@ -888,7 +895,11 @@ export const ipcContract = {
    */
   translateDirection: invoke<[DirectionCorrection], DirectionCorrectionResult>(IPC.TRANSLATE_DIRECTION),
   /** 周度质量卡：守卫抓了几次 + 记账本白拿几次，面板只画不猜（口径在 @shared/quality-report）。 */
-  qualityReport: invoke<[], QualityReport>(IPC.QUALITY_REPORT)
+  qualityReport: invoke<[], QualityReport>(IPC.QUALITY_REPORT),
+  /** 语音队列（#88）：现取快照；STOP 清空排队并停正在读的这句。 */
+  speechQueue: invoke<[], SpeechQueueSnapshot>(IPC.SPEECH_QUEUE),
+  onSpeechQueue: listen<SpeechQueueSnapshot>(IPC.SPEECH_QUEUE_STATE),
+  speechStop: invoke<[], SpeechStopResult>(IPC.SPEECH_STOP)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

@@ -5,6 +5,7 @@ import { synthesizeOffline } from './offline'
 import { synthesizeSovits } from './sovits'
 import { SPEECH_MIME, speechLang, type SpeechMime } from '@shared/speech-plan'
 import type { SpeechEngine } from '@shared/speech-plan'
+import type { SpeechQueueLane, SpeechQueueSnapshot, SpeechStopResult } from '@shared/speech-queue'
 
 /**
  * 合成管线：把一句文本变成按序音频段的公共机器——切段、按引擎并发策略合成、
@@ -245,13 +246,23 @@ function startEagerSynths(
 
 /** 投递一段产出：所有引擎共用的唯一投递循环——按序 await、投递闸拦截、失败留 null
  * （调用方整句跳过，绝不换系统嗓子）。时序差异（入队发车、换代作废）看引擎表，不看引擎名。 */
+/** 合成与停止信号赛跑：停止先到就当没合成出音频，由调用处按 stopped() 结账。 */
+function raceStop<T>(work: Promise<T>, stopSignal?: Promise<void>): Promise<T | null> {
+  if (!stopSignal) return work
+  return Promise.race([work, stopSignal.then(() => null)])
+}
+
 async function deliverSegments(
   request: SpeechRequest,
   adapters: SpeechSynthAdapters,
   segments: string[],
   eager: Promise<Buffer | null>[] | null,
   onSegment?: (segment: SpeechSegment) => void | Promise<void>,
-  jobGen?: number
+  jobGen?: number,
+  /** 停止标记（#88）：每段开头问一次，打了标记之后一段都不再开始。 */
+  stopped?: () => boolean,
+  /** 停止信号：正等着的合成与它赛跑，先到先算——停下来不用等合成回来。 */
+  stopSignal?: Promise<void>
 ): Promise<SpeechOutcome> {
   const driver = ENGINE_DRIVERS[request.engine]
   // 换代作废只属于本机推理引擎：新单一来，旧单剩下的段一分推理都不该再花。
@@ -261,6 +272,12 @@ async function deliverSegments(
   let dropped = 0
   let synthOkAny = false
   for (let index = 0; index < segments.length; index += 1) {
+    // 停止（#88）：标记在入循环前打下的，这一段连合成都不该再花。
+    if (stopped?.() === true) {
+      dropped += segments.length - index
+      logDrop('stopped', segments[index])
+      break
+    }
     const text = segments[index]
     // 投递闸：宣布时只拦了宣布就过期的，这里拦合成期间变旧的——过期的段连推理都不该有。
     if (isDeliverStale(request.dropStale === true, request.ts, latestCaptureAt)) {
@@ -278,18 +295,27 @@ async function deliverSegments(
     if (driver.scheduling === 'eager') {
       const pending = eager?.[index]
       if (pending) {
-        audio = await pending
+        audio = await raceStop(pending, stopSignal)
         audioMime = audio ? driver.mime : null
       }
     } else if (driver.atDelivery) {
       // 轮到才合成：过期单子根本不浪费推理。
-      audio = await driver.atDelivery(adapters, text, resolveFor(request, text).voice, request)
+      audio = await raceStop(
+        driver.atDelivery(adapters, text, resolveFor(request, text).voice, request),
+        stopSignal
+      )
       audioMime = audio ? driver.mime : null
     }
     // 合成期间来了新单：这条剩下的段不再投递（音频已花掉，认了）。
     if (stale()) {
       dropped += segments.length - index
       logDrop('synthesized', text)
+      break
+    }
+    // 合成这几秒里按了停止：这一段连播都不播（音频已经花掉，认了）。
+    if (stopped?.() === true) {
+      dropped += segments.length - index
+      logDrop('stopped', text)
       break
     }
     // 预取下一段：当前段合成一完成就发车，推理时间藏进投递顺位里，长句听完不出空窗。
@@ -322,6 +348,89 @@ const lanes = new Map<string, LaneJob[]>()
 const lanePumping = new Set<string>()
 /** 换代计数器：独占队列引擎的每个新单都往前走一格，旧单对不上号就作废。 */
 let speechGen = 0
+/** 一次投递的控制句柄：stopSpeech() 只把它标成 stopped，投递循环每段开头看一次。 */
+interface SpeechJob {
+  text: string
+  stopped: boolean
+  /** 停止信号：打到这一刻，正等着的合成当场放行——停下来不该再等一次跨境往返。 */
+  stopSignal: Promise<void>
+  markStopped: () => void
+}
+
+const activeJobs = new Set<SpeechJob>()
+const queueWatchers = new Set<() => void>()
+
+function beginSpeechJob(text: string): SpeechJob {
+  let fire!: () => void
+  const stopSignal = new Promise<void>((resolve) => {
+    fire = resolve
+  })
+  const job: SpeechJob = { text, stopped: false, stopSignal, markStopped: fire }
+  activeJobs.add(job)
+  notifyQueue()
+  return job
+}
+
+function endSpeechJob(job: SpeechJob): void {
+  activeJobs.delete(job)
+  notifyQueue()
+}
+
+/** 队列变了就叫一声（推送侧接线在 src/main/ipc.ts）；返回退订函数。 */
+export function onSpeechQueueChange(listener: () => void): () => void {
+  queueWatchers.add(listener)
+  return () => {
+    queueWatchers.delete(listener)
+  }
+}
+
+function notifyQueue(): void {
+  for (const listener of queueWatchers) listener()
+}
+
+/** 队列快照：正在投递的那句 + 各通道待读。面板只画这个，不自己数。 */
+export function speechQueueSnapshot(): SpeechQueueSnapshot {
+  const laneRows: SpeechQueueLane[] = [...lanes].map(([key, queue]) => ({
+    key,
+    pending: queue.length,
+    text: queue[0]?.request.text ?? ''
+  }))
+  return {
+    speaking: [...activeJobs][0]?.text ?? null,
+    pending: laneRows.reduce((total, lane) => total + lane.pending, 0),
+    lanes: laneRows
+  }
+}
+
+/**
+ * 停止（#88）：排队的当场结账（调用方不等一场空），正在投递的那句读到当前段的段尾就停——
+ * 已经送进频道的那一截音频切不开，但「一个段边界内停下来」是结构保证。
+ * 停止只打标记、不拆发动机：停完新的一句照常读满。
+ */
+export function stopSpeech(): SpeechStopResult {
+  let cleared = 0
+  for (const [key, queue] of [...lanes]) {
+    for (const job of queue) {
+      job.resolve({ delivered: 0, dropped: job.segments.length, synthFailed: false })
+      cleared += 1
+    }
+    lanes.delete(key)
+  }
+  let interrupted = false
+  for (const job of activeJobs) {
+    if (!job.stopped) {
+      job.stopped = true
+      interrupted = true
+      job.markStopped()
+    }
+  }
+  // 停止本身要留一行账：真停了几单、有没有打断，事后只认这行。
+  if (cleared > 0 || interrupted) {
+    console.log('SPEECH_STOP', JSON.stringify({ cleared, interrupted }))
+    notifyQueue()
+  }
+  return { cleared, interrupted }
+}
 
 function enqueueLane(
   key: string,
@@ -348,6 +457,8 @@ function enqueueLane(
     } else {
       lanes.set(key, [...lane, job])
     }
+    // 入队/顶掉都改了队列，推一次（面板的「余 N 句」跟着动）。
+    notifyQueue()
     void pumpLane(key)
   })
 }
@@ -357,7 +468,22 @@ async function pumpLane(key: string): Promise<void> {
   lanePumping.add(key)
   try {
     for (let job = lanes.get(key)?.shift(); job; job = lanes.get(key)?.shift()) {
-      job.resolve(await deliverSegments(job.request, job.adapters, job.segments, job.eager, job.onSegment, job.gen))
+      const active = beginSpeechJob(job.request.text)
+      try {
+        const outcome = await deliverSegments(
+          job.request,
+          job.adapters,
+          job.segments,
+          job.eager,
+          job.onSegment,
+          job.gen,
+          () => active.stopped,
+          active.stopSignal
+        )
+        job.resolve(outcome)
+      } finally {
+        endSpeechJob(active)
+      }
     }
   } finally {
     lanePumping.delete(key)
@@ -377,12 +503,21 @@ export async function speakPipeline(
   const lane = driver.exclusiveLane ?? request.lane
   if (lane) return enqueueLane(lane, request, adapters, onSegment)
   const segments = planSegments(request)
-  return deliverSegments(
-    request,
-    adapters,
-    segments,
-    driver.atEnqueue ? startEagerSynths(driver.atEnqueue, request, adapters, segments) : null,
-    onSegment
-  )
+  // 内联投递（声出整句、试听）不排队，照样能被停止：标记打在这一次投递上。
+  const active = beginSpeechJob(request.text)
+  try {
+    return await deliverSegments(
+      request,
+      adapters,
+      segments,
+      driver.atEnqueue ? startEagerSynths(driver.atEnqueue, request, adapters, segments) : null,
+      onSegment,
+      undefined,
+      () => active.stopped,
+      active.stopSignal
+    )
+  } finally {
+    endSpeechJob(active)
+  }
 }
 

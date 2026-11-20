@@ -16,6 +16,7 @@ import {
 } from '@shared/voice-out'
 import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { formatChainTiming } from '@shared/voice-timing'
+import { queueLine, stopLine, type SpeechQueueSnapshot } from '@shared/speech-queue'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
 import {
@@ -72,6 +73,10 @@ export function TalkPage({
   const [outResult, setOutResult] = useState<VoiceOutTestResult | null>(null)
   // 声出就绪快照：进页读一次，之后主进程只在变化时推（面板不自己开定时器）。
   const [readiness, setReadiness] = useState<VoiceOutReadiness | null>(null)
+  // 语音队列（#88）：进页读一次快照，之后主进程一变就推；面板不自己数余量。
+  const [queue, setQueue] = useState<SpeechQueueSnapshot | null>(null)
+  const [queueBusy, setQueueBusy] = useState(false)
+  const [stopNote, setStopNote] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
   const [log, setLog] = useState<LogEntry[]>([])
   const [editingAt, setEditingAt] = useState<number | null>(null)
@@ -110,6 +115,10 @@ export function TalkPage({
   }, [])
   useEffect(() => window.api.onVoiceOutReadiness(setReadiness), [])
   useEffect(() => {
+    void window.api.speechQueue().then(setQueue)
+    return window.api.onSpeechQueue(setQueue)
+  }, [])
+  useEffect(() => {
     // 输入/输出设备只在面板里枚举：插拔后重新打开页面就能看到。
     navigator.mediaDevices
       ?.enumerateDevices()
@@ -121,6 +130,18 @@ export function TalkPage({
         setOutputs([])
         setInputs([])
       })
+  }, [])
+
+  // 停止：一句 IPC，主进程把排队清掉、在途标停；回执写成一句话，别让人猜停没停。
+  const runStop = useCallback(async () => {
+    setQueueBusy(true)
+    try {
+      const result = await window.api.speechStop()
+      setStopNote(stopLine(result))
+      setQueue(await window.api.speechQueue())
+    } finally {
+      setQueueBusy(false)
+    }
   }, [])
 
   const recheckCable = useCallback(() => {
@@ -517,6 +538,22 @@ export function TalkPage({
           </Row>
         </Group>
 
+        {/* #88：队列真相在主进程（speech-pipeline 握着 lanes 与在途的段），面板只画快照，不自己数。 */}
+        <Group label="语音队列">
+          <Row label="正在读" stacked hint="正在读哪一句、后头还压着几句；停止 = 排队的当场清掉，正在读的读到当前段的段尾就停。">
+            {queue ? (
+              <>
+                <StatusPill tone={queue.pending > 0 ? 'warn' : 'ready'}>{queueLine(queue)}</StatusPill>
+                <Button size="sm" variant="outline" disabled={queueBusy} onClick={() => void runStop()}>
+                  {queueBusy ? '停止中…' : '停止'}
+                </Button>
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">还在读队列</span>
+            )}
+          </Row>
+          {stopNote ? <p className="px-4 pb-3 text-xs text-muted-foreground">{stopNote}</p> : null}
+        </Group>
         <Group label="试一下">
           <Row label="整条链" hint="点一下开始说话，再点一下结束：识别 → 翻译 → 声出全程照跑">
             <Button
