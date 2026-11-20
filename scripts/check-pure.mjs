@@ -545,6 +545,33 @@ check('链路门：0 帧永远不进 ASR（判成立也不进）', !shouldRunCha
 check('链路门：有帧且判定成立才进', shouldRunChain({ ok: true, frames: 24_000 }))
 check('电平：0/负数/NaN 都是 0，0.1 顶满', levelPercent(0) === 0 && levelPercent(-3) === 0 && levelPercent(Number.NaN) === 0 && levelPercent(0.4) === 100)
 check('电平：说话量级落在六成上下', levelPercent(0.05) >= 55 && levelPercent(0.05) <= 65)
+// —— 按住自检（#95）：状态与文案是用户可以据以判断「按住还灵不灵」的唯一证据
+const { formatHeld, judgeHoldHealth, summarizeHoldEdges } = await import('../src/shared/hold-selftest.ts')
+const holdBase = { presence: 'resident', ready: true, attempts: 0, fallbackReason: null, edges: [] }
+const held = summarizeHoldEdges([
+  { at: 1_000, kind: 'press' },
+  { at: 1_820, kind: 'release' },
+  { at: 5_000, kind: 'press' }
+])
+check('按住自检：一按一放算一对，按住时长 820ms', held.presses === 2 && held.releases === 1 && held.pairs === 1 && held.heldMs === 820)
+check('按住自检：只按着没松开时不会有配对的时长', held.heldMs !== null && summarizeHoldEdges([{ at: 1, kind: 'press' }]).heldMs === null)
+check('按住自检：仍常驻且收到过边 → 正常态', judgeHoldHealth({ ...holdBase, edges: [{ at: 1, kind: 'press' }] }).tone === 'ready')
+check('按住自检：常驻但一次没按过 → 提醒，不算正常', judgeHoldHealth(holdBase).tone === 'warn')
+check(
+  '按住自检：退回敲一下是坏的，必须说清按住已失效',
+  (() => {
+    const view = judgeHoldHealth({ ...holdBase, presence: 'fallback', ready: false, fallbackReason: '常驻脚本连续 5 次没起来' })
+    return view.tone === 'bad' && view.title.includes('退回') && view.hint.includes('按一下')
+  })()
+)
+check(
+  '按住自检：任何状态都不许说「已恢复」这类假话',
+  ['off', 'starting', 'resident', 'fallback'].every((presence) => {
+    const view = judgeHoldHealth({ ...holdBase, presence, ready: presence === 'resident', fallbackReason: null })
+    return !/已恢复|已修复|recovered|repaired/.test(`${view.title}${view.hint}`)
+  })
+)
+check('按住自检：时长文案毫秒/秒分档', formatHeld(320) === '320 ms' && formatHeld(1_820) === '1.8 s' && formatHeld(12_400) === '12 s')
 
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)

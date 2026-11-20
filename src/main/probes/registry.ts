@@ -216,7 +216,7 @@ export const PROBES: readonly ProbeEntry[] = [
   },
   {
     flag: '--hold-watch-probe',
-    summary: 'the hold-to-talk signal chain end to end with no window and no mic (F13 via the resident watcher)',
+    summary: 'the hold-to-talk chain in three layers: the resident script reports OK, HOLD edges are recorded once each, and a dead script surfaces as fallback instead of silence',
     run: runHoldWatchProbe
   },
   {

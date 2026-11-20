@@ -12,6 +12,7 @@ import {
   type HotkeyVerdict
 } from '@shared/hotkeys'
 import type { HotkeysResult } from '@shared/ipc'
+import { formatEdgeClock, formatHeld, judgeHoldHealth, summarizeHoldEdges, type HoldSelfTest } from '@shared/hold-selftest'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 import { useSaveFlash, useSettings } from '../use-settings'
@@ -40,6 +41,26 @@ export function HotkeysPage(): React.ReactElement {
   const [capturing, setCapturing] = useState<HotkeyActionId | null>(null)
   const [pending, setPending] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // #95：按住检测的自检快照。只看不写——这一行必须能回答「按住到底还有没有在听」，
+  // 所以它读主进程记下的真实边，而不是自己猜热键有没有生效。
+  const [hold, setHold] = useState<HoldSelfTest | null>(null)
+  useEffect(() => {
+    let alive = true
+    const tick = async (): Promise<void> => {
+      try {
+        const next = await window.api.holdSelfTest()
+        if (alive) setHold(next)
+      } catch {
+        // 读不到自检不该让整页报错：面板本身就有一条「注册失败」的出口。
+      }
+    }
+    void tick()
+    const timer = setInterval(() => void tick(), 2000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [])
   const [busy, setBusy] = useState(false)
   // 语音对讲怎么按不在这张表里（表只管键位），单独读写设置，保存即时生效。
   const { settings, update } = useSettings()
@@ -108,6 +129,9 @@ export function HotkeysPage(): React.ReactElement {
       setBusy(false)
     }
   }
+
+  const holdView = hold ? judgeHoldHealth(hold) : null
+  const holdEdges = hold ? summarizeHoldEdges(hold.edges) : null
 
   return (
     <Panel>
@@ -186,6 +210,23 @@ export function HotkeysPage(): React.ReactElement {
           {flash.flash ? <span className="text-xs text-muted-foreground">{flash.flash}</span> : null}
           {flash.error ? <span className="text-xs text-destructive">{flash.error}</span> : null}
         </Row>
+        {holdView && holdEdges ? (
+          <Row label="按住检测" stacked hint={holdView.hint}>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusPill tone={holdView.tone}>{holdView.title}</StatusPill>
+              {hold?.presence === 'off' ? null : (
+                <span className="text-xs text-muted-foreground">
+                  按下 {holdEdges.presses} · 松开 {holdEdges.releases}
+                  {holdEdges.heldMs === null ? '' : ` · 上次按住 ${formatHeld(holdEdges.heldMs)}`}
+                  {holdEdges.lastAt === null ? '' : ` · 最近 ${formatEdgeClock(holdEdges.lastAt)}`}
+                </span>
+              )}
+              {hold && hold.attempts > 0 ? (
+                <span className="text-xs text-amber-300">正在重开（第 {hold.attempts} 次）</span>
+              ) : null}
+            </div>
+          </Row>
+        ) : null}
         {captureKeyClash(settings?.hotkeys?.voiceCapture ?? '', settings?.ttsSpeakKey ?? '') ? (
           <Row label="键位冲突">
             <p className="text-xs text-destructive">

@@ -45,7 +45,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--translate-accuracy-probe` runs the real provider over a fixed line set and reports per-line accuracy and latency
   - `--overlay-geometry-probe` 
   - `--hotkey-probe` the global-hotkey seam with zero window and zero game: accelerator round trip and collisions
-  - `--hold-watch-probe` the hold-to-talk signal chain end to end with no window and no mic (F13 via the resident watcher)
+  - `--hold-watch-probe` the hold-to-talk chain in three layers: the resident script reports OK, HOLD edges are recorded once each, and a dead script surfaces as fallback instead of silence
   - `--voice-out-probe` the pure 声出 decision seam (`src/shared/voice-out.ts`) plus readiness reasons
   - `--voice-chain-probe` the 对讲 timing account (`src/shared/voice-timing.ts` + `chain-timing.ts`), zero network
   - `--log-bundle-probe` the diagnostic bundle (`src/shared/log-bundle.ts` + `services/zip.ts`): masking, manifest, missing files, byte-stable archive

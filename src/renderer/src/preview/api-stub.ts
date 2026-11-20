@@ -394,6 +394,33 @@ const implemented = {
     Object.assign(hotkeys, map)
     return hotkeyPayload()
   },
+  holdSelfTest: async () => {
+    // #95 预览：假边随刷新轮转。切换语音对讲模式的面板按钮会真的盖掉沉浸模式设置，
+    // 退出预览再进 fresh browser 页面即还原。
+    const mode = settings.voiceCaptureMode ?? 'hold'
+    if (mode !== 'hold') {
+      return { presence: 'off', ready: false, attempts: 0, fallbackReason: null, edges: [] }
+    }
+    // ?hold=fallback 看「常驻脚本起不来、退回敲一下」那一屏：这是最容易没人检查、
+    // 却最需要人看见的状态（用户按住没反应，只能靠这一行告诉他）。
+    if (query.get('hold') === 'fallback') {
+      return {
+        presence: 'fallback',
+        ready: false,
+        attempts: 5,
+        fallbackReason: '常驻脚本连续 5 次没起来（按住的松开信号收不到）',
+        edges: []
+      }
+    }
+    const base = Date.now() - 30_000
+    const edges = [
+      { at: base + 1000, kind: 'press' as const },
+      { at: base + 2600, kind: 'release' as const },
+      { at: base + 8000, kind: 'press' as const },
+      { at: base + 9600, kind: 'release' as const }
+    ]
+    return { presence: 'resident', ready: true, attempts: 0, fallbackReason: null, edges }
+  },
   appVersion: async () => '0.0.0-stub',
   appOpenExternal: async () => ({ ok: true, error: null }),
   updateCheck: async () => ({ channel: 'stable', status: 'dev', version: '0.0.0' }),

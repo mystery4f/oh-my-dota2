@@ -23,6 +23,16 @@
 - 预防：`npm install` 时带 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 和
   `--registry=https://registry.npmmirror.com`。
 
+### 按住热键「按了没反应」时，先看自检那一行（#95）
+
+**症状**：按住热键说话，有时候像没听见；重启应用又好了，说不清到底哪一步坏了。
+
+**根因**：按住用的不是 `globalShortcut`（它只报按下），而是一个常驻 `hotkey-hold.ps1` 轮询 `GetAsyncKeyState`。这条链有三段会各自失败：脚本没起来（PowerShell 策略、被杀）、起来了但没收到按下、收到了但松开丢了。以前三段都只在日志里各留一行，用户看不到，于是只能「重启试试」。
+
+**修法**：`src/main/services/input/hold-selftest.ts` 成为唯一登记处（starting / resident / fallback + 原因 + 最近 24 条边），经 `hotkey:hold-selftest` 给面板；热键页的「按住检测」一行显示状态、按下/松开次数、上次按住多久。**退回敲一下时文案必须说「按住不生效」并给出敲一下的用法**——降级不是修复，不许写「已恢复」。
+
+**探针的边界**（`--hold-watch-probe`，三段）：真脚本起来并回报 `OK` 是硬断言；假脚本按同一协议吐 `HOLD 1`/`HOLD 0`，钉住「每条边只落一次」；起不来时退回态必须带原因。**注入按键这一段在拒收 `keybd_event` 的桌面上只记 SKIP**：实测同一进程里注入后 `GetAsyncKeyState` 仍返回 0，把环境限制算成代码失败只会让人去修不该修的地方。另：`powershell -Command "<一长串>"` 在这台机器上会挂住不退出，注入脚本一律落盘用 `-File` 跑。
+
 ### `--xxx-probe` 无输出、进程挂住
 - 症状：`npx electron out/main/index.js --capture-selftest` 什么都不打印就退出，或卡到 120 秒。
 - 根因：上一次的 electron 进程还活着，`requestSingleInstanceLock()` 失败后新进程直接 quit；另有一种情况是

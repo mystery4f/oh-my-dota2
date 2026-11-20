@@ -65,6 +65,11 @@ guessing the fields costs a rework round.
   dispatches from it — add a probe by adding a row, then `npm run probes:doc`; `npm run check:probes` (inside `lint`)
   fails when the catalogue drifts. CI reads the same table: a row marked `ci: true` is what the `Pure probes` job runs,
   and `npx electron out/main/index.js --probes-ci` prints those flags — never hand-write that list in the workflow again.
+  `--hold-watch-probe` runs in three layers and prints SKIP for the one it cannot judge: the resident PowerShell
+  really starts and reports `OK`; a fake child speaking the same `OK`/`HOLD 1`/`HOLD 0` protocol proves each edge is
+  recorded once; a child that never starts proves the fallback surfaces with a reason. Injected `keybd_event` is
+  skipped, not failed — this desktop drops it (in-process injection leaves `GetAsyncKeyState` at 0), so the probe never
+  claims real keys were verified here.
   Exit codes and the flush-before-exit rule live in `src/main/probes/harness.ts`
   (`exitProbe` / `finishProbe` / `reportProbe`): never call `app.exit(0)` unconditionally — that is how a failed probe
   used to look green, and eslint now rejects `app.exit` / `process.exit` anywhere under `src/main/probes/`.
@@ -132,6 +137,10 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
   and falls back to a `globalShortcut` toggle when it gives up — the hotkey must never go silent. Never register both paths
   for `voiceCapture`: one press would start and stop in the same instant. Keyboard auto-repeat is debounced 500ms in
   `toggleVoiceCapture` (toggle mode only; the watcher emits one edge per physical press).
+  Every outcome of that resident script is registered once in `src/main/services/input/hold-selftest.ts`
+  (starting / resident / fallback + reason + the last 24 edges) and served to the panel through
+  `hotkey:hold-selftest`; the panel's 热键 → 按住检测 row is the only place a user can tell "按下真的被听见" from
+  "按住已经失效、现在是敲一下". A fallback state must say 按住不生效 and how to use 敲一下 — never "已恢复".
 
 Two actions may never share an accelerator — the panel refuses the whole table and marks both rows. A key another
 program already owns is reported per row (`被占用`), never silently dropped: that is the only visible form of "I pressed

@@ -7,6 +7,7 @@ import type { VoiceChainTiming } from './voice-timing'
 import type { VoiceStageEvent } from './voice-stage'
 import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
+import type { HoldSelfTest } from './hold-selftest'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { QualityReport } from './quality-report'
 import type { SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
@@ -451,6 +452,8 @@ export const IPC = {
   HOTKEYS_GET: 'hotkeys:get',
   /** 存整张热键表并立刻重注册；表里有冲突/非法键时整张拒收。 */
   HOTKEYS_SET: 'hotkeys:set',
+  /** #95：按住检测的自检快照（常驻脚本在不在、最近的按下/松开）。 */
+  HOLD_SELF_TEST: 'hotkey:hold-selftest',
   PROVIDER_TEST: 'provider:test',
   PROVIDER_TRANSLATE: 'provider:translate',
   CAPTURE_START: 'capture:start',
@@ -769,6 +772,7 @@ export const ipcContract = {
   // 热键：读整张表、存整张表（存完主进程立刻重注册并重发浮层状态）。
   getHotkeys: invoke<[], HotkeysResult>(IPC.HOTKEYS_GET),
   setHotkeys: invoke<[Record<HotkeyActionId, string>], HotkeysResult>(IPC.HOTKEYS_SET),
+  holdSelfTest: invoke<[], HoldSelfTest>(IPC.HOLD_SELF_TEST),
   testProvider: invoke<[ProviderConfig], TestResult>(IPC.PROVIDER_TEST),
   translate: invoke<[string, TranslateDirection?], string>(IPC.PROVIDER_TRANSLATE),
   translateInPlace: invoke<[], InPlaceResult>(IPC.REPLY_INPLACE),

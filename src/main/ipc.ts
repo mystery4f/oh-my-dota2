@@ -6,6 +6,7 @@ import { translateInPlace, voiceReply } from './services/reply/reply-service'
 import { generatePanelSuggestions } from './services/reply/panel-suggestions'
 import { loadSettings, saveSettings } from './services/settings'
 import { hotkeysState, saveHotkeysState } from './services/hotkeys'
+import { holdSelfTest } from './services/input/hold-selftest'
 import { firstRunReport, recordProviderProbe } from './services/first-run'
 import { envReport } from './services/env-report'
 import { translationInsights } from './services/session/translate-cache'
@@ -116,6 +117,7 @@ const handlers: MainHandlers = {
   getSettings: () => loadSettings(),
   setSettings: (patch) => saveSettings(patch),
   getHotkeys: () => hotkeysState(),
+  holdSelfTest: () => holdSelfTest(),
   setHotkeys: (map) => saveHotkeysState(map),
   // 真连一次的结果要留下来：上手检查那一步只认「key 真能用」，不认「key 已填」。
   testProvider: async (provider) => {

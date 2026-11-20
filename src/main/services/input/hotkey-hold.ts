@@ -1,6 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import scriptSource from './hotkey-hold.ps1?raw'
 import { deployPsScript } from './ps-runner'
+import {
+  noteHoldEdge,
+  noteHoldFallback,
+  noteHoldReady,
+  noteHoldRetry,
+  noteHoldStarting,
+  noteHoldStopped
+} from './hold-selftest'
 
 /**
  * 按住检测：常驻一个 PowerShell 进程，40ms 轮询组合键的 GetAsyncKeyState。
@@ -23,15 +31,23 @@ export interface HoldWatchHandlers {
 const RETRY_MS = 3000
 const MAX_ATTEMPTS = 5
 
+/** 探针用的两个口子：把常驻进程换成一个假的，或把退避压缩到毫秒。生产代码不传。 */
+export interface HoldWatchOptions {
+  launch?: (vks: number[]) => ChildProcess
+  retryMs?: number
+}
+
 class HoldWatcher {
   private child: ChildProcess | null = null
   private signature = ''
   private handlers: HoldWatchHandlers | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private attempts = 0
+  private launcher: ((vks: number[]) => ChildProcess) | null = null
+  private retryMs = RETRY_MS
 
   /** 开始（或换键重启）监视。同一个组合键只换处理函数，不重开进程。 */
-  start(vks: number[], handlers: HoldWatchHandlers): void {
+  start(vks: number[], handlers: HoldWatchHandlers, options?: HoldWatchOptions): void {
     const signature = vks.join(',')
     if (this.child && this.signature === signature) {
       this.handlers = handlers
@@ -41,6 +57,9 @@ class HoldWatcher {
     this.signature = signature
     this.handlers = handlers
     this.attempts = 0
+    this.launcher = options?.launch ?? null
+    this.retryMs = options?.retryMs ?? RETRY_MS
+    noteHoldStarting()
     this.spawn(vks)
   }
 
@@ -51,6 +70,7 @@ class HoldWatcher {
     const child = this.child
     this.child = null
     child?.kill()
+    noteHoldStopped()
   }
 
   private clearRetry(): void {
@@ -66,11 +86,13 @@ class HoldWatcher {
       scriptName: 'hotkey-hold.ps1',
       source: scriptSource
     })
-    const child = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Vks', vks.join(',')],
-      { windowsHide: true }
-    )
+    const child = this.launcher
+      ? this.launcher(vks)
+      : spawn(
+          'powershell.exe',
+          ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Vks', vks.join(',')],
+          { windowsHide: true }
+        )
     this.child = child
     let buffer = ''
     let ready = false
@@ -84,10 +106,13 @@ class HoldWatcher {
         if (text === 'OK') {
           ready = true
           this.attempts = 0
+          noteHoldReady()
           console.log('HOTKEY_HOLD_READY', JSON.stringify({ vks }))
         } else if (text === 'HOLD 1') {
+          noteHoldEdge('press')
           this.handlers?.onPress()
         } else if (text === 'HOLD 0') {
+          noteHoldEdge('release')
           this.handlers?.onRelease()
         }
       }
@@ -112,16 +137,18 @@ class HoldWatcher {
     if (!this.handlers) return
     if (this.attempts >= MAX_ATTEMPTS) {
       console.log('HOTKEY_HOLD_GIVE_UP', JSON.stringify({ attempts: this.attempts }))
+      noteHoldFallback(`常驻脚本连续 ${MAX_ATTEMPTS} 次没起来（按住的松开信号收不到）`)
       this.handlers.onUnavailable?.()
       return
     }
     this.attempts += 1
+    noteHoldRetry(this.attempts)
     this.clearRetry()
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
       if (!this.handlers) return
       this.spawn(vks)
-    }, RETRY_MS)
+    }, this.retryMs)
   }
 }
 
@@ -133,8 +160,8 @@ function getWatcher(): HoldWatcher {
 }
 
 /** 用 VK 列表开始（或换键重启）按住监视。 */
-export function watchHold(vks: number[], handlers: HoldWatchHandlers): void {
-  getWatcher().start(vks, handlers)
+export function watchHold(vks: number[], handlers: HoldWatchHandlers, options?: HoldWatchOptions): void {
+  getWatcher().start(vks, handlers, options)
 }
 
 /** 停掉常驻进程（换回敲一下、退出程序时调用）。 */
