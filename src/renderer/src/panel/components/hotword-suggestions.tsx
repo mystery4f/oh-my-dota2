@@ -30,6 +30,8 @@ export function HotwordCandidateBox({
   const [note, setNote] = useState<string | null>(null)
   // 表满时被丢下的词：note 里写了「见下」就必须真的列出来，否则那句提示是在骗人。
   const [dropped, setDropped] = useState<readonly string[]>([])
+  // 展开了原句的词（#137）：证据算出来又丢掉，等于让人凭猜决定要不要改词表。
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set())
   const save = useSaveFlash()
 
   const refresh = useCallback((): void => {
@@ -61,6 +63,15 @@ export function HotwordCandidateBox({
         表满没写进去：{dropped.join('、')} —— 先在热词框里删几个，再勾上重并
       </p>
     ) : null
+  const toggleSamples = (word: string): void => {
+    setRevealed((prev) => {
+      const next = new Set(prev)
+      if (next.has(word)) next.delete(word)
+      else next.add(word)
+      return next
+    })
+  }
+
   const toggle = (word: string): void => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -145,32 +156,59 @@ if (suggestions.suggestions.length === 0) {
         </span>
       </div>
       <ul className="space-y-1">
-        {suggestions.suggestions.map((item) => (
-          <li key={item.word} className="flex items-start gap-2 text-xs">
-            <label className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                className="mt-0.5 size-3.5"
-                checked={selected.has(item.word)}
-                onChange={() => toggle(item.word)}
-              />
-              <span className={cn('font-medium', item.inTable && 'text-muted-foreground line-through')}>
-                {item.word}
-              </span>
-            </label>
-            <span className="text-muted-foreground">
-              ×{item.count}
-              {item.inTable ? ' · 已在表' : ''}
-            </span>
-            <button
-              type="button"
-              className="text-muted-foreground underline-offset-2 hover:underline"
-              onClick={() => dismiss(item.word)}
-            >
-              忽略
-            </button>
-          </li>
-        ))}
+        {suggestions.suggestions.map((item) => {
+          const open = revealed.has(item.word)
+          return (
+            <li key={item.word} className="space-y-1 text-xs">
+              <div className="flex items-start gap-2">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-3.5"
+                    checked={selected.has(item.word)}
+                    onChange={() => toggle(item.word)}
+                  />
+                  {/* 悬停给第一条原句：不想展开的人也能一眼看到它从哪句话里来 */}
+                  <span
+                    title={item.samples[0] ?? item.word}
+                    className={cn('font-medium', item.inTable && 'text-muted-foreground line-through')}
+                  >
+                    {item.word}
+                  </span>
+                </label>
+                <span className="text-muted-foreground">
+                  ×{item.count}
+                  {item.inTable ? ' · 已在表' : ''}
+                </span>
+                {item.samples.length > 0 ? (
+                  <button
+                    type="button"
+                    aria-expanded={open}
+                    className="text-muted-foreground underline-offset-2 hover:underline"
+                    onClick={() => toggleSamples(item.word)}
+                  >
+                    {open ? '收起原句' : `原句 ${item.samples.length}`}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="text-muted-foreground underline-offset-2 hover:underline"
+                  onClick={() => dismiss(item.word)}
+                >
+                  忽略
+                </button>
+              </div>
+              {open ? (
+                <ul className="ml-5 space-y-0.5 border-l border-border/60 pl-2 text-[11px] leading-relaxed text-muted-foreground">
+                  {/* 同一句可能被纠错过两次（原句相同）：键带上序号，别让 React 丢掉一条证据 */}
+                  {item.samples.map((sample, index) => (
+                    <li key={`${item.word}-${index}`}>· {sample}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </li>
+          )
+        })}
       </ul>
       <div className="flex items-center gap-2">
         <Button size="sm" disabled={busy || chosen.length === 0} onClick={() => void apply()}>
