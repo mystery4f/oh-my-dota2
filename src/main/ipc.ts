@@ -19,6 +19,11 @@ import { ensureOfflineModel, offlineStatus } from './services/voice/offline'
 import { transcribeForVoice, transcribeWav } from './services/voice/asr'
 import { saveVoiceCorrection } from './services/voice/corrections'
 import {
+  applyHotwordCandidates,
+  dismissHotwordCandidates,
+  hotwordSuggestions
+} from './services/voice/hotword-candidates'
+import {
   asrState,
   asrStatus,
   ensureActiveAsrModel,
@@ -174,6 +179,10 @@ const handlers: MainHandlers = {
   transcribeAudio: (wavBase64, micLabel) => transcribeForVoice(wavBase64, micLabel),
   // #66：纠错落库。开关（settings.asrCorrectionsToDataset）在主进程判；面板只报「票据 + 改对的那句」。
   voiceCorrection: (input) => saveVoiceCorrection(input),
+// #74：热词候选只建议不自动应用。并入走 settings 的保存（引擎自重载）；忽略只清池子。
+  hotwordSuggestions: () => hotwordSuggestions(),
+  hotwordApply: (words) => applyHotwordCandidates(Array.isArray(words) ? words : []),
+  hotwordDismiss: (words) => dismissHotwordCandidates(Array.isArray(words) ? words : []),
   ttsPreview: (text) => getTtsAdapter().preview(String(text ?? '')),
   voiceOutTest: () => getVoiceOutService().test(),
   voiceOutCable: () => detectVirtualCable(),

@@ -106,6 +106,7 @@ tags: [docs, index]
 | `docs/adr/translate-guard-telemetry.md` | 保真守卫只报三段计数（blocked / recovered / gaveUp）：漏检率测不出来，事件攒批写 `logs/translate-guard.jsonl`，记账本战绩同批拍快照 |
 | `docs/adr/first-run-checklist.md` | 上手检查六步证据链：每步给可核对证据，最后一步只认真游戏帧（cfg 只在 Dota 启动时读），外加多 Steam 库 / 中文路径 / 移动硬盘三处加固 |
 | `docs/adr/match-attribution.md` | 一行话属于哪一局：voice-chain 每行带 `matchid`（`liveMatchId()` 只认 90 秒内的活帧，拿不到写显式 null 不猜），gsi-summary 按局归档 `<matchid>.json` 只留 20 份且当前局永不删 |
+| `docs/adr/hotword-candidates.md` | 热词候选只建议不自动应用：纠错的差异词≥2 字才进池，面板勾选后才写一次 `asrHotwords`（写一次=重载一次识别器），表满丢的词必须列出来 |
 
 ## 协作约定
 

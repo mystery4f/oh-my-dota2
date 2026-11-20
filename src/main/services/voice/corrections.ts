@@ -25,6 +25,7 @@ import {
   type FtCorrectionSaveResult
 } from '@shared/train/corrections'
 import { loadSettings } from '../settings'
+import { noteCorrection } from './hotword-candidates'
 import { recordDatasetTake } from '../train/run-store'
 
 /** 纠错落库结果就是 IPC 那个类型（`@shared/train/corrections`），这里只起个本地的短名。 */
@@ -42,6 +43,8 @@ interface StashedUtterance {
   /** 识别那一刻发下去的票：面板纠错时原样带回来，按它对录音，不看文本。 */
   id: string
   wav: Uint8Array
+  /** 识别出来的原句：热词候选靠它算差异（改后那句在纠错请求里）。 */
+  transcript: string
   /** 已经写过样本的键：同一条再改一次覆盖它，不新增一条。 */
   key: string | null
 }
@@ -57,7 +60,7 @@ export function stashUtterance(transcript: string, wav: Uint8Array): string | nu
   if (!transcript.trim() || wav.byteLength === 0) return null
   nextUtteranceId += 1
   const id = `u${nextUtteranceId}`
-  stash.push({ id, wav, key: null })
+  stash.push({ id, wav, transcript, key: null })
   while (stash.length > STASH_MAX) stash.shift()
   return id
 }
@@ -143,7 +146,13 @@ export async function writeCorrectionSample(input: {
  */
 export async function saveVoiceCorrection(
   input: FtCorrectionInput,
-  options?: { enabled?: boolean; root?: string; limits?: CorrectionLimits }
+  options?: {
+    enabled?: boolean
+    root?: string
+    limits?: CorrectionLimits
+    /** 热词候选记账；探针注入空实现，免得测一次纠错就在真实数据目录留一条候选。 */
+    onCorrection?: (before: string, after: string) => void
+  }
 ): Promise<CorrectionSaveResult> {
   const enabled = options?.enabled ?? loadSettings().asrCorrectionsToDataset
   if (!enabled) return { saved: false, key: null, notice: null }
@@ -162,6 +171,11 @@ export async function saveVoiceCorrection(
     key: found.key,
     limits: options?.limits
   })
-  if (result.saved) found.key = result.key
+  if (result.saved) {
+    found.key = result.key
+    // #74：候选池只从「真的落了一条样本」的纠错里长出来——没存样本的纠错没有证据可依。
+    const note = options?.onCorrection ?? noteCorrection
+    note(found.transcript ?? '', input.corrected)
+  }
   return result
 }

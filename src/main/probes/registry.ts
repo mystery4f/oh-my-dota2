@@ -23,6 +23,7 @@ import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
 import { runMatchReportProbe } from './match-report'
 import { runMatchAttributionProbe } from './match-attribution'
+import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runProviderReasoningProbe } from './provider-reasoning'
 import { runSettingsPersistProbe } from './settings-persist'
@@ -174,6 +175,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'which match a row belongs to: one archive per match, the live summary holding only the current one, and null instead of a guessed id',
     run: runMatchAttributionProbe
+  },
+  {
+    flag: '--hotword-candidates-probe',
+    ci: true,
+    summary:
+      'hotword candidates from corrections: only >=2-char diffs enter the pool, sorting by count, explicit merge, full table never silently drops',
+    run: runHotwordCandidatesProbe
   },
   {
     flag: '--translate-accuracy-probe',

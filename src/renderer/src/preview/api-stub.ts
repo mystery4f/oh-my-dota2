@@ -24,6 +24,7 @@ import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
 import { estimateFtCost, summarizePendingTakes } from '@shared/train/asr-ft'
 import type { AsrCheckState } from '@shared/train/asr-check'
 import { judgeCorrectionSamples } from '@shared/train/corrections'
+import { mergePlan, rankCandidates, type HotwordCandidate, type HotwordSuggestions } from '@shared/asr-hotword-candidates'
 import { judgeFirstRun } from '@shared/first-run'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
@@ -298,6 +299,23 @@ const stubAsrModels = [
 let stubAsrActiveId = query.get('asrModel') === 'paraformer' ? 'paraformer:asr-models/paraformer-zh' : 'qwen3:asr-models/qwen3-asr'
 // 设置里的现役 id 是页面判断「训练目标和现役不是同一个引擎」的唯一来源，stub 也要跟着走这条。
 settings.asrActiveModel = stubAsrActiveId
+
+// #74 候选池的桩：预览里没有真人纠错，池子是一份造出来的典型样本；写词表走真 `mergePlan`，
+// 所以「表满丢哪几个」「已在表里几个」这些数字在预览里也跟真机一致。
+let stubHotwordPool: HotwordCandidate[] = [
+  { word: '肉山', count: 4, samples: ['我们打肉山啊', '肉山在上路'] },
+  { word: '马尔斯', count: 2, samples: ['我们打个哈斯卡', '对面马而斯'] },
+  { word: '跳刀', count: 1, samples: ['先出跳刀吗'] }
+]
+let stubHotwordCorrections = 7
+
+function stubHotwordView(): HotwordSuggestions {
+  return {
+    corrections: stubHotwordCorrections,
+    hotwords: settings.asrHotwords,
+    suggestions: rankCandidates(stubHotwordPool, settings.asrHotwords)
+  }
+}
 /**
  * 现役模型的微调腿：与主进程 finetuneEngine 同一判据（activeId 的引擎 → 引擎表 finetune），
  * 目标行与估时都读它——换一条腿，预览里的 trainer / 步数 / 分钟跟着换。
@@ -328,8 +346,13 @@ function stubLineRecs(): FtRecInfo[] {
 
 /** 面板真正调用的通道，逐个给出类型正确的假答复。 */
 const implemented = {
-  getSettings: async () => settings,
-  setSettings: async (patch) => Object.assign(settings, patch),
+  // 必须回副本：真机每次 IPC 都过一遍结构化克隆，预览里回同一个对象的话
+  // React 的 `setState` 会因引用没变而跳过重渲染，面板就停在旧值上（热词并入后输入框还是 0/50）。
+  getSettings: async () => ({ ...settings }),
+  setSettings: async (patch) => {
+    Object.assign(settings, patch)
+    return { ...settings }
+  },
   testProvider: async () => ({ ok: true, message: 'stub ok', latencyMs: 321 }),
   translationCacheInspect: async () => cacheCounts(),
   translationCacheClear: async () => cacheCounts(),
@@ -441,6 +464,20 @@ const implemented = {
     stubAsrActiveId = id
     settings.asrActiveModel = id
     return { activeId: id, pinned: true, models: [...stubAsrModels] }
+  },
+  hotwordSuggestions: async () => stubHotwordView(),
+  hotwordApply: async (words) => {
+    const plan = mergePlan(settings.asrHotwords, words)
+    if (plan.added.length > 0) settings.asrHotwords = plan.next
+    // 真机把处理过的词从池子里摘掉：预览也要摘，连点两次「并入」才不会重复报数。
+    const handled = new Set([...plan.added, ...plan.already, ...plan.dropped])
+    stubHotwordPool = stubHotwordPool.filter((item) => !handled.has(item.word))
+    stubHotwordCorrections = Math.max(0, stubHotwordCorrections - handled.size)
+    return { ...plan, hotwords: settings.asrHotwords }
+  },
+  hotwordDismiss: async (words) => {
+    stubHotwordPool = stubHotwordPool.filter((item) => !words.includes(item.word))
+    return stubHotwordView()
   },
   voiceRuntimeStatus: async () => ({ state: 'ready', nodePath: 'stub-node.exe', installing: false, installError: null }),
   voiceRuntimeInstall: async () => ({ ok: true, error: null }),

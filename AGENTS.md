@@ -321,6 +321,11 @@ it and nothing happened". The overlay and the pause hint print key names from th
   Hotwords (`asrHotwords` setting, comma-separated) are a constructor-time config — the worker's
   recognizer cache key includes them, so editing the list reloads the engine. Single-char
   corrections are never auto-added (noise); the correction loop only merges ≥2-char diffs.
+  Correction samples feed a persistent candidate pool (`asr-hotword-candidates.json`) and the panel's
+  热词候选 box — that box is the ONLY writer of `asrHotwords`, it writes once per confirm (one write =
+  one recognizer reload), and a word it could not fit under `HOTWORD_LIMIT` must be listed, never
+  dropped silently. After applying, the panel's own settings state must be refreshed (`onApplied`) or
+  the next keystroke in the editor overwrites the words just merged.
 - ASR fine-tune legs follow the same table: qwen3 trains with `qwen3_asr_sft.py` + the ONNX exporter,
   paraformer trains through `python -m funasr.bin.train` on `funasr-jsonl` data and exports through the
   bundled `resources/asr-ft-export-funasr.py` (export + quantize + sherpa metadata/tokens in one process).

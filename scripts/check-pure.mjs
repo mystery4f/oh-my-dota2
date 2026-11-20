@@ -17,6 +17,15 @@ import { pureResolve } from './pure-resolve.mjs'
 registerHooks({ resolve: pureResolve })
 const { gradeAsrCheck, gradeSpoken, normalizeSpoken, summarizeAsrCheck } = await import('../src/shared/train/asr-check.ts')
 const { FT_TARGET_STEPS, deriveFtEpochsFor, deriveFtResumeEpochs } = await import('../src/shared/train/asr-ft.ts')
+const {
+  EMPTY_TALLY,
+  CANDIDATE_LIMIT,
+  mergePlan,
+  parseTally,
+  rankCandidates,
+  recordCorrection,
+  dismissCandidates
+} = await import('../src/shared/asr-hotword-candidates.ts')
 
 let failed = 0
 function check(name, ok, detail) {
@@ -41,6 +50,84 @@ const summary = summarizeAsrCheck([
 ])
 check('比对：汇总三档分开数', summary.same === 1 && summary.near === 1 && summary.wrong === 1 && summary.total === 3)
 
+// —— 热词候选（#74）：纠错差异词
+check(
+  '热词候选：一次纠错记一个 ≥2 字候选，带原句样本',
+  (() => {
+    const tally = recordCorrection(EMPTY_TALLY, '我们打个哈斯卡', '我们打个马尔斯')
+    return (
+      tally.corrections === 1 &&
+      tally.candidates.length === 1 &&
+      tally.candidates[0].word === '马尔斯' &&
+      tally.candidates[0].samples[0] === '我们打个哈斯卡'
+    )
+  })(),
+  ''
+)
+check(
+  '热词候选：同一个词纠三次 count=3，原句样本只收一次',
+  (() => {
+    const once = recordCorrection(EMPTY_TALLY, '我们打个哈斯卡', '我们打个马尔斯')
+    const twice = recordCorrection(once, '我们打个哈斯卡', '我们打个马尔斯')
+    const third = recordCorrection(twice, '我们打个哈斯卡', '我们打个马尔斯')
+    const hit = third.candidates.find((c) => c.word === '马尔斯')
+    return hit !== undefined && hit.count === 3 && hit.samples.length === 1
+  })(),
+  ''
+)
+check('热词候选：只改标点不进候选池', recordCorrection(EMPTY_TALLY, '打个', '打个！').candidates.length === 0, '')
+check(
+  '热词候选：池子满（40）了不新增候选，计数照记',
+  (() => {
+    let tally = EMPTY_TALLY
+    for (let i = 0; i < CANDIDATE_LIMIT + 5; i += 1)
+      tally = recordCorrection(tally, `改${i}废话`, `词${i}好话`)
+    return tally.candidates.length === CANDIDATE_LIMIT && tally.corrections === CANDIDATE_LIMIT + 5
+  })(),
+  ''
+)
+check(
+  '热词候选：已在表里的词记为 inTable',
+  (() => {
+    const tally = recordCorrection(EMPTY_TALLY, '我们打个哈斯卡', '我们打个马尔斯')
+    return rankCandidates(tally.candidates, '马尔斯')[0].inTable === true
+  })(),
+  ''
+)
+check(
+  '热词候选：合并计划把新增/已存在分开，next 是规范化串',
+  (() => {
+    const plan = mergePlan('冰甲,捍卫', ['捍卫', '肉山', '泰坦'])
+    return plan.already.includes('捍卫') && plan.added.includes('肉山') && plan.next === '冰甲,捍卫,肉山,泰坦'
+  })(),
+  ''
+)
+check(
+  '热词候选：表满时新词单独列出 dropped，next 不动',
+  (() => {
+    const full = Array.from({ length: 50 }, (_, i) => `词${i}`).join(',')
+    const plan = mergePlan(full, ['泰坦'])
+    return plan.dropped.includes('泰坦') && plan.next === full
+  })(),
+  ''
+)
+check(
+  '热词候选：忽略只摘候选，计数不动',
+  (() => {
+    const once = recordCorrection(EMPTY_TALLY, '我们打个哈斯卡', '我们打个马尔斯')
+    const dismissed = dismissCandidates(once, ['马尔斯'])
+    return dismissed.corrections === 1 && dismissed.candidates.length === 0
+  })(),
+  ''
+)
+check(
+  '热词候选：脏数据当空池',
+  (() => {
+    const junk = parseTally({ corrections: '三', candidates: [{ word: '甲', samples: 'x' }, { word: '' }, null] })
+    return junk.corrections === 0 && junk.candidates.length === 0
+  })(),
+  ''
+)
 // —— 训练轮数：数字错了就是训练时长错了，这里钉住当前的量级 ——
 check('轮数：全量 qwen3 42 条按 110 步折算 10 轮', deriveFtEpochsFor('qwen3-sft', 42) === 10, String(deriveFtEpochsFor('qwen3-sft', 42)))
 check(

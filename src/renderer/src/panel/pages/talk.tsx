@@ -30,6 +30,7 @@ import { selectClass } from '../components/select-class'
 import { Modal } from '../components/modal'
 import { errorMessage } from '@shared/errors'
 import { HotwordEditor } from '../components/hotword-editor'
+import { HotwordCandidateBox } from '../components/hotword-suggestions'
 import { useSaveFlash, useSettings } from '../use-settings'
 import { useVoicePacks } from '../use-voice-packs'
 import { VoicePackDisplay } from '../components/voice-pack-display'
@@ -371,6 +372,10 @@ export function TalkPage({
               onChange={(next) => void update({ asrHotwords: next })}
             />
           </Row>
+<HotwordCandidateBox
+            enabled={hotwordsEditable}
+            onApplied={(next) => void update({ asrHotwords: next })}
+          />
           <Row label="识别模型" hint="现役模型的下载与删除：底模从 hf-mirror 按文件下载（断点续传 + 校验）；微调转正的模型优先生效">
             {!asrStatus ? (
               <StatusPill tone="idle">检查中…</StatusPill>

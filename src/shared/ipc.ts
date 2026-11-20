@@ -1,5 +1,6 @@
 import type { DotaDisplayMode } from './dota-video'
 import type { FirstRunReport } from './first-run'
+import type { HotwordApplyResult, HotwordSuggestions } from './asr-hotword-candidates'
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
 import type { VoiceChainTiming } from './voice-timing'
 import type { VoiceStageEvent } from './voice-stage'
@@ -472,6 +473,10 @@ export const IPC = {
   // 模型注册表：列出磁盘上所有可用的识别模型、钉一份现役（换模型 = 换 id，不动代码）。
   ASR_MODELS: 'asr:models',
   ASR_ACTIVE_SET: 'asr:active-set',
+  // 热词候选（#74）：只建议不自动应用——读清单、显式并入、忽略。
+  HOTWORD_SUGGESTIONS: 'asr:hotword-suggestions',
+  HOTWORD_APPLY: 'asr:hotword-apply',
+  HOTWORD_DISMISS: 'asr:hotword-dismiss',
   // 语音运行时（#45）：自带 node.exe + sherpa 插件的一键安装；模型下载复用 ASR_DOWNLOAD。
   VOICE_RUNTIME_STATUS: 'voice:runtime-status',
   VOICE_RUNTIME_INSTALL: 'voice:runtime-install',
@@ -767,6 +772,9 @@ export const ipcContract = {
   asrDownload: invoke<[], OfflineStatus>(IPC.ASR_DOWNLOAD),
   asrModels: invoke<[], AsrState>(IPC.ASR_MODELS),
   asrActiveSet: invoke<[string], AsrState>(IPC.ASR_ACTIVE_SET),
+  hotwordSuggestions: invoke<[], HotwordSuggestions>(IPC.HOTWORD_SUGGESTIONS),
+  hotwordApply: invoke<[string[]], HotwordApplyResult>(IPC.HOTWORD_APPLY),
+  hotwordDismiss: invoke<[string[]], HotwordSuggestions>(IPC.HOTWORD_DISMISS),
   voiceRuntimeStatus: invoke<[], VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATUS),
   voiceRuntimeInstall: invoke<[], VoiceOperationResult>(IPC.VOICE_RUNTIME_INSTALL),
   voiceModelRemove: invoke<[], VoiceOperationResult>(IPC.VOICE_MODEL_REMOVE),
