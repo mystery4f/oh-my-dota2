@@ -12,7 +12,7 @@
  * 不在本缝范围：缩写保真（bkb → bkg）归 `translate-fidelity.latinTokenViolations`；
  * 术语类词条（mid / top / push）是普通英文词，点名不算「关键名词」，不在这里判。
  */
-import { GLOSSARY, type GlossaryKind } from './dota-glossary'
+import { GLOSSARY, type GlossaryEntry, type GlossaryKind } from './dota-glossary'
 import type { TranslateDirection } from './ipc'
 
 export interface KeyNoun {
@@ -38,20 +38,34 @@ function enPatternOf(en: string): RegExp {
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`)
 }
 
-/** 词表里能当「关键名词」点名的条目：英雄与物品（含 keepVerbatim 的短名，如 od、bkb）。 */
-const NAMED: { entry: KeyNoun; pattern: RegExp }[] = GLOSSARY.filter((entry) => entry.kind !== 'jargon').map(
-  (entry) => ({
+/**
+ * 词表里能当「关键名词」点名的条目：英雄与物品（含 keepVerbatim 的短名，如 od、bkb）。
+ * 懒加载 + 记住来源表：现役词表是一份可以整体换掉的 let（词表包），模块加载时算死的缓存
+ * 会在换包后继续拿旧词表点名。
+ */
+let namedCache: { table: readonly GlossaryEntry[]; rows: NamedEntry[] } | null = null
+
+interface NamedEntry {
+  entry: KeyNoun
+  pattern: RegExp
+}
+
+function namedEntries(): NamedEntry[] {
+  if (namedCache && namedCache.table === GLOSSARY) return namedCache.rows
+  const rows: NamedEntry[] = GLOSSARY.filter((entry) => entry.kind !== 'jargon').map((entry) => ({
     entry: { en: entry.en, zh: entry.zh, kind: entry.kind },
     pattern: enPatternOf(entry.en)
-  })
-)
+  }))
+  namedCache = { table: GLOSSARY, rows }
+  return rows
+}
 
 /** 翻译前的那一次比对：这一行点名的英雄/物品清单（同一词条只出现一次）。 */
 export function keyNounsOf(source: string, direction: TranslateDirection): KeyNoun[] {
   const lower = source.toLowerCase()
   const byZh = direction === 'zh-en'
   const out: KeyNoun[] = []
-  for (const entry of NAMED) {
+  for (const entry of namedEntries()) {
     if (byZh ? source.includes(entry.entry.zh) : entry.pattern.test(lower)) out.push(entry.entry)
   }
   return out

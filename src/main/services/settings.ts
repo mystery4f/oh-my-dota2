@@ -111,6 +111,10 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     if (typeof merged.trainDataset !== 'string') merged.trainDataset = DEFAULT_SETTINGS.trainDataset
     // 微调环境根目录：只认字符串，空串 = 用应用数据目录的 asr-ft-env。
     if (typeof merged.asrFtEnvDir !== 'string') merged.asrFtEnvDir = DEFAULT_SETTINGS.asrFtEnvDir
+    // 词表包名（#82）：只认字符串，空串 = 内置表。名字要能被拼成文件名，所以去掉路径与空白，
+    // 长过 GLOSSARY_PACK_NAME_MAX 的名直接打回内置（装不上比装一个奇怪名字安全）。
+    if (typeof merged.glossaryPackName !== 'string') merged.glossaryPackName = ''
+    else merged.glossaryPackName = merged.glossaryPackName.trim().replace(/[/\\:*?"<>|]/g, '')
   return merged
 }
 

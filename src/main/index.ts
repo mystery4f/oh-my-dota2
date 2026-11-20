@@ -18,6 +18,7 @@ import { warmEdge } from './services/voice/edge'
 import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-server'
 import { autoVoicePackSetup } from './services/voice/sovits-voicepack'
 import { PROBES, ciProbeFlags, renderProbeCatalogue } from './probes/registry'
+import { startGlossaryPack } from './services/glossary-pack'
 import { startGsi, stopGsi } from './services/gsi'
 import { startUpdateCheck } from './services/updater'
 import { registerIpc } from './ipc'
@@ -194,6 +195,9 @@ app.whenReady().then(() => {
   const startup = loadSettings()
   // 重启即新会话：上一个进程的会话库与槽位 id 先清掉，新进程从空白历史开始（用户要求）。
   if (!probeRun) resetSessionsOnBoot()
+  // 词表包（#82）：选过包的用户开机即生效，坏包回退内置并留着警告给面板——
+  // 翻译必须先于第一条消息拿到正确的术语表，所以这里紧跟设置加载。
+  if (!probeRun) startGlossaryPack()
   // 进对局自动开始处理聊天：GSI 报 GAME_IN_PROGRESS 时会再拉一次，这里覆盖「启动时已在局内」。
   if (!probeRun && startup.autoStartCapture) getCaptureService().start()
   // 预热翻译会话：冷启动的建库与会话创建放在后台，用户第一条消息就是热路径。

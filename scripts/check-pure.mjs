@@ -618,6 +618,34 @@ check('没有 roshan 块就不报肉山', announceTick(freshState(), [1080]).eve
 check('肉山死时间 +8 分钟才报、之前不报', (() => { const s = freshState(); const rosh = (g) => stepAnnounces(s, { gameTime: g, matchId: '42', roshan: { state: 'dead', death_time: 600 } }).filter((e) => e.id === 'rosh'); return rosh(1079).length === 0 && rosh(1080).length === 1 })())
 check('没开闸时没人念（纯层只判该不该报，念不念由上层）', DEFAULT_ANNOUNCE_TRIGGERS.wisdom === true && typeof stepAnnounces === 'function')
 
+// —— 词表包（#82）：坏包整包拒绝并说清哪一条坏了，回退文案不静默 ——
+const { parseGlossaryPack, bundledGlossaryStatus, glossaryStatusOf, glossaryPackLine } = await import('../src/shared/glossary-pack.ts')
+const packOk = parseGlossaryPack({
+  name: '演示词表',
+  entries: [
+    { en: 'New Hero', zh: '新英雄', kind: 'hero' },
+    { en: 'ww', zh: '怪杖', kind: 'item', keepVerbatim: true },
+    { en: 'New Hero', zh: '新英雄', kind: 'hero' }
+  ]
+})
+check(
+  '合法包通过校验，重复 en 只留第一条',
+  packOk.ok && packOk.pack.name === '演示词表' && packOk.pack.entries.length === 2 && packOk.pack.entries[1].keepVerbatim === true
+)
+const packNoName = parseGlossaryPack({ entries: [{ en: 'x', zh: '叉', kind: 'item' }] })
+check('缺 name 被拒并说 name', packNoName.ok === false && packNoName.error.includes('name'))
+const packBadKind = parseGlossaryPack({ name: '坏', entries: [{ en: 'x', zh: '叉', kind: 'spell' }] })
+check('kind 越界被拒并点名第 1 条', packBadKind.ok === false && packBadKind.error.includes('第 1 条') && packBadKind.error.includes('kind'))
+check('没有包时面板文案说清去哪里放', glossaryPackLine(bundledGlossaryStatus()).includes('还没有词表包'))
+check(
+  '坏包的面板文案同时说回退与原因',
+  glossaryPackLine(bundledGlossaryStatus('坏了', ['坏包'], '坏包.json')).includes('已回退内置')
+)
+check(
+  '装上的面板文案说出包名与条数',
+  packOk.ok && glossaryStatusOf(packOk.pack, '演示词表.json', ['演示词表']).name === '演示词表' && glossaryPackLine(glossaryStatusOf(packOk.pack)).includes('演示词表')
+)
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

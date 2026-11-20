@@ -9,6 +9,7 @@ import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import type { HoldSelfTest } from './hold-selftest'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
+import type { GlossaryPackStatus } from './glossary-pack'
 import type { QualityReport } from './quality-report'
 import type { SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
 import type { GsiLibrariesView, GsiLibrarySetResult } from './gsi-lib'
@@ -615,7 +616,9 @@ export const IPC = {
   SPEECH_STOP: 'speech:stop',
   OVERLAY_DIGEST: 'overlay-digest',
   // 麦克风健康（#96）：浮层边录边报电平和掉线，主进程转广播给面板。
-  MIC_HEALTH: 'mic:health'
+  MIC_HEALTH: 'mic:health',
+  GLOSSARY_PACKS: 'glossary:packs',
+  GLOSSARY_APPLY: 'glossary:apply'
 } as const
 
 /** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
@@ -915,7 +918,9 @@ export const ipcContract = {
   speechStop: invoke<[], SpeechStopResult>(IPC.SPEECH_STOP),
   /** 麦克风健康（#96）：采集端上报，主进程转手广播；面板只收不发。 */
   reportMicHealth: send<[MicHealthEvent]>(IPC.MIC_HEALTH),
-  onMicHealth: listen<MicHealthEvent>(IPC.MIC_HEALTH)
+  onMicHealth: listen<MicHealthEvent>(IPC.MIC_HEALTH),
+  glossaryPacks: invoke<[], GlossaryPackStatus>(IPC.GLOSSARY_PACKS),
+  glossaryApply: invoke<[string], GlossaryPackStatus>(IPC.GLOSSARY_APPLY)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

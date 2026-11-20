@@ -125,6 +125,11 @@ export interface AppSettings {
   /** 逐事件开关：没写的键按缺省（全开）。总闸关着时这里怎么设都不出声。 */
   announceTriggers?: Partial<DotaAnnounceTriggers>
   /**
+   * 现役词表包（#82）：空串 = 用随包发布的内置对照表。非空时读数据目录
+   * glossary/<名字>.json；文件坏了就回退内置并在面板留警告，不会静默换成空表。
+   */
+  glossaryPackName: string
+  /**
    * 丢弃积压：默认开。GPT-SoVITS 在本机显卡上推理，游戏正吃满显卡时一句要 5–7 s，
    * 聊天刷屏时排队会把显卡按住几十秒——游戏掉帧、读到的也是过时的旧消息。
    * 开启后同一时刻只保留最新一条待读，被顶掉的直接跳过（日志 TTS_SPEAK_DROP）。
@@ -263,6 +268,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsReadOwn: false,
   announceTotal: false,
   announceTriggers: { wisdom: true, rosh: true, stack: true, pull: true },
+  glossaryPackName: '',
   ttsDropBacklog: true,
   ttsSpeakPrefix: 'front',
   ttsSpeakSegmentChars: 30,

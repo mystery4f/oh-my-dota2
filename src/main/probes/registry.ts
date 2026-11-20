@@ -46,6 +46,7 @@ import { runTtsVoicesProbe } from './tts-voices'
 import { runVoiceChainProbe } from './voice-chain'
 import { runLogBundleProbe } from './log-bundle'
 import { runDatasetHealthProbe } from './dataset-health'
+import { runGlossaryPackProbe } from './glossary-pack'
 import { runMicHealthProbe } from './mic-health'
 import { runOverlayDigestProbe } from './overlay-digest'
 import { runKeyNounProbe } from './key-nouns'
@@ -253,6 +254,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the pre-training dataset health check (`src/shared/train/dataset-health.ts` + `services/train/wav-facts.ts`): duplicate lines, takes that carry no speech, missing script lines, duration distribution',
     run: runDatasetHealthProbe
+  },
+  {
+    flag: '--glossary-pack-probe',
+    ci: true,
+    summary:
+      'the swappable glossary pack (`src/shared/glossary-pack.ts` + `services/glossary-pack.ts`): a pack with a new hero maps both directions, a malformed pack falls back to the bundled table with the reason kept, and the active pack name is visible',
+    run: runGlossaryPackProbe
   },
   {
     flag: '--overlay-digest-probe',

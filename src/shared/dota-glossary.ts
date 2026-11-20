@@ -22,8 +22,11 @@ export interface GlossaryEntry {
   kind: GlossaryKind
   keepVerbatim?: boolean
 }
-
-export const GLOSSARY: GlossaryEntry[] = [
+/**
+ * 随包发布的内置对照表。它也是回退表：词表包坏了、没找到、字段不合法时，
+ * 现役表退回这一份 —— 翻译不能因为一份坏词表就失去术语保护。
+ */
+export const BUNDLED_GLOSSARY: GlossaryEntry[] = [
   // ---- 英雄：CN 黑话 ↔ EN 名 ----
   { en: 'Disruptor', zh: '萨尔', kind: 'hero' },
   { en: 'Razor', zh: '电棍', kind: 'hero' },
@@ -115,6 +118,13 @@ export const GLOSSARY: GlossaryEntry[] = [
   { en: 'b', zh: '撤', kind: 'jargon', keepVerbatim: true }
 ]
 
+/**
+ * 现役对照表：默认就是内置那份；词表包载入后整体换成包里的条目。
+ * 导出成 `let` 是有意的 —— ESM 的 live binding 让 glossaryFor、保真守卫、关键名词
+ * 三处调用方一行都不用改，换包之后读到的就是新表。
+ */
+export let GLOSSARY: GlossaryEntry[] = BUNDLED_GLOSSARY
+
 interface PreparedEntry extends GlossaryEntry {
   zhLower: string
   /** EN 侧整词匹配：missing 不得命中 ss，nod 不得命中 od；短语按词边界折叠空白。 */
@@ -133,7 +143,8 @@ function prepare(entry: GlossaryEntry): PreparedEntry {
   }
 }
 
-const PREPARED: PreparedEntry[] = GLOSSARY.map(prepare)
+/** 派生表跟着现役表走：换包时整体重建，别让它悄悄停在旧表上。 */
+let PREPARED: PreparedEntry[] = GLOSSARY.map(prepare)
 
 /**
  * 这行聊天里出现了哪些词条：中文侧按子串、英文侧按整词边界，两侧同时匹配
@@ -191,13 +202,34 @@ export const JARGON_KEEP_TOKENS: readonly string[] = [
   'jungle'
 ]
 
-/** 两种方向都必须原样存活的 token：keepVerbatim 词条的 EN 短缩写 ∪ JARGON_KEEP 全表。 */
-export const KEEP_VERBATIM_TOKENS: ReadonlySet<string> = (() => {
+/**
+ * 两种方向都必须原样存活的 token：keepVerbatim 词条的 EN 短缩写 ∪ JARGON_KEEP 全表。
+ * 同样是模块级 let：词表包可以自己标 keepVerbatim，换包后这里跟着重建。
+ */
+export let KEEP_VERBATIM_TOKENS: ReadonlySet<string> = deriveKeepVerbatim(GLOSSARY)
+
+function deriveKeepVerbatim(table: readonly GlossaryEntry[]): ReadonlySet<string> {
   const set = new Set<string>(JARGON_KEEP_TOKENS)
-  for (const entry of GLOSSARY) {
+  for (const entry of table) {
     if (entry.keepVerbatim !== true) continue
     for (const token of entry.en.toLowerCase().match(/[a-z0-9]+/g) ?? []) set.add(token)
   }
   return set
-})()
+}
+
+/**
+ * 换现役词表：传 null 或空数组就退回内置那份。
+ * 三张派生表（PREPARED 整词正则、KEEP_VERBATIM_TOKENS、关键名词的懒加载表）都跟着重建，
+ * 所以调用方不必知道换过表 —— 下次调用读到的就是新表。
+ * 校验在调用方（src/shared/glossary-pack.ts 的 parseGlossaryPack），这里只管装。
+ */
+export function setGlossaryEntries(entries: readonly GlossaryEntry[] | null): void {
+  GLOSSARY = entries && entries.length > 0 ? [...entries] : BUNDLED_GLOSSARY
+  PREPARED = GLOSSARY.map(prepare)
+  KEEP_VERBATIM_TOKENS = deriveKeepVerbatim(GLOSSARY)
+  console.log(
+    'GLOSSARY_TABLE ' +
+      JSON.stringify({ entries: GLOSSARY.length, bundled: GLOSSARY === BUNDLED_GLOSSARY }),
+  )
+}
 

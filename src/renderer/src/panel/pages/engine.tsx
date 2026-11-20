@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { errorMessage } from '@shared/errors'
+import { glossaryPackLine, type GlossaryPackStatus } from '@shared/glossary-pack'
 import { cacheLine, guardLine, qualityFootnote, type QualityReport } from '@shared/quality-report'
 import {
   PROVIDER_PRESETS,
@@ -29,6 +30,7 @@ export function EnginePage(): React.ReactElement {
   const cache = useCacheClear()
   const save = useSaveFlash()
   const quality = useQualityCard()
+  const glossary = useGlossaryCard()
 
   if (settings === null) {
     return (
@@ -227,6 +229,38 @@ export function EnginePage(): React.ReactElement {
             {quality.flash || (quality.report === null ? '' : qualityFootnote(quality.report.cache))}
           </p>
         </Group>
+        <Group label="词表">
+          <Row
+            label="现役词表"
+            hint={glossary.status === null ? '读取中…' : glossaryPackLine(glossary.status)}
+          >
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={glossary.status?.source === 'bundled' ? 'default' : 'outline'}
+                size="sm"
+                disabled={glossary.busy || glossary.status === null}
+                onClick={() => void glossary.apply('')}
+              >
+                内置
+              </Button>
+              {(glossary.status?.available ?? []).map((name) => (
+                <Button
+                  key={name}
+                  variant={glossary.status?.source === 'pack' && glossary.status.name === name ? 'default' : 'outline'}
+                  size="sm"
+                  disabled={glossary.busy}
+                  onClick={() => void glossary.apply(name)}
+                >
+                  {name}
+                </Button>
+              ))}
+            </div>
+          </Row>
+          <p className="px-4 pb-3 text-xs text-muted-foreground">
+            词表包放在数据目录的 glossary/ 下（一份 JSON：name + entries，字段 hero / item / jargon）。
+            放进去在面板点一下即可生效，不用重新打包；包坏了整包拒绝、回退内置，原因就写在上面那行。
+          </p>
+        </Group>
       </Panel>
 
       <TrialBench />
@@ -333,6 +367,46 @@ function useQualityCard(): {
   }, [refresh])
 
   return { report, flash, busy, refresh }
+}
+
+/**
+ * 词表包卡（#82）：进页面读一次现役词表，点一个包就切换。
+ * 文案来自 @shared/glossary-pack 的 glossaryPackLine —— 面板不自己拼「回退」这类状态。
+ */
+function useGlossaryCard(): {
+  status: GlossaryPackStatus | null
+  busy: boolean
+  flash: string
+  apply: (name: string) => Promise<void>
+} {
+  const [status, setStatus] = useState<GlossaryPackStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [flash, setFlash] = useState('')
+
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      setStatus(await window.api.glossaryPacks())
+    } catch (e) {
+      setFlash(`读取词表失败：${errorMessage(e)}`)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const apply = useCallback(async (name: string): Promise<void> => {
+    setBusy(true)
+    try {
+      setStatus(await window.api.glossaryApply(name))
+      setFlash('')
+    } catch (e) {
+      setFlash(`切换词表失败：${errorMessage(e)}`)
+    }
+    setBusy(false)
+  }, [])
+
+  return { status, busy, flash, apply }
 }
 
 function ConfirmClear({

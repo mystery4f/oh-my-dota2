@@ -362,6 +362,34 @@ let stubHotwordPool: HotwordCandidate[] = [
 ]
 const stubHotwordCorrections = 7
 
+/** #82 词表包桩：名字为空或「内置」= 内置表；名字是「坏包」= 装不上、带警告。 */
+function glossaryStub(name?: string): import('@shared/glossary-pack').GlossaryPackStatus {
+  const wanted = name ?? (query.get('pack') ?? '')
+  const available = ['演示词表', '坏包']
+  if (wanted === '' || wanted === '内置') {
+    const fallback = wanted === '内置' && query.get('pack') === '坏包'
+    return {
+      name: '内置',
+      source: 'bundled',
+      entries: 78,
+      error: fallback ? 'glossary/坏包.json: 第 2 条的 kind 只能是 hero / item / jargon' : null,
+      file: null,
+      available
+    }
+  }
+  if (wanted === '坏包') {
+    return {
+      name: '内置',
+      source: 'bundled',
+      entries: 78,
+      error: 'glossary/坏包.json: 第 2 条的 kind 只能是 hero / item / jargon',
+      file: '坏包.json',
+      available
+    }
+  }
+  return { name: '演示词表', source: 'pack', entries: 5, error: null, file: '演示词表.json', available }
+}
+
 function stubHotwordView(): HotwordSuggestions {
   return {
     corrections: stubHotwordCorrections,
@@ -490,6 +518,9 @@ const implemented = {
   }),
   onSpeechQueue: () => () => {},
   speechStop: async () => ({ cleared: 2, interrupted: true }),
+  // #82：?pack=坏包 演示回退 + 警告，默认演示装好的一份包；点「内置」等于 apply('')。
+  glossaryPacks: async () => glossaryStub(),
+  glossaryApply: async (name: string) => glossaryStub(name),
   onUpdateStatus: (callback) => {
     callback({ channel: 'stable', status: 'dev', version: '0.0.0' })
     return () => {}
