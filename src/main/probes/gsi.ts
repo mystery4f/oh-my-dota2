@@ -2,9 +2,11 @@ import { exitProbe } from './harness'
 import { request } from 'node:http'
 import {
   decideGsi,
+  gsiStallDiagnostics,
   gsiStatus,
   startGsi,
   stopGsi,
+  watchdogTick,
   type GsiEffects,
   type GsiPayload
 } from '../services/gsi'
@@ -120,7 +122,9 @@ export async function runGsiProbe(): Promise<void> {
   const cfgOk = cfgMissing.length === 0
 
   // 真实 HTTP 链路：端口给 0 让系统分配，探针不去碰 Dota 目录。
-  const started = await startGsi({ port: 0, effects, writeConfig: false })
+  // 时钟可推：断流判定是 90 秒，真等 90 秒这条最该被测的路就没人测。
+  let fakeNow = Date.now()
+  const started = await startGsi({ port: 0, effects, writeConfig: false, clock: () => fakeNow })
   const port = started.port
   const statuses: number[] = []
   statuses.push(await get(port))
@@ -195,7 +199,36 @@ export async function runGsiProbe(): Promise<void> {
     })
   )
   const second = gsiStatus()
-  // 坏包不该把服务打挂。
+  // 断流那一段会自己再起一次捕获、再收一次场（模拟「又打了一局」），
+  // 所以自动开关的计数在进入那一段之前抄下来，后面的断言才对得上。
+  const startsBeforeStall = events.starts
+  const stopsBeforeStall = events.stops
+
+  // —— 断流诊断（issue #75）：安静得像没事，才是这件事最坏的地方。
+  // 此刻还在推（上一帧刚落地），所以这里该只有证据、没有告警。
+  const beforeStall = gsiStatus().stall
+  fakeNow += 120_000
+  watchdogTick(effects)
+  const stalled = gsiStatus().stall
+  const diagAfterFirst = gsiStallDiagnostics()
+  // 再跑两轮看门狗：同一次断流只许诊断一次、只许重写一次 cfg。
+  watchdogTick(effects)
+  watchdogTick(effects)
+  const diagAfterRepeat = gsiStallDiagnostics().length
+  // 新帧到达 = 又连上了：告警必须自己消失，而不是留着吓人。
+  statuses.push(
+    await post(port, {
+      provider: { name: 'Dota 2' },
+      map: { game_state: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS', matchid: '7773' },
+      player: { name: 'Mystery' }
+    })
+  )
+  const recovered = gsiStatus().stall
+  // 再断一次要能重新诊断（复位，不粘死）。
+  fakeNow += 120_000
+  watchdogTick(effects)
+  const diagAfterSecondStall = gsiStallDiagnostics().length
+  // 坏包不该把服务打挂：放最后，它会把 live 判成 false，放在断流段前面会挡住整段。
   statuses.push(await post(port, 'not-an-object-but-json'))
   stopGsi()
   const afterStop = gsiStatus()
@@ -225,15 +258,37 @@ export async function runGsiProbe(): Promise<void> {
     duringChat.roster[2].side === 'enemy' &&
     duringChat.rosterText === '我方 2 · 敌方 1 · 英雄 3/3' &&
     afterPostGame.roster.length === 0
+  // 票面这四句是要点：有告警、有诊断行、一次断流只诊断一次、文案只许说重启。
+  const stallWorded = stalled.state === 'stalled' && (stalled.warning ?? '').includes('重启 Dota')
+  const stallNoLies = !/已恢复|已重连|已修复|reconnected/.test(stalled.warning ?? '')
+  const quietWhileFresh =
+    beforeStall.state === 'fresh' && (beforeStall.since ?? '').includes('前收到帧')
+  const diagFields =
+    diagAfterFirst.length === 1 &&
+    diagAfterFirst[0].silentMs !== null &&
+    diagAfterFirst[0].silentMs >= 90_000 &&
+    diagAfterFirst[0].listening === true &&
+    diagAfterFirst[0].port === port
+  const stallOk =
+    stallWorded &&
+    stallNoLies &&
+    quietWhileFresh &&
+    diagFields &&
+    diagAfterRepeat === 1 &&
+    recovered.state === 'fresh' &&
+    diagAfterSecondStall === 2
   const ok =
+    stallOk &&
     failed.length === 0 &&
     rosterOk &&
     ownOk &&
     chatOk &&
     cfgOk &&
     matchIdPicked &&
-    events.starts === 2 &&
-    events.stops === 2 &&
+    startsBeforeStall === 2 &&
+    // 这一段之前只该停过一次（7771 打完那一局）；后面断流段自己会再停一次，
+    // 所以拿快照比，而不是拿被后续段落污染的累计值比。
+    stopsBeforeStall === 1 &&
     events.nicknames.length === 1 &&
     events.nicknames[0] === 'Mystery' &&
     afterStart.gameState === 'DOTA_GAMERULES_STATE_PRE_GAME' &&
@@ -270,6 +325,19 @@ export async function runGsiProbe(): Promise<void> {
         autoStops: afterPostGame.autoStops
       },
       second: { gameState: second.gameState, matchId: second.matchId, autoStarts: second.autoStarts },
+      stall: {
+        quietWhileFresh,
+        stalled: stalled.state,
+        warning: stalled.warning,
+        diagnostics: diagAfterFirst,
+        repeatedTicks: diagAfterRepeat,
+        startsBeforeStall,
+        stopsBeforeStall,
+        startsAfter: events.starts,
+        stopsAfter: events.stops,
+        recovered: recovered.state,
+        secondStall: diagAfterSecondStall
+      },
       listeningAfterStop: afterStop.listening
     })
   )

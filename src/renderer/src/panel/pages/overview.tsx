@@ -142,9 +142,20 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
           </Row>
           <Row
             label="对局正文"
-            hint={capture ? `已收 ${capture.totalEntries} 条 · 上一句翻译 ${capture.lastTranslateMs === null ? '还没翻过' : `${capture.lastTranslateMs}ms`}` : undefined}
+            hint={
+              capture
+                ? `已收 ${capture.totalEntries} 条 · 上一句翻译 ${capture.lastTranslateMs === null ? '还没翻过' : `${capture.lastTranslateMs}ms`}`
+                : undefined
+            }
           >
             {capture?.running ? <StatusPill tone="ready">监听中</StatusPill> : <StatusPill tone="idle">已停止</StatusPill>}
+            {/* 断流时不重复一句话两遍：这里只把「几秒前还收到过帧」亮出来（正常时也是证据），
+                真正要动作的告警在下面「异常」组里。 */}
+            {capture?.gsi?.stall.state === 'stalled' ? (
+              <StatusPill tone="bad">断流</StatusPill>
+            ) : capture?.gsi?.stall.since ? (
+              <span className="text-xs text-muted-foreground">{capture.gsi.stall.since}</span>
+            ) : null}
           </Row>
           <Row label="浮层" hint={overlay.geometry.width > 0 ? `${overlay.geometry.width}×${overlay.geometry.height}` : undefined}>
             {overlay.visible ? <StatusPill tone="ready">显示中</StatusPill> : <StatusPill tone="idle">已隐藏</StatusPill>}
@@ -162,8 +173,17 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
           </Row>
         </Group>
 
-        {translator?.lastFallback || capture?.lastError ? (
+        {translator?.lastFallback || capture?.lastError || capture?.gsi?.stall.state === 'stalled' ? (
           <Group label="异常">
+            {capture?.gsi?.stall.state === 'stalled' ? (
+              <Row
+                label="GSI 断流"
+                stacked
+                hint="运行中的 Dota 不会重读 GSI 配置：这一条只能诊断，任何应用都改不了它——所以解决办法只有重启游戏"
+              >
+                <span className="text-sm text-amber-300">{capture.gsi.stall.warning}</span>
+              </Row>
+            ) : null}
             {translator?.lastFallback ? (
               <Row label="会话层回退直连" stacked hint="会话请求失败，这一句改走了单次直连——偶发可忽略，连续出现查「翻译引擎」页">
                 <span className="text-sm text-amber-300">{translator.lastFallback}</span>

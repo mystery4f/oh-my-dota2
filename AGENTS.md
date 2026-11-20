@@ -226,6 +226,13 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `allplayers` is actually delivered, and which `event_type`s exist. It lives in the app rather than
   a probe because port 32123 is single-owner — a probe would force closing the app exactly while a
   real match is being observed.
+- GSI 断流是诊断，不是自愈（`src/shared/gsi-stall.ts` + `gsi.ts` 的 `watchdogTick`）：Dota 只在启动时
+  读一次 `gamestate_integration/*.cfg`，运行中的游戏任何进程内手段都重载不了它。所以超过 90 秒没帧且
+  仍认为在打对局时，应用只做三件事——按当前端口重写一次 cfg（让「重启 Dota」真的能连上）、写一行
+  `GSI_STALL_DIAG` 到 `logs/gsi-stall.jsonl`（cfg 在不在、端口是不是自己占着、静默多久、有没有重写）、
+  在总览的「异常」组挂一条告警。**告警文案只许说「重启 Dota」**，任何「已恢复/已重连」的说法都是假的；
+  断流判定会一直粘到下一帧到达为止，因为心跳超时之后 `live` 已经被清掉，光靠实时判定就再也算不出
+  「刚才断过」。一次断流只诊断一次（`stallHandled`），探针用注入时钟推快，不真等 90 秒。
 - Two parallel auto paths: `chatSource: 'ocr' | 'gsi'` picks where chat text comes from. `gsi` never
   never touches the screen and does not need a chat region; text arrives through
   `gsi.ts` → `pushChat` → `ChatCaptureService.pushMessages()`. `ocr` is the original polling loop.

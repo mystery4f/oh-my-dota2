@@ -4,6 +4,7 @@ import type { HotwordApplyResult, HotwordSuggestions } from './asr-hotword-candi
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
 import type { VoiceChainTiming } from './voice-timing'
 import type { VoiceStageEvent } from './voice-stage'
+import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
@@ -264,6 +265,7 @@ export interface PanelSuggestionsResult {
   error?: string
 }
 
+
 /**
  * Dota 2 Game State Integration 的运行状态。
  * 它只是状态源（GSI 里没有聊天正文）：用来判断「在不在对局里」，正文仍然靠屏幕 OCR。
@@ -285,6 +287,11 @@ export interface GsiStatusView {
   roster: { slot: number; name: string; hero: string; side: 'mine' | 'enemy' | 'unknown' }[]
   /** 阵容的一句话概括，空阵容是空串，面板直接用。 */
   rosterText: string
+  /**
+   * 断流诊断（issue #75）。它跟着同一个快照走，不再单开通道：
+   * 「在不在打」和「多久没收到帧」必须同源，两路各算一次就会出现「已停捕获但仍在打」的自相矛盾。
+   */
+  stall: GsiStallView
 }
 
 export interface CaptureStatus {

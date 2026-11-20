@@ -27,6 +27,7 @@ import type { CerCohort } from '@shared/train/cer'
 import { judgeCorrectionSamples } from '@shared/train/corrections'
 import { mergePlan, rankCandidates, type HotwordCandidate, type HotwordSuggestions } from '@shared/asr-hotword-candidates'
 import { judgeFirstRun } from '@shared/first-run'
+import { judgeGsiStall, gsiStallWarning } from '@shared/gsi-stall'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
@@ -461,13 +462,34 @@ const implemented = {
       now: Date.now()
     })
   },
-  captureStatus: async () => ({
-    running: true,
-    source: 'gsi',
-    totalEntries: 37,
-    lastTranslateMs: 820,
-    lastError: null
-  }),
+  captureStatus: async () => {
+    const stalled = query.get('stall') === '1'
+    const lastAt = stalled ? Date.now() - 7 * 60_000 : Date.now() - 4_000
+    return {
+      running: !stalled,
+      source: 'gsi',
+      totalEntries: 37,
+      lastTranslateMs: 820,
+      lastError: null,
+      gsi: {
+        listening: true,
+        port: 32123,
+        gameState: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS',
+        matchId: '7512345678',
+        lastAt,
+        autoStarts: 2,
+        autoStops: 1,
+        configPath: 'D:/Steam/steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration',
+        configError: null,
+        roster: [],
+        rosterText: '',
+        // ?stall=1 停在「有过一局、然后帧停了」那一屏：这是用户唯一真正需要看见它的时刻。
+        stall: stalled
+          ? { state: 'stalled', silentMs: 7 * 60_000, warning: gsiStallWarning(7 * 60_000), action: 'restart-dota' }
+          : judgeGsiStall({ live: true, lastAt, now: Date.now() })
+      }
+    }
+  },
   translatorStatus: async () => ({
     active: true,
     model: 'deepseek-chat',

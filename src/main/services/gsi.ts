@@ -8,6 +8,8 @@ import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
 import { noteLiveMatch } from './gsi-match'
 import type { GsiStatusView } from '../../shared/ipc'
+import { judgeGsiStall, type GsiStallView } from '../../shared/gsi-stall'
+import { errorMessage } from '@shared/errors'
 import { buildRoster, rosterLine } from './team-intel'
 import type { ChatLine } from '@shared/chat-line'
 
@@ -343,6 +345,17 @@ interface GsiRuntime {
   config: GsiConfigResult | null
   watchdog: ReturnType<typeof setInterval> | null
   port: number
+  /**
+   * 粘住的断流告警：心跳超时之后 `live` 会被清掉，光靠实时判定就再也算不出「刚才断过」，
+   * 而那正是要展示给用户的时刻。只在收到新帧时清。
+   */
+  stall: GsiStallView | null
+  /** 本轮断流是否已经重写过 cfg（只写一次：每 10 秒重写一遍既没用又吵）。 */
+  stallHandled: boolean
+  /** 探针要能把时钟推快，否则一条 90 秒的判定只能靠真等。 */
+  clock: () => number
+  /** 探针模式（`writeConfig: false`）：断流诊断照记，但绝不去碰 Dota 目录。 */
+  writeConfig: boolean
 }
 
 const runtime: GsiRuntime = {
@@ -356,7 +369,33 @@ const runtime: GsiRuntime = {
   autoStops: 0,
   config: null,
   watchdog: null,
-  port: GSI_PORT
+  port: GSI_PORT,
+  stall: null,
+  stallHandled: false,
+  clock: () => Date.now(),
+  writeConfig: true
+}
+
+/**
+ * 断流诊断的一行（issue #75）。字段刻意只放「能核对的事实」：
+ * cfgs 在不在、端口是不是我们自己占着、静默多久、这一轮有没有重写。
+ */
+export interface GsiStallDiagnostic {
+  at: string
+  silentMs: number | null
+  port: number
+  listening: boolean
+  configPath: string | null
+  configError: string | null
+  rewritten: boolean
+}
+
+/** 最近几次断流诊断（探针读它断言「每次断流只落一行」；也与落盘内容同形）。 */
+const stallDiagnostics: GsiStallDiagnostic[] = []
+const STALL_DIAGNOSTIC_KEEP = 20
+
+export function gsiStallDiagnostics(): readonly GsiStallDiagnostic[] {
+  return [...stallDiagnostics]
 }
 
 /** 从三张缓存拼出阵容：槽位取三者的并集，缺什么就留空，不编造。 */
@@ -383,7 +422,10 @@ export function gsiStatus(): GsiStatus {
     autoStops: runtime.autoStops,
     configPath: runtime.config?.path ?? null,
     configError: runtime.config?.error ?? null,
-    ...rosterView()
+    ...rosterView(),
+    stall:
+      runtime.stall ??
+      judgeGsiStall({ live: runtime.live, lastAt: runtime.lastAt, now: runtime.clock() })
   }
 }
 
@@ -480,7 +522,10 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
     runtime.gameState = decision.gameState
     runtime.matchId = decision.matchId
   }
-  runtime.lastAt = Date.now()
+  runtime.lastAt = runtime.clock()
+  // 新帧就是「又连上了」：粘住的告警复位，下一次断流要重新诊断、重新写 cfg。
+  runtime.stall = null
+  runtime.stallHandled = false
   // 这一帧属于哪一局：对讲计时等写行的人只读这里（`liveMatchId()`），不自己问 GSI。
   noteLiveMatch(decision.matchId)
   // 每一帧都记进小结账本：真对局时不可能去抢 32123 端口，只能在应用里攒。
@@ -520,14 +565,67 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
 /** 游戏关掉之后不会再有推送，也不能让捕获一直空转。 */
 function armWatchdog(effects: GsiEffects): void {
   if (runtime.watchdog !== null) clearInterval(runtime.watchdog)
-  runtime.watchdog = setInterval(() => {
-    if (!runtime.live || runtime.lastAt === null) return
-    if (Date.now() - runtime.lastAt < HEARTBEAT_TIMEOUT_MS) return
-    runtime.live = false
-    // 捕获不是 GSI 开的就别替用户停；是它开的，收场必须和 POST_GAME 走同一条路。
-    if (!runtime.startedByGsi) return
-    closeMatch(effects)
-  }, 10_000)
+  runtime.watchdog = setInterval(() => watchdogTick(effects), 10_000)
+}
+
+/**
+ * 心跳看门狗跑一轮。导出是给探针用的：判 90 秒要真等 90 秒的话，
+ * 这条路径就永远没人测，而它恰好是「安静得像没事」的那条。
+ */
+export function watchdogTick(effects: GsiEffects): void {
+  if (!runtime.live || runtime.lastAt === null) return
+  const now = runtime.clock()
+  const view = judgeGsiStall({ live: runtime.live, lastAt: runtime.lastAt, now })
+  if (view.state === 'stalled') {
+    runtime.stall = view
+    if (!runtime.stallHandled) {
+      runtime.stallHandled = true
+      void diagnoseStall(view, now)
+    }
+  }
+  if (now - runtime.lastAt < HEARTBEAT_TIMEOUT_MS) return
+  runtime.live = false
+  // 捕获不是 GSI 开的就别替用户停；是它开的，收场必须和 POST_GAME 走同一条路。
+  if (!runtime.startedByGsi) return
+  closeMatch(effects)
+}
+
+/**
+ * 断流的落盘诊断（issue #75）。检查三件事并把结论写一行：
+ * cfg 还在不在该在的位置、32123 是不是我们自己占着（被别的程序抢走时 Dota 推不到我们这里）、
+ * 已经静默多久。同时按当前端口**重写一次 cfg**——运行中的 Dota 不会重读它，
+ * 但这样「重启 Dota」这个动作才真的能连上，而不是让用户重启完还是没帧。
+ */
+async function diagnoseStall(view: GsiStallView, now: number): Promise<void> {
+  let configPath = runtime.config?.path ?? null
+  let configError = runtime.config?.error ?? null
+  let rewritten = false
+  if (runtime.writeConfig) {
+    try {
+      const result = await ensureGsiConfig(runtime.port)
+      runtime.config = result
+      configPath = result.path
+      configError = result.error
+      rewritten = result.written
+    } catch (error) {
+      configError = errorMessage(error)
+    }
+  }
+  const line: GsiStallDiagnostic = {
+    at: new Date(now).toISOString(),
+    silentMs: view.silentMs,
+    port: runtime.port,
+    listening: runtime.server !== null,
+    configPath,
+    configError,
+    rewritten
+  }
+  stallDiagnostics.push(line)
+  if (stallDiagnostics.length > STALL_DIAGNOSTIC_KEEP) stallDiagnostics.shift()
+  // 探针里两样都不落：不写 Dota 目录，也不往真实 logs 里塞一条合成事故。
+  if (!runtime.writeConfig) return
+  console.log('GSI_STALL_DIAG', JSON.stringify(line))
+  appendCappedJsonl(join(app.getPath('userData'), 'logs', 'gsi-stall.jsonl'), { ...line })
 }
 
 export interface StartGsiOptions {
@@ -537,6 +635,8 @@ export interface StartGsiOptions {
   writeConfig?: boolean
   /** 每一帧原始 payload：`--gsi-dump` 用它把「Dota 到底推了什么」摊开看。 */
   onFrame?: (payload: GsiPayload) => void
+  /** 探针注入的时钟：断流判 90 秒，真等不起。 */
+  clock?: () => number
 }
 
 export async function startGsi(options: StartGsiOptions = {}): Promise<GsiStatus> {
@@ -583,6 +683,10 @@ export async function startGsi(options: StartGsiOptions = {}): Promise<GsiStatus
   runtime.live = false
   runtime.startedByGsi = false
   runtime.lastAt = null
+  runtime.stall = null
+  runtime.stallHandled = false
+  runtime.clock = options.clock ?? (() => Date.now())
+  runtime.writeConfig = options.writeConfig !== false
   armWatchdog(effects)
   if (options.writeConfig !== false) runtime.config = await ensureGsiConfig(runtime.port)
   return gsiStatus()
