@@ -10,6 +10,7 @@ import { useSaveFlash, useSettings } from '../use-settings'
 const EMPTY_OVERLAY: OverlayStatus = {
   visible: false,
   textMode: 'translated',
+  digest: false,
   panelOpen: false,
   quickPhrases: [],
   locked: true,
@@ -129,6 +130,20 @@ export function OverlayPage(): React.ReactElement {
               <option value="both">原文 + 译文</option>
               <option value="original">只显示原文</option>
             </select>
+          </Row>
+          <Row
+            label="战况摘要"
+            htmlFor="v2-digest"
+            hint="抬头先给一行摘要（只搬聊天行里已有的话，不额外调模型），逐行消息收在「展开」后面；锁定的浮层点不到展开按钮，要先解锁或呼出面板"
+          >
+            <input
+              type="checkbox"
+              id="v2-digest"
+              className="h-4 w-4 accent-amber-500"
+              checked={overlay.digest}
+              onChange={(e) => act(window.api.overlaySetDigest(e.target.checked))}
+            />
+            <StatusPill tone={overlay.digest ? 'ready' : 'idle'}>{overlay.digest ? '摘要' : '逐行'}</StatusPill>
           </Row>
         </Group>
         <Group label="位置">

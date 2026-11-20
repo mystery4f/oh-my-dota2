@@ -16,6 +16,8 @@ export interface OverlayState {
   /** 用户亲手拖过的几何；null = 跟着屏幕默认摆放。 */
   custom: OverlayGeometry | null
   textMode: OverlayTextMode
+  /** 抬头先给一行战况摘要，逐行消息收在展开后面（#99）。 */
+  digest: boolean
   opacity: number
   /** 为什么取不到字；null = 一切正常。 */
   hint: string | null
@@ -27,6 +29,7 @@ export type OverlayEvent =
   | { type: 'collapse'; geometryAtCollapse: OverlayGeometry }
   | { type: 'expand' }
   | { type: 'set-text'; mode: OverlayTextMode }
+  | { type: 'set-digest'; on: boolean }
   | { type: 'set-opacity'; value: number }
   | { type: 'set-hint'; hint: string | null }
   /** 显示/隐藏跨启动记住（「记忆隐藏」）。 */
@@ -42,7 +45,7 @@ export type OverlayEvent =
 
 /** 这次归约要写进设置文件的字段；空对象 = 不写盘。 */
 export type OverlayPersistPatch = Partial<
-  Pick<AppSettings, 'overlayLocked' | 'overlayCollapsed' | 'overlayText' | 'overlayOpacity' | 'overlayBounds' | 'overlayVisible' | 'ttsReadAloud'>
+  Pick<AppSettings, 'overlayLocked' | 'overlayCollapsed' | 'overlayText' | 'overlayDigest' | 'overlayOpacity' | 'overlayBounds' | 'overlayVisible' | 'ttsReadAloud'>
 >
 
 export interface OverlayReduction {
@@ -92,6 +95,7 @@ export function overlayStateFromSettings(settings: AppSettings): OverlayState {
     expandedBounds: null,
     custom: settings.overlayBounds,
     textMode: settings.overlayText,
+    digest: settings.overlayDigest,
     opacity: clampOpacity(settings.overlayOpacity),
     hint: null
   }
@@ -139,6 +143,16 @@ export function reduceOverlay(event: OverlayEvent, state: OverlayState): Overlay
       return {
         state: { ...state, textMode: event.mode },
         persist: changed ? { overlayText: event.mode } : {},
+        changed,
+        clickThrough: false,
+        idle: 'keep'
+      }
+    }
+    case 'set-digest': {
+      const changed = event.on !== state.digest
+      return {
+        state: { ...state, digest: event.on },
+        persist: changed ? { overlayDigest: event.on } : {},
         changed,
         clickThrough: false,
         idle: 'keep'

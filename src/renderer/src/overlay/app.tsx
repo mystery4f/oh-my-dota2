@@ -13,6 +13,7 @@ import { Toolbar } from './toolbar'
 import { subscribeSpeech } from './speech'
 import { createVoiceCapture, type VoiceRowPatch } from './voice-capture'
 import { stageLine } from '@shared/overlay-state'
+import { digestLine } from '@shared/overlay-digest'
 
 
 /**
@@ -27,6 +28,8 @@ export function App(): JSX.Element {
   /** 对讲行的阶段留痕：主进程每完成一段发一份快照，这里只格式化，渲染端不自己算时间。 */
   const [traceById, setTraceById] = useState<Record<string, string>>({})
   const [stage, setStageText] = useState<string | null>(null)
+  // 战况摘要（#99）：摘要行是一瞥，逐行消息收在「展开」后面；关掉这个设置就整块回到逐行列表。
+  const [digestOpen, setDigestOpen] = useState(false)
   // 麦克风电平（#96）：录着的时候每块 PCM 刷一次，停录归零。
   const [level, setLevel] = useState(0)
 
@@ -216,7 +219,10 @@ export function App(): JSX.Element {
       ) : (
         <>
           {!status.locked && <Toolbar status={status} onStatus={onStatus} />}
-          <ChatRows rows={rows} spokenById={spokenById} traceById={traceById} status={status} />
+          {status.digest && <DigestLine rows={rows} open={digestOpen} locked={status.locked} onToggle={() => setDigestOpen(!digestOpen)} />}
+          {(!status.digest || digestOpen) && (
+            <ChatRows rows={rows} spokenById={spokenById} traceById={traceById} status={status} />
+          )}
           <StageLine status={status} stage={stage} level={level} />
           {!status.locked && (
             <>
@@ -225,6 +231,27 @@ export function App(): JSX.Element {
             </>
           )}
         </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 战况摘要行（#99）：文字全部来自共享纯函数 digestLine（只搬已有行里的话，一次模型调用都不发）。
+ *
+ * 锁定的浮层点击穿透，展开按钮点不到——那就只画摘要行，要看逐行先解锁（Alt+Shift+P）或呼出面板；
+ * 面板上的开关旁边写着这件事，不靠用户猜。
+ */
+function DigestLine(props: { rows: LedgerRow[]; open: boolean; locked: boolean; onToggle: () => void }): JSX.Element | null {
+  const text = digestLine(props.rows)
+  if (text.length === 0) return null
+  return (
+    <div id="digest" className={props.open ? 'open' : undefined} title="战况摘要：只搬聊天行里已有的话">
+      <span className="digest-text">{text}</span>
+      {!props.locked && (
+        <button type="button" className="digest-toggle" onClick={props.onToggle}>
+          {props.open ? '收起' : `展开 ${props.rows.length}`}
+        </button>
       )}
     </div>
   )

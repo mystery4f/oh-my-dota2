@@ -457,6 +457,41 @@
   cursor: pointer;
   flex: none;
 }
+/* 战况摘要（#99）：抬头一行，逐行消息在它下面（展开后）。 */
+#digest {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 10px 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #e2e8f0;
+}
+
+#digest .digest-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#digest .digest-toggle {
+  flex: none;
+  padding: 0 6px;
+  font-size: 11px;
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.14);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+#digest .digest-toggle:hover {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.26);
+}
+
 /* 麦克风电平（#96）：阶段行里一条细横条，只在真收声时出现（空闲不占位）。 */
 .mic-meter {
   display: inline-block;

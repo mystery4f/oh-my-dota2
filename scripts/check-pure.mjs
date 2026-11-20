@@ -573,6 +573,19 @@ check(
 )
 check('按住自检：时长文案毫秒/秒分档', formatHeld(320) === '320 ms' && formatHeld(1_820) === '1.8 s' && formatHeld(12_400) === '12 s')
 
+// —— 战况摘要（#99）：只搬已有行里的话，排序按意图强弱 ——
+const { digestCues, digestLine, digestRowText } = await import('../src/shared/overlay-digest.ts')
+const digestRows = ['gg', 'mid is missing', 'need 4 top', 'nice'].map((s) => ({ id: s, original: s, translated: null }))
+const digestRowLine = digestLine(digestRows)
+check('摘要每一段都出自已存在的行（不编造）', digestRowLine.split(' +')[0].split(' · ').every((part) => digestRows.some((r) => r.original.startsWith(part.replace(/…$/, '')))))
+check('摘要说清被省掉的句数', digestRowLine.includes(' +') && Number(digestRowLine.slice(digestRowLine.lastIndexOf('+') + 1)) > 0)
+check('意图明显的行都在摘要里', digestRowLine.includes('mid is missing') && digestRowLine.includes('need 4 top'))
+check('命中一样多时后说的在前', digestRowLine.indexOf('need 4 top') < digestRowLine.indexOf('mid is missing'))
+check('有译文用译文、没译文用原文', digestRowText({ id: 'a', original: '需要 tp', translated: 'need tp' }) === 'need tp' && digestRowText({ id: 'b', original: '需要 tp', translated: null }) === '需要 tp')
+check('空列表给空串（浮层不画空壳）', digestLine([]) === '' && digestLine([{ id: 'x', original: '  ', translated: null }]) === '')
+check('意图词表能数命中', digestCues('mid is missing') >= 1 && digestCues('gg') === 0)
+check('同一批消息两次摘要一致', digestLine(digestRows) === digestRowLine)
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

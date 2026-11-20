@@ -205,6 +205,7 @@ export function runOverlayGeometryProbe(): void {
     expandedBounds: null,
     custom: null,
     textMode: 'translated',
+    digest: false,
     opacity: 0.34,
     hint: null,
     ...overrides

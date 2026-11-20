@@ -411,6 +411,8 @@ export interface OverlayStatus {
   visible: boolean
   /** 浮层显示什么：只译文（默认）／原文+译文／只原文。 */
   textMode: OverlayTextMode
+  /** 抬头先给一行战况摘要、逐行消息收在展开后面（#99）；关掉就是原来的逐行列表。 */
+  digest: boolean
   /** 呼出面板开着吗：开着 = 浮层临时可交互（历史/短语/AI 建议），关了恢复原状态。 */
   panelOpen: boolean
   /** 锁定后位置与尺寸都冻住，并且强制点击穿透——想调整时先解锁。 */
@@ -611,6 +613,7 @@ export const IPC = {
   SPEECH_QUEUE: 'speech:queue',
   SPEECH_QUEUE_STATE: 'speech:queue-state',
   SPEECH_STOP: 'speech:stop',
+  OVERLAY_DIGEST: 'overlay-digest',
   // 麦克风健康（#96）：浮层边录边报电平和掉线，主进程转广播给面板。
   MIC_HEALTH: 'mic:health'
 } as const
@@ -802,6 +805,7 @@ export const ipcContract = {
   overlayToggle: invoke<[], OverlayStatus>(IPC.OVERLAY_TOGGLE),
   overlayVoiceToggle: invoke<[], { ok: boolean }>(IPC.OVERLAY_VOICE_TOGGLE),
   overlaySetText: invoke<[OverlayTextMode], OverlayStatus>(IPC.OVERLAY_TEXT),
+  overlaySetDigest: invoke<[boolean], OverlayStatus>(IPC.OVERLAY_DIGEST),
   overlayPanelToggle: invoke<[], OverlayStatus>(IPC.OVERLAY_PANEL_TOGGLE),
   overlayStatus: invoke<[], OverlayStatus>(IPC.OVERLAY_STATUS),
   chatHistory: invoke<[], CaptureEntry[]>(IPC.CHAT_HISTORY),

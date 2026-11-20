@@ -96,6 +96,11 @@ export interface AppSettings {
   /** 浮层显示哪一层文字：默认只显示译文（译文未到时先用原文占位）。 */
   overlayText: OverlayTextMode
   /**
+   * 浮层抬头先给一行战况摘要，逐行消息收在「展开」后面（#99）。
+   * 摘要只搬已有行里的话，一次模型调用都不发；关掉就回到原来那种逐行列表。
+   */
+  overlayDigest: boolean
+  /**
    * 跨语气查账本：这句话在目标语气下没有，就去别的语气找现成译文。
    * 默认开——同一句中文用「客气」发过一次，下次用「简短」发就别再翻一遍。
    */
@@ -244,6 +249,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   myNicknames: [],
   replyTone: 'terse',
   overlayText: 'translated',
+  overlayDigest: false,
   crossToneLookup: true,
   ttsReadAloud: false,
   ttsReadOwn: false,

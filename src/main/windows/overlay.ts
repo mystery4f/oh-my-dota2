@@ -65,6 +65,7 @@ class OverlayManager {
     return {
       visible: this.win !== null && this.win.isVisible(),
       textMode: this.s.textMode,
+      digest: this.s.digest,
       panelOpen: this.s.panelOpen,
       locked: this.s.locked,
       collapsed: this.s.collapsed,
@@ -306,6 +307,11 @@ class OverlayManager {
 
   setText(mode: OverlayTextMode): OverlayStatus {
     return this.commit({ type: 'set-text', mode })
+  }
+
+  /** 抬头先给一行战况摘要（#99）：浮层自己的按钮和面板的开关走同一条事件。 */
+  setDigest(on: boolean): OverlayStatus {
+    return this.commit({ type: 'set-digest', on })
   }
 
   show(): void {

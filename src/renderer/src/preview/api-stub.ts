@@ -95,12 +95,33 @@ const cacheCounts = (): Awaited<ReturnType<WindowApi['translationCacheInspect']>
 })
 
 /** 浮层状态可变：点了按钮就得看到变，否则按钮等于假的。 */
+/** 浮层预览的假聊天行：一条「不见了」、一条「需要」、两条清汤寡水——摘要与逐行都能看出区别。 */
+function stubOverlayEntries(): import('@shared/ipc').CaptureEntry[] {
+  const now = Date.now()
+  const raw: Array<[string, string, string | null]> = [
+    ['[队友] [队友A] gg', 'gg', 'gg'],
+    ['[队友] [队友B] mid is missing', 'mid is missing', '中路不见了'],
+    ['[队友] [队友A] need 4 top', 'need 4 top', '上路要人来'],
+    ['[队友] [队友C] nice', 'nice', '漂亮']
+  ]
+  return raw.map(([original, body, translated], index) => ({
+    id: `stub-${index}`,
+    ts: now - (raw.length - index) * 1200,
+    original,
+    body,
+    translated
+  }))
+}
+
 const overlay = {
   visible: true,
   textMode: 'translated' as OverlayTextMode,
+  // 真机默认关（settings.overlayDigest=false）：预览照同一口径，?digest=1 才开。
+  digest: query.get('digest') === '1',
   panelOpen: false,
   quickPhrases: ['Push mid', 'Fall back', 'Nice play'],
-  locked: true,
+  // ?unlocked=1 才能点工具条与「展开」——锁定时浮层整块点击穿透，预览也照这个规则来。
+  locked: query.get('unlocked') !== '1',
   collapsed: false,
   readAloud: false,
   opacity: 0.45,
@@ -855,6 +876,23 @@ const implemented = {
     callback(overlaySnap())
     return () => {}
   },
+  // 浮层预览要的那几条推送原来没有桩：Proxy 兜底返回的是 async 函数，effect 拿到 Promise 就直接报错，
+  // 整个浮层页渲染不出来（看着像「空白」）。这里一次补齐，缺的那条会立刻在控制台点名。
+  onCaptureEntries: (callback) => {
+    if (!query.has('noRows')) setTimeout(() => callback(stubOverlayEntries()), 120)
+    return () => {}
+  },
+  onCaptureReplace: () => () => {},
+  onCaptureUpdate: (callback) => {
+    // 只有 ?late=1 才补一条译文：平时保持「原文已到、译文还没来」的样子。
+    if (query.has('late')) setTimeout(() => callback([{ ...stubOverlayEntries()[1], translated: '中路不见了', pending: false }]), 600)
+    return () => {}
+  },
+  onVoiceRecordStart: () => () => {},
+  onVoiceRecordStop: () => () => {},
+  onVoiceRecordToggle: () => () => {},
+  onVoiceSpeak: () => () => {},
+  onVoiceStage: () => () => {},
   overlayToggle: async () => {
     overlay.visible = !overlay.visible
     return overlaySnap()

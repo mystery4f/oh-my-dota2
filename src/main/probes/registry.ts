@@ -45,6 +45,7 @@ import { runVoiceChainProbe } from './voice-chain'
 import { runLogBundleProbe } from './log-bundle'
 import { runDatasetHealthProbe } from './dataset-health'
 import { runMicHealthProbe } from './mic-health'
+import { runOverlayDigestProbe } from './overlay-digest'
 import { runKeyNounProbe } from './key-nouns'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
@@ -244,6 +245,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the pre-training dataset health check (`src/shared/train/dataset-health.ts` + `services/train/wav-facts.ts`): duplicate lines, takes that carry no speech, missing script lines, duration distribution',
     run: runDatasetHealthProbe
+  },
+  {
+    flag: '--overlay-digest-probe',
+    ci: true,
+    summary:
+      'the combat-digest line (`src/shared/overlay-digest.ts`): every fragment quoted from an existing chat row (nothing invented, no model call), intent-first pick in chronological order, and the setting that hides the rows',
+    run: runOverlayDigestProbe
   },
   {
     flag: '--mic-health-probe',

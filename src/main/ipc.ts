@@ -162,6 +162,7 @@ const handlers: MainHandlers = {
     return { ok: true }
   },
   overlaySetText: (mode) => getOverlayManager().setText(mode),
+  overlaySetDigest: (on) => getOverlayManager().setDigest(on),
   overlayPanelToggle: () => getOverlayManager().togglePanel(),
   overlayStatus: () => getOverlayManager().status(),
   chatHistory: () => getCaptureService().history(),
