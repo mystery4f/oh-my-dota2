@@ -19,6 +19,7 @@ const { gradeAsrCheck, gradeSpoken, summarizeAsrCheck } = await import('../src/s
 const { formatCer, measureCer, normalizeSpoken, rankByCer, summarizeCer, summarizeCerByCohort } = await import('../src/shared/train/cer.ts')
 const { FT_TARGET_STEPS, deriveFtEpochsFor, deriveFtResumeEpochs } = await import('../src/shared/train/asr-ft.ts')
 const { DEVICE_ID_PLACEHOLDER, maskLogText, wantedLogFiles } = await import('../src/shared/log-bundle.ts')
+const { filterHistory, historyCopyText } = await import('../src/shared/overlay-ledger.ts')
 const {
   EMPTY_TALLY,
   CANDIDATE_LIMIT,
@@ -333,6 +334,31 @@ check(
   '诊断包：只收表里点名的文件，顺序按表',
   wantedLogFiles(['voice-chain.jsonl', 'nope.txt', 'inplace.log']).map((f) => f.name).join(',') ===
     'inplace.log,voice-chain.jsonl'
+)
+
+// —— 召唤面板历史过滤（ticket 116）：收窄只看词，复制永远给整行 ——
+const HISTORY_ROWS = [
+  { id: 'a', ts: 1, original: '[队友] [阿杰] ⚔ 中路miss', body: '中路miss', translated: null },
+  { id: 'b', ts: 2, original: '[队友] [阿杰] ⚔ 买眼', body: '买眼', translated: 'ward' },
+  { id: 'c', ts: 3, original: '[所有人] [Miracle] ⚔ gg wp', body: 'gg wp', translated: '打得好' }
+]
+check('历史过滤：空查询原样返回同一份数组', filterHistory(HISTORY_ROWS, '  ') === HISTORY_ROWS)
+check(
+  '历史过滤：昵称收窄到那个人的行',
+  filterHistory(HISTORY_ROWS, '阿杰').map((row) => row.id).join(',') === 'a,b'
+)
+check(
+  '历史过滤：关键词不分大小写且命中译文也算',
+  filterHistory(HISTORY_ROWS, 'WARD').map((row) => row.id).join(',') === 'b'
+)
+check(
+  '历史过滤：空格分词是都要命中',
+  filterHistory(HISTORY_ROWS, '阿杰 买眼').map((row) => row.id).join(',') === 'b'
+)
+check('历史过滤：没命中就是空数组', filterHistory(HISTORY_ROWS, '查无此词').length === 0)
+check(
+  '历史过滤：复制的是整行（有译文抄译文，否则原文）',
+  historyCopyText(HISTORY_ROWS[0]) === '[队友] [阿杰] ⚔ 中路miss' && historyCopyText(HISTORY_ROWS[1]) === 'ward'
 )
 
 if (failed > 0) {

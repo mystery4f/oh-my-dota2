@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CaptureEntry, OverlayStatus, PanelSuggestionsResult } from '@shared/ipc'
-import { pickPhrase } from '@shared/overlay-ledger'
+import { filterHistory, historyCopyText, pickPhrase } from '@shared/overlay-ledger'
 
 type Tab = 'history' | 'phrases' | 'suggest'
 
@@ -98,6 +98,7 @@ function CopyRow(props: {
 
 function HistoryTab(): JSX.Element {
   const [rows, setRows] = useState<CaptureEntry[] | null>(null)
+  const [query, setQuery] = useState('')
   const { copiedId, copy } = useCopy()
   useEffect(() => {
     let alive = true
@@ -112,19 +113,40 @@ function HistoryTab(): JSX.Element {
   if (rows.length === 0) return <div className="panel-note">还没有聊天记录 · 开始捕获后这里会有最近 200 条</div>
   // 新的在上：翻历史找「刚才那句话」不用滚到底。
   const newest = [...rows].reverse()
+  const hits = filterHistory(newest, query)
   return (
-    <div className="scroll">
-      {newest.map((entry) => (
-        <CopyRow
-          key={entry.id}
-          id={entry.id}
-          primary={entry.translated ?? entry.original}
-          secondary={entry.translated !== null ? entry.original : undefined}
-          copied={copiedId === entry.id}
-          onCopy={() => copy(entry.id, entry.translated ?? entry.original)}
+    <>
+      <div className="panel-search">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="搜玩家或关键词 · 空格分词"
+          aria-label="搜索聊天记录"
+          autoFocus
         />
-      ))}
-    </div>
+        {query.trim().length > 0 && (
+          <span className="hit">
+            {hits.length}/{newest.length}
+          </span>
+        )}
+      </div>
+      {hits.length === 0 ? (
+        <div className="panel-note">没有命中「{query.trim()}」的记录 · 换个词再试</div>
+      ) : (
+        <div className="scroll">
+          {hits.map((entry) => (
+            <CopyRow
+              key={entry.id}
+              id={entry.id}
+              primary={historyCopyText(entry)}
+              secondary={entry.translated !== null ? entry.original : undefined}
+              copied={copiedId === entry.id}
+              onCopy={() => copy(entry.id, historyCopyText(entry))}
+            />
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 

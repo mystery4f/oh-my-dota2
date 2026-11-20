@@ -15,7 +15,8 @@ import {
   SNAP_PX,
   resizeFromRight
 } from '@shared/overlay-geometry'
-import { nextUnread } from '@shared/overlay-ledger'
+import { filterHistory, historyCopyText, nextUnread } from '@shared/overlay-ledger'
+import type { CaptureEntry } from '@shared/ipc'
 import { reduceOverlay, stageLine, type OverlayState } from '@shared/overlay-state'
 
 const WORK = { x: 0, y: 0, width: 1920, height: 1040 }
@@ -254,6 +255,26 @@ export function runOverlayGeometryProbe(): void {
     st({ collapsed: true })
   )
   push('没有用户几何就不写盘', Object.keys(noCustom.persist).length === 0, 'no persist')
+
+  // —— 召唤面板历史过滤（ticket 116）：关键词收窄，但复制出去的是整行 ——
+  const history: CaptureEntry[] = [
+    { id: 'a', ts: 1, original: '[队友] [阿杰] ⚔ 中路miss', body: '中路miss', translated: null, hero: 'nevermore' },
+    { id: 'b', ts: 2, original: '[队友] [阿杰] ⚔ 买眼', body: '买眼', translated: 'ward', hero: 'lina' },
+    { id: 'c', ts: 3, original: '[所有人] [Miracle] ⚔ gg wp', body: 'gg wp', translated: '打得好', hero: 'invoker' }
+  ]
+  push('空查询原样返回（不复制数组、也不筛掉任何一行）', filterHistory(history, '   ') === history, String(filterHistory(history, '   ').length))
+  const byName = filterHistory(history, '阿杰')
+  push('按昵称收窄：只留这个人的行', byName.length === 2 && byName.every((row) => row.id !== 'c'), JSON.stringify(byName.map((row) => row.id)))
+  const byKeyword = filterHistory(history, 'WARD')
+  push('按关键词收窄：不分大小写，命中译文也算', byKeyword.length === 1 && byKeyword[0].id === 'b', JSON.stringify(byKeyword.map((row) => row.id)))
+  const bothTerms = filterHistory(history, '阿杰 买眼')
+  push('空格分词是「都要命中」：两个词一起收窄到一行', bothTerms.length === 1 && bothTerms[0].id === 'b', JSON.stringify(bothTerms.map((row) => row.id)))
+  push('没有命中就是空数组（面板据此说「没有命中」，不是假装还有行）', filterHistory(history, '不存在的词').length === 0, '')
+  push(
+    '复制出去的是整行原文/译文，不是过滤命中的那一段',
+    historyCopyText(history[0]) === '[队友] [阿杰] ⚔ 中路miss' && historyCopyText(history[1]) === 'ward',
+    `${historyCopyText(history[0])} | ${historyCopyText(history[1])}`
+  )
 
   const failed = cases.filter((item) => !item.ok)
   for (const item of cases) {

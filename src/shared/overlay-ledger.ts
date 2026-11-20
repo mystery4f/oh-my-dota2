@@ -69,3 +69,22 @@ export function pickPhrase(length: number, index: number): number {
   if (length <= 0) return -1
   return ((index % length) + length) % length
 }
+
+/**
+ * 召唤面板历史过滤：关键词按空白切词，每个词都要命中（不分大小写）。
+ * 命中范围是整行可见内容 + 要翻译的正文：昵称在展示串里（`[队友] [昵称] ⚔ 正文`），
+ * 中文词命中正文或译文，英文词命中原文。空查询原样返回，不复制数组。
+ */
+export function filterHistory(entries: CaptureEntry[], query: string): CaptureEntry[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter((term) => term.length > 0)
+  if (terms.length === 0) return entries
+  return entries.filter((entry) => {
+    const haystack = `${entry.original}\n${entry.body}\n${entry.translated ?? ''}`.toLowerCase()
+    return terms.every((term) => haystack.includes(term))
+  })
+}
+
+/** 复制哪一份：有译文抄译文，否则原文——整行内容，不是过滤命中的那一段。 */
+export function historyCopyText(entry: CaptureEntry): string {
+  return entry.translated ?? entry.original
+}
