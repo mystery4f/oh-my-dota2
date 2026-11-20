@@ -106,6 +106,14 @@ export function mergePlan(hotwords: string, chosen: readonly string[]): HotwordM
   return { added, already, dropped, next: joinHotwords(merged) }
 }
 
+/**
+ * 一次合并里真正算「已处理」的词：进了表的与已在表里的。
+ * 表满丢下的（`dropped`）**不算**——它们要被留着，等人清几个再勾上重并（#138）。
+ */
+export function handledWords(plan: HotwordMergePlan): string[] {
+  return [...plan.added, ...plan.already]
+}
+
 /** 从池里移除若干词（应用成功或用户忽略之后）。计数不动，它记的是「改过几次」。 */
 export function dismissCandidates(tally: HotwordTally, words: readonly string[]): HotwordTally {
   const drop = new Set(words.map((word) => word.trim()).filter((word) => word !== ''))

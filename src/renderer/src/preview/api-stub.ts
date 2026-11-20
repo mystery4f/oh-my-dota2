@@ -326,12 +326,17 @@ settings.asrActiveModel = stubAsrActiveId
 
 // #74 候选池的桩：预览里没有真人纠错，池子是一份造出来的典型样本；写词表走真 `mergePlan`，
 // 所以「表满丢哪几个」「已在表里几个」这些数字在预览里也跟真机一致。
+// `?hotwords=full` 把词表填到只剩一个空位：不这样，#138 那种「表满丢下」的路径
+// 只能靠人手敲 49 个词才能走到，等于没人检查。
+if (query.get('hotwords') === 'full') {
+  settings.asrHotwords = Array.from({ length: 49 }, (_, i) => `词${i}`).join(',')
+}
 let stubHotwordPool: HotwordCandidate[] = [
   { word: '肉山', count: 4, samples: ['我们打肉山啊', '肉山在上路'] },
   { word: '马尔斯', count: 2, samples: ['我们打个哈斯卡', '对面马而斯'] },
   { word: '跳刀', count: 1, samples: ['先出跳刀吗'] }
 ]
-let stubHotwordCorrections = 7
+const stubHotwordCorrections = 7
 
 function stubHotwordView(): HotwordSuggestions {
   return {
@@ -493,10 +498,10 @@ const implemented = {
   hotwordApply: async (words) => {
     const plan = mergePlan(settings.asrHotwords, words)
     if (plan.added.length > 0) settings.asrHotwords = plan.next
-    // 真机把处理过的词从池子里摘掉：预览也要摘，连点两次「并入」才不会重复报数。
-    const handled = new Set([...plan.added, ...plan.already, ...plan.dropped])
+    // 真机把处理过的词从池子里摘掉，表满丢下的词留着（否则「删几个再勾上重并」无从谈起）；
+    // 预览跟随同一口径，连点两次「并入」才不会重复报数。
+    const handled = new Set([...plan.added, ...plan.already])
     stubHotwordPool = stubHotwordPool.filter((item) => !handled.has(item.word))
-    stubHotwordCorrections = Math.max(0, stubHotwordCorrections - handled.size)
     return { ...plan, hotwords: settings.asrHotwords }
   },
   hotwordDismiss: async (words) => {

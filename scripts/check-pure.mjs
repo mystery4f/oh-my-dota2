@@ -25,7 +25,8 @@ const {
   parseTally,
   rankCandidates,
   recordCorrection,
-  dismissCandidates
+  dismissCandidates,
+  handledWords
 } = await import('../src/shared/asr-hotword-candidates.ts')
 
 let failed = 0
@@ -169,6 +170,16 @@ check(
     const once = recordCorrection(EMPTY_TALLY, '我们打个哈斯卡', '我们打个马尔斯')
     const dismissed = dismissCandidates(once, ['马尔斯'])
     return dismissed.corrections === 1 && dismissed.candidates.length === 0
+  })(),
+  ''
+)
+check(
+  '热词候选：表满丢下的词不算已处理，要留在池子里（#138）',
+  (() => {
+    const full = Array.from({ length: 50 }, (_, i) => `词${i}`).join(',')
+    const plan = mergePlan(full, ['泰坦', '词3'])
+    const handled = handledWords(plan)
+    return plan.dropped.includes('泰坦') && !handled.includes('泰坦') && handled.includes('词3')
   })(),
   ''
 )

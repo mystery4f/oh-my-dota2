@@ -22,8 +22,10 @@
   四个结果再落盘，面板把三个数说出来；表满（`HOTWORD_LIMIT = 50`）时被丢下的词单独
   列一行「表满没写进去：…」。**绝不静默丢弃**。
 - **一次提交只写一次 `asrHotwords`**：`applyHotwordCandidates()` 只在 `added.length > 0`
-  时调一次 `saveSettings`，也就是最多重载一次识别器。已处理的词从池子里摘掉，同一个
-  词不会被反复提议。
+  时调一次 `saveSettings`，也就是最多重载一次识别器。真正进了表的（`added`/`already`）
+  从池子里摘掉，同一个词不会被反复提议；**表满丢下的（`dropped`）留在池子里**——面板
+  提示「先在热词框里删几个，再勾上重并」时它必须还在那里，摘掉等于把唯一的恢复路
+  变成死胡同（#138）。
 - **忽略只清候选，不动设置**：`dismissCandidates()` 从池子摘词，`asrHotwords` 一字不改，
   纠错计数保留（人要能看到「攒了多少次」）。
 - **面板必须把新词表接回自己的 state**：`HotwordCandidateBox` 的 `onApplied(hotwords)`
@@ -43,7 +45,7 @@
 - 探针 `--hotword-candidates-probe`（ci: true，`passed:14`）：池子归并与排序、单字差异
   永不入池、`rankCandidates` 的 `inTable` 标记、`mergePlan` 的三条边界（都已在表 /
   表满 / 差一个）、`dismissCandidates` 计数保留、脏数据当空池、`applyHotwordCandidates`
-  恰好写一次且摘掉已处理词。
+  恰好写一次、摘掉 `added`/`already` 而留下 `dropped`（#138 回归线）。
 - `scripts/check-pure.mjs` 对同批纯函数另有一组断言（无需 Electron）。
 - 面板：`npm run panel:preview ?s=talk` 人工核过三条路径——正常并入（3 个词进表、
   输入框从 0/50 变 3/50）、忽略（行消失、提示保留计数）、表满（加 1 丢 2，丢的两个

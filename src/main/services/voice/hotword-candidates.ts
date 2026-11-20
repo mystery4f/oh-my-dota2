@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import {
   dismissCandidates,
+  handledWords,
   mergePlan,
   parseTally,
   rankCandidates,
@@ -88,7 +89,9 @@ export function applyHotwordCandidates(
   const current = loadSettings().asrHotwords
   const plan = mergePlan(current, words)
   if (plan.added.length > 0) save({ asrHotwords: plan.next })
-  const handled = [...plan.added, ...plan.already, ...plan.dropped]
+  // 只摘「真的进了表的」与「已经在表里的」（handledWords）：表满丢下的词必须留在池子里，
+  // 否则用户按提示「删几个再勾上重并」时发现候选没了，唯一的恢复路就是死胡同（#138）。
+  const handled = handledWords(plan)
   if (handled.length > 0) saveHotwordTally(dismissCandidates(loadHotwordTally(), handled))
   return { ...plan, hotwords: plan.added.length > 0 ? plan.next : current }
 }
