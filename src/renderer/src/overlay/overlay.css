@@ -136,6 +136,18 @@
   line-height: 1.5;
   vertical-align: 1px;
 }
+/* 逐行判出来的方向（#84）：中性灰，只说明这一句往哪翻，不抢译文的注意力。 */
+.trans .dir {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.14);
+  color: #94a3b8;
+  font-size: 10px;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
 /* 翻失败的行：红字 + ✕。 */
 .trans.err {
   color: #f87171;
@@ -410,6 +422,22 @@
 }
 .copied.ok {
   color: #86efac;
+}
+/* 方向标（#84）：点一下改判这一句的方向。灰底小字，排在「已复制」左边。 */
+.dir-badge {
+  margin-left: 8px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+  font-size: 10px;
+  line-height: 1.6;
+  cursor: pointer;
+  flex: none;
+}
+.dir-badge:hover {
+  background: rgba(148, 163, 184, 0.3);
+  color: #f1f5f9;
 }
 .panel-note {
   padding: 10px;

@@ -16,6 +16,7 @@ import { broadcastToWindows } from '../../windows/broadcast'
 
 import { HISTORY_MAX_ROWS } from '@shared/overlay-ledger'
 import { flagKeyNouns, keyNounsOf, type KeyNoun } from '@shared/key-nouns'
+import { directionFor } from '@shared/translate-direction'
 /**
  * 存续窗口：同一句话在 60 条内重复出现就不再上屏。
  * Dota 的 GSI 会连推 26 帧左右，这里也顺手兜住重复投递。
@@ -277,7 +278,9 @@ export class ChatCaptureService {
       const entry: CaptureEntry = {
         ...row,
         translated: restored || null,
-        ...(missing.length > 0 ? { keyNouns: missing } : {})
+        ...(missing.length > 0 ? { keyNouns: missing } : {}),
+        // 逐行判出来的方向（#84）：浮层拿它画方向标，点一下就是一次更正。
+        direction: directionFor(row.body)
       }
       return cachedRows.get(index) === true ? { ...entry, cached: true } : entry
     })

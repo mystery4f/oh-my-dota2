@@ -3,6 +3,7 @@ import type { OverlayStatus } from '@shared/ipc'
 import type { SpokenStatus } from '@shared/voice-out'
 import { formatStageTrace } from '@shared/voice-stage'
 import { heroHue } from '@shared/overlay-ledger'
+import { directionLabel } from '@shared/translate-direction'
 import { heroUrl } from './hero'
 import type { LedgerRow } from '@shared/overlay-ledger'
 
@@ -55,6 +56,11 @@ function ChatRow(props: {
             {row.keyNouns !== undefined && row.keyNouns.length > 0 && (
               <span className="keynoun" title={`译文没提到：${row.keyNouns.join('、')}`}>
                 ？{row.keyNouns.join('、')}
+              </span>
+            )}
+            {row.direction !== undefined && (
+              <span className="dir" title="这一句判的方向 · 召唤面板里点一下能改">
+                {directionLabel(row.direction)}
               </span>
             )}
           </div>

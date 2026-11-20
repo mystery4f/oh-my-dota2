@@ -45,6 +45,7 @@ import { runVoiceChainProbe } from './voice-chain'
 import { runLogBundleProbe } from './log-bundle'
 import { runDatasetHealthProbe } from './dataset-health'
 import { runKeyNounProbe } from './key-nouns'
+import { runTranslateDirectionProbe } from './translate-direction'
 import { runVoiceOutProbe } from './voice-out'
 import { runVoiceRuntimeProbe } from './voice-runtime'
 import { runVoiceWorkerProbe } from './voice-worker'
@@ -247,6 +248,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the post-translation key-noun check (`src/shared/key-nouns.ts`): hero and item names extracted from the source once before translating, flagged when the translation drops one — the method never rewrites the delivered text',
     run: runKeyNounProbe
+  },
+  {
+    flag: '--translate-direction-probe',
+    ci: true,
+    summary:
+      'per-line translation direction (`src/shared/translate-direction.ts`): Han share decides zh-en vs en-zh, digits and punctuation stay out of the denominator, and a manual correction applies to that one line for the rest of the session',
+    run: runTranslateDirectionProbe
   },
   {
     flag: '--asr-hotwords-probe',

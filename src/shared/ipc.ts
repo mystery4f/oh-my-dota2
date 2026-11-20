@@ -250,6 +250,23 @@ export interface CaptureEntry {
    * 浮层打「？」问一句，译文本身一个字不改——去留由人定。
    */
   keyNouns?: string[]
+  /**
+   * 这一句被送去翻译的方向（`@shared/translate-direction` 逐行判出来的）：浮层把它画成方向标，
+   * 点一下就是一次「翻错了」的更正。
+   */
+  direction?: TranslateDirection
+}
+/** 方向更正请求：`text` 用正文（不带玩家名与前缀），`direction` 是用户点出来的那一个。 */
+export interface DirectionCorrection {
+  text: string
+  direction: 'zh-en' | 'en-zh'
+}
+/** 更正结果：记住了更正，并顺手按新方向重翻这一句（翻不成时 `translated` 为 null）。 */
+export interface DirectionCorrectionResult {
+  ok: boolean
+  direction: 'zh-en' | 'en-zh'
+  translated: string | null
+  error?: string
 }
 /** 原地替换结果：draft = 从游戏聊天框读到的中文，translated = 写回聊天框的英文。 */
 export interface InPlaceResult {
@@ -568,7 +585,9 @@ export const IPC = {
   OVERLAY_OPACITY: 'overlay:opacity',
   OVERLAY_STATE: 'overlay:state',
   // 诊断包（#111）：把 logs/ 里的证据打成一个 zip，带 manifest、版本与构建戳，默认脱敏。
-  LOG_BUNDLE_EXPORT: 'log:bundle-export'
+  LOG_BUNDLE_EXPORT: 'log:bundle-export',
+  // 方向更正（#84）：浮层点一下方向标，改的是「这一句该往哪翻」，只记在这一局里。
+  TRANSLATE_DIRECTION: 'translate:direction-override'
 } as const
 
 /** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
@@ -850,7 +869,12 @@ export const ipcContract = {
   ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK),
   ftAsrftResetBase: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_RESET_BASE),
   /** 一键导出诊断包；成功了也要把 missing 摆在面板上（缺哪几份日志）。 */
-  logBundleExport: invoke<[], LogBundleResult>(IPC.LOG_BUNDLE_EXPORT)
+  logBundleExport: invoke<[], LogBundleResult>(IPC.LOG_BUNDLE_EXPORT),
+  /**
+   * 方向更正（#84）：把「这一句」改判成另一个方向并记住，返回重新翻出来的译文。
+   * 失败时 `translated` 为 null 且 `error` 说明原因，但更正本身已经记住了。
+   */
+  translateDirection: invoke<[DirectionCorrection], DirectionCorrectionResult>(IPC.TRANSLATE_DIRECTION)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

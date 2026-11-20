@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CaptureEntry, OverlayStatus, PanelSuggestionsResult } from '@shared/ipc'
 import { filterHistory, historyCopyText, pickPhrase } from '@shared/overlay-ledger'
+import { directionLabel } from '@shared/translate-direction'
 
 type Tab = 'history' | 'phrases' | 'suggest'
 
@@ -86,19 +87,37 @@ function CopyRow(props: {
   copied: boolean
   selected?: boolean
   onCopy: () => void
+  /** 行尾的小按钮（方向标）：点了不算复制，所以自己拦掉事件冒泡。 */
+  badge?: { label: string; title: string; onClick: () => void }
 }): JSX.Element {
   return (
     <div className={props.selected ? 'copy-row selected' : 'copy-row'} onClick={props.onCopy}>
       <span className="copy-primary">{props.primary}</span>
       {props.secondary && <span className="copy-secondary">{props.secondary}</span>}
+      {props.badge !== undefined && (
+        <span
+          className="dir-badge"
+          title={props.badge.title}
+          onClick={(event) => {
+            event.stopPropagation()
+            props.badge?.onClick()
+          }}
+        >
+          {props.badge.label}
+        </span>
+      )}
       <span className={props.copied ? 'copied ok' : 'copied'}>{props.copied ? '已复制' : ''}</span>
     </div>
   )
 }
 
+/** 手工改过方向的行：这一行显示改判后的方向与重翻出来的译文，只记在这次面板打开期间。 */
+type DirectionFix = { direction: 'zh-en' | 'en-zh'; translated: string | null }
+
 function HistoryTab(): JSX.Element {
   const [rows, setRows] = useState<CaptureEntry[] | null>(null)
   const [query, setQuery] = useState('')
+  const [fixed, setFixed] = useState<Record<string, DirectionFix>>({})
   const { copiedId, copy } = useCopy()
   useEffect(() => {
     let alive = true
@@ -114,6 +133,21 @@ function HistoryTab(): JSX.Element {
   // 新的在上：翻历史找「刚才那句话」不用滚到底。
   const newest = [...rows].reverse()
   const hits = filterHistory(newest, query)
+  /**
+   * 点方向标 = 说「这一句翻错方向了」：先让主进程记住，再拿它重翻出来的译文替换这一行。
+   * 重翻要一次模型往返，所以只在人点了之后才发生；失败就把原来的译文留在屏幕上。
+   */
+  const flipDirection = (entry: CaptureEntry): void => {
+    const from = fixed[entry.id]?.direction ?? entry.direction
+    if (from === undefined) return
+    const direction = from === 'zh-en' ? 'en-zh' : 'zh-en'
+    void window.api.translateDirection({ text: entry.body, direction }).then((result) => {
+      setFixed((previous) => ({
+        ...previous,
+        [entry.id]: { direction: result.direction, translated: result.translated }
+      }))
+    })
+  }
   return (
     <>
       <div className="panel-search">
@@ -138,10 +172,19 @@ function HistoryTab(): JSX.Element {
             <CopyRow
               key={entry.id}
               id={entry.id}
-              primary={historyCopyText(entry)}
+              primary={fixed[entry.id]?.translated ?? historyCopyText(entry)}
               secondary={entry.translated !== null ? entry.original : undefined}
               copied={copiedId === entry.id}
-              onCopy={() => copy(entry.id, historyCopyText(entry))}
+              badge={
+                entry.direction === undefined
+                  ? undefined
+                  : {
+                      label: directionLabel(fixed[entry.id]?.direction ?? entry.direction),
+                      title: '点一下换成另一个方向 · 这一局里记住',
+                      onClick: () => flipDirection(entry)
+                    }
+              }
+              onCopy={() => copy(entry.id, fixed[entry.id]?.translated ?? historyCopyText(entry))}
             />
           ))}
         </div>

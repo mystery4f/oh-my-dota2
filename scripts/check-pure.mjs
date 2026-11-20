@@ -435,6 +435,24 @@ check(
   flagKeyNouns(keyNounsOf('雷锤还没出', 'zh-en'), 'not ready').keyNouns.join(',')
 )
 check('关键名词：词边界内的假命中不算（tinyhouse ≠ tiny）', keyNounsOf('tinyhouse next door', 'auto-zh').length === 0)
+
+// —— 逐行判方向（translate-direction）：汉字占比定方向，手工更正只改这一句 ——
+const { correctDirection, detectDirection, directionFor, directionLabel, directionOverrideCount, forgetDirections, hanShare } =
+  await import('../src/shared/translate-direction.ts')
+check('方向：纯中文中→英、纯英文英→中', detectDirection('中路不见了') === 'zh-en' && detectDirection('where is the courier') === 'en-zh')
+check('方向：中英混排按汉字占比，夹一个中文词就是中文行', detectDirection('push 中路') === 'zh-en' && detectDirection('where is the 肉山') === 'en-zh')
+check('方向：数字与标点不进分母', detectDirection('GG 666') === 'en-zh' && hanShare('？！…') === 0)
+forgetDirections()
+correctDirection('need mjollnir', 'zh-en')
+check(
+  '方向：更正记住这一句，空白与大小写不影响',
+  directionFor('need mjollnir') === 'zh-en' && directionFor('  Need   Mjollnir ') === 'zh-en' && directionOverrideCount() === 1
+)
+check('方向：别的句子不受更正影响', directionFor('where is the courier') === 'en-zh')
+correctDirection('need mjollnir', 'en-zh')
+check('方向：更正回原来的方向就等于撤销', directionOverrideCount() === 0)
+forgetDirections()
+check('方向：方向标写中→英 / 英→中', directionLabel('zh-en') === '中→英' && directionLabel('en-zh') === '英→中')
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

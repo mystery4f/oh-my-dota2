@@ -406,6 +406,12 @@ const implemented = {
     missing: ['voice-chain.jsonl', 'capture-ticks.jsonl'],
     error: null
   }),
+  // 方向更正（#84）：桩里不翻，只回一个「按你点的方向重翻了」的假译文，好让面板走完整个显示路径。
+  translateDirection: async (request) => ({
+    ok: true,
+    direction: request.direction,
+    translated: request.direction === 'en-zh' ? '（桩）按英→中重翻的一句' : '(stub) retranslated the other way'
+  }),
   onUpdateStatus: (callback) => {
     callback({ channel: 'stable', status: 'dev', version: '0.0.0' })
     return () => {}
@@ -435,7 +441,8 @@ const implemented = {
       body: '雷锤还没出，跳刀也差一点',
       translated: 'mjollnir not ready yet',
       hero: 'muerta',
-      keyNouns: ['跳刀']
+      keyNouns: ['跳刀'],
+      direction: 'zh-en'
     }
   ],
   /**
