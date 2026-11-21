@@ -37,6 +37,7 @@ tags: [docs, index]
 | `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 那一轮的待验收项 | 历史快照 |
 | `docs/HANDOFF-2026-11-10.md` | 架构走查实施交接：待跑的三个探针、探针盖不到的手测项、环境坑 | 现行 |
 | `docs/REQ-backlog-2026-11.md` | 需求账本：候选池逐条现状证据 + 期望，末尾标注落成的 issue 编号（取票顺序看 issue 号） | 现行 |
+| `docs/LANDING-diff-2026-11.md` | 原型 ↔ main 落地差集：每组差在哪、真面板位置、settings 键、探针覆盖、落地要动什么 | 进行中：原型补差集 |
 | `docs/COMPETITIVE-2026-11.md` | 同类对局助手竞品分析（2026-11）：开源与官方竞品盘点、能力矩阵、定位图、可搬的四条、明确不追的清单 | 现行 |
 | `docs/SPIKE-asr-streaming.md` | #72 量测报告：流式识别 vs 整句识别的延迟与错字率（含尾块静音坑与复现步骤） | 历史快照 |
 | `docs/HANDOFF.md` | 讲话卡顿与浮层鼠标的常驻交接：麦克风选型根因、已推提交、未真机验证的改动、环境坑（每轮直接改这一份） | 现行 |
@@ -90,6 +91,7 @@ tags: [docs, index]
 | `docs/adr/asr-ft-disk-reclaim.md` | 训练残留的统一回收：启动时只留最新一份导出产物与一份能接着训的 run 目录，其余连半成品删掉 |
 | `docs/adr/asr-check-batch.md` | 全量识别比对：数据步一个按钮 + 弹层，用现役模型跑全库、归一化后判一致，结果不落库 |
 | `docs/adr/asr-check-cer.md` | 逐条 CER：三档不够用；CER 口径一处写、合计取总错字÷总字数、训练见过/留出/未记切分分开报、改稿写回账本 |
+| `docs/adr/asr-and-offline-testability.md` | 四处「先拆纯缝再谈可测」：离线模型判定、失败文案映射、分流接线、体检端口注入 | 现行 |
 | `docs/adr/asr-base-copy.md` | 底模副本 `asr-models/<engine>-base/`：转正只轮换现役↔`.bak`（两次之后原件就没了），副本首次使用才写入、缺件只报告不修，「重置为底模」走同一套 swap 所以当前权重变 `.bak` |
 | `docs/adr/asr-finetune-leg.md` | 识别微调成为正式训练腿（两引擎、增量、底模保留、转正/回滚）；热词只给支持提示的引擎。取代 `asr-hotwords-not-finetune.md` |
 | `docs/adr/asr-hotwords-not-finetune.md` | 识别个性化走热词注入；两次更正（Qwen3 可微调、后续切 FunASR paraformer）。**已被 `asr-finetune-leg.md` 取代**，留作决策历史 |
