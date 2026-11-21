@@ -90,7 +90,8 @@ export function AboutPage(): React.ReactElement {
           <span className="font-mono text-xs text-muted-foreground">
             {build?.stampMs ? new Date(build.stampMs).toLocaleString('zh-CN', { hour12: false }) : '…'}
           </span>
-          {build?.stale ? <StatusPill tone="warn">源码更新了</StatusPill> : null}
+          {build?.scope === 'main' ? <StatusPill tone="warn">源码更新了</StatusPill> : null}
+          {build?.scope === 'renderer' ? <StatusPill>已热更新</StatusPill> : null}
         </Row>
       </Group>
 

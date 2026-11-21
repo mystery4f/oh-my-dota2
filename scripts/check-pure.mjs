@@ -850,13 +850,32 @@ check(
 {
   const { BUILD_STALE_SLACK_MS, buildInfoOf, formatSpan, judgeBuildFreshness } = await import('../src/shared/build-info.ts')
   const T = 1_763_000_000_000
-  check('读不到产物 -> 说读不到，不说最新', judgeBuildFreshness({ stampMs: null, bytes: null, newestSourceMs: T }).note.includes('读不到'))
-  check('打包版 -> 只报时间不判旧', judgeBuildFreshness({ stampMs: T, bytes: 1, newestSourceMs: null }).stale === false)
-  check('宽限内不算旧', judgeBuildFreshness({ stampMs: T, bytes: 1, newestSourceMs: T + BUILD_STALE_SLACK_MS - 1 }).stale === false)
-  const stale = judgeBuildFreshness({ stampMs: T, bytes: 1, newestSourceMs: T + 540_000 })
+  check(
+    '读不到产物 -> 说读不到，不说最新',
+    judgeBuildFreshness({ stampMs: null, bytes: null, newestMainMs: T, newestRendererMs: T }).note.includes('读不到')
+  )
+  check(
+    '打包版 -> 只报时间不判旧',
+    judgeBuildFreshness({ stampMs: T, bytes: 1, newestMainMs: null, newestRendererMs: null }).stale === false
+  )
+  check(
+    '宽限内不算旧',
+    judgeBuildFreshness({ stampMs: T, bytes: 1, newestMainMs: T + BUILD_STALE_SLACK_MS - 1, newestRendererMs: T }).stale ===
+      false
+  )
+  const stale = judgeBuildFreshness({ stampMs: T, bytes: 1, newestMainMs: T + 540_000, newestRendererMs: T })
   check('超宽限判旧并给出办法', stale.stale === true && stale.note.includes('dev:restart'), stale.note)
   check('时长文案看得出量级', formatSpan(600_000).includes('分') && formatSpan(7_200_000).includes('小时'))
-  check('面板视图由一处判定产生', buildInfoOf({ stampMs: T, bytes: 1, newestSourceMs: T + 60_000 }).behindMs === 60_000)
+  check(
+    '面板视图由一处判定产生',
+    buildInfoOf({ stampMs: T, bytes: 1, newestMainMs: T + 60_000, newestRendererMs: T }).behindMs === 60_000
+  )
+  const rendererOnly = judgeBuildFreshness({ stampMs: T, bytes: 1, newestMainMs: T, newestRendererMs: T + 260_000 })
+  check(
+    '只改渲染层 -> 不判旧、说已热更新、不喊重启',
+    rendererOnly.stale === false && rendererOnly.scope === 'renderer' && rendererOnly.note.includes('热更新') && !rendererOnly.note.includes('dev:restart'),
+    rendererOnly.note
+  )
 }
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)

@@ -521,25 +521,41 @@ const implemented = {
   updateCheck: async () => ({ channel: 'stable', status: 'dev', version: '0.0.0' }),
   updateInstall: async () => true,
   // 诊断包（#111）：夹具假装收了 3 份、缺 2 份，好让面板的「缺哪几份」也走一遍。
-  // 构建新鲜度（#113）：默认是一份「刚刚构建完」的干净读数；?staleBuild=1 演示源码比产物新那一条红字。
+  // 构建新鲜度（#113/#147）：默认「刚刚构建完」；?staleBuild=1 主进程源码更新（红字 + 徽标）；
+  // ?rendererNewer=1 只有渲染层动过（一句话说明已热更新，不报警）。
   buildInfo: async () =>
     query.get('staleBuild') === '1'
       ? {
           stampMs: 1_763_000_000_000,
           bytes: 1_087_554,
-          newestSourceMs: 1_763_000_540_000,
+          newestMainMs: 1_763_000_540_000,
+          newestRendererMs: 1_763_000_000_000,
           stale: true,
-          note: '改的代码没生效：源码比构建产物新 9 分，重跑 npm run dev:restart',
+          scope: 'main',
+          note: '改的代码没生效：主进程源码比构建产物新 9 分，重跑 npm run dev:restart',
           behindMs: 540_000
         }
-      : {
-          stampMs: 1_763_000_540_000,
-          bytes: 1_087_554,
-          newestSourceMs: 1_763_000_000_000,
-          stale: false,
-          note: '构建产物是最新的',
-          behindMs: null
-        },
+      : query.get('rendererNewer') === '1'
+        ? {
+            stampMs: 1_763_000_000_000,
+            bytes: 1_087_554,
+            newestMainMs: 1_763_000_000_000,
+            newestRendererMs: 1_763_000_260_000,
+            stale: false,
+            scope: 'renderer',
+            note: '渲染层有改动：开发模式下已经热更新，打包版才需要重新 npm run build',
+            behindMs: null
+          }
+        : {
+            stampMs: 1_763_000_540_000,
+            bytes: 1_087_554,
+            newestMainMs: 1_763_000_000_000,
+            newestRendererMs: 1_763_000_000_000,
+            stale: false,
+            scope: null,
+            note: '构建产物是最新的',
+            behindMs: null
+          },
   // 异常清单（P3）：`?errors=1` 造两条样本（一条未捕获、一条未处理 promise），默认干净。
   errorsView: async () =>
     query.get('errors') === '1'
