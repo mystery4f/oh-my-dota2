@@ -32,6 +32,7 @@ import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
 import { runInterpretLegProbe } from './interpret-leg'
 import { runClausePlanProbe } from './clause-plan'
+import { runClauseStreamBench } from './clause-stream-bench'
 import { runSettingsBundleProbe } from './settings-bundle'
 import { runBuildInfoProbe } from './build-info'
 import { runLogsIsolationProbe } from './logs-isolation'
@@ -337,6 +338,11 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the settings bundle (ticket 81): export writes settings plus the training index into one zip with every key field blanked out, import restores each setting but keeps the local API key and proxy, and a partial or mismatched archive is refused before a single field is written',
     run: runSettingsBundleProbe
+  },
+  {
+    flag: '--clause-stream-bench',
+    summary: 'measures first-audio and total latency of clause streaming vs whole-sentence speech against a real provider (`BENCH_BASE_URL` / `BENCH_MODEL`), never in CI',
+    run: runClauseStreamBench
   },
   {
     flag: '--clause-plan-probe',
