@@ -16,6 +16,8 @@ export type HotkeyActionId =
   | 'overlayPanel'
   | 'voiceCapture'
   | 'visionAsk'
+  | 'markGood'
+  | 'markBad'
 
 export interface HotkeyAction {
   id: HotkeyActionId
@@ -64,6 +66,18 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
     label: '看一眼画面',
     hint: '截当前这一帧问视觉模型，答案在呼出面板的「看一眼」页；只在你按的时候截图',
     defaultAccelerator: 'Alt+Shift+G'
+  },
+  {
+    id: 'markGood',
+    label: '标记最近一句译文：好',
+    hint: '把浮层上最后一条已翻译的行记为「译得对」，连原文和 matchid 一起记下来，供对比供应商',
+    defaultAccelerator: 'Alt+Shift+M'
+  },
+  {
+    id: 'markBad',
+    label: '标记最近一句译文：差',
+    hint: '同上，记成「译错了」。没标记过的行不会进这份记录',
+    defaultAccelerator: 'Alt+Shift+N'
   },
   {
     id: 'voiceCapture',

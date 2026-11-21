@@ -29,6 +29,7 @@ import { judgeCorrectionSamples } from '@shared/train/corrections'
 import { mergePlan, rankCandidates, type HotwordCandidate, type HotwordSuggestions } from '@shared/asr-hotword-candidates'
 import { judgeFirstRun } from '@shared/first-run'
 import { summarizeErrors } from '@shared/error-log'
+import { summarizeMarks } from '@shared/translation-mark'
 import { judgeGsiStall, gsiStallWarning } from '@shared/gsi-stall'
 import { judgeEnv } from '@shared/env-report'
 import { resolveGsiRoot } from '@shared/gsi-lib'
@@ -565,6 +566,17 @@ const implemented = {
           { at: '2026-11-21T11:58:20.000Z', kind: 'rejection', message: 'fetch failed: ECONNRESET', stack: null, context: 'provider' }
         ])
       : summarizeErrors([]),
+  // 译文抽检（#87）：`?marks=1` 造三条样本，让「好评率」那一行在预览里看得见。
+  translationMarks: async () =>
+    summarizeMarks(
+      query.get('marks') === '1'
+        ? [
+            { at: '2026-11-21T12:01:00.000Z', matchid: '7512345678', entryId: 'a1', source: '他中路不见了', translation: 'Mid is missing.', verdict: 'good', provider: 'deepseek', model: 'deepseek-chat', cached: false },
+            { at: '2026-11-21T12:03:10.000Z', matchid: '7512345678', entryId: 'a2', source: '我们开雾', translation: 'We smoke.', verdict: 'bad', provider: 'deepseek', model: 'deepseek-chat', cached: false },
+            { at: '2026-11-21T12:05:22.000Z', matchid: null, entryId: 'a3', source: '打肉山', translation: 'Roshan now.', verdict: 'good', provider: 'deepseek', model: 'deepseek-chat', cached: true }
+          ]
+        : []
+    ),
   logBundleExport: async () => ({
     ok: true,
     path: 'data/logs/export/log-bundle-20260101-000000.zip',

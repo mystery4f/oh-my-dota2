@@ -62,6 +62,7 @@ import { runFtAuditionProbe } from './ft-audition'
 import { runPatchWatchProbe } from './patch-watch'
 import { runAsrRoutingProbe } from './asr-routing'
 import { runAsrSwitchProbe } from './asr-switch'
+import { runTranslationMarkProbe } from './translation-mark'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
 import { runSpeechQueueProbe } from './speech-queue'
@@ -356,6 +357,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the short/long ASR routing (`src/shared/asr-routing.ts`): short clips go to the fast engine (paraformer), long ones to the accurate one (qwen3), the rule can be switched off, and every switch is logged with its reason',
     run: runAsrRoutingProbe
+  },
+  {
+    flag: '--translation-mark-probe',
+    ci: true,
+    summary:
+      'the translation spot-check account (`src/shared/translation-mark.ts`): unmarked or untranslated lines never become samples, a re-mark replaces the earlier verdict, tallies group by provider and model, and a failed mark still speaks (ticket 87)',
+    run: runTranslationMarkProbe
   },
   {
     flag: '--asr-switch-probe',

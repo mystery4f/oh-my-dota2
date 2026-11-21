@@ -84,6 +84,7 @@ import {
 import { patchWatchView } from './services/patch-watch'
 import { exportLogBundle } from './services/log-bundle'
 import { errorsSummary } from './services/error-log'
+import { translationMarkSummary } from './services/session/translation-marks'
 import { correctLineDirection } from './services/session/direction-correction'
 import { readQualityReport } from './services/session/quality-report'
 import { readBuildInfo } from './services/build-info'
@@ -335,6 +336,7 @@ const handlers: MainHandlers = {
   ftAsrftResetBase: () => resetAsrFtToBase(),
   logBundleExport: () => exportLogBundle(),
   errorsView: () => errorsSummary(5),
+  translationMarks: () => translationMarkSummary(),
   translateDirection: (request) => correctLineDirection(request),
   qualityReport: () => readQualityReport(),
   speechQueue: () => speechQueueSnapshot(),

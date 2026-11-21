@@ -40,6 +40,8 @@ import { suppressExperimentalSqliteWarning } from './services/session/warnings'
 import { getOverlayManager } from './windows/overlay'
 import { broadcastToWindows as broadcast } from './windows/broadcast'
 import { askScreen } from './services/vision'
+import { noteTranslationMark } from './services/session/translation-marks'
+import { markFeedback } from '@shared/translation-mark'
 import { getCaptureService } from './services/capture/capturer'
 import { getInPlaceSender } from './services/input/chat-inplace'
 import { createTray, destroyTray } from './windows/tray'
@@ -275,6 +277,15 @@ app.whenReady().then(() => {
     },
     voiceCapture: () => {
       getOverlayManager().toggleVoiceCapture()
+    },
+    // 译文抽检（#87）：标「浮层上最后一条已翻译的行」。热键不许静默——标不上也要说为什么。
+    markGood: () => {
+      const mark = noteTranslationMark('good')
+      getOverlayManager().flashHint(markFeedback('good', mark))
+    },
+    markBad: () => {
+      const mark = noteTranslationMark('bad')
+      getOverlayManager().flashHint(markFeedback('bad', mark))
     },
     // 看一眼（#135）：先打开呼出面板让答案有地方落，再截帧问模型。
     // 热键这条路没人接返回值，所以结果广播回渲染层，失败也必须是条消息而不是静默。

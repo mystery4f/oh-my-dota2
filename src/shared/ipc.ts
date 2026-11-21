@@ -10,6 +10,7 @@ import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './
 import type { VisionAnswer, VisionReadiness } from './vision'
 import type { HoldSelfTest } from './hold-selftest'
 import type { ErrorSummary } from './error-log'
+import type { TranslationMarkSummary } from './translation-mark'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { GlossaryPackStatus } from './glossary-pack'
 import type { QualityReport } from './quality-report'
@@ -627,6 +628,8 @@ export const IPC = {
   LOG_BUNDLE_EXPORT: 'log:bundle-export',
   /** 本地异常清单（backlog 第七节 P3）：只在内存里留最近 50 条，不联网。 */
   ERRORS_VIEW: 'errors:view',
+  /** 译文抽检（#87）：被标记过的译文对（供应商 × 模型的好评率），只读汇总。 */
+  TRANSLATION_MARKS: 'translation:marks',
   // 方向更正（#84）：浮层点一下方向标，改的是「这一句该往哪翻」，只记在这一局里。
   TRANSLATE_DIRECTION: 'translate:direction-override',
   // 周度质量卡（#110）：守卫计数 + 记账本命中，主进程现读两份 jsonl 现算。
@@ -935,6 +938,8 @@ export const ipcContract = {
   /** 一键导出诊断包；成功了也要把 missing 摆在面板上（缺哪几份日志）。 */
   logBundleExport: invoke<[], LogBundleResult>(IPC.LOG_BUNDLE_EXPORT),
   errorsView: invoke<[], ErrorSummary>(IPC.ERRORS_VIEW),
+  /** 译文抽检（#87）：面板只读一句话与分组统计，明细在 `logs/translation-marks.jsonl`。 */
+  translationMarks: invoke<[], TranslationMarkSummary>(IPC.TRANSLATION_MARKS),
   /**
    * 方向更正（#84）：把「这一句」改判成另一个方向并记住，返回重新翻出来的译文。
    * 失败时 `translated` 为 null 且 `error` 说明原因，但更正本身已经记住了。

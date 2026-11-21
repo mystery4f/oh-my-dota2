@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { LogBundleResult, UpdateState } from '@shared/ipc'
 import type { BuildInfo } from '@shared/build-info'
 import { ERROR_KIND_LABEL, errorsLine, type ErrorSummary } from '@shared/error-log'
+import { marksLine, type TranslationMarkSummary } from '@shared/translation-mark'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 
@@ -28,6 +29,7 @@ export function AboutPage(): React.ReactElement {
   const [build, setBuild] = useState<BuildInfo | null>(null)
   const [bundleBusy, setBundleBusy] = useState(false)
   const [errors, setErrors] = useState<ErrorSummary | null>(null)
+  const [marks, setMarks] = useState<TranslationMarkSummary | null>(null)
 
   useEffect(() => {
     void window.api.appVersion().then(setVersion)
@@ -35,6 +37,8 @@ export function AboutPage(): React.ReactElement {
     void window.api.buildInfo().then(setBuild)
     // 异常清单一次就够：主进程没接住的错误不会在这里自己冒出来，刷新靠重新进页面（P3）。
     void window.api.errorsView().then(setErrors)
+    // 译文抽检（#87）：只读汇总，明细在 logs/translation-marks.jsonl。
+    void window.api.translationMarks().then(setMarks)
     return window.api.onUpdateStatus(setState)
   }, [])
 
@@ -119,6 +123,20 @@ export function AboutPage(): React.ReactElement {
               </Row>
             ))
           : null}
+        <Row
+          label="译文抽检"
+          hint={
+            marks === null
+              ? '正在读本地标记（对局里按「标记译文：好/差」两个热键）'
+              : marksLine(marks)
+          }
+        >
+          {marks === null ? null : (
+            <StatusPill tone={marks.total === 0 ? 'idle' : marks.bad > marks.good ? 'warn' : 'ready'}>
+              {marks.total === 0 ? '还没标过' : `${marks.total} 条`}
+            </StatusPill>
+          )}
+        </Row>
         <Row label="导出诊断包" hint={bundleHint}>
           <Button variant="outline" size="sm" disabled={bundleBusy} onClick={() => void exportBundle()}>
             {bundleBusy ? '打包中…' : '导出'}
