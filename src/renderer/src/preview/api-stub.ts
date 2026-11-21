@@ -832,15 +832,27 @@ const implemented = {
   ttsOfflineState: async () => offlineState(),
   ttsOfflineDownload: async () => offlineState(),
   ttsPreview: async () => ({ ok: true }),
-  translateInPlace: async () => ({
-    ok: true,
-    draft: '稳住，我们能赢',
-    translated: 'hold mid, we can win',
-    grabMs: 120,
-    translateMs: 640,
-    sendMs: 95,
-    restored: true
-  }),
+  // #176：四种失败各一条，句子照抄主进程那两张表（`src/main/services/reply/reply-service.ts:255,298` 与
+  // `src/main/services/input/chat-inplace.ts:14`）——桩是演示"主进程会返回什么"，不是页面自己编文案。
+  translateInPlace: async () => {
+    const mode = query.get('send')
+    if (mode === 'empty') return { ok: false, draft: null, translated: null, grabMs: 60, error: '聊天框里没有可翻译的内容', restored: false }
+    if (mode === 'nofocus')
+      return { ok: false, draft: null, translated: null, error: '游戏不在前台：先把 Dota 2 切到前台再按热键', restored: false }
+    if (mode === 'write')
+      return { ok: false, draft: '稳住，我们能赢', translated: 'hold mid, we can win', grabMs: 120, translateMs: 640, sendMs: 90, error: '写回聊天框并发送失败', restored: true }
+    if (mode === 'keystroke')
+      return { ok: false, draft: '稳住，我们能赢', translated: 'hold mid, we can win', grabMs: 130, translateMs: 610, sendMs: 420, error: '输入桥失败：SendInput 没送进去', restored: true }
+    return {
+      ok: true,
+      draft: '稳住，我们能赢',
+      translated: 'hold mid, we can win',
+      grabMs: 120,
+      translateMs: 640,
+      sendMs: 95,
+      restored: true
+    }
+  },
   panelSuggestions: async () => ({
     ok: true,
     items: ['Heading back to lane', 'Careful, mid is missing', 'Nice play']
