@@ -2,6 +2,7 @@ import { app, clipboard, dialog, ipcMain, shell } from 'electron'
 import { dotaDisplayWarning } from '@shared/dota-video'
 import { errorMessage } from '@shared/errors'
 import { halfDuplexSnapshot } from './services/voice/half-duplex'
+import { resolvePlaybackLeg } from '@shared/half-duplex'
 import { IPC, ipcContract, type MainHandlers, type OpenExternalResult } from '@shared/ipc'
 import { translateInPlace, voiceReply } from './services/reply/reply-service'
 import { generatePanelSuggestions } from './services/reply/panel-suggestions'
@@ -307,8 +308,10 @@ const handlers: MainHandlers = {
   // #157：渲染层播的公告腿 / 回放腿也走这一条。>0 = 起播并给出时长；<=0 = 这段播完了，立刻关窗。
   voicePlayback: (durationMs, leg) => {
     const ms = Number(durationMs) || 0
-    if (ms > 0) notePlayback(Date.now(), ms, leg)
-    else endPlayback(leg)
+    // #163：渲染层只知道「哪条腿在放」，测试模式由主进程按设置折成 `test`。
+    const named = resolvePlaybackLeg(leg, loadSettings().voiceOutTestMode)
+    if (ms > 0) notePlayback(Date.now(), ms, named)
+    else endPlayback(named)
   },
   voiceHalfDuplex: () => halfDuplexSnapshot(),
   voiceOutShadow: () => shadowViewNow(),

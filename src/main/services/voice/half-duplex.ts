@@ -8,6 +8,7 @@
  * 不开同传也守着：公告腿（`speech.ts`）同样把声音放出来，那时的回声一样不该被识别。
  * 这条规则不依赖任何设置，判断只看「我们的播放窗口是否还开着」。
  */
+import { appendVoiceChainLine } from './chain-log'
 import {
   expireWindow,
   extendPlaybackWindow,
@@ -27,8 +28,24 @@ let lastDropAt = 0
 
 /** 一段音频真的开始播了：把窗口延长到它播完（再加尾巴），并记住是哪条腿。 */
 export function notePlayback(at: number, durationMs: number, leg: PlaybackLeg | string = 'unknown'): void {
+  const named = normalizePlaybackLeg(leg)
+  // #163：时长没量到（渲染层没报 size/duration）时窗口根本不会开，过去一行痕迹都没有 ——
+  // 现场于是分不清「没丢」与「没记账」。这里留一行痕迹，但**不计入** total/dropped：
+  // 记账不是判定，把它算进丢掉的段数会让面板数字说谎。
+  const measured = Number.isFinite(durationMs) && durationMs > 0
+  if (!measured) {
+    appendVoiceChainLine({
+      at: new Date(at).toISOString(),
+      kind: 'half-duplex-skip',
+      stage: named,
+      // 0 与 NaN 都记 null：两种都表示「没量到」，写成 0 会被读成「量到了、长度为零」。
+      durationMs: measured ? durationMs : null,
+      note: '播放端没量到时长：这道守卫这次没有窗口，等于没在守'
+    })
+    return
+  }
   playingUntil = extendPlaybackWindow(expireWindow(playingUntil, at), at, durationMs)
-  playingLeg = normalizePlaybackLeg(leg)
+  playingLeg = named
 }
 
 /**

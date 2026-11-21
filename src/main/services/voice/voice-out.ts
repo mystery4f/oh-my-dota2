@@ -16,6 +16,7 @@ import { currentVoiceOutReadiness } from './voice-out-readiness'
 import { noteShadowLine, shadowActive } from './shadow'
 import { rateDeltaLine, rateForLine } from '@shared/speech-rate'
 import { notePlayback } from './half-duplex'
+import { resolvePlaybackLeg } from '@shared/half-duplex'
 import { loadSettings } from '../settings'
 import { interpretLegOf, interpretSinkOf } from '@shared/interpret'
 import { getOverlayManager } from '../../windows/overlay'
@@ -144,7 +145,8 @@ class VoiceOutService {
       onDeviceNotice: showHint,
       onSpeak: ({ bytes, durationMs, sinkLabel, keyHeld, holdMs }) => {
         // #129：起播那一刻开始半双工窗口，回声尾巴交给窗口自己的 grace。
-        notePlayback(Date.now(), durationMs ?? 0)
+        // #163：腿名在缝里定——测试模式只出声不按键，必须报 `test`，不能借用 `reply`。
+        notePlayback(Date.now(), durationMs ?? 0, resolvePlaybackLeg('reply', settings.voiceOutTestMode))
         playedSink = sinkLabel || null
         console.log(
           'VOICE_OUT_SPEAK',
@@ -222,7 +224,12 @@ class VoiceOutService {
       // 起播那一刻（键已按下、窗口开始播）才是计时的「起播」点，不是调用 play 的时刻。
       onSpeak: (info) => {
         // #129：起播那一刻开始半双工窗口，回声尾巴交给窗口自己的 grace。
-        notePlayback(Date.now(), info.durationMs ?? 0)
+        // #163：无键腿（测试音/同传回放）同样报 `test`，让耳验手册「只认真公告」站得住。
+        notePlayback(
+          Date.now(),
+          info.durationMs ?? 0,
+          resolvePlaybackLeg('interpret', legPlan === null ? settings.voiceOutTestMode : legPlan.keyless)
+        )
         // 播到哪台设备是渲染层回报的事实：同声腿靠它回答「队友那边听到的是这一台吗」。
         playedSink = info.sinkLabel || ''
         timer?.notePlayStart()

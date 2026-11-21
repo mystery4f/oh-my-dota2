@@ -616,6 +616,11 @@ Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `
 
 Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
+Half-duplex guard (#163): the renderer only knows which leg is playing, so `resolvePlaybackLeg(leg, testMode)` in
+`src/shared/half-duplex.ts` folds test mode to the `test` leg — borrowing `announce` there would silently invalidate the
+"only count real announcements" ear check. `notePlayback()` without a measured duration opens no window, but writes one
+`half-duplex-skip` line (with `stage` and `durationMs: null`) so "not guarded" is distinguishable from "nothing dropped";
+that line is a trace, never counted in `total`/`dropped`.
 Half-duplex guard: the playback window is reported from the renderer (`voice:playback`, sent from
 `overlay/speech.ts` and `overlay/interpret-echo.ts` `onplaying`) because the announce leg plays its audio in the
 window, not the main process — a guard that only `voice-out.ts` feeds stays blind during announcements, and that

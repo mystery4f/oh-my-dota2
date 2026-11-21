@@ -13,9 +13,32 @@
  * 我们的哪条腿在放声音。丢弃时要能说出「是公告在念」还是「同传回放在响」，
  * 否则日志里只有一句「在播」，收工后无从追。#157 起由渲染层随 voice:playback 一起上报。
  */
-export type PlaybackLeg = 'announce' | 'echo' | 'reply' | 'interpret' | 'unknown'
+export type PlaybackLeg = 'announce' | 'echo' | 'reply' | 'interpret' | 'test' | 'unknown'
 
-const PLAYBACK_LEGS: readonly PlaybackLeg[] = ['announce', 'echo', 'reply', 'interpret']
+/**
+ * `test` 是面板「测试模式」那条腿：它只出声、不按键。必须与 `announce` 分开记——(m09123)
+ * 耳验手册要求「只认真公告」，测试音一旦借用 announce，那一条就永久失效。
+ */
+const PLAYBACK_LEGS: readonly PlaybackLeg[] = ['announce', 'echo', 'reply', 'interpret', 'test']
+
+/** 腿名的人话（日志与面板共用一套词，免得一处叫「公告」一处叫 announce）。 */
+export const PLAYBACK_LEG_LABELS: Readonly<Record<PlaybackLeg, string>> = {
+  announce: '公告在念',
+  echo: '同传在响',
+  reply: '回复在念',
+  interpret: '同传回放在响',
+  test: '测试音在响',
+  unknown: '说不清哪条腿'
+}
+
+/**
+ * 播放侧该报哪条腿：测试模式只出声不按键，所以它报 `test` 而不是借用调用方的腿名。
+ * 这条判断放缝里，因为「哪条腿在放」是记账的一部分，不能由三处驱动各猜一遍。
+ */
+export function resolvePlaybackLeg(leg: unknown, testMode: boolean): PlaybackLeg {
+  if (testMode) return 'test'
+  return normalizePlaybackLeg(leg)
+}
 
 /** 主进程把渲染层的字符串折成已知腿名：不认识的一律 unknown，不把脏值写进日志。 */
 export function normalizePlaybackLeg(value: unknown): PlaybackLeg {

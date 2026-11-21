@@ -4,7 +4,14 @@
  * 票面三段验收：播放窗口内的录音产出零条识别；30 秒往返不会把同一句连着识别两次；
  * 丢弃次数进日志，「全丢了」和「一次没丢」可区分。全部用合成帧 + 注入时钟，不占真麦克风、不加真实合成调用。
  */
-import { HALF_DUPLEX_GRACE_MS, expireWindow, extendPlaybackWindow, halfDuplexLine, judgeHalfDuplex } from '@shared/half-duplex'
+import {
+  HALF_DUPLEX_GRACE_MS,
+  expireWindow,
+  extendPlaybackWindow,
+  halfDuplexLine,
+  judgeHalfDuplex,
+  resolvePlaybackLeg
+} from '@shared/half-duplex'
 import {
   endPlayback,
   halfDuplexSnapshot,
@@ -13,7 +20,7 @@ import {
   notePlayback,
   resetHalfDuplexForProbe
 } from '../services/voice/half-duplex'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { logsDir } from '../services/logs/base-dir'
 import { reportChainTiming, ChainTimer } from '../services/voice/chain-timing'
@@ -165,6 +172,32 @@ export async function runHalfDuplexProbe(): Promise<void> {
   const afterEnd = judgeCaptureAt(endAt)
   push('播完立刻关窗：窗口结束后不残留惩罚', afterEnd.drop === false && afterEnd.penaltyMs === 0, String(afterEnd.penaltyMs))
   push('关窗后那一段的腿名也清掉了', halfDuplexSnapshot(endAt).leg === 'unknown')
+
+  // —— #163：两条过去「隐形」的情形 ——
+  push('测试模式报 test，不借用 reply（耳验「只认真公告」靠这条）', resolvePlaybackLeg('reply', true) === 'test')
+  push('非测试模式原样保留腿名', resolvePlaybackLeg('echo', false) === 'echo')
+  push('认不出的腿名仍是 unknown（不把脏值写进日志）', resolvePlaybackLeg('whatever', false) === 'unknown')
+
+  resetHalfDuplexForProbe()
+  const beforeSkip = halfDuplexSnapshot(Date.now())
+  const skipFile = join(logsDir(), 'voice-chain.jsonl')
+  const skipBefore = existsSync(skipFile) ? readFileSync(skipFile, 'utf8').length : 0
+  // 时长没量到：过去窗口不开、日志零行；现在要留一行痕迹但不计入总数
+  notePlayback(Date.now(), 0, 'test')
+  const afterSkip = halfDuplexSnapshot(Date.now())
+  push('时长没量到：窗口不开（这段录音不会被丢）', judgeCaptureAt(Date.now()).drop === false)
+  push('时长没量到：也不计入识别尝试总数', afterSkip.total === beforeSkip.total, `${beforeSkip.total}→${afterSkip.total}`)
+  const skipAdded = existsSync(skipFile) ? readFileSync(skipFile, 'utf8').slice(skipBefore) : ''
+  push('时长没量到：日志里留了 half-duplex-skip 一行', skipAdded.includes('"kind":"half-duplex-skip"'), skipAdded.trim().slice(0, 140))
+  push('那一行说得出是哪条腿（stage）', skipAdded.includes('"stage":"test"'), skipAdded.trim().slice(0, 140))
+  push('那一行明确写了 durationMs 为 null', skipAdded.includes('"durationMs":null'))
+
+  // 端到端：测试音在响的那段录音，丢弃行里的 stage 必须是 test
+  resetHalfDuplexForProbe()
+  const testAt = Date.now()
+  notePlayback(testAt, 3000, resolvePlaybackLeg('reply', true))
+  const drop = judgeCaptureAt(testAt + 100)
+  push('端到端：测试音期间录音被丢，且腿名是 test', drop.drop === true && drop.leg === 'test', `${drop.drop}/${drop.leg}`)
 
   finishProbe('HALF_DUPLEX_PROBE', cases)
 }
