@@ -10,6 +10,7 @@ import { voiceRuntimeNodeBinary } from './runtime'
 import { offlineVoicePreset, type OfflineVoiceId } from '../../../shared/ipc'
 import { createNdjsonWorker, type NdjsonReply } from './worker'
 import { join } from 'node:path'
+import { judgeOfflineReady, type OfflineReadyVerdict } from '@shared/offline-status'
 
 /**
  * 离线朗读引擎：sherpa-onnx 本地 TTS（matcha/vits 三款模型，见 MODEL_FILES）。
@@ -93,13 +94,21 @@ function vocoderPath(voice: OfflineVoiceId): string | undefined {
   return name ? vocoderFile(name) : undefined
 }
 
-export function offlineReady(voice: OfflineVoiceId = 'baker'): boolean {
+/**
+ * 就绪判定：判定逻辑在 `@shared/offline-status` 的 `judgeOfflineReady`（#153），
+ * 这里只提供 IO —— 相对模型目录的 exists。`../<vocoder>` 指 `tts-models/` 根下那件。
+ */
+export function offlineVerdict(voice: OfflineVoiceId = 'baker'): OfflineReadyVerdict {
   const files = modelFiles(voice)
   const dir = offlineModelDir(voice)
-  if (!files.required.every((name) => existsSync(join(dir, name)))) return false
-  if (files.dict && !existsSync(join(dir, 'dict'))) return false
-  if (files.vocoder && !existsSync(vocoderFile(files.vocoder))) return false
-  return true
+  return judgeOfflineReady(
+    { required: files.required, dict: files.dict, vocoder: files.vocoder ?? null },
+    (rel) => existsSync(join(dir, rel))
+  )
+}
+
+export function offlineReady(voice: OfflineVoiceId = 'baker'): boolean {
+  return offlineVerdict(voice).ready
 }
 
 function dirBytes(dir: string): number {

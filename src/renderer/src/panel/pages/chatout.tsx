@@ -194,6 +194,8 @@ function PhrasesEditor(props: { phrases: string[]; onChange: (next: string[]) =>
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         rows={6}
+        // #156：变量用 placeholder 示范，比多一行「支持三个变量」的说明更有用——人看例子会抄。
+        placeholder={'{hero} 说：{time}，{matchid}'}
         className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
       />
       <p className="mt-1 text-[11px] text-muted-foreground">

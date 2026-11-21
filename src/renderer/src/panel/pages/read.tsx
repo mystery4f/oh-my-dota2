@@ -6,6 +6,7 @@ import {
   type VoicePreviewResult
 } from '@shared/ipc'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
+import { offlineUiView } from '@shared/offline-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
@@ -347,22 +348,23 @@ export function ReadPage({
         </CollapsibleGroup>
 
         <CollapsibleGroup id="read.offline" label="离线模型">
-          <Row
-            label="离线模型状态"
-            hint="模型文件在数据目录 tts-models/ 下；在线时用不到它"
-          >
-            {offline === null ? (
-              <StatusPill tone="idle">读取中…</StatusPill>
-            ) : offline.ready ? (
-              <StatusPill tone="ready">已就绪 {Math.round((offline.bytes ?? 0) / 1048576)} MB</StatusPill>
-            ) : offline.downloading ? (
-              <StatusPill tone="warn">下载中 {Math.round((offline.progress ?? 0) * 100)}%</StatusPill>
-            ) : (
-              <StatusPill tone="idle">未下载</StatusPill>
-            )}
-            {offline !== null && offline.error !== null && offline.error !== undefined && !offline.ready ? (
-              <StatusPill tone="bad">下载失败</StatusPill>
-            ) : null}
+          <Row label="离线模型状态" hint="模型文件在数据目录 tts-models/ 下；在线时用不到它">
+            {(() => {
+              // #153：四态与判据都在 `offlineUiView` 里，这里只显示，不再二次判断。
+              const view = offlineUiView({
+                ready: offline?.ready ?? false,
+                downloading: offline?.downloading ?? false,
+                bytes: offline?.bytes ?? null,
+                error: offline?.error ?? null
+              })
+              if (offline === null) return <StatusPill tone="idle">读取中…</StatusPill>
+              const tone = view.state === 'ready' ? 'ready' : view.state === 'failed' ? 'bad' : view.state === 'downloading' ? 'warn' : 'idle'
+              const text =
+                view.state === 'downloading'
+                  ? `下载中 ${Math.round((offline.progress ?? 0) * 100)}%`
+                  : view.text
+              return <StatusPill tone={tone}>{text}</StatusPill>
+            })()}
           </Row>
           <Row
             label="下载"

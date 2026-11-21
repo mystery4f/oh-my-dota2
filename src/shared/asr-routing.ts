@@ -45,6 +45,31 @@ export interface AsrRouteDecision {
 }
 
 /** 这一句该用哪个引擎。纯函数：同一个输入永远同一个答案，探针据此钉票面。 */
+/**
+ * 从「设置里的开关 + 现场有哪些 ready 模型」拼出 `routeAsrClip` 的入参（#154）。
+ *
+ * 拆出来的理由：`transcribeAsr()` 里那三行（读开关、扫 ready、拼对象）没法在探针里验——
+ * 纯缝 `routeAsrClip` 早已覆盖，缺的正是这一段「settings 真的被读进来了」。
+ */
+export interface AsrRouteModels {
+  activeEngine: AsrEngineId
+  ready: readonly AsrEngineId[]
+}
+
+export function routingFor(
+  ruleOn: boolean,
+  models: AsrRouteModels,
+  durationMs = 0
+): AsrRouteInput {
+  return {
+    durationMs,
+    activeEngine: models.activeEngine,
+    ruleOn,
+    shortReady: models.ready.includes(ASR_ROUTE_SHORT_ENGINE),
+    longReady: models.ready.includes(ASR_ROUTE_LONG_ENGINE)
+  }
+}
+
 export function routeAsrClip(input: AsrRouteInput): AsrRouteDecision {
   const keep = (reason: AsrRouteReason): AsrRouteDecision => ({
     engine: input.activeEngine,

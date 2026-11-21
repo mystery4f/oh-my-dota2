@@ -89,6 +89,9 @@ import { runReplayStarProbe } from './replay-star'
 import { runProbeCatalogProbe } from './probe-catalog'
 import { runProviderBoardProbe } from './provider-board'
 import { runQuickPhrasesProbe } from './quick-phrases'
+import { runOfflineStatusProbe } from './offline-status'
+import { runAsrRoutingWireProbe } from './asr-routing-wire'
+import { runEnvReportProbe } from './env-report'
 import { runMatchSnapshotProbe } from './match-snapshot'
 import { runTargetLanguageProbe } from './target-language'
 import { runTranslateDirectionProbe } from './translate-direction'
@@ -492,6 +495,24 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the target language of one message (`src/shared/target-language.ts`): the direction picks exactly one code, an unknown code falls back to the default instead of reaching the prompt, and only a non-default target adds the one output-language line (ticket 120)',
     run: runTargetLanguageProbe
+  },
+  {
+    flag: '--offline-status-probe',
+    ci: true,
+    summary: 'the offline voice model judged through a pure seam: three different missing reasons, and the four UI states each tied to one rule',
+    run: runOfflineStatusProbe
+  },
+  {
+    flag: '--asr-routing-wire-probe',
+    ci: true,
+    summary: 'the short/long switch really reaches routeAsrClip, and on a machine with both models it really changes the engine (SKIP names the missing one)',
+    run: runAsrRoutingWireProbe
+  },
+  {
+    flag: '--env-report-probe',
+    ci: true,
+    summary: 'the machine check: six rows in fixed order, missing device counts read unknown, and all three port owners verified on an injected high port',
+    run: runEnvReportProbe
   },
   {
     flag: '--quick-phrases-probe',

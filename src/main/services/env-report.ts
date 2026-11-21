@@ -38,7 +38,11 @@ async function diskFacts(dir: string): Promise<Pick<EnvFacts, 'diskFreeBytes' | 
   }
 }
 
-export async function envReport(devices: EnvDeviceCounts): Promise<EnvReport> {
+/**
+ * `port` 只为探针存在（#155）：探针注入高位端口就能验「被别人占着」，不必和应用自己的
+ * 32123 抢。生产调用一律用默认值，`GSI_PORT` 是唯一真身。
+ */
+export async function envReport(devices: EnvDeviceCounts, port: number = GSI_PORT): Promise<EnvReport> {
   const cpus = os.cpus()
   const dataDir = app.getPath('userData')
   const facts: EnvFacts = {
@@ -47,8 +51,8 @@ export async function envReport(devices: EnvDeviceCounts): Promise<EnvReport> {
     freeMemBytes: os.freemem(),
     totalMemBytes: os.totalmem(),
     ...(await diskFacts(dataDir)),
-    gsiPort: GSI_PORT,
-    portOwner: await probePortOwner(GSI_PORT),
+    gsiPort: port,
+    portOwner: await probePortOwner(port),
     micCount: devices.micCount,
     speakerCount: devices.speakerCount
   }

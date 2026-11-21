@@ -14,7 +14,7 @@ import type { OfflineStatus } from '@shared/ipc'
 import { loadSettings, saveSettings } from '../settings'
 import { hfMirrorRepoFileUrl } from '@shared/voice-runtime'
 import { hotwordEcho, hotwordPrompt } from '@shared/asr-hotwords'
-import { ASR_ROUTE_LONG_ENGINE, ASR_ROUTE_SHORT_ENGINE, routeAsrClip, routingLogRecord } from '@shared/asr-routing'
+import { routeAsrClip, routingFor, routingLogRecord } from '@shared/asr-routing'
 import { WAV_BYTES_PER_MS, WAV_HEADER_BYTES } from '@shared/wav'
 import { createInstallJob } from '../install-job'
 import { downloadResumable } from '../net/download'
@@ -149,6 +149,13 @@ export function engineSpecOf(model: AsrModel): AsrEngineSpec {
   return ASR_ENGINES[model.engineId]
 }
 
+/** 盘上哪些引擎有 ready 模型（#154 的探针用；也是面板「两副都在不在」的唯一来源）。 */
+export function readyEngineIds(): string[] {
+  return collectAsrModels(dirFacts())
+    .filter((model) => model.ready)
+    .map((model) => model.engineId)
+}
+
 export function asrModelDir(model: AsrModel): string {
   return underUserData(model.rel)
 }
@@ -239,14 +246,17 @@ export async function transcribeAsr(wavPath: string): Promise<{ text: string; dr
   const active = pickActiveAsrModel(models, settings.asrActiveModel)
   if (!active?.ready) return null
   if (!sherpaNodeBinary()) return null
-  const readyOf = (engine: string): boolean => models.some((model) => model.engineId === engine && model.ready)
-  const decision = routeAsrClip({
-    durationMs: wavDurationMs(wavPath),
-    activeEngine: active.engineId,
-    ruleOn: settings.asrRouteShortLong === true,
-    shortReady: readyOf(ASR_ROUTE_SHORT_ENGINE),
-    longReady: readyOf(ASR_ROUTE_LONG_ENGINE)
-  })
+  // 「设置 → 入参」这一段拆进 `routingFor`（#154），探针才验得到开关真的被读进来。
+  const decision = routeAsrClip(
+    routingFor(
+      settings.asrRouteShortLong === true,
+      {
+        activeEngine: active.engineId,
+        ready: models.filter((model) => model.ready).map((model) => model.engineId)
+      },
+      wavDurationMs(wavPath)
+    )
+  )
   // 分流要换的那副引擎必须自己有一份 ready 模型；找不到就留在现役（routeAsrClip 已经判过 ready，
   // 这里挑的是那份模型本身——目录可能不是规范目录，比如训练转正的 copy）。
   const target =
