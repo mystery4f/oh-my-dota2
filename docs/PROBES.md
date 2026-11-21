@@ -63,7 +63,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--hotkey-probe` the global-hotkey seam with zero window and zero game: accelerator round trip and collisions
   - `--download-probe` a download that drops mid-way resumes from the partial file, a source ignoring Range restarts clean, and a bad mirror falls through with the one actually used named in the log
   - `--vision-probe` look at the screen once: the payload is one message with the prompt and a data URL, a text-only model is refused with words, and no frame reaches the disk
-  - `--helm-empty-probe` the cockpit head and channel lines: three empty states verbatim, every missing field its own dash, living written as 活着, and hotkeys read from the live table
+  - `--helm-empty-probe` the cockpit head, its three fixed actions and the listen line: empty states verbatim, every missing field its own dash, one reason per disabled action, and a timeline from another match never shown
   - `--speaker-channel-probe` the cockpit channel data: no chat means no channels, a new match clears them, and an unknown seat is never guessed
   - `--hold-watch-probe` the hold-to-talk chain in three layers: the resident script reports OK, HOLD edges are recorded once each, and a dead script surfaces as fallback instead of silence
   - `--voice-out-probe` the pure 声出 decision seam (`src/shared/voice-out.ts`) plus readiness reasons

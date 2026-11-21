@@ -154,6 +154,10 @@ const overlay = {
   },
   voiceCaptureMode: 'hold' as const
 }
+function stubMatchTimeline(): { matchid: string; entries: never[]; line: string } {
+  return { matchid: '7600111222', entries: [], line: '这局还没有值得停一下的事' }
+}
+
 const overlaySnap = (): Awaited<ReturnType<WindowApi['overlayStatus']>> => ({
   ...overlay,
   geometry: { ...overlay.geometry }
@@ -496,13 +500,17 @@ const implemented = {
     Object.assign(hotkeys, map)
     return hotkeyPayload()
   },
-  matchSnapshot: async () =>
-    snapshotOf({
+  // 驾驶室（#165）的空态截图要用：?noSnapshot=1 就是「还没收到过 GSI 帧」——
+  // 真机上这条通道在没帧时是 reject，页面 .catch(() => null) 才走到空态那一句。
+  matchSnapshot: async () => {
+    if (query.has('noSnapshot')) throw new Error('预览桩：还没收到过 GSI 帧')
+    return snapshotOf({
       map: { matchid: '7600111222', game_state: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS', clock_time: 183, daytime: true },
       hero: { name: 'npc_dota_hero_nevermore', level: 7, alive: true, gold: 1200, kills: 3, deaths: 1, assists: 5 },
       abilities: { ability_0: { name: 'nevermore_shadowraze1', level: 4 }, ability_1: { name: 'nevermore_presence', level: 2 } },
       items: { slot0: { name: 'item_blink', id: 1 }, slot1: { name: 'item_tango', id: 2 } }
-    }),
+    })
+  },
   /**
    * #161 驾驶室：真对局拿不到别人名字，所以默认这一屏**没有**英雄名（也就没有静音开关）。
    * `?ch=hero` 造观战/训练场那种「拿到了英雄名」的情形，看静音那一段长什么样。
@@ -1158,6 +1166,19 @@ const implemented = {
   }),
   onVisionResult: () => () => {},
   overlayStatus: async () => overlaySnap(),
+  // 驾驶室第二片（#165）：时间线的局号默认与快照一致；?crossMatch=1 让它是别的局，?emptyTimeline=1 空表。
+  matchTimeline: async () => {
+    if (query.has('emptyTimeline')) return { matchid: '7600111222', entries: [], line: '这局还没有值得停一下的事' }
+    const own = query.has('crossMatch') ? '7512345678' : '7600111222'
+    return {
+      matchid: own,
+      entries: [{ id: 'wisdom@420', kind: 'wisdom', gameTime: 420, text: '智慧符刷新了', done: false }],
+      line: '这局 1 件：还欠 1 件'
+    }
+  },
+  matchTimelineDone: async () => stubMatchTimeline(),
+  // 说话按钮：?captureBusy=1 模拟被 500 ms 去抖挡回来（界面必须说一句，不能静默）。
+  voiceCaptureToggle: async () => ({ sent: !query.has('captureBusy') }),
   overlayPanelToggle: async () => {
     overlay.panelOpen = !overlay.panelOpen
     return overlaySnap()

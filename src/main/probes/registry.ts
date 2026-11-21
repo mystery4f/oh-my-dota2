@@ -437,7 +437,7 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--helm-empty-probe',
     ci: true,
     summary:
-      'the cockpit head and channel lines: three empty states verbatim, every missing field its own dash, living written as 活着, and hotkeys read from the live table',
+      'the cockpit head, its three fixed actions and the listen line: empty states verbatim, every missing field its own dash, one reason per disabled action, and a timeline from another match never shown',
     run: runHelmEmptyProbe
   },
   {

@@ -313,15 +313,16 @@ class OverlayManager {
     if (plan.openPanel) this.togglePanel()
   }
   /** Ask the overlay window to start or stop microphone capture (hotkey driven). */
-  toggleVoiceCapture(): void {
+  toggleVoiceCapture(): boolean {
     // 按住不松会触发键盘自动重复（WM_HOTKEY 连发），一次长按 = 起录/停录疯狂翻面，
     // 最后多半落在「录音太短已忽略」——观感就是「热键没效果」。500ms 内的连发一律当同一次。
     const now = Date.now()
-    if (now - this.lastVoiceToggleAt < 500) return
+    if (now - this.lastVoiceToggleAt < 500) return false
     this.lastVoiceToggleAt = now
     if (!this.win) this.win = this.createWindow()
     if (!this.win.isVisible()) this.show()
     this.win.webContents.send(IPC.VOICE_RECORD_TOGGLE)
+    return true
   }
   /**
    * 按住模式：按下开录。不做 toggle 那 500ms 去抖——按住信号是轮询进程给的，

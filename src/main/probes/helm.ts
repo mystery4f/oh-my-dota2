@@ -1,5 +1,6 @@
 /**
  * #161 驾驶室第一片：抬头事实行、频道行、三个热键提示。
+ * #165 第二片：三个固定动作的可用状态、监听行（三档帧龄 + 三种「没东西」+ 跨局不串人）。
  *
  * 逐字断言三句空态（pm 的签字要求），并把「缺块写 `—`」断言到**每一位**：
  * 英雄、等级、比赛时间、状态、帧龄各来一例——只断言「有 `—`」等于没断言。
@@ -7,6 +8,17 @@
 
 import { exitProbe, guardProbe, probeCases } from './harness'
 import { formatAccelerator, UNBOUND_LABEL } from '@shared/hotkeys'
+import {
+  HELM_ACTION_BUSY,
+  HELM_ACTION_LOOKING,
+  HELM_ACTION_OVERLAY_OFF,
+  HELM_ACTION_UNBOUND,
+  HELM_LISTEN_NO_EVENT,
+  HELM_LISTEN_NO_FRAME,
+  HELM_LISTEN_UNREADABLE,
+  helmActions,
+  helmListenLine
+} from '@shared/helm'
 import {
   HELM_MUTE_NOTE,
   HELM_NO_CHANNELS,
@@ -109,6 +121,55 @@ export async function runHelmEmptyProbe(): Promise<void> {
   push('热键：空绑定写「未绑定」并标记 unbound', hints[1]?.key === UNBOUND_LABEL && hints[1]?.unbound === true, String(hints[1]?.key))
   const rebound = helmHotkeyHints({ voiceCapture: 'Ctrl+Alt+Q', visionAsk: 'Ctrl+Alt+G', overlayPanel: 'Ctrl+Alt+P' }, formatAccelerator, UNBOUND_LABEL)
   push('热键：改键后界面跟着变', rebound[0]?.key === formatAccelerator('Ctrl+Alt+Q'), rebound[0]?.key ?? '')
+
+
+  // ——— 第二片（#165）：三个动作的可用状态 ———
+  const allBound = { voiceCapture: 'Alt+Shift+V', visionAsk: 'Alt+Shift+G', overlayPanel: 'Alt+Shift+H' }
+  const baseActions = {
+    display: formatAccelerator,
+    unboundLabel: UNBOUND_LABEL,
+    overlayVisible: true,
+    recording: false,
+    looking: false,
+    captureBusy: false
+  }
+  const bound = helmActions({ ...baseActions, hotkeys: allBound })
+  push('动作：三个都绑时全部可点', bound.length === 3 && bound.every((one) => one.enabled && one.note === ''), JSON.stringify(bound.map((one) => [one.id, one.enabled, one.note])))
+  const noneBound = helmActions({ ...baseActions, hotkeys: { voiceCapture: '', visionAsk: '', overlayPanel: '' } })
+  push('动作：三个都未绑时全部禁用且都写「没绑键」', noneBound.every((one) => !one.enabled && one.note === HELM_ACTION_UNBOUND), JSON.stringify(noneBound.map((one) => one.note)))
+  const oneBound = helmActions({ ...baseActions, hotkeys: { ...allBound, visionAsk: '' } })
+  push('动作：只绑一个时只禁用它自己', oneBound[1].enabled === false && oneBound[1].note === HELM_ACTION_UNBOUND && oneBound[0].enabled && oneBound[2].enabled, JSON.stringify(oneBound.map((one) => [one.id, one.enabled])))
+  const overlayOff = helmActions({ ...baseActions, hotkeys: allBound, overlayVisible: false })
+  push('动作：浮层关着时只有「呼出」禁用，原因说清是浮层关着', overlayOff[2].enabled === false && overlayOff[2].note === HELM_ACTION_OVERLAY_OFF && overlayOff[0].enabled, JSON.stringify(overlayOff.map((one) => one.note)))
+  const lookingNow = helmActions({ ...baseActions, hotkeys: allBound, looking: true })
+  push('动作：看着画面时「看一眼」禁用（连点就是连花钱）', lookingNow[1].enabled === false && lookingNow[1].note === HELM_ACTION_LOOKING, String(lookingNow[1].note))
+  const busy = helmActions({ ...baseActions, hotkeys: allBound, captureBusy: true })
+  push('动作：说话被去抖挡回来时说一句，不静默', busy[0].enabled === false && busy[0].note === HELM_ACTION_BUSY, String(busy[0].note))
+  const recNow = helmActions({ ...baseActions, hotkeys: allBound, recording: true })
+  push('动作：录音中时说话按钮仍可点（再按一次就是停），并标「录音中」', recNow[0].enabled === true && recNow[0].note === '录音中', String(recNow[0].note))
+  const clash = helmActions({ ...baseActions, hotkeys: { ...allBound, visionAsk: '' }, overlayVisible: false, looking: true })
+  push('动作：多个原因同时成立时每行仍只有一句、互不覆盖', clash.every((one) => one.note === '' || one.note.length <= 16) && clash[1].note === HELM_ACTION_UNBOUND, JSON.stringify(clash.map((one) => one.note)))
+
+  // ——— 第二片：监听行（三档帧龄 + 三种「没东西」 + 跨局）———
+  const nowMs = NOW
+  const freshLine = helmListenLine({ gsiLastAt: nowMs - 800, now: nowMs, snapshotMatchId: '9061502086', timeline: { matchid: '9061502086', entries: [{ gameTime: 420, text: '智慧符刷新了' }] } })
+  push('监听：帧龄新时左半是「N.N 秒前」的 ok 档', freshLine.left.text === '0.8 秒前' && freshLine.left.tone === 'ok', freshLine.left.text)
+  push('监听：右半是「时间 + 人话」，不拼 kind', freshLine.right.text === '7:00 智慧符刷新了' && !freshLine.right.text.includes('wisdom'), freshLine.right.text)
+  const staleLine = helmListenLine({ gsiLastAt: nowMs - 12_000, now: nowMs, snapshotMatchId: '9061502086', timeline: null })
+  push('监听：帧龄偏旧时是 warn 档', staleLine.left.tone === 'warn', staleLine.left.text)
+  const deadLine = helmListenLine({ gsiLastAt: nowMs - 5 * 60_000, now: nowMs, snapshotMatchId: '9061502086', timeline: null })
+  push('监听：早断了时是 bad 档并说「早断了」', deadLine.left.tone === 'bad' && deadLine.left.text.includes('早断了'), deadLine.left.text)
+  const noFrame = helmListenLine({ gsiLastAt: null, now: nowMs, snapshotMatchId: null, timeline: null })
+  push('监听：「没帧」与「没事件」与「读不到」是三句话', noFrame.left.text === HELM_LISTEN_NO_FRAME && noFrame.right.text === HELM_LISTEN_NO_EVENT, JSON.stringify([noFrame.left.text, noFrame.right.text]))
+  const unreadable = helmListenLine({ gsiLastAt: null, now: nowMs, captureError: 'ipc 超时：主进程没有回应。还有后半句不该出现', snapshotMatchId: null, timeline: null })
+  push('监听：状态读不到时只取第一句并截断', unreadable.left.tone === 'bad' && unreadable.left.text.startsWith(HELM_LISTEN_UNREADABLE + '：') && !unreadable.left.text.includes('后半句'), unreadable.left.text)
+  const emptyTimeline = helmListenLine({ gsiLastAt: nowMs - 900, now: nowMs, snapshotMatchId: '9061502086', timeline: { matchid: '9061502086', entries: [] } })
+  push('监听：时间线为空时右半说「这局还没发生可播报的事」', emptyTimeline.right.text === HELM_LISTEN_NO_EVENT && emptyTimeline.crossMatch === false, emptyTimeline.right.text)
+  const crossLine = helmListenLine({ gsiLastAt: nowMs - 900, now: nowMs, snapshotMatchId: '9061502086', timeline: { matchid: '7512345678', entries: [{ gameTime: 1200, text: '肉山复活了' }] } })
+  push('监听：时间线属上一局时一条都不显示（跨局串人是最贵的错）', crossLine.right.text === HELM_LISTEN_NO_EVENT && crossLine.crossMatch === true, crossLine.right.text)
+  push('监听：跨局时左半照常报帧龄（帧是这一局的）', crossLine.left.tone === 'ok', crossLine.left.text)
+  const notRealId = helmListenLine({ gsiLastAt: nowMs - 900, now: nowMs, snapshotMatchId: '0', timeline: { matchid: '0', entries: [{ gameTime: 30, text: '不该显示' }] } })
+  push('监听：matchid 为 "0"（菜单/训练场）不算对局，不显示任何事件', notRealId.right.text === HELM_LISTEN_NO_EVENT, notRealId.right.text)
 
   const failed = cases.filter((one) => !one.ok)
   for (const one of cases) console.log(`${one.ok ? 'PASS' : 'FAIL'} | ${one.name} | ${one.detail}`)

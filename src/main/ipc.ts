@@ -398,6 +398,7 @@ const handlers: MainHandlers = {
   speechStop: () => stopSpeech(),
   matchTimeline: () => matchTimelineView(),
   matchTimelineDone: (id, done) => markTimelineDone(String(id ?? ''), done === true),
+  voiceCaptureToggle: () => ({ sent: getOverlayManager().toggleVoiceCapture() }),
 }
 
 export function registerIpc(): void {
