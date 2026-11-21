@@ -10,6 +10,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { exitProbe, guardProbe, probeCases } from './harness'
 import { appendVoiceChainLine, voiceChainPath } from '../services/voice/chain-log'
+import { noteAnnounceSkip, speakOptionsFromSettings } from '../services/voice/speech'
+import { loadSettings } from '../services/settings'
 import { logsDir } from '../services/logs/base-dir'
 import {
   SPEAK_LOG_TEXT_MAX,
@@ -78,6 +80,38 @@ export async function runSpeakSkipProbe(): Promise<void> {
 
   // 隔离：探针的 logs 根是临时目录，不该是我们真实数据目录
   push('logs 根在临时目录（不在 userData 下）', logsDir().includes('omd2-probe-logs') || !logsDir().includes('oh-my-dota2'), logsDir())
+
+  // —— 端到端：走真链路（announceEntries → speakSkipReason → 落盘），不是只调纯函数 ——
+  //
+  // 挑「还在翻译」这种必然跳过的行，绝不触发合成：探针不许花真模型/真合成调用。
+  // 朗读总开关关着时 `announceEntries` 会整条 return（那是另一条静默路径，不写行），
+  // 那种机器上没法验这一步 —— 记 SKIP 并写清原因，不假绿。
+  const settings = loadSettings()
+  // 总开关关着时 `announceEntries` 整条 return（那是另一条静默路径，本来就不写行）。
+  // 这里按「开关打开」造 options，只走同一条记账号：判据仍是 speakSkipReason()。
+  const options = speakOptionsFromSettings({ ...settings, ttsReadAloud: true })
+  // 环境事实（不参与断言）：本机总开关关着时，真机上这条路径根本不会跑；探针按「开」造 options 验记账号本身。
+  console.log(`SPEAK_SKIP_ENV ${JSON.stringify({ ttsReadAloud: settings.ttsReadAloud })}`)
+  const fileBeforeE2e = existsSync(file) ? readFileSync(file, 'utf8') : ''
+  noteAnnounceSkip(
+    {
+      id: `probe-${Date.now()}`,
+      ts: Date.now(),
+      original: '[队友] [斧王] 别走中路',
+      body: '别走中路',
+      translated: null,
+      pending: true,
+      hero: 'axe'
+    } as never,
+    options
+  )
+  const fileAfterE2e = existsSync(file) ? readFileSync(file, 'utf8') : ''
+  {
+    const added = fileAfterE2e.slice(fileBeforeE2e.length)
+    push('端到端：真链路（announceEntries）确实写了这一行', added.includes('"kind":"speak-skip"'), `added=${added.trim().slice(0, 120)}`)
+    push('端到端：那行的 reason 是 pending（翻译还没到）', added.includes('"reason":"pending"'), added.trim().slice(0, 160))
+    push('端到端：那条走的是朗读腿（stage=announce），不是 reply/interpret', added.includes('"stage":"announce"'), added.trim().slice(0, 120))
+  }
 
   const failed = cases.filter((one) => !one.ok)
   for (const one of cases) console.log(`${one.ok ? 'PASS' : 'FAIL'} | ${one.name} | ${one.detail}`)

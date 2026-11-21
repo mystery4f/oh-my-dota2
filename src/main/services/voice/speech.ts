@@ -188,6 +188,26 @@ export function speakOptionsFromSettings(settings: {
     offlineVoice: settings.ttsOfflineVoice
   }
 }
+/**
+ * 一条被跳过的朗读：控制台一行 + `voice-chain.jsonl` 一行（#164）。
+ *
+ * 单独开出来是为了让探针能走**真链路**：总开关关着时 `announceEntries` 会整条 return，
+ * 那种机器上端到端那一步就永远验不到。这里只把「怎么记」收成一处，判据仍是 `speakSkipReason()`。
+ */
+export function noteAnnounceSkip(entry: CaptureEntry, options: SpeakOptions): void {
+  // 静默路径留痕：own / pending / 空正文几种跳过在浮层上都一样（没声音），
+  // 没有 TTS_SPEAK_SKIP 的话「怎么没念」只能靠翻代码猜。
+  const skipReason = speakSkipReason(entry, options)
+  console.log(
+    'TTS_SPEAK_SKIP',
+    JSON.stringify({ reason: skipReason, own: entry.own === true, text: entry.original.slice(0, 30) })
+  )
+  // #164：同一行再落一份到 voice-chain.jsonl（reason 逐字保留），验收才分得清
+  // 「按人静音生效」与「总开关被关了」——两者耳朵听起来一样。
+  const skipLine = speakSkipLine({ reason: skipReason, own: entry.own === true, text: entry.original, stage: 'announce' })
+  if (skipLine !== null) appendVoiceChainLine(skipLine)
+}
+
 export function announceEntries(entries: CaptureEntry[], cutoff?: number): void {
   // 截止线随每句进管线记账（speech-pipeline 里的 latestCaptureAt）：投递闸靠它拦合成期间变旧的。
   const settings = loadSettings()
@@ -207,17 +227,7 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
       continue
     }
     if (!payload) {
-      // 静默路径留痕：own / pending / 空正文三种跳过在浮层上都一样（没声音），
-      // 没有 TTS_SPEAK_SKIP 的话「怎么没念」只能靠翻代码猜。
-      const skipReason = speakSkipReason(entry, options)
-      console.log(
-        'TTS_SPEAK_SKIP',
-        JSON.stringify({ reason: skipReason, own: entry.own === true, text: entry.original.slice(0, 30) })
-      )
-      // #164：同一行再落一份到 voice-chain.jsonl（reason 逐字保留），验收才分得清
-      // 「按人静音生效」与「总开关被关了」——两者耳朵听起来一样。
-      const skipLine = speakSkipLine({ reason: skipReason, own: entry.own === true, text: entry.original, stage: 'announce' })
-      if (skipLine !== null) appendVoiceChainLine(skipLine)
+      noteAnnounceSkip(entry, options)
       continue
     }
     // 前缀来源留痕：speaker=英雄名（现实中只有自己的话有）；没有就是光念内容。
