@@ -38,6 +38,7 @@ import { runTrainProbe } from './train'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
+import { runMinimapProbe } from './minimap'
 import { runTranslateGuardProbe } from './translate-guard'
 import { runFirstRunProbe } from './first-run'
 import { runTtsBenchProbe } from './tts-bench'
@@ -179,6 +180,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the fidelity guard telemetry: blocked / recovered / gaveUp counts, dirty jsonl lines, and one batched write',
     run: runTranslateGuardProbe
+  },
+  {
+    flag: '--minimap-probe',
+    ci: true,
+    summary:
+      'minimap hero dots: cost per frame and correct clustering on a synthetic frame — accuracy stays unmeasured without labelled screenshots',
+    run: runMinimapProbe
   },
   {
     flag: '--first-run-probe',

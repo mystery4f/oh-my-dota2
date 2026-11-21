@@ -770,6 +770,40 @@ check(
   )
 }
 
+// —— 小地图血点（#134）：判据、连通域、面积门槛 ——
+{
+  const { DEFAULT_DOT_RULES, detectDots, isGreenPixel, isRedPixel } = await import('../src/shared/minimap.ts')
+  check('英雄红被判成红', isRedPixel(212, 58, 50) && !isRedPixel(120, 90, 80), 'r212')
+  check('队友绿被判成绿', isGreenPixel(80, 190, 90) && !isGreenPixel(120, 120, 90), 'g190')
+  const size = 64
+  const rgba = new Uint8ClampedArray(size * size * 4)
+  for (let i = 0; i < size * size; i += 1) {
+    rgba[i * 4] = 24
+    rgba[i * 4 + 1] = 32
+    rgba[i * 4 + 2] = 22
+    rgba[i * 4 + 3] = 255
+  }
+  const paint = (x0, y0, w, h, rgb) => {
+    for (let y = y0; y < y0 + h; y += 1) {
+      for (let x = x0; x < x0 + w; x += 1) {
+        const at = (y * size + x) * 4
+        rgba[at] = rgb[0]
+        rgba[at + 1] = rgb[1]
+        rgba[at + 2] = rgb[2]
+      }
+    }
+  }
+  paint(10, 10, 6, 6, [212, 58, 50])
+  paint(40, 40, 5, 5, [212, 58, 50])
+  paint(2, 2, 1, 1, [212, 58, 50])
+  const red = detectDots(rgba, size, size, 'red')
+  check('两块红点、1 像素噪声被门槛滤掉', red.length === 2, red.map((d) => d.area).join(','))
+  const big = red.find((dot) => dot.area === 36)
+  check('质心在方块中心', big !== undefined && Math.abs(big.x - 12.5) < 0.6 && Math.abs(big.y - 12.5) < 0.6, big ? `${big.x.toFixed(1)},${big.y.toFixed(1)}` : 'missing')
+  check('门槛可调高到滤掉全部', detectDots(rgba, size, size, 'red', { ...DEFAULT_DOT_RULES, minRed: 37 }).length === 0)
+  check('绿点为空时不编造', detectDots(rgba, size, size, 'green').length === 0)
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
