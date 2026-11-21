@@ -19,6 +19,7 @@
  * fail so the fallback warning row on 识别训练 is visible.
  */
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type VoiceChainSummary, type WindowApi } from '@shared/ipc'
+import { snapshotOf } from '@shared/match-snapshot'
 import { renderGroups } from '@shared/quick-phrases'
 import { summarizeProviderCalls } from '@shared/provider-metrics'
 import { catalogOf } from '@shared/probe-catalog'
@@ -494,6 +495,13 @@ const implemented = {
     Object.assign(hotkeys, map)
     return hotkeyPayload()
   },
+  matchSnapshot: async () =>
+    snapshotOf({
+      map: { matchid: '7600111222', game_state: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS', clock_time: 183, daytime: true },
+      hero: { name: 'npc_dota_hero_nevermore', level: 7, alive: true, gold: 1200, kills: 3, deaths: 1, assists: 5 },
+      abilities: { ability_0: { name: 'nevermore_shadowraze1', level: 4 }, ability_1: { name: 'nevermore_presence', level: 2 } },
+      items: { slot0: { name: 'item_blink', id: 1 }, slot1: { name: 'item_tango', id: 2 } }
+    }),
   holdSelfTest: async () => {
     // #95 预览：假边随刷新轮转。切换语音对讲模式的面板按钮会真的盖掉沉浸模式设置，
     // 退出预览再进 fresh browser 页面即还原。

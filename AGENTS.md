@@ -104,6 +104,13 @@ path for 30 s; timeout/network: back to the session after 1.5–2 s; 429: honour
   (`judgeFtVram`/`ftVramNote` four-case), export completeness (`missingFtExportFiles` three-case),
   dataset split (`splitTrainEval` holds out the tail), and CER grading (cohorts never merged).
 
+- Second screen (#124b) has ONE data source: `noteSnapshot(payload)` in `src/main/services/match-snapshot.ts` is
+  fed by the same frame `src/main/services/gsi.ts` already parsed, and `currentSnapshot()` is what the window
+  reads through `match:snapshot` — never a second GSI listener. `cfgBody` already requests hero/items/abilities
+  (the 2026-10-25 "turn them all on" pass), so the cfg itself needs no change here; **any cfg change still means
+  the user must restart Dota**, and that hint already lives on the library row. A missing block reads as `null` and
+  must never reach the stall warning — `gsi-stall.ts` judges frames, not fields. `abilities` keeps levels only:
+  cooldowns tick every frame and would turn the 5-second summary into noise.
 ## Panel
 
 The dashboard is `src/renderer/src/panel/` and it is the only one: `panel-app.tsx` shell +

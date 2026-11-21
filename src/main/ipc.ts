@@ -11,6 +11,7 @@ import { chooseGlossaryPack, glossaryPackStatus } from './services/glossary-pack
 import { loadSettings, saveSettings } from './services/settings'
 import { hotkeysState, saveHotkeysState } from './services/hotkeys'
 import { holdSelfTest } from './services/input/hold-selftest'
+import { currentSnapshot } from './services/match-snapshot'
 import { notePlayback } from './services/voice/half-duplex'
 import { firstRunReport, recordProviderProbe } from './services/first-run'
 import { envReport } from './services/env-report'
@@ -135,6 +136,7 @@ const handlers: MainHandlers = {
   setSettings: (patch) => saveSettings(patch),
   getHotkeys: () => hotkeysState(),
   holdSelfTest: () => holdSelfTest(),
+  matchSnapshot: () => currentSnapshot(),
   setHotkeys: (map) => saveHotkeysState(map),
   // 真连一次的结果要留下来：上手检查那一步只认「key 真能用」，不认「key 已填」。
   testProvider: async (provider) => {

@@ -7,6 +7,7 @@ import { announceFrameOf, feedLiveAnnouncement } from './voice/announce'
 import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
 import { noteLiveMatch } from './gsi-match'
+import { flushSnapshot, noteSnapshot } from './match-snapshot'
 import { notePhraseFrame } from './voice/phrase-context'
 import { logsDir } from './logs/base-dir'
 import type { GsiStatusView } from '../../shared/ipc'
@@ -517,6 +518,7 @@ function closeMatch(effects: GsiEffects): void {
   countStop(effects.endMatch())
   // 局末立刻落一次小结：这是唯一能复盘整局的时机。
   flushFrameSummary()
+  void flushSnapshot()
 }
 
 /** 处理一次推送。拆出来是为了让探针能直接喂 payload，不必绕 HTTP。 */
@@ -537,6 +539,7 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
   noteLiveMatch(decision.matchId)
   // 每一帧都记进小结账本：真对局时不可能去抢 32123 端口，只能在应用里攒。
   recordFrameSummary(payload)
+  noteSnapshot(payload)
   notePhraseFrame(payload)
   recordDraft(payload)
   recordPlayer(payload)

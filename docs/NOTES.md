@@ -222,6 +222,16 @@
 
 验收：`--replay-star-probe` 26 条。关键是跨边界那条——先在 M1 标两条、再在 M2 标一条，`replayStarSummary('M1').total === 2` 且 `('M2').total === 1`；从没标过的 M3 读出来必须是 0，不是全部。
 
+### 副屏面板要的数据，先得有一份「只读快照」（#124b）
+
+症状（做副屏那段）：想在新窗口里显示局号、时间、昼夜、我是谁、金、战绩、装备、技能，但**没有任何一处能一次读到这些**——`gsi.ts` 解析完就散着用，`gsi-summary.json` 是 5 秒一次的统计（帧数/事件数），不是「最近一帧长什么样」。
+
+根因：数据只有「帧」这一种形态，没有「可读摘要」这一层。
+
+修法：`src/shared/match-snapshot.ts` 定义 `MatchSnapshot`（全部字段可 null）+ `snapshotOf(payload)` + `snapshotLine()`；`src/main/services/match-snapshot.ts` 在 `handleGsiPayload` 里 `noteSnapshot(payload)`（内存即时、落盘 5 秒一次到 `logs/match-snapshot.json`），`closeMatch` 时补一次 `flushSnapshot()`。窗口经 `match:snapshot` 读同一份。三条口径：不新开 GSI 监听；缺块填 null 且**不进断流告警**（断流只看帧来没来）；技能只留等级，冷却每帧在走，写进摘要就是噪声。
+
+验收：`--match-snapshot-probe` 19 条（合成帧字段齐全、缺块为 null 且不告警、技能键只有 `name/level`、空格子不算装备、死了才有复活倒计时）。
+
 ### 混编局里，我翻出来的话没人看得懂（#120）
 
 症状：`settings.targetLang`（「浮层译文语言」）在面板上可选，但**改了没有任何效果**——两种方向的语言写死在提示词里，zh-en 永远出英文、auto-zh 永远出简体中文。英文局、俄语局、东南亚局里，中国玩家翻出来的话队友读不了。

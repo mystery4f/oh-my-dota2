@@ -11,6 +11,7 @@ import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import type { VisionAnswer, VisionReadiness } from './vision'
 import type { HoldSelfTest } from './hold-selftest'
+import type { MatchSnapshot } from './match-snapshot'
 import type { HalfDuplexSnapshot } from './half-duplex'
 import type { LatencyBoardRow } from './latency-board'
 import type { ErrorSummary } from './error-log'
@@ -475,6 +476,8 @@ export interface OverlayGeometry {
 
 
 export const IPC = {
+  /** #124b：副屏面板读的那份「最近一帧」摘要（与浮层同源）。 */
+  MATCH_SNAPSHOT: 'match:snapshot',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   /** 读整张热键表 + 本次启动的注册结果。 */
@@ -832,6 +835,8 @@ export const ipcContract = {
   getHotkeys: invoke<[], HotkeysResult>(IPC.HOTKEYS_GET),
   setHotkeys: invoke<[Record<HotkeyActionId, string>], HotkeysResult>(IPC.HOTKEYS_SET),
   holdSelfTest: invoke<[], HoldSelfTest>(IPC.HOLD_SELF_TEST),
+  /** #124b：副屏面板的数据源，读的是主进程那一份快照。 */
+  matchSnapshot: invoke<[], MatchSnapshot>(IPC.MATCH_SNAPSHOT),
   testProvider: invoke<[ProviderConfig], TestResult>(IPC.PROVIDER_TEST),
   translate: invoke<[string, TranslateDirection?], string>(IPC.PROVIDER_TRANSLATE),
   translateInPlace: invoke<[], InPlaceResult>(IPC.REPLY_INPLACE),
