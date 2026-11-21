@@ -19,7 +19,7 @@ import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { formatChainTiming } from '@shared/voice-timing'
 import { queueLine, stopLine, type SpeechQueueSnapshot } from '@shared/speech-queue'
 import type { MicHealthEvent } from '@shared/mic-health'
-import { interpretDeviceLine } from '@shared/interpret'
+import { interpretDeviceLine, interpretFollowNote } from '@shared/interpret'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
 import {
@@ -52,6 +52,12 @@ const READINESS_ACTION_LABEL: Record<VoiceOutAction, string> = {
   'start-service': '启动服务'
 }
 
+
+/** 设备 id → 面板显示的名字（#145）：空 id 就是没选，列表里没有就说「当前未接入」。 */
+function deviceLabelOf(outputs: { deviceId: string; label: string }[], id: string): string {
+  if (id === '') return ''
+  return outputs.find((device) => device.deviceId === id)?.label ?? '（已保存，当前未接入）'
+}
 
 /**
  * 对讲页：我说给别人听。麦克风 → 识别 → 翻译 → 声出，一条链一屏看完。
@@ -608,12 +614,9 @@ export function TalkPage({
               ) : null}
             </select>
             <span className="text-xs text-muted-foreground">
-              {interpretDeviceLine(
-                (settings.interpretInDevice || settings.ttsOutputDevice) === ''
-                  ? ''
-                  : (outputs.find((d) => d.deviceId === (settings.interpretInDevice || settings.ttsOutputDevice))?.label ??
-                      '（已保存，当前未接入）')
-              )}
+              {settings.interpretInDevice === ''
+                ? interpretFollowNote(deviceLabelOf(outputs, settings.ttsOutputDevice))
+                : interpretDeviceLine(deviceLabelOf(outputs, settings.interpretInDevice))}
             </span>
           </Row>
         </Group>

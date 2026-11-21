@@ -37,6 +37,8 @@ export interface InterpretLeg {
   keyless: boolean
   /** 本机监听关掉：中文回放由渲染层拿原始录音放，英文再放一遍就是两种语言打架。 */
   monitorLocal: boolean
+  /** 用户是否真的点名了游戏话筒（#145）：没点名时设备是「跟输出设备」借来的，界面不许说它是话筒。 */
+  explicit: boolean
 }
 
 /**
@@ -46,7 +48,12 @@ export interface InterpretLeg {
  */
 export function interpretLegOf(input: { interpretInDevice: string; ttsOutputDevice: string }): InterpretLeg {
   const picked = input.interpretInDevice.trim()
-  return { device: picked === '' ? input.ttsOutputDevice : picked, keyless: true, monitorLocal: false }
+  return {
+    device: picked === '' ? input.ttsOutputDevice : picked,
+    keyless: true,
+    monitorLocal: false,
+    explicit: picked !== ''
+  }
 }
 
 /** 面板那一行说什么：选好的设备名字，或者「还没选」。 */
@@ -54,4 +61,22 @@ export function interpretDeviceLine(label: string): string {
   const name = label.trim()
   if (name === '') return '还没选游戏话筒：先把 Dota 2 的麦克风设成虚拟声卡的输出，再回这里点一下'
   return `游戏话筒 ← ${name}`
+}
+
+/**
+ * 没点名话筒时面板那一行（#145）：借来的设备只能照实叫「输出设备」，
+ * 否则界面一边写「游戏话筒 ← 扬声器」，一边解释不了队友为什么听不见。
+ */
+export function interpretFollowNote(label: string): string {
+  const name = label.trim()
+  if (name === '') return '还没选游戏话筒：先把 Dota 2 的麦克风设成虚拟声卡的输出，再回这里点一下'
+  return `跟输出设备：${name}；只有当它就是虚拟声卡时队友才听得到`
+}
+
+/**
+ * 「灌入「…」」只给点名选过的那台设备（#145）：借来的输出设备不写这一行，
+ * 免得记录里把扬声器说成游戏话筒。
+ */
+export function interpretSinkOf(input: { sink: string; explicit: boolean }): string {
+  return input.explicit ? input.sink : ''
 }

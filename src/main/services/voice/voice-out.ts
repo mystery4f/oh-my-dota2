@@ -14,7 +14,7 @@ import { errorMessage } from '@shared/errors'
 import { speechFailHint } from '@shared/speech-plan'
 import { currentVoiceOutReadiness } from './voice-out-readiness'
 import { loadSettings } from '../settings'
-import { interpretLegOf } from '@shared/interpret'
+import { interpretLegOf, interpretSinkOf } from '@shared/interpret'
 import { getOverlayManager } from '../../windows/overlay'
 
 
@@ -273,7 +273,9 @@ class VoiceOutService {
       // 音频播出去了（本地能听见），但频道没开——队友没听到，按失败算并说明原因。
       return { spoken: false, error: player.error, segments: segmentCount }
     }
-    return { spoken: true, error: null, segments: segmentCount, sink: playedSink }
+    // #145：借来的输出设备不写「灌入」，记录里就不存在「扬声器=游戏话筒」这句话。
+    const sink = legPlan === null ? playedSink : interpretSinkOf({ sink: playedSink, explicit: legPlan.explicit })
+    return { spoken: true, error: null, segments: segmentCount, sink }
   }
 }
 

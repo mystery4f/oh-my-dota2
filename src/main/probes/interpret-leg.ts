@@ -8,7 +8,14 @@
  *   英文已经进了话筒，中文再在本机念一遍两种语言会同时说；
  * - 关掉模式时老链条一个字节都不变：链上那条 meta 不带 sink、不带 interpret 阶段。
  */
-import { INTERPRET_STAGE, interpretDeviceLine, interpretLegOf, interpretPlanOf } from '@shared/interpret'
+import {
+  INTERPRET_STAGE,
+  interpretDeviceLine,
+  interpretFollowNote,
+  interpretLegOf,
+  interpretPlanOf,
+  interpretSinkOf
+} from '@shared/interpret'
 import type { VoiceChainMeta } from '../services/voice/chain-timing'
 import { finishProbe, probeCases } from './harness'
 
@@ -52,6 +59,21 @@ export async function runInterpretLegProbe(): Promise<void> {
   check('同声腿永远不按说话键', explicit.keyless === true)
   check('同声腿本机不回放译文（回放的是原音）', explicit.monitorLocal === false)
 
+  // —— #145：借来的输出设备不许被叫成游戏话筒 ——
+  check('点名选过 -> explicit 为真', explicit.explicit === true)
+  check('跟输出设备借来的 -> explicit 为假', fallback.explicit === false && interpretLegOf({ interpretInDevice: '   ', ttsOutputDevice: 'x' }).explicit === false)
+  const followNote = interpretFollowNote('扬声器 (Realtek(R) Audio)')
+  check(
+    '跟输出设备时说的是「输出设备」，不是「游戏话筒 ←」',
+    followNote.includes('跟输出设备') && followNote.includes('虚拟声卡') && !followNote.includes('游戏话筒 ←'),
+    followNote
+  )
+  check('跟输出设备但一台都没选 -> 说清还没选', interpretFollowNote('') === interpretDeviceLine(''), interpretFollowNote(''))
+  check(
+    '借来的设备不写「灌入」（记录里没有扬声器=话筒这句话）',
+    interpretSinkOf({ sink: '扬声器 (Realtek(R) Audio)', explicit: false }) === ''
+  )
+  check('点名选过的设备照写「灌入」', interpretSinkOf({ sink: 'CABLE Input', explicit: true }) === 'CABLE Input')
   // —— 阶段名独立：慢在哪一段才量得出来
   check('同声腿有自己的阶段名', INTERPRET_STAGE === 'interpret')
 
