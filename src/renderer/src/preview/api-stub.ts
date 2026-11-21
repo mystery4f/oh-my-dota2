@@ -42,6 +42,20 @@ import { resolveGsiRoot } from '@shared/gsi-lib'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
 const query = new URLSearchParams(location.search)
+/**
+ * `?devices=cable`：把枚举结果换成「装好了虚拟声卡」的那张清单（#174 的三张截图用）。
+ * 浏览器里 `enumerateDevices()` 返回的是这台机器的真设备，预览时往往一个音频设备都没有，
+ * 于是 `judgeCableGap()` 永远停在「清单里还没出现」，最后一种「一切正常」根本截不到。
+ */
+if (query.get('devices') === 'cable') {
+  const fake = [
+    { deviceId: 'stub-mic', kind: 'audioinput', label: '麦克风阵列 (Realtek(R) Audio)', groupId: 'g1', toJSON: () => ({}) },
+    { deviceId: 'stub-cable-out', kind: 'audioinput', label: 'CABLE Output (VB-Audio Virtual Cable)', groupId: 'g2', toJSON: () => ({}) },
+    { deviceId: 'stub-speaker', kind: 'audiooutput', label: '扬声器 (Realtek(R) Audio)', groupId: 'g1', toJSON: () => ({}) },
+    { deviceId: 'stub-cable-in', kind: 'audiooutput', label: 'CABLE Input (VB-Audio Virtual Cable)', groupId: 'g2', toJSON: () => ({}) }
+  ] as MediaDeviceInfo[]
+  navigator.mediaDevices.enumerateDevices = async () => fake
+}
 const engine = query.get('engine') as typeof settings.ttsEngine | null
 const outEngine = query.get('outEngine') as typeof settings.ttsOutEngine | null
 const scriptMode = query.get('script')
@@ -1035,10 +1049,16 @@ const implemented = {
   voiceOutTest: async () => ({ ok: true, durationMs: 900, hint: 'stub 声出已播', sinkLabel: 'CABLE Input (VB-Audio Virtual Cable)' }),
   // #90 三种缺口一眼可看：?cable=absent（没装）/ driverOnly（驱动在端点没出现）/ error（没查成）。
   voiceOutCable: async () => {
+    // 六态旋钮（#174 签字里点名的名字）：missing / endpoint / unlisted / ok / unselected / error。
+    // 旧名 absent / driverOnly 保留，老链接不失效。
     const mode = query.get('cable')
-    if (mode === 'absent') return { installed: false, endpoints: [], driverOnly: false, error: null }
-    if (mode === 'driverOnly') return { installed: true, endpoints: [], driverOnly: true, error: null }
+    if (mode === 'missing' || mode === 'absent') return { installed: false, endpoints: [], driverOnly: false, error: null }
+    if (mode === 'endpoint' || mode === 'driverOnly') return { installed: true, endpoints: [], driverOnly: true, error: null }
     if (mode === 'error') return { installed: false, endpoints: [], driverOnly: false, error: 'PowerShell 超过 15 秒没返回' }
+    // unlisted / ok / unselected 三态都靠 `?devices=cable` 区分：
+    //   不带它 → 端点有、渲染层设备清单里没有（unlisted）
+    //   带上它 → 页面自己的 #90 自动选上（ok）
+    // unselected 在预览里活不过一帧：检出已装的那一拍，页面的自动选中就把它补上了。
     return {
       installed: true,
       endpoints: ['CABLE Input (VB-Audio Virtual Cable)', 'CABLE Output (VB-Audio Virtual Cable)'],

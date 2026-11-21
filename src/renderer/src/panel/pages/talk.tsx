@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   OFFLINE_VOICES,
   type OfflineStatus,
+  type VoiceChainLast,
   type VoiceChainSummary,
   type VoiceOutEngine,
   type VoiceOutTestResult,
@@ -39,7 +40,7 @@ import {
 } from '@shared/voice-out-readiness'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { CollapsibleGroup, Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
+import { Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitives'
 import { selectClass } from '../components/select-class'
 import { Modal } from '../components/modal'
 import { errorMessage } from '@shared/errors'
@@ -62,6 +63,11 @@ const READINESS_ACTION_LABEL: Record<VoiceOutAction, string> = {
   'start-service': '启动服务'
 }
 
+const OUT_ENGINE_LABEL: Record<VoiceOutEngine, string> = {
+  edge: 'Edge 英文嗓',
+  offline: '离线模型',
+  sovits: 'GPT-SoVITS'
+}
 
 /** 设备 id → 面板显示的名字（#145）：空 id 就是没选，列表里没有就说「当前未接入」。 */
 function deviceLabelOf(outputs: { deviceId: string; label: string }[], id: string): string {
@@ -69,9 +75,41 @@ function deviceLabelOf(outputs: { deviceId: string; label: string }[], id: strin
   return outputs.find((device) => device.deviceId === id)?.label ?? '（已保存，当前未接入）'
 }
 
+/** 摘要行里的一段：`名字 · 问题` 或只有 `名字`；问题那段永远排在后面，读起来才知道是同一个东西出的毛病。 */
+function summaryPart(name: string, problem: string | null): string {
+  return problem === null || problem === '' ? name : `${name} · ${problem}`
+}
+
 /**
- * 对讲页：我说给别人听。麦克风 → 识别 → 翻译 → 声出，一条链一屏看完。
- * 声出用哪个音色包也在这里显示，但换包走弹窗——下载/删除/服务不属于这一页的常规流程。
+ * 抽屉里的一行（#174）：两列窄排，刻意不用 `Row` —— 这一页的行是 13 行的预算，
+ * 而抽屉里的东西「装一次就不动」，不该按页面主行来排。每一项都必须写出「现在是什么」。
+ */
+function DrawerRow({
+  label,
+  hint,
+  children
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+}): React.ReactElement {
+  return (
+    <div className="grid grid-cols-[7.5rem_1fr] items-start gap-3 border-t border-border/60 px-4 py-2.5">
+      <div className="min-w-0">
+        <div className="text-sm text-foreground">{label}</div>
+        {hint ? <div className="text-xs leading-4 text-muted-foreground">{hint}</div> : null}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">{children}</div>
+    </div>
+  )
+}
+
+/**
+ * 对讲页（#174）：把 25 行收成四块 + 一个「全部调整」抽屉。
+ *
+ * 一眼的事只有三件：现在收谁的声音、现在念给谁听、上一次对讲卡在哪。
+ * 设备 / 引擎 / 音色 / 语速这四项装好之后基本不动，收进抽屉，但摘要行必须把「现在是什么」和
+ * 「哪一项有毛病」一起写出来 —— 这行是整页唯一的一眼，它骗人比没有更糟。
  */
 export function TalkPage({
   onOpenVoicePacks,
@@ -116,6 +154,11 @@ export function TalkPage({
   const [cableGuideOpen, setCableGuideOpen] = useState(false)
   const [linkNote, setLinkNote] = useState<string | null>(null)
   const [installingCable, setInstallingCable] = useState(false)
+  // 抽屉（#174）：设备 / 引擎 / 音色 / 语速这类「装一次就不动」的东西默认收起。
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  // 上一次对讲（#167 的主进程内存最后一条）：带 matchid，跨局就不显示内容。
+  const [chainLast, setChainLast] = useState<VoiceChainLast | null>(null)
+  const [chainRead, setChainRead] = useState(true)
 
   // 识别模型状态：进面板问一次，下载/解压期间每秒刷——别让人对着假进度等。
   useEffect(() => {
@@ -146,6 +189,20 @@ export function TalkPage({
   useEffect(() => {
     void window.api.speechQueue().then(setQueue)
     return window.api.onSpeechQueue(setQueue)
+  }, [])
+  useEffect(() => {
+    // 上一次对讲：进页读一次，之后每次链结果都重读（广播本身不带 matchid，只有读口知道属于哪局）。
+    const load = (): void => {
+      void window.api
+        .voiceChainLast()
+        .then((last) => {
+          setChainLast(last)
+          setChainRead(true)
+        })
+        .catch(() => setChainRead(false))
+    }
+    load()
+    return window.api.onVoiceChainResult(load)
   }, [])
   useEffect(() => {
     // 输入/输出设备只在面板里枚举：插拔后重新打开页面就能看到。
@@ -199,9 +256,7 @@ export function TalkPage({
   const cableOutput = findCableOutput(outputs.map((d) => ({ deviceId: d.deviceId, label: d.label })))
   // 解构出 wrap：save 是每次渲染新建的对象字面量，进依赖数组会自激。
   const wrap = save.wrap
-  const gap = cable
-    ? judgeCableGap(cable, settings?.ttsOutputDevice ?? '', cableOutput?.deviceId ?? null)
-    : null
+  const gap = cable ? judgeCableGap(cable, settings?.ttsOutputDevice ?? '', cableOutput?.deviceId ?? null) : null
   // #90：装好且当前输出不是 CABLE 时自动选上——用户手动选过别的设备就不碰（settings 已变）。
   // 只在「检测为已装 + 输出还没指到它」瞬间做一次，之后 settings 指向它，条件自然不再成立。
   useEffect(() => {
@@ -338,10 +393,258 @@ export function TalkPage({
 
   // 热词只在吃得下的引擎上开放编辑：paraformer 忽略热词，编辑了也是空转（词表保留，切回来就生效）。
   const hotwordsEditable = activeEngine !== null && activeEngine.hotwords === 'prompt'
+
+  // 摘要是整页唯一的一眼：四项当前值 + 每一项的毛病（#174 签字里那条硬要求）。
+  const micName = settings.micDevice === '' ? '自动' : deviceLabelOf(inputs.map((d) => ({ deviceId: d.deviceId, label: d.label })), settings.micDevice) || '（未接入）'
+  const asrName = activeModel === null ? '识别模型' : activeModel.label
+  const asrProblem =
+    asrModels === null
+      ? '还没读到模型'
+      : activeModel === null
+        ? '没有现成模型'
+        : activeModel.ready
+          ? null
+          : '未就绪'
+  const outProblem =
+    cable === null
+      ? '虚拟声卡检查中'
+      : cable.error !== null
+        ? '虚拟声卡没查成'
+        : gvReadiness !== null && !gvReadiness.ready
+          ? (gvReadiness.reason ?? 'GV 服务没起')
+          : null
+  const voiceName =
+    engine === 'sovits'
+      ? (voicePacks.current?.name ?? '音色包没选')
+      : ((engine === 'offline' ? OFFLINE_VOICES : VOICE_OUT_VOICES).find((v) => v.id === voiceValue)?.label ?? voiceValue)
+  const summary = [
+    summaryPart(`讲话 ${micName}`, null),
+    summaryPart(`识别 ${asrName}`, asrProblem),
+    summaryPart(`声出 ${OUT_ENGINE_LABEL[engine]}`, outProblem),
+    summaryPart(`音色 ${voiceName}`, null),
+    `语速 ${settings.ttsRate.toFixed(2)}`
+  ].join(' · ')
+
+  // 上一次对讲（#167 那份内存快照）：本局才算，跨局与空态各自一句，不互相冒充。
+  const chainTiming = chainLast === null ? null : formatChainTiming(chainLast.summary.timing)
+  const chainLine = !chainRead
+    ? '读不到上一次的记录'
+    : chainLast === null
+      ? '这局还没对讲过'
+      : chainLast.matchid === null
+        ? '不在对局里 · 上一次对讲没有对局号'
+        : (chainTiming ?? '上一次对讲没有计时（耗时统计关着）')
+
   return (
     <>
       <Panel>
-        <Group label="怎么听">
+        {/* 抽屉：装一次就不动的四项收在这里，但那行摘要必须把「现在是什么 + 哪里有毛病」写全。 */}
+        <Group label="全部调整">
+          <Row
+            label="设备与引擎"
+            stacked
+            hint="点开才展开：讲话设备 / 识别模型 / 运行时 / 说话键、方式 / 热词 / 切段 / 不念谁 / 影子 / 同声 / 三种测试开关"
+          >
+            <span className="text-xs text-muted-foreground">{summary}</span>
+            <Button size="sm" variant="outline" onClick={() => setDrawerOpen((open) => !open)}>
+              {drawerOpen ? '收起' : '全部调整'}
+            </Button>
+          </Row>
+          {drawerOpen ? (
+            <div className="border-t border-border/60">
+              <DrawerRow label="识别模型" hint="底模按文件下载，微调转正的优先生效">
+                {!asrStatus ? (
+                  <StatusPill tone="idle">检查中…</StatusPill>
+                ) : asrStatus.ready ? (
+                  <>
+                    <StatusPill tone="ready">已就绪 {Math.round(asrStatus.bytes / 1024 / 1024)} MB</StatusPill>
+                    {activeModel?.origin === 'download' || activeModel?.origin === 'manual' ? (
+                      <Button size="sm" variant="outline" onClick={() => void removeModel()}>
+                        删除模型
+                      </Button>
+                    ) : null}
+                  </>
+                ) : asrStatus.downloading ? (
+                  <StatusPill tone="warn">{asrStatus.verifying ? '校验中…' : `下载中 ${Math.round(asrStatus.progress * 100)}%`}</StatusPill>
+                ) : (
+                  <>
+                    <StatusPill tone={asrStatus.error ? 'bad' : 'idle'}>{asrStatus.error ?? '模型未下载'}</StatusPill>
+                    <Button size="sm" variant="outline" onClick={() => void downloadAsr()}>
+                      下载模型
+                    </Button>
+                  </>
+                )}
+              </DrawerRow>
+              <DrawerRow label="语音运行时" hint="独立 node.exe + sherpa 插件，约 35 MB">
+                {!runtime ? (
+                  <StatusPill tone="idle">检查中…</StatusPill>
+                ) : runtime.installing ? (
+                  <StatusPill tone="warn">安装中…</StatusPill>
+                ) : runtime.state === 'ready' ? (
+                  <StatusPill tone="ready">已就绪</StatusPill>
+                ) : (
+                  <>
+                    <StatusPill tone={runtime.installError ? 'bad' : 'idle'}>
+                      {runtime.installError ?? (runtime.state === 'broken' ? '安装不完整' : '未安装')}
+                    </StatusPill>
+                    <Button size="sm" variant="outline" onClick={() => void installRuntime()}>
+                      {runtime.state === 'broken' ? '重试安装' : '安装运行时'}
+                    </Button>
+                  </>
+                )}
+              </DrawerRow>
+              <DrawerRow label="说话键 / 方式" hint="游戏里按住才能发言的键；方式要和游戏设置一致">
+                <Input
+                  id="v2-speakKey"
+                  className="w-24 font-mono"
+                  value={settings.ttsSpeakKey}
+                  onChange={(e) => update({ ttsSpeakKey: e.target.value.toUpperCase() })}
+                  placeholder="F5"
+                />
+                <Button
+                  size="sm"
+                  variant={settings.ttsSpeakMode === 'hold' ? 'secondary' : 'outline'}
+                  onClick={() => void save.wrap(update({ ttsSpeakMode: 'hold' }))}
+                >
+                  按住（{settings.ttsSpeakMode === 'hold' ? '现在' : '切换'}）
+                </Button>
+                <Button
+                  size="sm"
+                  variant={settings.ttsSpeakMode === 'toggle' ? 'secondary' : 'outline'}
+                  onClick={() => void save.wrap(update({ ttsSpeakMode: 'toggle' }))}
+                >
+                  敲一下（{settings.ttsSpeakMode === 'toggle' ? '现在' : '切换'}）
+                </Button>
+              </DrawerRow>
+              <DrawerRow
+                label="热词"
+                hint={
+                  activeEngine === null
+                    ? '还没有现役识别模型：先在上面选一个'
+                    : hotwordsEditable
+                      ? '填容易认错的词，下一句录音就生效'
+                      : '当前引擎忽略热词：词表保留，换回支持热词的引擎就恢复'
+                }
+              >
+                <HotwordEditor
+                  value={settings.asrHotwords}
+                  disabled={!hotwordsEditable}
+                  onChange={(next) => void update({ asrHotwords: next })}
+                />
+              </DrawerRow>
+              <HotwordCandidateBox enabled={hotwordsEditable} onApplied={(next) => void update({ asrHotwords: next })} />
+              <DrawerRow label="切段策略" hint={splitPreviewLine(previewSplit(SPLIT_SAMPLE, settings.speechSplitStrategy, settings.ttsSpeakSegmentChars ?? 30))}>
+                <select
+                  id="v2-splitStrategy"
+                  value={settings.speechSplitStrategy}
+                  onChange={(e) =>
+                    void save.wrap(update({ speechSplitStrategy: e.target.value as (typeof SPEECH_SPLIT_STRATEGIES)[number] }))
+                  }
+                  className={selectClass}
+                >
+                  {SPEECH_SPLIT_STRATEGIES.map((one) => (
+                    <option key={one} value={one}>
+                      {SPEECH_SPLIT_LABELS[one]}
+                    </option>
+                  ))}
+                </select>
+              </DrawerRow>
+              <DrawerRow
+                label="不念谁"
+                hint={
+                  muteLine(muteTableOf({ muteHeroes: settings.ttsMuteHeroes ?? [], muteNames: settings.ttsMuteNames ?? [] })) +
+                  ' · 英雄短名（影魔 nevermore）或昵称/座位名；逗号分隔'
+                }
+              >
+                <Input
+                  id="v2-muteNames"
+                  defaultValue={formatMuteList([...(settings.ttsMuteNames ?? []), ...(settings.ttsMuteHeroes ?? [])])}
+                  onBlur={(e) => {
+                    // 一个词可能既是昵称又是英雄短名，两路都写进去；命中任一路就跳过这个人。
+                    const list = parseMuteList(e.target.value)
+                    void save.wrap(update({ ttsMuteNames: list, ttsMuteHeroes: list }))
+                  }}
+                  placeholder="例：玩家2、nevermore"
+                />
+              </DrawerRow>
+              {shadow ? (
+                <DrawerRow label="影子模式" hint="第一局先不出声：照常翻译、记账，但不合成、不按说话键">
+                  <StatusPill tone={shadow.state === 'active' ? 'warn' : shadow.state === 'done' ? 'ready' : 'idle'}>
+                    {shadow.state === 'active' ? '第一局只记账' : shadow.state === 'done' ? '已完成' : '未启用'}
+                  </StatusPill>
+                  <span className="text-xs text-muted-foreground">{shadow.line}</span>
+                </DrawerRow>
+              ) : null}
+              <DrawerRow label="本机也播放" hint="调试用：译文同时播到系统默认扬声器">
+                <Button
+                  size="sm"
+                  variant={settings.ttsMonitorLocal ? 'secondary' : 'outline'}
+                  onClick={() => void save.wrap(update({ ttsMonitorLocal: !settings.ttsMonitorLocal }))}
+                >
+                  {settings.ttsMonitorLocal ? '开（本机也能听到）' : '关'}
+                </Button>
+              </DrawerRow>
+              <DrawerRow
+                label="同声翻译"
+                hint={
+                  settings.interpretInDevice === ''
+                    ? interpretFollowNote(deviceLabelOf(outputs, settings.ttsOutputDevice))
+                    : interpretDeviceLine(deviceLabelOf(outputs, settings.interpretInDevice))
+                }
+              >
+                <Button
+                  size="sm"
+                  variant={settings.interpretMode ? 'secondary' : 'outline'}
+                  onClick={() => void save.wrap(update({ interpretMode: !settings.interpretMode }))}
+                >
+                  {settings.interpretMode ? '开' : '关'}
+                </Button>
+                <select
+                  id="v2-interpretDevice"
+                  value={settings.interpretInDevice}
+                  onChange={(e) => void save.wrap(update({ interpretInDevice: e.target.value }))}
+                  className={`${selectClass} max-w-72`}
+                  disabled={!settings.interpretMode}
+                >
+                  <option value="">跟输出设备</option>
+                  {outputs.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `输出设备 ${d.deviceId.slice(0, 8)}…`}
+                    </option>
+                  ))}
+                  {settings.interpretInDevice && !outputs.some((d) => d.deviceId === settings.interpretInDevice) ? (
+                    <option value={settings.interpretInDevice}>（已保存，当前未接入）</option>
+                  ) : null}
+                </select>
+              </DrawerRow>
+              <DrawerRow label="三种测试开关" hint="只放音频 / 只看识别 / 记耗时；测完记得关">
+                <Button
+                  size="sm"
+                  variant={settings.voiceOutTestMode ? 'secondary' : 'outline'}
+                  onClick={() => void save.wrap(update({ voiceOutTestMode: !settings.voiceOutTestMode }))}
+                >
+                  测试模式（{settings.voiceOutTestMode ? '开' : '关'}）
+                </Button>
+                <Button
+                  size="sm"
+                  variant={settings.voiceTranscribeOnly ? 'secondary' : 'outline'}
+                  onClick={() => void save.wrap(update({ voiceTranscribeOnly: !settings.voiceTranscribeOnly }))}
+                >
+                  只看识别（{settings.voiceTranscribeOnly ? '开' : '关'}）
+                </Button>
+                <Button
+                  size="sm"
+                  variant={settings.voiceShowTiming ? 'secondary' : 'outline'}
+                  onClick={() => void save.wrap(update({ voiceShowTiming: !settings.voiceShowTiming }))}
+                >
+                  耗时统计（{settings.voiceShowTiming ? '开' : '关'}）
+                </Button>
+              </DrawerRow>
+            </div>
+          ) : null}
+        </Group>
+
+        <Group label="听">
           <Row
             label="讲话设备"
             htmlFor="v2-micDevice"
@@ -364,11 +667,7 @@ export function TalkPage({
               ) : null}
             </select>
           </Row>
-          <Row
-            label="麦克风电平"
-            stacked
-            hint="录着的时候跟着声音走；设备掉了这里立刻报，下一次开麦自动回退到默认设备。"
-          >
+          <Row label="麦克风电平" stacked hint="录着的时候跟着声音走；设备掉了这里立刻报，下一次开麦自动回退到默认设备。">
             {micHealth?.recording ? (
               <span className="flex items-center gap-2">
                 <span className="h-1.5 w-40 overflow-hidden rounded bg-muted">
@@ -400,103 +699,9 @@ export function TalkPage({
             </select>
             {asrModels !== null && asrModels.pinned ? null : <StatusPill tone="idle">自动</StatusPill>}
           </Row>
-          <Row label="语音运行时" hint="识别跑在独立的 node.exe + sherpa 插件里（sherpa 原生插件进不了 Electron）；一键装到数据目录，约 35 MB">
-            {!runtime ? (
-              <StatusPill tone="idle">检查中…</StatusPill>
-            ) : runtime.installing ? (
-              <StatusPill tone="warn">安装中…</StatusPill>
-            ) : runtime.state === 'ready' ? (
-              <StatusPill tone="ready">已就绪</StatusPill>
-            ) : (
-              <>
-                <StatusPill tone={runtime.installError ? 'bad' : 'idle'}>
-                  {runtime.installError ?? (runtime.state === 'broken' ? '安装不完整' : '未安装')}
-                </StatusPill>
-                <Button size="sm" variant="outline" onClick={() => void installRuntime()}>
-                  {runtime.state === 'broken' ? '重试安装' : '安装运行时'}
-                </Button>
-              </>
-            )}
-          </Row>
-          <Row label="说话键" htmlFor="v2-speakKey" hint="游戏里按住才能发言的那个键：声出时由程序按住它把话送进频道">
-            <Input
-              id="v2-speakKey"
-              className="w-24 font-mono"
-              value={settings.ttsSpeakKey}
-              onChange={(e) => update({ ttsSpeakKey: e.target.value.toUpperCase() })}
-              placeholder="F5"
-            />
-          </Row>
-          <Row
-            label="说话方式"
-            hint="要和游戏里语音按键的设置一致：按住 = 游戏选「按住说话」；敲一下 = 游戏选「切换」，按一下开麦、播完再按一下关麦"
-          >
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant={settings.ttsSpeakMode === 'hold' ? 'secondary' : 'outline'}
-                onClick={() => void save.wrap(update({ ttsSpeakMode: 'hold' }))}
-              >
-                按住
-              </Button>
-              <Button
-                size="sm"
-                variant={settings.ttsSpeakMode === 'toggle' ? 'secondary' : 'outline'}
-                onClick={() => void save.wrap(update({ ttsSpeakMode: 'toggle' }))}
-              >
-                敲一下
-              </Button>
-            </div>
-          </Row>
-          <Row
-            label="热词"
-            stacked
-            hint={
-              activeEngine === null
-                ? '还没有现役识别模型：先在上方选一个，再回来编辑热词'
-                : hotwordsEditable
-                  ? '填容易认错的词，下一句录音就生效；识别记录里点「纠错」，差异词会自动并进这里。'
-                  : '当前引擎忽略热词：词表原样保留，换回支持热词的引擎就恢复编辑与生效。'
-            }
-          >
-            <HotwordEditor
-              value={settings.asrHotwords}
-              disabled={!hotwordsEditable}
-              onChange={(next) => void update({ asrHotwords: next })}
-            />
-          </Row>
-<HotwordCandidateBox
-            enabled={hotwordsEditable}
-            onApplied={(next) => void update({ asrHotwords: next })}
-          />
-          <Row label="识别模型" hint="现役模型的下载与删除：底模从 hf-mirror 按文件下载（断点续传 + 校验）；微调转正的模型优先生效">
-            {!asrStatus ? (
-              <StatusPill tone="idle">检查中…</StatusPill>
-            ) : asrStatus.ready ? (
-              <>
-                <StatusPill tone="ready">已就绪 {Math.round(asrStatus.bytes / 1024 / 1024)} MB</StatusPill>
-                {activeModel?.origin === 'download' || activeModel?.origin === 'manual' ? (
-                  <Button size="sm" variant="outline" onClick={() => void removeModel()}>
-                    删除模型
-                  </Button>
-                ) : null}
-              </>
-            ) : asrStatus.downloading ? (
-              <StatusPill tone="warn">{asrStatus.verifying ? '校验中…' : `下载中 ${Math.round(asrStatus.progress * 100)}%`}</StatusPill>
-            ) : (
-              <>
-                <StatusPill tone={asrStatus.error ? 'bad' : 'idle'}>
-                  {asrStatus.error ?? '模型未下载'}
-                </StatusPill>
-                <Button size="sm" variant="outline" onClick={() => void downloadAsr()}>
-                  下载模型
-                </Button>
-              </>
-            )}
-          </Row>
         </Group>
 
-        <Group label="说给谁听">
+        <Group label="说">
           <Row
             label="声出引擎"
             htmlFor="v2-outEngine"
@@ -544,46 +749,6 @@ export function TalkPage({
             )}
           </Row>
           <Row
-            label="不念谁"
-            hint={muteLine(muteTableOf({ muteHeroes: settings.ttsMuteHeroes ?? [], muteNames: settings.ttsMuteNames ?? [] })) + ' · 填英雄短名（影魔 nevermore）或昵称/座位名；逗号分隔。自己也照旧由「自己也念」管'}
-            htmlFor="v2-muteNames"
-          >
-            <Input
-              id="v2-muteNames"
-              defaultValue={formatMuteList([...(settings.ttsMuteNames ?? []), ...(settings.ttsMuteHeroes ?? [])])}
-              onBlur={(e) => {
-                // 一个词可能既是昵称又是英雄短名，两路都写进去；命中任一路就跳过这个人。
-                const list = parseMuteList(e.target.value)
-                void save.wrap(update({ ttsMuteNames: list, ttsMuteHeroes: list }))
-              }}
-              placeholder="例：玩家2、nevermore"
-            />
-          </Row>
-          <Row label="切段策略" hint={splitPreviewLine(previewSplit(SPLIT_SAMPLE, settings.speechSplitStrategy, settings.ttsSpeakSegmentChars ?? 30))}>
-            <select
-              id="v2-splitStrategy"
-              value={settings.speechSplitStrategy}
-              onChange={(e) =>
-                void save.wrap(update({ speechSplitStrategy: e.target.value as (typeof SPEECH_SPLIT_STRATEGIES)[number] }))
-              }
-              className={selectClass}
-            >
-              {SPEECH_SPLIT_STRATEGIES.map((one) => (
-                <option key={one} value={one}>
-                  {SPEECH_SPLIT_LABELS[one]}
-                </option>
-              ))}
-            </select>
-          </Row>
-          {shadow ? (
-            <Row label="影子模式" hint="第一局先不出声：照常翻译、记账，但不合成、不按说话键">
-              <StatusPill tone={shadow.state === 'active' ? 'warn' : shadow.state === 'done' ? 'ready' : 'idle'}>
-                {shadow.state === 'active' ? '第一局只记账' : shadow.state === 'done' ? '已完成' : '未启用'}
-              </StatusPill>
-              <span className="text-xs text-muted-foreground">{shadow.line}</span>
-            </Row>
-          ) : null}
-          <Row
             label="虚拟声卡"
             hint="声出要进 Dota 2 语音：译文播到 CABLE Input，游戏里麦克风选 CABLE Output"
             note={
@@ -617,15 +782,6 @@ export function TalkPage({
               </Button>
             ) : null}
           </Row>
-          <Row label="本机也播放" hint="调试用：译文同时播到系统默认扬声器；正式用时关掉，本机就只剩游戏里能听到">
-            <Button
-              size="sm"
-              variant={settings.ttsMonitorLocal ? 'secondary' : 'outline'}
-              onClick={() => void save.wrap(update({ ttsMonitorLocal: !settings.ttsMonitorLocal }))}
-            >
-              {settings.ttsMonitorLocal ? '开（本机也能听到）' : '关'}
-            </Button>
-          </Row>
           <Row label="输出设备" htmlFor="v2-outDevice" hint="选 VB-Cable 的「CABLE Input」；找不到已选设备时回退系统默认并提示">
             <select
               id="v2-outDevice"
@@ -644,61 +800,6 @@ export function TalkPage({
               ) : null}
             </select>
           </Row>
-          <Row
-            label="同声翻译"
-            hint="开：按住热键说中文，英文直接灌进这台设备——把它设成 Dota 2 的麦克风，队友听到的就是英文；你这句中文同时在本机回放。不按说话键，电缆那一路在游戏里本来就是常开的话筒。"
-          >
-            <Button
-              size="sm"
-              variant={settings.interpretMode ? 'secondary' : 'outline'}
-              onClick={() => void save.wrap(update({ interpretMode: !settings.interpretMode }))}
-            >
-              {settings.interpretMode ? '开' : '关'}
-            </Button>
-            <select
-              id="v2-interpretDevice"
-              value={settings.interpretInDevice}
-              onChange={(e) => void save.wrap(update({ interpretInDevice: e.target.value }))}
-              className={`${selectClass} max-w-72`}
-              disabled={!settings.interpretMode}
-            >
-              <option value="">跟输出设备</option>
-              {outputs.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || `输出设备 ${d.deviceId.slice(0, 8)}…`}
-                </option>
-              ))}
-              {settings.interpretInDevice && !outputs.some((d) => d.deviceId === settings.interpretInDevice) ? (
-                <option value={settings.interpretInDevice}>（已保存，当前未接入）</option>
-              ) : null}
-            </select>
-          </Row>
-          <Row label="这条链走到哪" note={
-            <span className={settings.interpretMode ? '' : 'text-muted-foreground'}>
-              {settings.interpretInDevice === ''
-                ? interpretFollowNote(deviceLabelOf(outputs, settings.ttsOutputDevice))
-                : interpretDeviceLine(deviceLabelOf(outputs, settings.interpretInDevice))}
-            </span>
-          } />
-        </Group>
-
-        {/* #88：队列真相在主进程（speech-pipeline 握着 lanes 与在途的段），面板只画快照，不自己数。 */}
-        <Group label="语音队列">
-          <Row label="正在读" stacked hint="正在读哪一句、后头还压着几句；停止 = 排队的当场清掉，正在读的读到当前段的段尾就停。">
-            {queue ? (
-              <>
-                <StatusPill tone={queue.pending > 0 ? 'warn' : 'ready'}>{queueLine(queue)}</StatusPill>
-                <Button size="sm" variant="outline" disabled={queueBusy} onClick={() => void runStop()}>
-                  {queueBusy ? '停止中…' : '停止'}
-                </Button>
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">还在读队列</span>
-            )}
-          </Row>
-          {stopNote ? <p className="px-4 pb-3 text-xs text-muted-foreground">{stopNote}</p> : null}
-        </Group>
-        <Group label="试一下">
           <Row label="整条链" hint="点一下开始说话，再点一下结束：识别 → 翻译 → 声出全程照跑">
             <Button
               size="sm"
@@ -754,32 +855,39 @@ export function TalkPage({
               ) : null}
             </Row>
           ) : null}
-          <Row label="测试模式" hint="只放音频、不按说话键：游戏没开也能试听">
+        </Group>
+
+        {/* #88：队列真相在主进程（speech-pipeline 握着 lanes 与在途的段），面板只画快照，不自己数。 */}
+        <Group label="队列与记录">
+          <Row label="正在读" stacked hint="正在读哪一句、后头还压着几句；停止 = 排队的当场清掉，正在读的读到当前段的段尾就停。">
+            {queue ? (
+              <>
+                <StatusPill tone={queue.pending > 0 ? 'warn' : 'ready'}>{queueLine(queue)}</StatusPill>
+                <Button size="sm" variant="outline" disabled={queueBusy} onClick={() => void runStop()}>
+                  {queueBusy ? '停止中…' : '停止'}
+                </Button>
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">还在读队列</span>
+            )}
+          </Row>
+          {stopNote ? <p className="px-4 pb-3 text-xs text-muted-foreground">{stopNote}</p> : null}
+          <Row
+            label="积压策略"
+            hint="开：新的一句来了，就把它之前还没开口的几句直接跳过——刷新太快时中间的句子会丢，只保证你听到的是最新战况。关：一句不落，按顺序念完。"
+          >
             <Button
               size="sm"
-              variant={settings.voiceOutTestMode ? 'secondary' : 'outline'}
-              onClick={() => void save.wrap(update({ voiceOutTestMode: !settings.voiceOutTestMode }))}
+              variant={settings.ttsDropBacklog ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ ttsDropBacklog: !settings.ttsDropBacklog }))}
             >
-              {settings.voiceOutTestMode ? '开（不按说话键）' : '关'}
+              {settings.ttsDropBacklog ? '开（丢旧的，只念最新的）' : '关（排着队念完）'}
             </Button>
           </Row>
-          <Row label="只看识别" hint="转写完就停：不翻译、不声出——测口音、调模型用，测完记得关">
-            <Button
-              size="sm"
-              variant={settings.voiceTranscribeOnly ? 'secondary' : 'outline'}
-              onClick={() => void save.wrap(update({ voiceTranscribeOnly: !settings.voiceTranscribeOnly }))}
-            >
-              {settings.voiceTranscribeOnly ? '开（不翻译不声出）' : '关'}
-            </Button>
-          </Row>
-          <Row label="耗时统计" hint="识别/译/首音/起播/播完各段多久：浮层与识别记录里都能看到；默认关">
-            <Button
-              size="sm"
-              variant={settings.voiceShowTiming ? 'secondary' : 'outline'}
-              onClick={() => void save.wrap(update({ voiceShowTiming: !settings.voiceShowTiming }))}
-            >
-              {settings.voiceShowTiming ? '开' : '关'}
-            </Button>
+          <Row label="上一次对讲" hint={chainLine}>
+            {chainLast?.matchid ? (
+              <span className="text-xs text-muted-foreground">对局 {chainLast.matchid}</span>
+            ) : null}
           </Row>
         </Group>
 
@@ -787,16 +895,16 @@ export function TalkPage({
           <Group label="识别记录">
             <ul className="space-y-1.5 px-4 py-3">
               {log.map((entry) => (
-                <li key={entry.at} className="text-xs leading-5">
+                <li key={entry.at} className="min-w-0 text-xs leading-5">
                   <span className="mr-2 tabular-nums text-muted-foreground">
                     {new Date(entry.at).toLocaleTimeString('zh-CN', { hour12: false })}
                   </span>
                   {entry.error ? (
                     <span className="text-rose-400">🎤 {entry.error}</span>
                   ) : editingAt === entry.at ? (
-                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                       <Input
-                        className="h-6 w-64 text-xs"
+                        className="h-6 min-w-0 flex-1 text-xs"
                         value={draft}
                         autoFocus
                         onChange={(e) => setDraft(e.target.value)}
@@ -808,13 +916,13 @@ export function TalkPage({
                           }
                         }}
                       />
-                      <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => saveCorrection(entry)}>
+                      <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-xs" onClick={() => saveCorrection(entry)}>
                         存（差异并入热词）
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-6 px-2 text-xs"
+                        className="h-6 shrink-0 px-2 text-xs"
                         onClick={() => {
                           setEditingAt(null)
                           setDraft('')
@@ -824,7 +932,7 @@ export function TalkPage({
                       </Button>
                     </span>
                   ) : (
-                    <span>
+                    <span className="min-w-0">
                       {entry.corrected ? '✏️ ' : ''}🎤 原文「{entry.transcript || '（空）'}」→ 译文「
                       {entry.translated ?? (entry.stage === 'skipped' ? '（只看识别）' : '（翻译失败）')}」
                       {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}
@@ -860,15 +968,6 @@ export function TalkPage({
         ) : null}
       </Panel>
 
-
-      <CollapsibleGroup id="talk.train" label="训练">
-        <Row
-          label="音色训练 / 识别训练"
-          hint="GV 音色微调与 ASR 口音微调都在侧边栏「系统」组下，训练记录会留在磁盘上"
-        >
-          <StatusPill tone="idle">侧边栏</StatusPill>
-        </Row>
-      </CollapsibleGroup>
 
       <Modal
         open={cableGuideOpen}
