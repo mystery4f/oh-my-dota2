@@ -1327,6 +1327,34 @@ check(
   check('自动选中：驱动在端点没出现不写', driverOnly.write === false && driverOnly.reason === 'no-endpoint', '')
 }
 
+// —— 进度怎么念（#184）：-1 是「这版脚本不报进度」，一份逻辑两页共用 ——
+{
+  const { progressText, TRAIN_PROGRESS_UNKNOWN } = await import('../src/shared/train/preflight.ts')
+  check('进度：-1 说整句，不印 -1%', progressText(-1) === TRAIN_PROGRESS_UNKNOWN && !progressText(-1).includes('%'), progressText(-1))
+  check('进度：整句句末没有标点（它被当状态读）', /[。！？，]$/.test(progressText(-1)) === false, progressText(-1))
+  check('进度：0 与 45 仍是百分比', progressText(0) === '0%' && progressText(45) === '45%', progressText(45))
+}
+
+// —— 体检压成一行（#184）：格式一份，布局两页各自决定 ——
+{
+  const { preflightSummary } = await import('../src/shared/train/preflight.ts')
+  check('体检：空列表压成一行是空字符串（不拿「—」冒充有内容）', preflightSummary([]) === '', JSON.stringify(preflightSummary([])))
+  const blocked = [
+    { id: 'env', level: 'block', label: '环境', detail: '缺 推理运行时' },
+    { id: 'data', level: 'ok', label: '数据', detail: '已录 27 句' }
+  ]
+  const line = preflightSummary(blocked)
+  check('体检：含 block 项压成一行后仍能看出哪一项拦路', line.startsWith('环境：缺 推理运行时'), line)
+  check('体检：有拦路项时只列问题项，好项不掺进来', !line.includes('已录 27 句'), line)
+  const cleanLine = preflightSummary([{ id: 'data', level: 'ok', label: '数据', detail: '已录 27 句' }])
+  check('体检：全绿时只留 detail，不重复 label', cleanLine === '已录 27 句', cleanLine)
+  const warnOnly = preflightSummary([
+    { id: 'gpu', level: 'warn', label: '显存', detail: '8GB 偏紧' },
+    { id: 'data', level: 'ok', label: '数据', detail: '已录 27 句' }
+  ])
+  check('体检：warn 项也带 label（压成一行后「谁在提醒」才看得出来）', warnOnly.startsWith('显存：8GB 偏紧'), warnOnly)
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

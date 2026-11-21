@@ -128,6 +128,31 @@ export function judgeGvPreflight(input: GvPreflightInput): PreflightItem[] {
   return items
 }
 
+/**
+ * 脚本不报进度（progress = -1）时的那句话（#184）。整句、句末不加标点：
+ * 它被当状态读，加上标点读起来像句子，人就去找「下面还有什么」。
+ * 写法只有这一份——行内 pill、音色页、识别页左栏摘要都走 {@link progressText}。
+ */
+export const TRAIN_PROGRESS_UNKNOWN = '这版脚本不报进度'
+
+/** 进度怎么念：正常时是百分比，脚本不报时是这句话。 */
+export function progressText(progress: number): string {
+  return progress >= 0 ? `${progress}%` : TRAIN_PROGRESS_UNKNOWN
+}
+
+/**
+ * 把体检项压成一行（#184）：识别训练页逐条渲染（`PreflightList`），音色训练页按行预算只留一行。
+ * **格式只有这一份**，两页各自的布局自己决定——所以这里只负责「怎么拼这句话」。
+ *
+ * 不拦路的项只留 detail（读起来是一句现状）；block / warn 的项前面必须带 label ——
+ * 压成一行之后，「哪一项在拦路」就只剩这个前缀能看出来，丢了它等于把结论也压平了。
+ */
+export function preflightSummary(items: PreflightItem[]): string {
+  const bad = items.filter((item) => item.level !== 'ok')
+  if (bad.length === 0) return items.map((item) => item.detail).join(' · ')
+  return bad.map((item) => `${item.label}：${item.detail}`).join(' · ')
+}
+
 /** 只有 block 拦开训——体检不该变成一堆「你确定吗」。 */
 export function preflightBlocks(items: PreflightItem[]): PreflightItem[] {
   return items.filter((item) => item.level === 'block')

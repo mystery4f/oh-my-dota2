@@ -3,7 +3,7 @@ import type { FtRecInfo, FtScriptState } from '@shared/ipc'
 import type { AsrFtFacts, AsrFtMode, AsrFtStatusResult } from '@shared/train/asr-ft'
 import { ASR_ENGINES, finetunableEngines, type AsrEngineId } from '@shared/asr/engines'
 import type { TrainSnapshot } from '@shared/train/task'
-import { judgeAsrPreflight, preflightBlocks } from '@shared/train/preflight'
+import { judgeAsrPreflight, preflightBlocks, progressText } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 import {
   CUSTOM_GROUP,
@@ -305,7 +305,8 @@ export function AsrTrainPage(): React.ReactElement {
   const stepSummary: Record<StepId, string> = {
     env: status ? (status.env.ok ? '就绪' : `缺 ${status.env.gaps.length} 项`) : '…',
     data: script ? `${Object.keys(recs).length}/${totalLines} 句已录` : '读稿还没读出来',
-    train: taskRunning ? `${task?.progress ?? 0}%` : status ? `待训 ${status.pending.count} 条` : '…',
+    // #184：左栏摘要播的也是「进度怎么念」，不许在这里再写一次百分比（原来会印 -1%）。
+    train: taskRunning && task ? progressText(task.progress) : status ? `待训 ${status.pending.count} 条` : '…',
     live: status?.swap.activeExists ? `${status.target.label} 已就位` : '还没换过模型'
   }
 

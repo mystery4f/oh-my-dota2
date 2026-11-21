@@ -461,6 +461,8 @@ const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> =
       ? asrStubSnapshot
       : { task: null, logs: [] }
 // `?train=idle` 时训练不占着：比对按钮平时被「正在训练」挡着，没有这个开关就看不到弹层。
+// #184：识别训练页也要有「这版脚本不报进度」的证据——progress = -1 时 pill 必须说整句，不许印 -1%。
+if (query.get('asrNoProgress') === '1' && stubTrainSnapshot.task !== null) stubTrainSnapshot.task.progress = -1
 if (query.get('train') === 'idle') {
   stubTrainSnapshot.task = {
     id: 'train-stub',

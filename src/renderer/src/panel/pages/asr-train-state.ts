@@ -1,5 +1,6 @@
 import type { AsrFtStatusResult } from '@shared/train/asr-ft'
-import type { PreflightItem } from '@shared/train/preflight'
+// check:pure 直接用 node 加载这个文件，别名 @shared 在那里解析不了，所以走相对路径。
+import { progressText, type PreflightItem } from '../../../../shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 
 /**
@@ -111,7 +112,8 @@ export function headlineOf(facts: AsrTrainFacts, state: PageState, handlers: Asr
   if (state === 'running')
     return {
       title: '正在训练',
-      hint: `${task?.stage || '准备中'} · ${task?.progress ?? 0}%｜中途停掉不会动现役模型`,
+      // #184：进度怎么念只有一份（progressText）——这里以前会印 -1%。
+      hint: `${task?.stage || '准备中'} · ${progressText(task?.progress ?? 0)}｜中途停掉不会动现役模型`,
       action: { label: '停止', step: 'train', run: handlers.stopTraining }
     }
   if (state === 'failed')

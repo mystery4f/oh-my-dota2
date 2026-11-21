@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { TrainSnapshot } from '@shared/train/task'
-import { judgeGvPreflight } from '@shared/train/preflight'
+import { judgeGvPreflight, preflightSummary } from '@shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 import {
   GV_LEGS,
@@ -15,7 +15,7 @@ import { machineEnvLine, machineEnvState, type MachineEnvReport } from '@shared/
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 import { RunRow, Sparkline } from '../components/run-view'
-import { formatDuration } from '../run-format'
+import { TrainTaskRow } from '../components/train-task-row'
 import { useTrainConsole } from '../use-train-console'
 import { selectClass } from '../components/select-class'
 
@@ -309,22 +309,7 @@ export function VoiceTrainPage(): React.ReactElement {
               开始训练
             </Button>
           </Row>
-          <Row
-            label="训练中"
-            hint={
-              task === null
-                ? '没有正在跑的训练'
-                : `${task.stage || '准备中'}｜${
-                    task.progress >= 0 ? `${task.progress}%` : '这版脚本不报进度'
-                  }｜已跑 ${formatDuration((task.endedAt ?? now) - task.startedAt)}`
-            }
-          >
-            {taskRunning && task !== null ? (
-              <Button size="sm" variant="outline" onClick={() => void window.api.trainStop()}>
-                停止
-              </Button>
-            ) : null}
-          </Row>
+          <TrainTaskRow task={task} running={taskRunning} label="训练中" now={now} />
           {failedRun === null ? null : (
             <Row
               label="上次结果"
@@ -333,7 +318,7 @@ export function VoiceTrainPage(): React.ReactElement {
               <StatusPill tone="bad">失败</StatusPill>
             </Row>
           )}
-          {preflight.length === 0 ? null : <Row label="体检" stacked hint={preflightLine(preflight)} />}
+          {preflight.length === 0 ? null : <Row label="体检" stacked hint={preflightSummary(preflight)} />}
         </Group>
       </Panel>
 
@@ -466,8 +451,3 @@ function runStampOf(run: TrainRunRecord): string {
 }
 
 /** 体检只留一句：把三条并成「备料齐 · GPT 腿训过 · SoVITS 腿还没训」，逐条列表留给不在这一页的地方。 */
-function preflightLine(items: Array<{ label: string; detail: string; level: string }>): string {
-  const bad = items.filter((item) => item.level !== 'ok')
-  if (bad.length === 0) return items.map((item) => item.detail).join(' · ')
-  return bad.map((item) => `${item.label}：${item.detail}`).join(' · ')
-}
