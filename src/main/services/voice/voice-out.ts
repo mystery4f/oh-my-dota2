@@ -14,6 +14,7 @@ import { errorMessage } from '@shared/errors'
 import { speechFailHint } from '@shared/speech-plan'
 import { currentVoiceOutReadiness } from './voice-out-readiness'
 import { noteShadowLine, shadowActive } from './shadow'
+import { rateDeltaLine, rateForLine } from '@shared/speech-rate'
 import { loadSettings } from '../settings'
 import { interpretLegOf, interpretSinkOf } from '@shared/interpret'
 import { getOverlayManager } from '../../windows/overlay'
@@ -226,6 +227,12 @@ class VoiceOutService {
       onKeyError: (error, requestId) => console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, error }))
     })
 
+    // #92：长句用更快的速率，短句保留用户原来的选择；加速量与上下限都来自共享缝。
+    const lineRate = rateForLine({ text, baseRate: settings.ttsRate })
+    if (lineRate !== settings.ttsRate) {
+      console.log('VOICE_OUT_RATE', JSON.stringify({ base: settings.ttsRate, rate: lineRate, note: rateDeltaLine(text, settings.ttsRate, lineRate) }))
+    }
+
     let synthOkAny = false
     let audioPlayed = false
     let segmentCount = 0
@@ -234,7 +241,7 @@ class VoiceOutService {
       // 等窗口就绪、按住说话键、起播等结束；单段翻车跳过这段继续。
       await speakPipeline(
         requestFromPlan(text, plan, {
-          rate: settings.ttsRate,
+          rate: lineRate,
           pitch: settings.ttsPitch,
           split: true,
           segmentChars: settings.ttsSpeakSegmentChars,

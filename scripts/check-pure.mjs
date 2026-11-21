@@ -1008,6 +1008,14 @@ check(
   settleDeviceAfterPlay({ requested: 'B', fallback: true, sinkId: '', sinkLabel: '', hint: null }).active === 'B'
 )
 
+// #92：长句加速只在阈值之上发生，短句原样保留用户速率。
+const { rateForLine, SPEECH_RATE_MAX } = await import('../src/shared/speech-rate.ts')
+check('长句加速：短句原样', rateForLine({ text: 'push mid', baseRate: 0.98 }) === 0.98)
+check('长句加速：长句更快且不越界', (() => {
+  const rate = rateForLine({ text: '这句要足够长才能越过阈值，所以我们把同一句话重复两遍，确认它真的会被加速说出来。这句要足够长才能越过阈值。', baseRate: 1 })
+  return rate > 1 && rate <= SPEECH_RATE_MAX
+})())
+check('长句加速：加速吃满后不再随长度上涨', rateForLine({ text: '很长'.repeat(80), baseRate: 1 }) === 1.18)
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

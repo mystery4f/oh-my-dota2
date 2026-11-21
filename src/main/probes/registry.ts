@@ -65,6 +65,7 @@ import { runKeyNounProbe } from './key-nouns'
 import { runFtAuditionProbe } from './ft-audition'
 import { runDatasetVersionProbe } from './dataset-version'
 import { runVoiceDeviceSwitchProbe } from './voice-device-switch'
+import { runSpeechRateProbe } from './speech-rate'
 import { runPatchWatchProbe } from './patch-watch'
 import { runAsrRoutingProbe } from './asr-routing'
 import { runAsrSwitchProbe } from './asr-switch'
@@ -444,6 +445,13 @@ export const PROBES: readonly ProbeEntry[] = [
       'the speak-device hot switch (`src/shared/voice-device-switch.ts`): a device change takes effect between segments so the playing one is never truncated, and a device that fails hands the next segment to the one that actually worked, with one sentence said out loud',
     ci: true,
     run: runVoiceDeviceSwitchProbe
+  },
+  {
+    flag: '--speech-rate-probe',
+    summary:
+      'the long-line speed rule (`src/shared/speech-rate.ts`): a line past the length threshold speaks faster up to one ceiling, a short line keeps the user rate untouched, and no input can land outside the engine-accepted range',
+    ci: true,
+    run: runSpeechRateProbe
   },
   {
     flag: '--key-noun-probe',
