@@ -47,6 +47,7 @@ import { runSovitsRefsProbe } from './sovits-refs'
 import { runSovitsVoicepackProbe } from './sovits-voicepack'
 import { runTrainProbe } from './train'
 import { runTrainQueueProbe } from './train-queue'
+import { runDiskBudgetProbe } from './disk-budget'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -524,6 +525,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the training queue (`src/shared/train/queue.ts`): three waiting runs execute in order, and cancelling a waiting entry never reaches the running run',
     run: runTrainQueueProbe
+  },
+  {
+    flag: '--disk-budget-probe',
+    ci: true,
+    summary: 'the pre-run disk budget (`src/shared/train/disk-budget.ts`): a short volume refuses with the measured numbers, an unmeasurable one is let through, and the estimate stays inside the stated band',
+    run: runDiskBudgetProbe
   },
   {
     flag: '--asr-check-live-probe',

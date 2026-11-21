@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { Notification } from 'electron'
+import { app, Notification } from 'electron'
 import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -40,6 +40,8 @@ import { finetuneEngine } from './target-engine'
 import { errorMessage } from '@shared/errors'
 import type { AsrFtSwapResult } from '@shared/train/asr-ft'
 import { appendTrainLog } from './log-file'
+import { checkDiskBudgetForRun, datasetBytesOfLedger, diskGate } from './disk-budget'
+import { portableDataDir } from '../data-dir'
 
 /**
  * 训练任务管理器：同一时刻只允许一个训练进程（编排器约定）。
@@ -226,6 +228,17 @@ export class TrainManager {
     if (plan.unavailable) return { ok: false, error: plan.unavailable }
     const node = this.nodeBin()
     if (plan.exe === 'node' && !node) return { ok: false, error: '没找到 node，演示任务跑不了（装 node 或设 OHMYDOTA2_NODE）' }
+    // #108：盘不够就别开跑。跑到一半磁盘满，面板上写的是「训练失败」，真正的原因（空间）没人记得。
+    // 量不到可用空间时 `budget` 是 null：那时不拦，只把「没量成」这一句记进日志。
+    const disk =
+      kind === 'asr-ft'
+        ? checkDiskBudgetForRun({
+            userDataDir: portableDataDir() ?? app.getPath('userData'),
+            datasetBytes: datasetBytesOfLedger(request.asrFt?.ledger ?? [])
+          })
+        : null
+    const diskVerdict = disk === null ? null : diskGate(disk)
+    if (diskVerdict !== null && !diskVerdict.ok) return { ok: false, error: diskVerdict.error }
 
     this.task = {
       id: `train-${Date.now()}`,
@@ -239,6 +252,8 @@ export class TrainManager {
       inference: null
     }
     this.logs = []
+    // 磁盘预算这一句也放在前面：够跑也要给数字，用户才知道「这次为什么没被拦」。
+    if (disk) this.record(disk.line)
     // 显存预检的提示（只提示不拦）：放在第一行，用户点完就能看见「现在有多少、差多少」。
     if (warning) this.record(warning)
     if (kind === 'asr-ft') this.recordAsrFtOpening(request)
