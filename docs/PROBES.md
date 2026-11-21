@@ -63,7 +63,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--hotkey-probe` the global-hotkey seam with zero window and zero game: accelerator round trip and collisions
   - `--download-probe` a download that drops mid-way resumes from the partial file, a source ignoring Range restarts clean, and a bad mirror falls through with the one actually used named in the log
   - `--vision-probe` look at the screen once: the payload is one message with the prompt and a data URL, a text-only model is refused with words, and no frame reaches the disk
-  - `--helm-empty-probe` the cockpit head and channel lines: three empty states verbatim, every missing field its own dash, living written as 活着, and hotkeys read from the live table
+  - `--helm-empty-probe` the cockpit head, its three fixed actions and the listen line: empty states verbatim, every missing field its own dash, one reason per disabled action, and a timeline from another match never shown
   - `--speaker-channel-probe` the cockpit channel data: no chat means no channels, a new match clears them, and an unknown seat is never guessed
   - `--hold-watch-probe` the hold-to-talk chain in three layers: the resident script reports OK, HOLD edges are recorded once each, and a dead script surfaces as fallback instead of silence
   - `--voice-out-probe` the pure 声出 decision seam (`src/shared/voice-out.ts`) plus readiness reasons
@@ -104,6 +104,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--disk-budget-probe` the pre-run disk budget (`src/shared/train/disk-budget.ts`): a short volume refuses with the measured numbers, an unmeasurable one is let through, and the estimate stays inside the stated band
   - `--train-failure-probe` the training failure diagnosis (`src/shared/train/failure-diagnosis.ts`): every known shape maps to its stage, and an unknown one keeps the raw tail instead of guessing
   - `--companion-profile-probe` the same-match companion profile (`src/shared/companion-profile.ts`): one player reuses their earlier rendering, a new player starts clean, and the profile is dropped at match end
+  - `--match-timeline-probe` the per-match timeline (`src/shared/match-timeline.ts` + `src/main/services/voice/match-timeline.ts`): events are kept while the announce gate is off, a matchid change clears the table and its done marks, done is idempotent for unknown ids and never reorders, and a frame without a roshan block never yields a roshan row
   - `--momentum-probe` the momentum band (`src/shared/momentum.ts`): no wording reads as a probability, the hover row carries both inputs, and a frame without net worth renders nothing
   - `--endpoint-probe` the end-of-utterance window (`src/shared/endpoint.ts`): each preset cuts at its own silence window, a preset change applies on the next recording, and a breath shorter than the minimum voiced time never ends an utterance
   - `--voice-review-probe` the edited-transcript rule (`src/shared/voice-review.ts`): an edit is what gets translated and recorded as a correction pair, while an untouched or re-cleared line behaves exactly as before

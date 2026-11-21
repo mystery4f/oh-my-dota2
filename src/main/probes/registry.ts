@@ -56,6 +56,7 @@ import { runTrainQueueProbe } from './train-queue'
 import { runDiskBudgetProbe } from './disk-budget'
 import { runTrainFailureProbe } from './train-failure'
 import { runCompanionProfileProbe } from './companion-profile'
+import { runMatchTimelineProbe } from './match-timeline'
 import { runMomentumProbe } from './momentum'
 import { runEndpointProbe } from './endpoint'
 import { runVoiceReviewProbe } from './voice-review'
@@ -436,7 +437,7 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--helm-empty-probe',
     ci: true,
     summary:
-      'the cockpit head and channel lines: three empty states verbatim, every missing field its own dash, living written as 活着, and hotkeys read from the live table',
+      'the cockpit head, its three fixed actions and the listen line: empty states verbatim, every missing field its own dash, one reason per disabled action, and a timeline from another match never shown',
     run: runHelmEmptyProbe
   },
   {
@@ -729,6 +730,13 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the same-match companion profile (`src/shared/companion-profile.ts`): one player reuses their earlier rendering, a new player starts clean, and the profile is dropped at match end',
     run: runCompanionProfileProbe
+  },
+  {
+    flag: '--match-timeline-probe',
+    ci: true,
+    summary:
+      'the per-match timeline (`src/shared/match-timeline.ts` + `src/main/services/voice/match-timeline.ts`): events are kept while the announce gate is off, a matchid change clears the table and its done marks, done is idempotent for unknown ids and never reorders, and a frame without a roshan block never yields a roshan row',
+    run: runMatchTimelineProbe
   },
   {
     flag: '--momentum-probe',

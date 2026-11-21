@@ -11,6 +11,7 @@
  */
 
 import { ageView, clockText } from './board-view'
+import { isRealMatchId } from './match-id'
 import type { MatchSnapshot } from './match-snapshot'
 import type { SpeakerChannel } from './speaker-channel'
 
@@ -157,4 +158,148 @@ export function helmHotkeyHints(hotkeys: Readonly<Record<string, string>>, displ
       unbound: accelerator === ''
     }
   })
+}
+/* ——— 第二片（issue #165）：三个固定动作 + 监听行 ——— */
+
+/** 页面能用到的动作 id：与热键表同名，改键后按钮跟着变。 */
+export type HelmActionId = 'voiceCapture' | 'visionAsk' | 'overlayPanel'
+
+/** 没绑键时按钮上那句话。 */
+export const HELM_ACTION_UNBOUND = '这个动作还没绑键'
+/** 浮层关着时「呼出」没法用的原因；这不是失败，是当前状态。 */
+export const HELM_ACTION_OVERLAY_OFF = '浮层现在是关的'
+/** 看一眼在跑：期间必须禁用，否则连点就是连着花老板的钱。 */
+export const HELM_ACTION_LOOKING = '正在看…'
+/** 说话刚触发过（500 ms 去抖挡掉的连点）：说一句，不静默。 */
+export const HELM_ACTION_BUSY = '刚触发过，稍等半秒'
+/** 监听行：帧龄为空。 */
+export const HELM_LISTEN_NO_FRAME = '还没收到过一帧'
+/** 监听行：这一局没有可播报的事（也用于「时间线属上一局」——不显示别人那一局）。 */
+export const HELM_LISTEN_NO_EVENT = '这一局还没发生可播报的事'
+/** captureStatus() 自己挂了：与「没帧」「没事件」必须是三句话。 */
+export const HELM_LISTEN_UNREADABLE = '状态读不到'
+
+export interface HelmAction {
+  id: HelmActionId
+  label: string
+  /** 活表里的键名；未绑定就是「未绑定」。 */
+  key: string
+  unbound: boolean
+  /** 现在能不能点。 */
+  enabled: boolean
+  /** **恰好一句**原因或状态（可用时为空串）——禁止两个原因叠着写。 */
+  note: string
+}
+
+export interface HelmActionsInput {
+  hotkeys: Readonly<Record<string, string>>
+  display: (accelerator: string) => string
+  unboundLabel: string
+  /** 浮层当前可见吗：不可见时「呼出」没有可呼的对象。 */
+  overlayVisible: boolean
+  /** 正在录音吗（真值来自浮层的采集上报）。 */
+  recording: boolean
+  /** 看一眼正在跑吗。 */
+  looking: boolean
+  /** 说话按钮刚被去抖挡回来吗。 */
+  captureBusy: boolean
+}
+
+const ACTION_LABELS: readonly { id: HelmActionId; label: string }[] = [
+  { id: 'voiceCapture', label: '说话' },
+  { id: 'visionAsk', label: '看一眼' },
+  { id: 'overlayPanel', label: '呼出' }
+]
+
+/**
+ * 三个固定动作的可用状态。优先级只有一条：**没绑键压倒一切**（没绑就点不动，
+ * 别的原因都无从谈起）；其余各自最多一句，绝不互相覆盖。
+ */
+export function helmActions(input: HelmActionsInput): HelmAction[] {
+  return ACTION_LABELS.map((one) => {
+    const accelerator = (input.hotkeys[one.id] ?? '').trim()
+    const unbound = accelerator === ''
+    const key = unbound ? input.unboundLabel : input.display(accelerator)
+    if (unbound) return { ...one, key, unbound, enabled: false, note: HELM_ACTION_UNBOUND }
+    if (one.id === 'overlayPanel' && !input.overlayVisible) {
+      return { ...one, key, unbound, enabled: false, note: HELM_ACTION_OVERLAY_OFF }
+    }
+    if (one.id === 'visionAsk' && input.looking) {
+      return { ...one, key, unbound, enabled: false, note: HELM_ACTION_LOOKING }
+    }
+    if (one.id === 'voiceCapture') {
+      if (input.captureBusy) return { ...one, key, unbound, enabled: false, note: HELM_ACTION_BUSY }
+      return { ...one, key, unbound, enabled: true, note: input.recording ? '录音中' : '' }
+    }
+    return { ...one, key, unbound, enabled: true, note: '' }
+  })
+}
+
+/** 一句话说完：错误文本只取第一句，超出就截断（面板一行放不下整段栈）。 */
+export function firstSentence(text: string, maxChars = 48): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  const cut = flat.search(/[。！？!?\n]/)
+  const head = cut < 0 ? flat : flat.slice(0, cut)
+  return head.length <= maxChars ? head : `${head.slice(0, maxChars - 1)}…`
+}
+
+export interface HelmListenHalf {
+  text: string
+  tone: 'ok' | 'warn' | 'bad' | 'dim'
+}
+
+export interface HelmListenLine {
+  /** 左半：它在听什么（GSI 帧龄三档）。 */
+  left: HelmListenHalf
+  /** 右半：刚说了什么（时间线最新一条）。 */
+  right: HelmListenHalf
+  /** 时间线属别的局：界面该知道「被藏掉了」，探针也据此断言。 */
+  crossMatch: boolean
+}
+
+export interface HelmListenInput {
+  /** captureStatus().gsi.lastAt。 */
+  gsiLastAt: number | null
+  now: number
+  /** captureStatus() 自己抛错时的原文（取第一句）。 */
+  captureError?: string | null
+  /** 当前快照的局号（null = 没快照）。 */
+  snapshotMatchId: string | null
+  /** 时间线视图（null = 还没取到）。 */
+  timeline: { matchid: string; entries: readonly { gameTime: number; text: string }[] } | null
+}
+
+/**
+ * 监听行。三种「没东西」必须三句话，谁都不许冒充谁：
+ * 读不到状态 / 还没收到过一帧 / 这一局还没发生可播报的事。
+ *
+ * 跨局那条更狠：时间线的局号与当前快照对不上，就当这一局还没事发生——
+ * 把上一局的事贴到这一局，是本票最贵的错误。
+ */
+export function helmListenLine(input: HelmListenInput): HelmListenLine {
+  const error = (input.captureError ?? '').trim()
+  const left: HelmListenHalf =
+    error !== ''
+      ? { text: `${HELM_LISTEN_UNREADABLE}：${firstSentence(error)}`, tone: 'bad' }
+      : input.gsiLastAt === null
+        ? { text: HELM_LISTEN_NO_FRAME, tone: 'dim' }
+        : ageView(input.gsiLastAt, input.now)
+
+  const timeline = input.timeline
+  const sameMatch =
+    timeline !== null &&
+    isRealMatchId(timeline.matchid) &&
+    input.snapshotMatchId !== null &&
+    timeline.matchid === input.snapshotMatchId
+  const newest = timeline === null || !sameMatch ? null : (timeline.entries[0] ?? null)
+  // text 本来就是人话（`智慧符刷新了`），只补时间，不拼 kind。
+  const right: HelmListenHalf =
+    newest === null
+      ? { text: HELM_LISTEN_NO_EVENT, tone: 'dim' }
+      : { text: `${clockText(newest.gameTime)} ${newest.text}`, tone: 'ok' }
+  const crossMatch =
+    timeline !== null &&
+    isRealMatchId(timeline.matchid) &&
+    timeline.matchid !== (input.snapshotMatchId ?? '')
+  return { left, right, crossMatch }
 }

@@ -5,6 +5,7 @@ import { logsDir } from '../logs/base-dir'
 import { loadSettings } from '../settings'
 import { broadcastToWindows } from '../../windows/broadcast'
 import { requestFromPlan, speakPipeline } from './speech-pipeline'
+import { noteTimelineEvents } from './match-timeline'
 import {
   DEFAULT_ANNOUNCE_TRIGGERS,
   initialAnnounceState,
@@ -17,10 +18,12 @@ import {
 
 /**
  * 对局播报腿（issue #123）：GSI 帧进来 → 纯状态机判该报什么 → 走朗读同款管线念出来。
+ * 事件同时喂给本局时间线（#162）：时间线记「发生过什么」，关闸也收；这里只管「念不念」。
  *
  * 与朗读/声出的分工：朗读念聊天，声出念给队友听，这里念的是**游戏自己的状态**
  * （智慧符、肉山窗口、堆野/拉野窗口）。念的引擎、嗓、语速、音高全部沿用朗读设置，
- * 不再开一套；总闸 `announceTotal` 关着时连纯状态机都不进，管线一次都不碰。
+ * 不再开一套；总闸 `announceTotal` 关着时不念、不落日志，但状态机照走（#162 起），
+ * 这样打开闸门的那一刻不会把整局过去的窗口一次补报出来。
  */
 const ANNOUNCE_LOG_MAX_BYTES = 256_000
 
@@ -41,10 +44,18 @@ export interface FeedAnnounceOptions {
   per: DotaAnnounceTriggers
   speak: (event: DotaAnnounceEvent) => void
   log: (event: DotaAnnounceEvent, now: number) => void
+  /** 本局时间线（#162）：不管总闸与单事件闸，事件一算出来就交给它。 */
+  timeline?: (events: DotaAnnounceEvent[]) => void
 }
 
 /**
- * 一帧交给播报腿。总闸关 → 直接返回空数组，`stepAnnounces` 都不进（管线零调用）。
+ * 一帧交给播报腿。三件事按顺序发生，顺序就是语义：
+ *
+ * 先是 `stepAnnounces` 推进状态并算出这帧的新事件（#162 起关闸也照走，否则打开闸门那一刻
+ * 会把整局过去的窗口一次性补报出来）；再把事件交给时间线（关闸也收，时间线回答「发生过什么」，
+ * 与念不念无关）；最后才看总闸与单事件闸决定念不念、记不记。
+ *
+ * 返回数组只是「这一帧念出去的」，关闸时为空——调用方不该拿它当「发生过什么」。
  * 单事件闸关 → 这一条不出声也不落日志：切掉的触发在日志里也不该出现，
  * 否则「日志里有、耳朵没听到」会被当成 bug 查。
  */
@@ -54,8 +65,9 @@ export function feedAnnouncement(
   options: FeedAnnounceOptions,
   now: number = Date.now()
 ): DotaAnnounceEvent[] {
-  if (!options.total) return []
   const events = stepAnnounces(state, frame)
+  if (events.length > 0) options.timeline?.(events)
+  if (!options.total) return []
   for (const event of events) {
     if (options.per[event.id] !== true) continue
     options.speak(event)
@@ -127,7 +139,8 @@ export function feedLiveAnnouncement(
     total: options?.total ?? totalAnnouncesOn(settings),
     per: options?.per ?? perAnnouncesOn(settings),
     speak: options?.speak ?? speakAnnouncement,
-    log: options?.log ?? logAnnouncement
+    log: options?.log ?? logAnnouncement,
+    timeline: options?.timeline ?? ((events) => noteTimelineEvents(frame.matchId, events))
   })
 }
 

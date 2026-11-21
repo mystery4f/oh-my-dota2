@@ -1110,6 +1110,77 @@ check(
   check('面板焦点：Home/End 走首末', rowNextIndex(50, 200, 'Home') === 0 && rowNextIndex(50, 200, 'End') === 199)
 }
 
+
+// —— 本局时间线（#162）：倒序、同龄按固定种类次序、已办不改排序 ——
+{
+  const { timelineEntriesOf, timelineIdOf, timelineLine, timelineViewOf } = await import(
+    '../src/shared/match-timeline.ts'
+  )
+  const rows = [
+    { id: 'pull', gameTime: 300, text: '拉野窗口到了' },
+    { id: 'wisdom', gameTime: 900, text: '智慧符刷新了' },
+    { id: 'stack', gameTime: 300, text: '堆野窗口到了' }
+  ]
+  const entries = timelineEntriesOf(rows)
+  check('时间线按 gameTime 倒序', entries.map((e) => e.gameTime).join(',') === '900,300,300', entries.map((e) => e.gameTime).join(','))
+  check('同一秒按固定种类次序（堆野在拉野前）', entries.map((e) => e.kind).join(',') === 'wisdom,stack,pull', entries.map((e) => e.kind).join(','))
+  check('条目 id 是 kind@gameTime', timelineIdOf(rows[0]) === 'pull@300', timelineIdOf(rows[0]))
+  const done = new Set(['pull@300'])
+  const withDone = timelineEntriesOf(rows, done)
+  check('已办只标不改排序', withDone.map((e) => e.id).join(',') === entries.map((e) => e.id).join(',') && withDone.some((e) => e.id === 'pull@300' && e.done), withDone.map((e) => e.done).join(','))
+  check('不在对局里是一句话', timelineLine('', []) === '不在对局里', timelineLine('', []))
+  check('对局里没事发生是另一句话', timelineLine('42', []) === '这局还没有值得停一下的事', timelineLine('42', []))
+  check('都办完有第三句话', timelineLine('42', withDone.map((e) => ({ ...e, done: true }))) === '这局 3 件都办完了', timelineLine('42', withDone.map((e) => ({ ...e, done: true }))))
+  check('还欠几件写在话里', timelineLine('42', withDone) === '这局 3 件：还欠 2 件', timelineLine('42', withDone))
+  check('同样输入逐字节同样输出', JSON.stringify(timelineEntriesOf(rows)) === JSON.stringify(timelineEntriesOf(rows)))
+  check('空 matchid 的视图不带条目', timelineViewOf({ matchid: '', events: [] }).entries.length === 0)
+}
+
+
+// —— 真对局号（#162）：菜单/训练场/人机的 "0" 不算一局 ——
+{
+  const { isRealMatchId } = await import('../src/shared/match-id.ts')
+  check('主菜单的 "0" 不算对局', isRealMatchId('0') === false)
+  check('位数太短的不算对局', isRealMatchId('12') === false)
+  check('十几位数字才算对局', isRealMatchId('9061502086') === true, '9061502086')
+  check('空串与 undefined 都不算对局', isRealMatchId('') === false && isRealMatchId(undefined) === false)
+  check('非数字不算对局', isRealMatchId('match-1') === false)
+}
+
+// —— 驾驶室第二片（#165）：三个动作的可用状态与监听行 ——
+{
+  const { helmActions, helmListenLine, firstSentence, HELM_ACTION_UNBOUND, HELM_ACTION_OVERLAY_OFF, HELM_ACTION_LOOKING, HELM_LISTEN_NO_EVENT, HELM_LISTEN_NO_FRAME } = await import(
+    '../src/shared/helm.ts'
+  )
+  const id = (s) => s
+  const base = {
+    display: id,
+    unboundLabel: '未绑定',
+    overlayVisible: true,
+    recording: false,
+    looking: false,
+    captureBusy: false
+  }
+  const all = { voiceCapture: 'A', visionAsk: 'B', overlayPanel: 'C' }
+  const bound = helmActions({ ...base, hotkeys: all })
+  check('动作：都绑时可点且无附加句', bound.every((one) => one.enabled && one.note === ''), JSON.stringify(bound.map((one) => one.note)))
+  const unbound = helmActions({ ...base, hotkeys: { ...all, visionAsk: '' } })
+  check('动作：未绑键压倒一切（只禁用自己）', unbound[1].enabled === false && unbound[1].note === HELM_ACTION_UNBOUND && unbound[0].enabled, unbound[1].note)
+  const off = helmActions({ ...base, hotkeys: all, overlayVisible: false })
+  check('动作：浮层关着时呼出禁用并说明', off[2].note === HELM_ACTION_OVERLAY_OFF && off[2].enabled === false, off[2].note)
+  const look = helmActions({ ...base, hotkeys: all, looking: true })
+  check('动作：看一眼在跑时禁用', look[1].note === HELM_ACTION_LOOKING && look[1].enabled === false, look[1].note)
+  const onlyOne = helmActions({ ...base, hotkeys: { ...all, visionAsk: '' }, overlayVisible: false, looking: true })
+  check('动作：多个原因同时成立也只写一句', onlyOne[1].note === HELM_ACTION_UNBOUND && onlyOne[2].note === HELM_ACTION_OVERLAY_OFF, JSON.stringify(onlyOne.map((one) => one.note)))
+  check('一句话截断：去掉句号后的半句并限量长', firstSentence('a。b', 10) === 'a' && firstSentence('x'.repeat(80), 20).length === 20, firstSentence('x'.repeat(80), 20).length.toString())
+  const same = helmListenLine({ gsiLastAt: 1000, now: 2000, snapshotMatchId: '9061502086', timeline: { matchid: '9061502086', entries: [{ gameTime: 420, text: '智慧符刷新了' }] } })
+  check('监听：同局显示最新一条（时间 + 人话）', same.right.text === '7:00 智慧符刷新了' && same.crossMatch === false, same.right.text)
+  const cross = helmListenLine({ gsiLastAt: 1000, now: 2000, snapshotMatchId: '9061502086', timeline: { matchid: '7512345678', entries: [{ gameTime: 1200, text: '肉山复活了' }] } })
+  check('监听：跨局一条都不显示并标记 crossMatch', cross.right.text === HELM_LISTEN_NO_EVENT && cross.crossMatch === true, cross.right.text)
+  const empty = helmListenLine({ gsiLastAt: null, now: 2000, snapshotMatchId: null, timeline: null })
+  check('监听：没帧与没事件是两句话', empty.left.text === HELM_LISTEN_NO_FRAME && empty.right.text === HELM_LISTEN_NO_EVENT, JSON.stringify([empty.left.text, empty.right.text]))
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
