@@ -11,6 +11,7 @@ import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import type { VisionAnswer, VisionReadiness } from './vision'
 import type { HoldSelfTest } from './hold-selftest'
+import type { SpeakerChannels } from './speaker-channel'
 import type { MatchSnapshot } from './match-snapshot'
 import type { HalfDuplexSnapshot, PlaybackLeg } from './half-duplex'
 import type { LatencyBoardRow } from './latency-board'
@@ -486,6 +487,8 @@ export const IPC = {
   HOTKEYS_SET: 'hotkeys:set',
   /** #95：按住检测的自检快照（常驻脚本在不在、最近的按下/松开）。 */
   HOLD_SELF_TEST: 'hotkey:hold-selftest',
+  /** #160 驾驶室：每个说话人一条频道（座位算标签，绝不猜名字）。 */
+  SPEAKER_CHANNELS: 'voice:speaker-channels',
   PROVIDER_TEST: 'provider:test',
   PROVIDER_TRANSLATE: 'provider:translate',
   CAPTURE_START: 'capture:start',
@@ -835,6 +838,7 @@ export const ipcContract = {
   getHotkeys: invoke<[], HotkeysResult>(IPC.HOTKEYS_GET),
   setHotkeys: invoke<[Record<HotkeyActionId, string>], HotkeysResult>(IPC.HOTKEYS_SET),
   holdSelfTest: invoke<[], HoldSelfTest>(IPC.HOLD_SELF_TEST),
+  speakerChannels: invoke<[], SpeakerChannels>(IPC.SPEAKER_CHANNELS),
   /** #124b：副屏面板的数据源，读的是主进程那一份快照。 */
   matchSnapshot: invoke<[], MatchSnapshot>(IPC.MATCH_SNAPSHOT),
   testProvider: invoke<[ProviderConfig], TestResult>(IPC.PROVIDER_TEST),

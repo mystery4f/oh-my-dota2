@@ -203,6 +203,13 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
   `hotkey:hold-selftest`; the panel's 热键 → 按住检测 row is the only place a user can tell "按下真的被听见" from
   "按住已经失效、现在是敲一下". A fallback state must say 按住不生效 and how to use 敲一下 — never "已恢复".
 
+- Cockpit channel data (#160): `src/shared/speaker-channel.ts` is the only place that decides what a
+  speaker channel is — labels come from the SEAT (`我` / `队友 2` / `对手 3`), never from a cached name or OCR,
+  because a real match never delivers `allplayers` (measured: 3499 frames in match 9061130332, zero allplayers).
+  Three empty states are part of the contract: no chat means an empty array (the UI writes 这局还没人说话, never ten
+  grey channels), a `matchid` change clears the ledger, and an unknown own seat makes every channel `unknown` and
+  says 认不出谁是谁 instead of guessing. The ledger (`src/main/services/voice/speaker-channels.ts`) is fed from
+  `gsi.ts`, served through `voice:speaker-channels`, and `--speaker-channel-probe` pins all three rules.
 - Per-speaker muting (#93): `src/shared/speak-mute.ts` owns identity extraction (hero short name plus the
   `[name]` segment of the display string), list normalisation and `isMuted()`. `speakSkipReason()` reports
   `muted-player`, never the global `mute` — the log must tell "this person is muted" from "reading is off".

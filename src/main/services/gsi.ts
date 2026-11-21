@@ -7,6 +7,7 @@ import { announceFrameOf, feedLiveAnnouncement } from './voice/announce'
 import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
 import { noteLiveMatch } from './gsi-match'
+import { noteSpeakerEvent, noteSpeakerSelf, noteSpeakerSlot } from './voice/speaker-channels'
 import { flushSnapshot, noteSnapshot } from './match-snapshot'
 import { notePhraseFrame } from './voice/phrase-context'
 import { logsDir } from './logs/base-dir'
@@ -263,6 +264,24 @@ function recordChatEvents(payload: GsiPayload): ChatLine[] {
     const hero = slotHero(event.player_id)
     const relation = slotRelation(event.player_id, mySlot, myTeam, event.channel_type)
     recordChatEvent(event, mySlot, label, hero, relation)
+    // 驾驶室（#160）的账本：只记座位与已确认的英雄/阵营，不猜名字。
+    noteSpeakerSelf({ matchid: payload.map?.matchid ?? null, slot: mySlot ?? null, team: myTeam })
+    if (event.player_id !== undefined) {
+      noteSpeakerSlot(event.player_id, {
+        ...(hero ? { hero } : {}),
+        ...(slotTeams.get(event.player_id) ?? slotTeams.get(event.player_id % 128) ?? slotTeams.get(event.player_id + 128)
+          ? { team: slotTeams.get(event.player_id) ?? slotTeams.get(event.player_id % 128) ?? slotTeams.get(event.player_id + 128) }
+          : {})
+      })
+      noteSpeakerEvent({
+        matchid: payload.map?.matchid ?? null,
+        slot: event.player_id,
+        at: Date.now(),
+        gameTime: event.game_time ?? null,
+        channel: event.channel_type ?? null,
+        text: event.message ?? ''
+      })
+    }
     // 只组装值：展示串由 renderChatLine 拼、正文就是 event.message，下游不再拆回来。
     if (typeof event.message === 'string' && event.message.trim())
       accepted.push({

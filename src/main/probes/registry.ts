@@ -21,6 +21,7 @@ import { runGsiProbe } from './gsi'
 import { runGsiFramesReportProbe } from './gsi-frames-report'
 import { runDownloadProbe } from './download'
 import { runHoldWatchProbe } from './hold-watch'
+import { runSpeakerChannelProbe } from './speaker-channel'
 import { runVisionProbe } from './vision'
 import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
@@ -421,6 +422,13 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--vision-probe',
     summary: 'look at the screen once: the payload is one message with the prompt and a data URL, a text-only model is refused with words, and no frame reaches the disk',
     run: runVisionProbe
+  },
+  {
+    flag: '--speaker-channel-probe',
+    ci: true,
+    summary:
+      'the cockpit channel data: no chat means no channels, a new match clears them, and an unknown seat is never guessed',
+    run: runSpeakerChannelProbe
   },
   {
     flag: '--hold-watch-probe',
