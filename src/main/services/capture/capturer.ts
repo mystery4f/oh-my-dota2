@@ -15,6 +15,7 @@ import { loadSettings } from '../settings'
 import { broadcastToWindows } from '../../windows/broadcast'
 
 import { HISTORY_MAX_ROWS } from '@shared/overlay-ledger'
+import { companionDropMatch, companionLookup, companionNote } from '../session/companion-profile'
 import { flagKeyNouns, keyNounsOf, type KeyNoun } from '@shared/key-nouns'
 import { directionFor } from '@shared/translate-direction'
 /**
@@ -149,6 +150,9 @@ export class ChatCaptureService {
 
   /** 对局结束：清掉「说过的话」窗口，并把浮层清空（下一局不该带着上一局的行）。 */
   endMatchSession(): void {
+    // #121：这一局的画像跟着对局一起结束，下一局从头记。
+    const forgotten = companionDropMatch()
+    if (forgotten > 0) console.log('COMPANION_DROP', JSON.stringify({ players: forgotten }))
     this.recent = []
     this.recentSet.clear()
     this.lastError = null
@@ -235,26 +239,37 @@ export class ChatCaptureService {
       if (!hasHan(row.body) && worthTranslating(row.body)) pending.push({ index, body: row.body })
     })
 
+    // #121：同一局同一个人说过同一句 → 直接用上次的译法，不再发一次请求（说法稳定，也省一次调用）。
+    // 匿名行（没有 speaker）不查也不记：把所有人的句子混进一个桶比不复用更糟。
+    const translatedEarly = new Map<number, string>()
+    const ask: typeof pending = []
+    for (const item of pending) {
+      const reused = companionLookup(rows[item.index]?.speaker, item.body)
+      if (reused === null) ask.push(item)
+      else translatedEarly.set(item.index, reused)
+    }
+    if (translatedEarly.size > 0) console.log('COMPANION_REUSE', JSON.stringify({ rows: translatedEarly.size }))
+
     // 谁真的被送去翻译了：只有这些行在失败时该背「翻译服务不可用」的标记。
-    const attempted = new Set(pending.map((item) => item.index))
+    const attempted = new Set(ask.map((item) => item.index))
     // 翻译前先拿原句对一次词表：清单抽好放这儿，翻译完只核对它，别让译文的用词反过来决定该找什么。
     const expected = new Map<number, KeyNoun[]>()
     for (const item of pending) expected.set(item.index, keyNounsOf(item.body, 'auto-zh'))
     const translated = new Map<number, string>()
     const cachedRows = new Map<number, boolean>()
-    if (pending.length > 0) {
+    if (ask.length > 0) {
       try {
         // 一次请求翻译整屏新行：会话上下文只增一次，也让模型看到同一屏的同伴信息。
         // 记账本在 translateLines 里统一处理（命中的行不会进这个请求）。
         const marks: boolean[] = []
         const block = await translateLines(
           provider,
-          pending.map((item) => item.body),
+          ask.map((item) => item.body),
           'auto-zh',
           { marks }
         )
         block.forEach((value, i) => {
-          const item = pending[i]
+          const item = ask[i]
           if (!item || !value) return
           translated.set(item.index, value)
           // 记账本命中的行单独标出来：面板和浮层要能一眼分清「词库」还是「现翻」。
@@ -264,6 +279,8 @@ export class ChatCaptureService {
         firstError ??= `translate: ${errorMessage(err)}`
       }
     }
+    // 画像里的复用值补进来：它们同样算「有译文」，但不进记账本（记账本只记模型真正的输出）。
+    for (const [index, value] of translatedEarly) translated.set(index, value)
 
     const entries = rows.map((row, index): CaptureEntry => {
       const value = translated.get(index)
@@ -272,6 +289,7 @@ export class ChatCaptureService {
       if (!value) return failed ? { ...row, error: firstError ?? undefined } : row
       const restored = withChatBody(row.original, row.body, value)
       // 翻译完只核对翻译前那份清单：缺了在条目上留个「？」，译文本身一个字不动。
+      companionNote(row.speaker, row.body, restored || value)
       const missing = flagKeyNouns(expected.get(index) ?? [], restored || value).keyNouns
       if (missing.length > 0)
         console.log('TRANSLATE_KEY_NOUN', JSON.stringify({ missing, line: row.body.slice(0, 80) }))

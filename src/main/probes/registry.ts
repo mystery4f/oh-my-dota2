@@ -49,6 +49,7 @@ import { runTrainProbe } from './train'
 import { runTrainQueueProbe } from './train-queue'
 import { runDiskBudgetProbe } from './disk-budget'
 import { runTrainFailureProbe } from './train-failure'
+import { runCompanionProfileProbe } from './companion-profile'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -546,6 +547,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the training failure diagnosis (`src/shared/train/failure-diagnosis.ts`): every known shape maps to its stage, and an unknown one keeps the raw tail instead of guessing',
     run: runTrainFailureProbe
+  },
+  {
+    flag: '--companion-profile-probe',
+    ci: true,
+    summary: 'the same-match companion profile (`src/shared/companion-profile.ts`): one player reuses their earlier rendering, a new player starts clean, and the profile is dropped at match end',
+    run: runCompanionProfileProbe
   },
   {
     flag: '--asr-check-live-probe',
