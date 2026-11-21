@@ -123,6 +123,7 @@ tags: [docs, index]
 | `docs/agents/issue-tracker.md` | 用 `gh` 管 GitHub Issue 的流程 |
 | `docs/agents/triage-labels.md` | 五个分诊标签的含义 |
 | `docs/agents/domain.md` | 单上下文领域文档：根 `GLOSSARY.md` + `docs/adr/` |
+| `docs/agents/prototype-to-landing.md` | 原型 → 落地的过关规则：票面五行、签字、交付门禁 |
 
 ## 历史快照
 
