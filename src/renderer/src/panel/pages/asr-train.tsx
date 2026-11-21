@@ -274,7 +274,7 @@ export function AsrTrainPage(): React.ReactElement {
     taskRunning,
     task,
     lastRun: runs[0] ?? null,
-    blocksCount: blocks.length,
+    blocks,
     busy: Boolean(busy)
     }),
     [status, taskRunning, task, runs, blocks, busy]
@@ -290,12 +290,14 @@ export function AsrTrainPage(): React.ReactElement {
     setStep(first)
   }, [pageFacts])
 
-  // headline 的文案与主按钮也从同一份事实推导（asr-train-state）：六态各自的提示都在一起。
+  // headline 的文案与主按钮也从同一份事实推导（asr-train-state）：七态各自的提示都在一起。
   const headline = headlineOf(pageFacts, state, {
     startTraining,
     stopTraining,
     goData: () => setStep('data'),
-    installEnv
+    installEnv,
+    // 增量没有可续权重时的出口：切回全量，不逼用户自己去开训方式里找（#173）。
+    useFullMode: () => setMode('fresh')
   })
 
   const stepSummary: Record<StepId, string> = {
@@ -408,25 +410,34 @@ export function AsrTrainPage(): React.ReactElement {
                       现役是 {activeEngineLabel}：训练不影响它，训完会自动切到 {status.target.label}。
                     </p>
                   ) : null}
-                {status ? (
-                  status.env.ok ? (
-                    <Row label="Python 与依赖" hint="训练用的那套解释器，和游戏进程无关">
-                      <StatusPill tone="ready">就绪</StatusPill>
-                    </Row>
-                  ) : (
-                    <Row label="还缺的依赖" stacked hint="缺一项就开不了训；录音与打包不受影响">
-                      <ul className="space-y-1 text-xs text-amber-300">
-                        {status.env.gaps.map((gap) => (
-                          <li key={gap}>· {gap}</li>
-                        ))}
-                      </ul>
-                    </Row>
-                  )
-                ) : null}
-                <Row label="安装" hint="装完自动重读环境；进度看「当前任务」">
-                  <Button size="sm" variant="outline" disabled={Boolean(busy) || taskRunning} onClick={installEnv}>
-                    安装环境
-                  </Button>
+                {/* 环境三行（解释器 / 缺件清单 / 安装按钮）合成一行：缺件反正是「装一下」，#173 收行。
+                    缺件清单进 Stacked 的值里，装完仍由同一条 installEnv 自动重读。 */}
+                <Row
+                  label="训练环境"
+                  stacked
+                  hint={
+                    status
+                      ? status.env.ok
+                        ? 'Python 与依赖齐全，和游戏进程无关'
+                        : '缺一项就开不了训；录音与打包不受影响'
+                      : '正在读状态…'
+                  }
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill tone={status?.env.ok ? 'ready' : 'warn'}>
+                      {status ? (status.env.ok ? '就绪' : `缺 ${status.env.gaps.length} 项`) : '…'}
+                    </StatusPill>
+                    <Button size="sm" variant="outline" disabled={Boolean(busy) || taskRunning} onClick={installEnv}>
+                      安装环境
+                    </Button>
+                  </div>
+                  {status && !status.env.ok ? (
+                    <ul className="space-y-1 text-xs text-amber-300">
+                      {status.env.gaps.map((gap) => (
+                        <li key={gap}>· {gap}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </Row>
               </>
             ) : null}
@@ -592,13 +603,10 @@ export function AsrTrainPage(): React.ReactElement {
                   >
                     识别测试
                   </Button>
+                  {/* 识别结果原来是独立一行（#173 收行）：读出来的句子就贴在这排按钮后面，
+                      字数不再单独占一格。 */}
+                  {asrText ? <span className="min-w-0 break-words text-xs text-muted-foreground">{asrText}</span> : null}
                 </Row>
-
-                {asrText ? (
-                  <Row label="识别结果" hint={asrText}>
-                    <span className="text-xs text-muted-foreground">{asrText.length} 字</span>
-                  </Row>
-                ) : null}
 
                 <Row
                   label="纠错样本"
@@ -659,24 +667,13 @@ export function AsrTrainPage(): React.ReactElement {
                   </div>
                 </Row>
 
-                {/* 数据体检（#104）：重复句、录不出话、缺句，开训前就该看见。
-                    判据与 `--dataset-health-probe` 是同一份（shared/train/dataset-health.ts），面板不自己判。 */}
-                <Row label="数据体检" stacked hint={status?.health ? healthLine(status.health) : '还在统计录音目录'}>
-                  {status?.health && status.health.takes > 0 ? (
-                    <>
-                      <p className="py-1 text-xs text-slate-400">
-                        时长 最短 {secOf(status.health.duration.minMs)} · 中位{' '}
-                        {secOf(status.health.duration.medianMs)} · 最长 {secOf(status.health.duration.maxMs)}
-                      </p>
-                      {status.health.issues.map((issue) => (
-                        <p key={issue.kind} className="py-1 text-xs text-amber-300">
-                          {issue.label}：{issue.keys.join('、')}
-                        </p>
-                      ))}
-                    </>
-                  ) : null}
-                </Row>
-                <Row label="打包数据集" hint={note || '已录句子 × 稿子 → 训练/验证两份 jsonl，训练脚本直接吃'}>
+                {/* 数据体检（#104）不再单独占一行（#173）：摘要挂在打包上，判据仍是同一份
+                    （shared/train/dataset-health.ts / --dataset-health-probe），面板不自己判。 */}
+                <Row
+                  label="打包数据集"
+                  stacked
+                  hint={note || '已录句子 × 稿子 → 训练/验证两份 jsonl，训练脚本直接吃'}
+                >
                   <Button
                     size="sm"
                     variant="outline"
@@ -697,6 +694,24 @@ export function AsrTrainPage(): React.ReactElement {
                   >
                     打包
                   </Button>
+                  {status?.health ? (
+                    <div className="space-y-1 text-xs">
+                      <p className="text-slate-400">{healthLine(status.health)}</p>
+                      {status.health.takes > 0 ? (
+                        <p className="text-slate-400">
+                          时长 最短 {secOf(status.health.duration.minMs)} · 中位{' '}
+                          {secOf(status.health.duration.medianMs)} · 最长 {secOf(status.health.duration.maxMs)}
+                        </p>
+                      ) : null}
+                      {status.health.issues.map((issue) => (
+                        <p key={issue.kind} className="text-amber-300">
+                          {issue.label}：{issue.keys.join('、')}
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-400">还在统计录音目录</span>
+                  )}
                 </Row>
 
                 <Row label="全量识别比对" hint="用现役模型把每条录音都跑一遍，和稿子原文对一遍；不一致的会列出来，点开约一分钟">
@@ -755,23 +770,15 @@ export function AsrTrainPage(): React.ReactElement {
                   </div>
                 </Row>
 
-                {/* 预计耗时（#65）：纯显示，不排程也不拦人；数字来自 shared/train/asr-ft 的 estimateFtCost，面板不自己算。 */}
-                {/* 基准那句是整段说明，不塞进 Row 的标签列（会被压成一条竖线），放成值下面的一整行。 */}
-                <Row label="预计耗时" stacked>
-                  <span className="text-sm leading-relaxed">{status?.estimate[mode].label ?? '…'}</span>
-                </Row>
-                <p className="py-2 text-xs leading-relaxed text-muted-foreground">
-                  {status?.estimateBasis ?? '正在读状态…'}
-                </p>
-
+                {/* 预计耗时（#65）不再单独占一行（#173）：数字与基准句一起进「开训」的 note——
+                    纯显示，不排程也不拦人；数字来自 shared/train/asr-ft 的 estimateFtCost，面板不自己算。 */}
                 <Row
                   label="开训"
+                  stacked
                   hint={
                     blocks.length > 0
                       ? `先解决：${blocks.map((item) => item.label).join('、')}`
-                      : mode === 'incremental'
-                        ? '接上一轮的权重，步数跟上方估算一致'
-                        : '轮数按录音量自动算，步数跟上方估算一致'
+                      : `${status?.estimate[mode].label ?? '…'}｜${status?.estimateBasis ?? '正在读状态…'}`
                   }
                 >
                   <Button size="sm" disabled={taskRunning || blocks.length > 0} onClick={startTraining}>
@@ -785,22 +792,22 @@ export function AsrTrainPage(): React.ReactElement {
 
                 {/* 最近三条：再多就是台账了，历史全量还在 runs.db 里。框起来是为了和上面的
                     设置行区分——这几行是「结果」，不是「可以改的设置」。 */}
-                {runs.length === 0 ? (
-                  <Row label="训练记录" hint="还没有记录：跑一次就会在磁盘上留一条" />
-                ) : (
-                  <div className="py-2">
-                    <Panel>
-                      <Group label="最近训练">
-                        {runs.slice(0, 3).map((run) => (
+                <div className="py-2">
+                  <Panel>
+                    <Group label="最近训练">
+                      {runs.length === 0 ? (
+                        <p className="py-2 text-xs text-muted-foreground">还没有记录：跑一次就会在磁盘上留一条</p>
+                      ) : (
+                        runs.slice(0, 3).map((run) => (
                           <div key={run.id}>
                             <RunRow run={run} outcomeLine={judgeRunOutcome(run).line} />
                             <Sparkline run={run} />
                           </div>
-                        ))}
-                      </Group>
-                    </Panel>
-                  </div>
-                )}
+                        ))
+                      )}
+                    </Group>
+                  </Panel>
+                </div>
               </>
             ) : null}
 
@@ -819,9 +826,24 @@ export function AsrTrainPage(): React.ReactElement {
                   <StatusPill tone={status?.swap.activeExists ? 'ready' : 'warn'}>
                     {status?.swap.activeExists ? '已就位' : '缺模型'}
                   </StatusPill>
+                  {status?.swap.bakExists ? (
+                    <span className="text-xs text-muted-foreground">上一代留在 .bak 里，只作最后一次失败时的兜底</span>
+                  ) : null}
                 </Row>
-                {awaitingRun?.audition ? (
-                  <Row label="试听对比" stacked hint={`${auditionLine(awaitingRun.audition)} —— 两副模型听的是同一批留出集录音；采纳才换，跳过也会记在这一轮上`}>
+                {awaitingRun?.audition || skippedRun?.auditionSkip ? (
+                  <Row
+                    label="试听"
+                    stacked
+                    hint={
+                      awaitingRun?.audition
+                        ? `${auditionLine(awaitingRun.audition)} —— 两副模型听的是同一批留出集录音；采纳才换，跳过也会记在这一轮上`
+                        : skippedRun?.auditionSkip
+                          ? auditionSkipLine(skippedRun.auditionSkip)
+                          : ''
+                    }
+                  >
+                    {awaitingRun?.audition ? (
+                    <>
                     <div className="space-y-1 text-xs">
                       {awaitingRun.audition.rows.map((row) => (
                         <div key={row.key} className="grid grid-cols-[72px_1fr_1fr] gap-2 rounded border border-border/60 px-2 py-1">
@@ -844,10 +866,9 @@ export function AsrTrainPage(): React.ReactElement {
                       </Button>
                       {auditionNote ? <span className="text-xs text-muted-foreground">{auditionNote}</span> : null}
                     </div>
+                    </>
+                    ) : null}
                   </Row>
-                ) : null}
-                {!awaitingRun && skippedRun?.auditionSkip ? (
-                  <Row label="试听" hint={auditionSkipLine(skippedRun.auditionSkip)} />
                 ) : null}
                 <Row
                   label="短句/长句分流"
@@ -872,14 +893,14 @@ export function AsrTrainPage(): React.ReactElement {
                     </StatusPill>
                   </label>
                 </Row>
-                <Row label="最近导出" hint={status?.swap.lastExportDir ?? '还没有导出的权重'} />
                 <Row
                   label="换模"
                   hint="训练成功自动换上新模型；失败保留旧模型。这里只读，不提供按钮"
-                />
-                {status?.swap.bakExists ? (
-                  <Row label="旧的微调模型" hint="还留在磁盘上，只作为最后一次失败时的兜底" />
-                ) : null}
+                >
+                  <span className="text-xs text-muted-foreground">
+                    最近导出：{status?.swap.lastExportDir ?? '还没有导出的权重'}
+                  </span>
+                </Row>
               </>
             ) : null}
           </div>

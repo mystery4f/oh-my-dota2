@@ -298,6 +298,36 @@ const stubTrainRuns: Awaited<ReturnType<WindowApi['trainRuns']>> = [
     error: null
   },
   {
+    id: 'asr-ft-stub-trained',
+    kind: 'asr-ft',
+    experiment: '地图-20261107190000',
+    params: { epochs: 3, lr: '1e-4', resumeFrom: null },
+    data: { files: 36, durationMs: 108_000, bytes: 388_000 },
+    status: 'trained',
+    startedAt: stubNow - 9 * 60 * 60 * 1000,
+    endedAt: stubNow - 7 * 60 * 60 * 1000,
+    artifacts: { runDir: 'data/asr-ft-runs/地图-20261107190000', ckptDir: 'data/asr-ft-runs/地图-20261107190000' },
+    metrics: { steps: 1200, epochs: 3, bestLoss: 0.42, lastLoss: 0.45, series: [] },
+    applied: false,
+    error: null,
+    auditionSkip: { at: stubNow - 7 * 60 * 60 * 1000, auto: false, reason: '这一轮只用来对齐底模，跳过试听' }
+  },
+  {
+    id: 'asr-ft-stub-early',
+    kind: 'asr-ft',
+    experiment: '地图-20261106190000',
+    params: { epochs: 66, lr: '2e-5', resumeFrom: null },
+    data: { files: 33, durationMs: 99_000, bytes: 355_000 },
+    status: 'trained',
+    startedAt: stubNow - 26 * 60 * 60 * 1000,
+    endedAt: stubNow - 24 * 60 * 60 * 1000,
+    artifacts: { runDir: 'data/asr-ft-runs/地图-20261106190000', ckptDir: 'data/asr-ft-runs/地图-20261106190000' },
+    metrics: { steps: 2100, epochs: 21, bestLoss: 0.38, lastLoss: 0.4, series: [] },
+    applied: false,
+    error: null,
+    auditionSkip: { at: stubNow - 24 * 60 * 60 * 1000, auto: true, reason: '验证集 5 轮没降，早停' }
+  },
+  {
     id: 'gv-sovits-stub-done',
     kind: 'gv-sovits',
     experiment: 'mirana',
@@ -312,7 +342,7 @@ const stubTrainRuns: Awaited<ReturnType<WindowApi['trainRuns']>> = [
       epochs: 8,
       bestLoss: null,
       lastLoss: null,
-      series: Array.from({ length: 8 }, (_, i) => ({ step: i + 1, epoch: i + 1 }))
+      series: Array.from({ length: 8 }, function (_, i) { return { step: i + 1, epoch: i + 1 } })
     },
     applied: true,
     error: null
@@ -351,6 +381,14 @@ if (query.get('audition') === '1') {
     auditionSkip: null
   })
 }
+
+/**
+ * 识别训练页的状态开关（#173）：`?asr=env|nodata|no-base|ready|running|failed|live`。
+ * 这页的抬头四态本来就只能靠真实训练状态触发（缺环境要真的缺、训练中要真的在跑），
+ * 预览里不给开关就永远看不到，设计侧也就无从检查。桩只喂事实，判据仍在页面自己的纯缝里。
+ */
+type AsrStubState = 'env' | 'nodata' | 'no-base' | 'ready' | 'running' | 'failed' | 'live'
+const asrStub: AsrStubState = (query.get('asr') as AsrStubState | null) ?? 'ready'
 
 const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
   task: {
@@ -1004,7 +1042,8 @@ const implemented = {
     return stubScript
   },
   ftScriptReset: async () => stubScript,
-  ftRecList: async () => [...stubRecs],
+  // `?asr=nodata`：一句都没录时体检才报「数据不足」，桩里得连录音一起空掉（#173）。
+  ftRecList: async () => (asrStub === 'nodata' ? [] : [...stubRecs]),
   ftRecSave: async (group, line, bytes) => {
     // 预览里也真的「存下」：保存后列表带上新标记，自动前进才有东西可看。
     const info = stubTake(
@@ -1082,8 +1121,8 @@ const implemented = {
       fresh: estimateFtCost({ ...costInput, mode: 'fresh' }),
       incremental: estimateFtCost({ ...costInput, mode: 'incremental' })
     }
-    return {
-      env: { ok: true, gaps: [], envRoot: 'data/asr-ft-env' },
+    const stubbed = {
+      env: { ok: true, gaps: [] as string[], envRoot: 'data/asr-ft-env' },
       // 目标行跟着现役模型走：?asrModel=paraformer 切腿时 trainer 一起换，估时不会对不上。
       target: {
         engineId: engine.id,
@@ -1109,12 +1148,20 @@ const implemented = {
         takes: 6,
         duration: { minMs: 620, medianMs: 900, maxMs: 2200, totalMs: 6800 },
         issues: [
-          { kind: 'unusable', label: '1 条录不出话（静音 1）', keys: ['G14-L02'], detail: 'G14-L02 静音' },
-          { kind: 'missing', label: '稿子里还有 2 句没录', keys: ['G15-L04', 'G15-L07'], detail: 'G15-L04、G15-L07' }
+          { kind: 'unusable' as const, label: '1 条录不出话（静音 1）', keys: ['G14-L02'], detail: 'G14-L02 静音' },
+          { kind: 'missing' as const, label: '稿子里还有 2 句没录', keys: ['G15-L04', 'G15-L07'], detail: 'G15-L04、G15-L07' }
         ],
         ok: false
       }
     }
+    // `?asr=` 的四种「上去就问用户要东西」的处境：缺环境 / 一句都没录 / 增量没有起点 / 现役已就位。
+    if (asrStub === 'env') stubbed.env = { ok: false, gaps: ['torch 2.5 未安装', 'soundfile 缺失'], envRoot: stubbed.env.envRoot }
+    if (asrStub === 'nodata') {
+      stubbed.swap = { ...stubbed.swap, activeExists: false, bakExists: false }
+      stubbed.pending = { ...stubbed.pending, count: 0, label: '还没录过：从未训练' }
+    }
+    if (asrStub === 'live') stubbed.pending = { ...stubbed.pending, count: 0, label: '没有待训数据' }
+    return stubbed
   },
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
   ftAsrftApply: async () => ({ ok: true, error: null, model: 'ft-stub' }),
@@ -1126,7 +1173,7 @@ const implemented = {
       : { frames: 240, gaps: 0, line: null, at: '2026-11-09T13:40:48.101Z' },
   ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),
   ftAsrftResetBase: async () => ({ ok: true, error: null, model: null }),
-  ftAsrftFacts: async () => ({ vramNote: null, incremental: true }),
+  ftAsrftFacts: async () => ({ vramNote: null, incremental: asrStub !== 'no-base' && asrStub !== 'nodata' }),
   sovitsStatus: async () => sovitsStatus,
   sovitsInstall: async () => sovitsStatus,
   sovitsRefs: async () => sovitsRefs,

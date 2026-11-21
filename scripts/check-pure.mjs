@@ -1268,6 +1268,47 @@ check(
   check('结局：ASR 训完且两种试听记录都为空才算待试听', awaiting.outcome === 'awaiting-audition' && v({ auditionSkip: { kind: 'manual' } }).outcome === 'trained', awaiting.outcome)
 }
 
+// #173 识别训练页的七态：判据只有 preflight 一份，这里钉的是「block 怎么映射成一句话」。
+{
+  const { pageStateOf, headlineOf } = await import('../src/renderer/src/panel/pages/asr-train-state.ts')
+  const status = (over = {}) => ({
+    env: { ok: true, gaps: [] },
+    swap: { activeExists: false, bakExists: false, lastExportDir: null },
+    pending: { count: 3, label: '待训 3 条' },
+    target: { label: 'qwen3-ft', modelDir: 'x' },
+    estimate: { fresh: { label: '12 分钟' }, incremental: { label: '300 步' } },
+    estimateBasis: '按录音量估的',
+    ...over
+  })
+  const facts = (over = {}) => ({
+    // status: null 表示「还没读到」，与「给了个默认快照」是两件事，别用 undefined 偷懒。
+    status: 'status' in over ? over.status : status(),
+    taskRunning: over.taskRunning ?? false,
+    task: over.task ?? null,
+    lastRun: over.lastRun ?? null,
+    blocks: over.blocks ?? [],
+    busy: over.busy ?? false
+  })
+  const block = (id, detail = '说清了为什么') => ({ id, level: 'block', label: id, detail })
+  const handlers = { startTraining() {}, stopTraining() {}, goData() {}, installEnv() {}, useFullMode() {} }
+
+  check('页面七态：状态还没读到时说「缺环境」而不是「可以开训」', pageStateOf(facts({ status: null })) === 'env', pageStateOf(facts({ status: null })))
+  const envBlock = pageStateOf(facts({ status: { env: { ok: false, gaps: ['torch'] } }, blocks: [block('env')] }))
+  check('页面七态：preflight 报环境阻断 → 缺环境', envBlock === 'env', envBlock)
+  check('页面七态：训练跑着就排在环境之后、数据之前', pageStateOf(facts({ taskRunning: true, blocks: [block('rec')] })) === 'running', 'running')
+  const failedState = pageStateOf(facts({ lastRun: { status: 'failed', error: '炸了' } }))
+  check('页面七态：上次失败要说得出原因（而不是混进可开训）', failedState === 'failed', failedState)
+  const noBase = pageStateOf(facts({ blocks: [block('incremental')] }))
+  check('页面七态：增量没有可续权重 → no-base，绝不是 ready（#167：按钮点不动的状态不能叫可开训）', noBase === 'no-base', noBase)
+  check('页面七态：一句都没录且没有现役 → 数据不足', pageStateOf(facts({ blocks: [block('rec')] })) === 'nodata', 'nodata')
+  check('页面七态：一句都没录但有现役 → 现役已就位（那时训练不是下一步）', pageStateOf(facts({ blocks: [block('rec')], status: { swap: { activeExists: true, bakExists: false } } })) === 'live', 'live')
+  check('页面七态：没有阻断、有待训 → 可以开训', pageStateOf(facts({})) === 'ready', 'ready')
+  const noBaseHead = headlineOf(facts({ blocks: [block('incremental', '没有可接的上一轮权重')] }), 'no-base', handlers)
+  check('页面抬头：no-base 那句直接引用 preflight 的 detail，不另写一份解释', noBaseHead.hint.includes('没有可接的上一轮权重'), noBaseHead.hint.slice(0, 24))
+  check('页面抬头：no-base 的主操作是「改成全量」且真能点', noBaseHead.action?.label === '改成全量' && noBaseHead.action?.disabled === false, String(noBaseHead.action?.label))
+  check('页面抬头：还有阻断时「开始训练」是 disabled（点了也白跑就不许给可点的按钮）', headlineOf(facts({ blocks: [block('pack')] }), 'ready', handlers).action?.disabled === true, 'disabled')
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
