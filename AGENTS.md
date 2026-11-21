@@ -387,6 +387,10 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `provider-failure.ts` — never a second classifier). `src/shared/provider-metrics.ts` owns the summary:
   median latency (a single timeout must not move it), failure kinds counted separately, and an empty
   board reads "nobody called a model" rather than 0% success, which looks like total outage.
+- The 20-second recording cap is not "the user finished" (#97): when `RECORD_MAX_MS` fires the overlay
+  stage says 等太久了，已停止 and the stop reason travels to main (`VoiceStopReason = 'release' |
+  'silence' | 'timeout'`), which writes one `{"stage":"capture-stop","reason":"timeout"}` line into
+  `logs/voice-chain.jsonl`. A cap that stops silently reads as "the key broke".
 - Quick phrases (#117): `src/shared/quick-phrases.ts` owns groups, `{hero}`/`{time}`/`{matchid}`
   substitution and the rule that an empty group is hidden — not rendered as an empty shell. Placeholders
   it does not recognise (a typo like `{heor}`) stay verbatim, so the mistake is visible instead of being

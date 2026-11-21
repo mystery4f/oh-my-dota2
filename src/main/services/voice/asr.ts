@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { VoiceTranscribeResult } from '@shared/ipc'
+import type { VoiceStopReason, VoiceTranscribeResult } from '@shared/ipc'
 import { activeAsrModel, engineSpecOf, transcribeAsr } from './asr-model'
 import { stashUtterance } from './corrections'
 import { halfDuplexSnapshot, judgeCaptureAt } from './half-duplex'
@@ -37,9 +37,23 @@ export async function transcribeWav(wavPath: string): Promise<VoiceTranscribeRes
  * asrMs/mic 随返回值显式交给渲染层，再随 voiceReply 原样带回——漏传这一步，
  * totalMs 就会静默从「识别开始」漂成「翻译开始」，这正是把它做成返回值的原因。
  */
-export async function transcribeForVoice(wavBase64: string, micLabel?: string): Promise<VoiceTranscribeResult> {
+export async function transcribeForVoice(
+  wavBase64: string,
+  micLabel?: string,
+  stopReason?: VoiceStopReason
+): Promise<VoiceTranscribeResult> {
   const base64 = String(wavBase64 ?? '')
   if (!base64) return { ok: false, text: '', error: '音频为空' }
+  // #97 追加验收：撞上 20 秒上限收尾的那一验收工后要查得出来，所以链路日志里单独留一行。
+  if (stopReason === 'timeout') {
+    appendCappedJsonl(join(logsDir(), 'voice-chain.jsonl'), {
+      at: new Date().toISOString(),
+      spoken: false,
+      stage: 'capture-stop',
+      reason: 'timeout',
+      note: '录音到了 20 秒上限，已自动停止'
+    })
+  }
   // #129：我们自己的声音还在放，这段录音就是它的回声——不识别，但要记账。
   const guard = judgeCaptureAt(Date.now())
   if (guard.drop) {

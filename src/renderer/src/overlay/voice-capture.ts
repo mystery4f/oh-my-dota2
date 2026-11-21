@@ -156,6 +156,8 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
   let voicedMs = 0
   let silentMs = 0
   let silenceWindowMs = SILENCE_PRESETS.short
+  // 这一次录音是不是被 20 秒上限收掉的（#97：浮层要说一句「等太久了，已停止」，链路要记 timeout）。
+  let maxedOut = false
   let chunkSampleRate = 48_000
   /** 设备在录音中断开：这条录音不进链，提示已经由 dropDevice 落过。 */
   let deadAbort = false
@@ -293,6 +295,7 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       return
     }
     recording = true
+    maxedOut = false
     setRingRecording(true)
     window.api.reportVoiceState(true)
     levelSentAt = 0
@@ -302,7 +305,13 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     stopInterpretEcho()
     reportHealth({ recording: true, level: 0, dead: false, reason: null, label: '' })
     sink.stage(recordingStageLine(sink.voiceCaptureMode(), sink.voiceCaptureKey()))
-    recordTimer = setTimeout(() => void stop(), RECORD_MAX_MS)
+    recordTimer = setTimeout(() => {
+      // 到上限不是「用户说完了」，是「我们等太久了」：浮层必须有一句可见的话，
+      // 否则人只看到录音自己停了，会以为按坏了（#97 追加验收）。
+      console.log('VOICE_CAPTURE_MAX', JSON.stringify({ maxMs: RECORD_MAX_MS }))
+      maxedOut = true
+      void stop()
+    }, RECORD_MAX_MS)
     // 设备名只进日志：挪到 recording=true 之后异步补齐，别再撑大「松开撞上开麦」的竞态窗口。
     const openedRef = opened
     void describeCaptureDevice(openedRef.stream)
@@ -353,11 +362,11 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       fail(rejectLine(verdict, mic.split('|')[0] ?? ''), verdict.detail, 1800)
       return
     }
-    sink.stage('识别中…')
+    sink.stage(maxedOut ? '等太久了，已停止 · 识别中…' : '识别中…')
     const wav = encodeWav16k(chunks, rate)
     // 同声模式（#128）：先把刚才那句中文原样放回自己耳朵，再去识别——回放是本地音频，不占链上的时间。
     void echoIfInterpret(wav)
-    const result = await window.api.transcribeAudio(wav, recordDevice)
+    const result = await window.api.transcribeAudio(wav, recordDevice, maxedOut ? 'timeout' : undefined)
     const transcript = result.text.trim()
     if (!result.ok || !transcript) {
       const transcriptError = result.error ?? result.note ?? '未识别到语音'

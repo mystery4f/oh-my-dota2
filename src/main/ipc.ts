@@ -234,7 +234,7 @@ const handlers: MainHandlers = {
   reportVoiceChain: (result) => {
     broadcast(IPC.VOICE_CHAIN_RESULT, result)
   },
-  transcribeAudio: (wavBase64, micLabel) => transcribeForVoice(wavBase64, micLabel),
+  transcribeAudio: (wavBase64, micLabel, stopReason) => transcribeForVoice(wavBase64, micLabel, stopReason),
   // #66：纠错落库。开关（settings.asrCorrectionsToDataset）在主进程判；面板只报「票据 + 改对的那句」。
   voiceCorrection: (input) => saveVoiceCorrection(input),
 // #74：热词候选只建议不自动应用。并入走 settings 的保存（引擎自重载）；忽略只清池子。

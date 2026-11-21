@@ -404,6 +404,9 @@ export interface VoiceBackendStatus {
 }
 
 /** Result of a speech transcription (Qwen3-ASR；#45 起 whisper.cpp 已退役，只剩这一种形状). */
+/** 这段录音是怎么结束的：松手、静音收尾，还是撞上 20 秒上限（#97 追加验收要它进链路日志）。 */
+export type VoiceStopReason = 'release' | 'silence' | 'timeout'
+
 export interface VoiceTranscribeResult {
   ok: boolean
   text: string
@@ -893,7 +896,7 @@ export const ipcContract = {
   onVoiceRuntimeState: listen<VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATE),
   // 第二个参数是录音设备（`label|deviceId 前 8 位`），只进日志：deviceId 按 origin 加盐，
   // 和 settings 里存的那串对不上，人眼认名字。
-  transcribeAudio: invoke<[string, string?], VoiceTranscribeResult>(IPC.VOICE_TRANSCRIBE),
+  transcribeAudio: invoke<[string, string?, VoiceStopReason?], VoiceTranscribeResult>(IPC.VOICE_TRANSCRIBE),
   voiceCorrection: invoke<[FtCorrectionInput], FtCorrectionSaveResult>(IPC.VOICE_CORRECTION),
   ttsPreview: invoke<[string], VoicePreviewResult>(IPC.VOICE_TTS_PREVIEW),
   voiceOutTest: invoke<[], VoiceOutTestResult>(IPC.VOICE_OUT_TEST),
