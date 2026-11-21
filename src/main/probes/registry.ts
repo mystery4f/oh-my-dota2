@@ -97,6 +97,7 @@ import { runQuickPhrasesProbe } from './quick-phrases'
 import { runOfflineStatusProbe } from './offline-status'
 import { runAsrRoutingWireProbe } from './asr-routing-wire'
 import { runEnvReportProbe } from './env-report'
+import { runMachineEnvProbe } from './machine-env'
 import { runMatchSnapshotProbe } from './match-snapshot'
 import { runTargetLanguageProbe } from './target-language'
 import { runTranslateDirectionProbe } from './translate-direction'
@@ -547,6 +548,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the machine check: six rows in fixed order, missing device counts read unknown, and all three port owners verified on an injected high port',
     run: runEnvReportProbe
+  },
+  {
+    flag: '--machine-env-probe',
+    ci: true,
+    summary: 'the machine-level three rows: python for both legs, missing packages with reasons, and four VRAM tiers where "cannot measure" is never green',
+    run: runMachineEnvProbe
   },
   {
     flag: '--quick-phrases-probe',

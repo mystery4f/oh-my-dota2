@@ -1099,3 +1099,18 @@
 三条口径：**缺块写 `—`**（不许猜成 Lv1 或 0 金）；**没有快照就整条说实话**（「先把 GSI 那条连通」，不排空壳）；**关掉看板不动浮层**——这不是靠条件判断，而是 `windows/board.ts` 根本不 import 浮层管理器，没有那条调用路径。
 
 位置单独记在 `settings.boardBounds`，**不复用** `overlayBoundsByDisplay`：共用键会让「动看板」看起来像「动浮层」。
+
+### 机器级三行：Python / 依赖 / 显存，两页共用一份（#179）
+
+症状（需求侧）：「音色训练跑不起来」与「识别训练装不上环境」在界面上长得一样——都是一行红字 + 一段旧日志，用户分不清是缺解释器、缺包，还是显存不够。
+
+根因：这三件事分别散在三条腿里。识别训练的解释器由 `detectAsrFtEnv()` 解析（`src/main/services/train/asr-ft.ts:101-119`，`venv/Scripts/python.exe` 或 `env/Scripts/python.exe`），音色合成的解释器是 GV 安装目录里的 `runtime/python.exe`（`src/main/services/voice/sovits-install.ts:45-51`），显存只在「点开训」那一刻查一次（`src/main/services/train/asr-ft.ts:766` 的 `ftVramGuard()`）。没有一处能把「这台机器行不行」讲清楚，两页各拼一句必然走样。
+
+修法：`src/shared/machine-env.ts` 把事实折叠成**固定三行**（python → deps → vram）+ 一句汇总；`src/main/services/machine-env.ts` 只做取数（缓存 5 秒）；页面各加一行 `<Row stacked>`，两页读同一份 IPC（`machine:env`）。
+
+四条口径：
+
+- **测不到 ≠ 不在**。解释器在但版本问不出来时写「测不到（退出码 1，没打印版本）」；没有 `nvidia-smi` 写「测不到：没有 nvidia-smi（核显或驱动没装）」，并且**不算 ready**。
+- **缺包要点名 + 说清为什么需要它**。音色合成那四个依赖写成 `GV_PY_DEPS`（torch=推理运行时、torchaudio=读参考音频、numpy=张量、soundfile=写 wav），缺 `soundfile` 时行里是「音色合成：缺 soundfile（把合成结果写成前端能播的 wav）」，不是光秃秃一个包名。
+- **两页拼一句话**：`depsClause(report)` 专门给「和识别训练页『引擎包没装』拼成一句」用，避免同一个格子上出现两句并列的判断。
+- **显存有两个出口，下一票合并**：旧的 `ftVramGuard()`（`src/main/services/train/asr-ft.ts:762-782`）在**开训那一刻**把 `ftVramNote()` 喂给开训预检（`src/shared/train/preflight.ts:78` 的 `vram` 项，`level: 'warn'`），新的是 `src/shared/machine-env.ts` 的机器级行。本票**不动旧出口**（`docs/adr/machine-env.md` 记了这件事），因为动它会把测试手上的训练票牵进来；合并时删的是**预检那一项**，别删机器级那行——识别训练页少一句显存提示不影响判断，而机器级那行是音色页唯一的显存视角。

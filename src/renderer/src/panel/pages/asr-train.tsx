@@ -18,6 +18,7 @@ import { healthLine } from '@shared/train/dataset-health'
 import { routingHint } from '@shared/asr-routing'
 import type { AsrState } from '@shared/asr/models'
 import { normalizeLine } from '@shared/chat-line'
+import { machineEnvLine, machineEnvState, type MachineEnvReport } from '@shared/machine-env'
 import { Button } from '@/components/ui/button'
 import { auditionLine, auditionSkipLine } from '@shared/train/audition'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
@@ -71,6 +72,7 @@ export function AsrTrainPage(): React.ReactElement {
   const [lineNo, setLineNo] = React.useState(1)
   const [asrText, setAsrText] = React.useState('')
   const [packed, setPacked] = React.useState<{ train: number; eval: number } | null>(null)
+  const [machine, setMachine] = React.useState<MachineEnvReport | null>(null)
   const [facts, setFacts] = React.useState<AsrFtFacts | null>(null)
   const [step, setStep] = React.useState<StepId>('data')
   const [customText, setCustomText] = React.useState('')
@@ -306,6 +308,22 @@ export function AsrTrainPage(): React.ReactElement {
     train: taskRunning ? `${task?.progress ?? 0}%` : status ? `待训 ${status.pending.count} 条` : '…',
     live: status?.swap.activeExists ? `${status.target.label} 已就位` : '还没换过模型'
   }
+
+  // #179：机器级三行进页面测一次（不轮询）。它答的是「这台机器能不能跑」，不是「这一局怎么样」。
+  React.useEffect(() => {
+    let alive = true
+    void window.api
+      .machineEnv()
+      .then((report) => {
+        if (alive) setMachine(report)
+      })
+      .catch(() => {
+        if (alive) setMachine(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   return (
     <>
@@ -906,6 +924,41 @@ export function AsrTrainPage(): React.ReactElement {
           </div>
         </div>
       </div>
+
+      {/* #179：机器级三行（Python / 依赖 / 显存）。放在四步之外：它答的是「这台机器」，不是某一步的进度。 */}
+      <Panel>
+        <Group label="机器">
+          <Row
+            label="这台机器"
+            stacked
+            hint={machine === null ? '正在读机器状态…' : machineEnvLine(machine)}
+          >
+            <StatusPill
+              tone={
+                machine === null
+                  ? 'idle'
+                  : machineEnvState(machine) === 'ok'
+                    ? 'ready'
+                    : machineEnvState(machine) === 'warn'
+                      ? 'warn'
+                      : machineEnvState(machine) === 'bad'
+                        ? 'bad'
+                        : 'idle'
+              }
+            >
+              {machine === null
+                ? '读取中'
+                : machineEnvState(machine) === 'ok'
+                  ? '能跑'
+                  : machineEnvState(machine) === 'warn'
+                    ? '偏紧'
+                    : machineEnvState(machine) === 'bad'
+                      ? '缺东西'
+                      : '测不到'}
+            </StatusPill>
+          </Row>
+        </Group>
+      </Panel>
 
       <Modal
         open={editingScript}

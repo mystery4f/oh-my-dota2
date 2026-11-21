@@ -22,6 +22,7 @@ import type { ProbeCatalog } from './probe-catalog'
 import type { ProviderBoard } from './provider-metrics'
 import type { RenderedPhraseGroup } from './quick-phrases'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
+import type { MachineEnvReport } from './machine-env'
 import type { GlossaryPackStatus } from './glossary-pack'
 import type { SettingsBundleExportResult, SettingsBundleImportResult } from './settings-bundle'
 import type { QualityReport } from './quality-report'
@@ -513,6 +514,8 @@ export const IPC = {
   FIRST_RUN: 'first-run:report',
   /** 这台机器的体检：CPU / 内存 / 磁盘 / 端口 / 设备数，每行一句话说清为什么值得看。 */
   ENV_REPORT: 'env:report',
+  /** #179：机器级三行（Python / 依赖 / 显存）。只读，进页面测一次。 */
+  MACHINE_ENV: 'machine:env',
   /** #78：枚举 Steam 库 + 当前选择 + 这次会写到哪。 */
   GSI_LIBRARIES: 'gsi:libraries',
   /** #78：记住用户在面板里挑的库（空串 = 回到自动）。 */
@@ -877,6 +880,7 @@ export const ipcContract = {
   /** 首次上手检查：六步证据快照，总览页直接画（不缓存，每次问都现凑）。 */
   firstRunReport: invoke<[], FirstRunReport>(IPC.FIRST_RUN),
   envReport: invoke<[EnvDeviceCounts], EnvReport>(IPC.ENV_REPORT),
+  machineEnv: invoke<[], MachineEnvReport>(IPC.MACHINE_ENV),
   gsiLibraries: invoke<[], GsiLibrariesView>(IPC.GSI_LIBRARIES),
   gsiSetLibrary: invoke<[string], GsiLibrarySetResult>(IPC.GSI_SET_LIBRARY),
   onCaptureEntries: listen<CaptureEntry[]>(IPC.CAPTURE_ENTRIES),

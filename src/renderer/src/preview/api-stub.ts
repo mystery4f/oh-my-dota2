@@ -24,6 +24,7 @@ import { renderGroups } from '@shared/quick-phrases'
 import { summarizeProviderCalls } from '@shared/provider-metrics'
 import { failureLine, judgeProviderFailure } from '@shared/provider-failure'
 import { catalogOf } from '@shared/probe-catalog'
+import { judgeMachineEnv, type MachineEnvFacts } from '@shared/machine-env'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 import type { OverlayFontSize } from '@shared/overlay-a11y'
 import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
@@ -1003,6 +1004,40 @@ const implemented = {
    * 这台机器：桩里也跑真判据（`judgeEnv` 纯函数），只编造主进程能量的和省心假值。
    * `?mach=warn` 切到「内存偏紧 + 端口空闲、被别人占了不知道」那一屏。
    */
+  // #179：机器级三行。`?menv=bad` 造「音色合成缺依赖 + 显存偏紧」，`?menv=unknown` 造「测不到」。
+  machineEnv: async () => {
+    const mode = query.get('menv')
+    const base: MachineEnvFacts = {
+      asrPython: { path: 'C:/asr-ft-env/venv/Scripts/python.exe', version: '3.11.9', error: null },
+      gvPython: { path: 'C:/voice-runtime/runtime/python.exe', version: '3.10.13', error: null },
+      asrMissing: [],
+      gvMissing: [],
+      asrDepsError: null,
+      gvDepsError: null,
+      vram: { totalMiB: 6144, usedMiB: 1900, freeMiB: 4244, ok: true, needMiB: 6400, holders: [], note: null },
+      vramError: null
+    }
+    if (mode === 'bad') {
+      return judgeMachineEnv({
+        ...base,
+        gvMissing: ['soundfile'],
+        vram: {
+          totalMiB: 6144,
+          usedMiB: 5200,
+          freeMiB: 944,
+          ok: false,
+          needMiB: 6400,
+          holders: ['dota2.exe 2100 MiB'],
+          note: '显存偏紧：整卡已用 5200 / 6144 MiB，可空出约 944 MiB（训练建议 6400 MiB）'
+        }
+      })
+    }
+    if (mode === 'unknown') {
+      return judgeMachineEnv({ ...base, gvPython: { path: null, version: null, error: null }, gvMissing: null, gvDepsError: '解释器不在', vram: null, vramError: '没有 nvidia-smi（核显或驱动没装）' })
+    }
+    return judgeMachineEnv(base)
+  },
+
   envReport: async (devices) => {
     // `?mach=tight` 只造「内存偏紧」：仰头（#175）在就绪态要显示「另有 N 项提醒」，
     // 没有这个开关那一行永远出不来——warn 不许因为「不降级」就从界面上消失。

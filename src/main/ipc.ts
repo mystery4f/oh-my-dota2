@@ -17,6 +17,7 @@ import { currentSnapshot } from './services/match-snapshot'
 import { endPlayback, notePlayback } from './services/voice/half-duplex'
 import { firstRunReport, recordProviderProbe } from './services/first-run'
 import { envReport } from './services/env-report'
+import { machineEnv } from './services/machine-env'
 import { translationInsights } from './services/session/translate-cache'
 import { checkForUpdates, installUpdate } from './services/updater'
 import { testProvider, translateText } from './services/providers'
@@ -175,6 +176,7 @@ const handlers: MainHandlers = {
   captureStatus: () => ({ ...getCaptureService().status(), gsi: gsiStatus() }),
   firstRunReport: () => firstRunReport(),
   envReport: (devices) => envReport(devices ?? { micCount: null, speakerCount: null }),
+  machineEnv: () => machineEnv(),
   gsiLibraries: () => gsiLibrariesView(),
   gsiSetLibrary: (root) => setGsiLibrary(String(root ?? ''), GSI_PORT),
   // 独占全屏上任何窗口都画不上去：这句话要在面板里说出来，否则用户只能自己猜浮层为什么不见了。

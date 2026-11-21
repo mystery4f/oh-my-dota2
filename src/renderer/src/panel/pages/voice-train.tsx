@@ -11,6 +11,7 @@ import {
   type GvVersion
 } from '@shared/train/gv'
 import type { SovitsStatus, SovitsVoicePack } from '@shared/ipc'
+import { machineEnvLine, machineEnvState, type MachineEnvReport } from '@shared/machine-env'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 import { RunRow, Sparkline } from '../components/run-view'
@@ -47,6 +48,7 @@ export function VoiceTrainPage(): React.ReactElement {
   const [sovits, setSovits] = React.useState<SovitsStatus | null>(null)
   const [packs, setPacks] = React.useState<SovitsVoicePack[]>([])
   const [registered, setRegistered] = React.useState('')
+  const [machine, setMachine] = React.useState<MachineEnvReport | null>(null)
   const [now, setNow] = React.useState(() => Date.now())
 
   const load = React.useCallback(async (): Promise<TrainSnapshot> => {
@@ -74,6 +76,22 @@ export function VoiceTrainPage(): React.ReactElement {
     const timer = window.setInterval(() => setNow(Date.now()), 5000)
     return () => window.clearInterval(timer)
   }, [taskRunning])
+
+  // #179：机器级三行进页面测一次（不轮询）。它答的是「这台机器」，不是某一步的进度。
+  React.useEffect(() => {
+    let alive = true
+    void window.api
+      .machineEnv()
+      .then((report) => {
+        if (alive) setMachine(report)
+      })
+      .catch(() => {
+        if (alive) setMachine(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const dataset = React.useMemo(
     () => datasets.find((item) => item.expName === targetExp) ?? datasets[0] ?? null,
@@ -156,6 +174,29 @@ export function VoiceTrainPage(): React.ReactElement {
             {sovits !== null && !sovits.installed && sovits.install.phase !== 'idle' ? (
               <StatusPill tone="warn">{`${Math.round(sovits.install.progress)}%`}</StatusPill>
             ) : null}
+          </Row>
+          {/* #179：机器级三行（Python / 依赖 / 显存）。和上面「引擎包」不是一件事：
+              那条说「装没装」，这条说「装了之后跑不跑得起来」；两句拼起来才是一句话。 */}
+          <Row
+            label="这台机器"
+            stacked
+            hint={machine === null ? '正在读机器状态…' : machineEnvLine(machine)}
+          >
+            <StatusPill
+              tone={
+                machine === null
+                  ? 'idle'
+                  : machineEnvState(machine) === 'ok'
+                    ? 'ready'
+                    : machineEnvState(machine) === 'warn'
+                      ? 'warn'
+                      : machineEnvState(machine) === 'bad'
+                        ? 'bad'
+                        : 'idle'
+              }
+            >
+              {machine === null ? '读取中' : machineLabel(machine)}
+            </StatusPill>
           </Row>
         </Group>
       </Panel>
@@ -407,6 +448,15 @@ function homeNameOf(home: string): string {
   if (!home) return '引擎包目录还没定'
   const parts = home.split(/[\\/]+/).filter(Boolean)
   return parts[parts.length - 1] ?? home
+}
+
+/** 机器级三行的一句话状态（#179）：测不到写「测不到」，不许写成「正常」。 */
+function machineLabel(report: MachineEnvReport): string {
+  const state = machineEnvState(report)
+  if (state === 'ok') return '能跑'
+  if (state === 'warn') return '偏紧'
+  if (state === 'bad') return '缺东西'
+  return '测不到'
 }
 
 function runStampOf(run: TrainRunRecord): string {

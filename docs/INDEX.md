@@ -115,6 +115,7 @@ tags: [docs, index]
 | `docs/adr/first-run-checklist.md` | 上手检查六步证据链：每步给可核对证据，最后一步只认真游戏帧（cfg 只在 Dota 启动时读），外加多 Steam 库 / 中文路径 / 移动硬盘三处加固 |
 | `docs/adr/match-attribution.md` | 一行话属于哪一局：voice-chain 每行带 `matchid`（`liveMatchId()` 只认 90 秒内的活帧，拿不到写显式 null 不猜），gsi-summary 按局归档 `<matchid>.json` 只留 20 份且当前局永不删 |
 | `docs/adr/hotword-candidates.md` | 热词候选只建议不自动应用：纠错的差异词≥2 字才进池，面板勾选后才写一次 `asrHotwords`（写一次=重载一次识别器），表满丢的词必须列出来 |
+| `docs/adr/machine-env.md` | 机器级三行（Python / 依赖 / 显存）为什么是共享缝；显存两个出口与合并时删哪一处 | 现行 |
 | `docs/adr/overlay-readability.md` | 浮层三档字号 + AA 对比度 + 状态不只靠颜色：像素与颜色表都在 `src/shared/overlay-a11y.ts`，CSS 只留 `--ov-fs-*`；AA 是「相对行底色叠纯黑」算的，不是「任何游戏画面上都看得清」 |
 | `docs/adr/vision-look.md` | 看一眼画面（#135）：热键截一帧问视觉模型，图片只走 data URL 不落盘；能否看图由模型名启发式判定，判不准时给的是「去换一个能看图的模型」而不是「不支持」 |
 
