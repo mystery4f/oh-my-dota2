@@ -29,6 +29,7 @@ import { runMatchAttributionProbe } from './match-attribution'
 import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
 import { runInterpretLegProbe } from './interpret-leg'
+import { runBuildInfoProbe } from './build-info'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runOverlayA11yProbe } from './overlay-a11y'
 import { runProviderReasoningProbe } from './provider-reasoning'
@@ -209,6 +210,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'hotword candidates from corrections: only >=2-char diffs enter the pool, sorting by count, explicit merge, full table never silently drops',
     run: runHotwordCandidatesProbe
+  },
+  {
+    flag: '--build-info-probe',
+    ci: true,
+    summary:
+      'build freshness (ticket 113): an unreadable artifact says so instead of claiming fresh, a packaged build only reports its time, and a source newer than the artifact by more than the 2 s slack is named stale with the one command that fixes it',
+    run: runBuildInfoProbe
   },
   {
     flag: '--interpret-leg-probe',

@@ -520,6 +520,25 @@ const implemented = {
   updateCheck: async () => ({ channel: 'stable', status: 'dev', version: '0.0.0' }),
   updateInstall: async () => true,
   // 诊断包（#111）：夹具假装收了 3 份、缺 2 份，好让面板的「缺哪几份」也走一遍。
+  // 构建新鲜度（#113）：默认是一份「刚刚构建完」的干净读数；?staleBuild=1 演示源码比产物新那一条红字。
+  buildInfo: async () =>
+    query.get('staleBuild') === '1'
+      ? {
+          stampMs: 1_763_000_000_000,
+          bytes: 1_087_554,
+          newestSourceMs: 1_763_000_540_000,
+          stale: true,
+          note: '改的代码没生效：源码比构建产物新 9 分，重跑 npm run dev:restart',
+          behindMs: 540_000
+        }
+      : {
+          stampMs: 1_763_000_540_000,
+          bytes: 1_087_554,
+          newestSourceMs: 1_763_000_000_000,
+          stale: false,
+          note: '构建产物是最新的',
+          behindMs: null
+        },
   logBundleExport: async () => ({
     ok: true,
     path: 'data/logs/export/log-bundle-20260101-000000.zip',

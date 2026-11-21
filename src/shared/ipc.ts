@@ -13,6 +13,7 @@ import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { GlossaryPackStatus } from './glossary-pack'
 import type { QualityReport } from './quality-report'
 import type { SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
+import type { BuildInfo } from './build-info'
 import type { PatchWatchView } from './patch-watch'
 import type { GsiLibrariesView, GsiLibrarySetResult } from './gsi-lib'
 import type { MicHealthEvent } from './mic-health'
@@ -588,6 +589,7 @@ export const IPC = {
   FT_ASRFT_APPLY: 'ft:asrft-apply',
   FT_ASRFT_SKIP_AUDITION: 'ft:asrft-skip-audition',
   PATCH_WATCH: 'patch:watch',
+  BUILD_INFO: 'build:info',
   FT_ASRFT_ROLLBACK: 'ft:asrft-rollback',
   FT_ASRFT_RESET_BASE: 'ft:asrft-reset-base',
   FT_ASRFT_INSTALL: 'ft:asrft-install',
@@ -923,6 +925,8 @@ export const ipcContract = {
   ftAsrftApply: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_APPLY),
   ftAsrftSkipAudition: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_SKIP_AUDITION),
   patchWatch: invoke<[], PatchWatchView>(IPC.PATCH_WATCH),
+  /** 构建新鲜度（#113）：产物时间 + 源码是否比它新，面板「关于」页一行。 */
+  buildInfo: invoke<[], BuildInfo>(IPC.BUILD_INFO),
   ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK),
   ftAsrftResetBase: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_RESET_BASE),
   /** 一键导出诊断包；成功了也要把 missing 摆在面板上（缺哪几份日志）。 */

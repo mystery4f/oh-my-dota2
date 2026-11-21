@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { LogBundleResult, UpdateState } from '@shared/ipc'
+import type { BuildInfo } from '@shared/build-info'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 
@@ -23,10 +24,13 @@ export function AboutPage(): React.ReactElement {
   const [state, setState] = useState<UpdateState | null>(null)
   const [busy, setBusy] = useState(false)
   const [bundle, setBundle] = useState<LogBundleResult | null>(null)
+  const [build, setBuild] = useState<BuildInfo | null>(null)
   const [bundleBusy, setBundleBusy] = useState(false)
 
   useEffect(() => {
     void window.api.appVersion().then(setVersion)
+    // 构建时间一次就够：产物 mtime 不会在自己跑着的时候改变（#113）。
+    void window.api.buildInfo().then(setBuild)
     return window.api.onUpdateStatus(setState)
   }, [])
 
@@ -77,6 +81,12 @@ export function AboutPage(): React.ReactElement {
               {state.status === 'downloading' ? ` ${state.percent ?? 0}%` : ''}
             </StatusPill>
           ) : null}
+        </Row>
+        <Row label="构建时间" hint={build?.note ?? '正在读构建产物的时间'}>
+          <span className="font-mono text-xs text-muted-foreground">
+            {build?.stampMs ? new Date(build.stampMs).toLocaleString('zh-CN', { hour12: false }) : '…'}
+          </span>
+          {build?.stale ? <StatusPill tone="warn">源码更新了</StatusPill> : null}
         </Row>
       </Group>
 

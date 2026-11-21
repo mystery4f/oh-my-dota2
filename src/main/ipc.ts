@@ -85,6 +85,7 @@ import { patchWatchView } from './services/patch-watch'
 import { exportLogBundle } from './services/log-bundle'
 import { correctLineDirection } from './services/session/direction-correction'
 import { readQualityReport } from './services/session/quality-report'
+import { readBuildInfo } from './services/build-info'
 import { onSpeechQueueChange, speechQueueSnapshot, stopSpeech } from './services/voice/speech-pipeline'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
 import { closeGvWebui, openGvWebui, registerGvWeights, scanGvDatasets } from './services/train/gv'
@@ -328,6 +329,7 @@ const handlers: MainHandlers = {
   ftAsrftApply: () => applyAsrFtModel(),
   ftAsrftSkipAudition: () => skipFtAudition(),
   patchWatch: () => patchWatchView(),
+  buildInfo: () => readBuildInfo(),
   ftAsrftRollback: () => rollbackAsrFtModel(),
   ftAsrftResetBase: () => resetAsrFtToBase(),
   logBundleExport: () => exportLogBundle(),
