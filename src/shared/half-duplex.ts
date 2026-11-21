@@ -54,6 +54,15 @@ export function expireWindow(current: number | null, now: number): number | null
 }
 
 /** 一句能读的账：丢了多少、最近一次丢在什么时候。 */
+/** 给渲染层看的快照：面板问一次就有数，不必去翻控制台。 */
+export interface HalfDuplexView {
+  playing: boolean
+  untilMs: number
+  total: number
+  dropped: number
+  line: string
+}
+
 export function halfDuplexLine(dropped: number, total: number): string {
   if (total <= 0) return '还没识别过'
   if (dropped <= 0) return `识别 ${total} 段，没有一段被半双工守卫丢掉`

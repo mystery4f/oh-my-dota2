@@ -1,6 +1,7 @@
 import { app, clipboard, dialog, ipcMain, shell } from 'electron'
 import { dotaDisplayWarning } from '@shared/dota-video'
 import { errorMessage } from '@shared/errors'
+import { halfDuplexSnapshot } from './services/voice/half-duplex'
 import { IPC, ipcContract, type MainHandlers, type OpenExternalResult } from '@shared/ipc'
 import { translateInPlace, voiceReply } from './services/reply/reply-service'
 import { generatePanelSuggestions } from './services/reply/panel-suggestions'
@@ -350,6 +351,7 @@ const handlers: MainHandlers = {
   ftAsrftRollback: () => rollbackAsrFtModel(),
   ftAsrftResetBase: () => resetAsrFtToBase(),
   logBundleExport: () => exportLogBundle(),
+  halfDuplex: () => halfDuplexSnapshot(),
   errorsView: () => errorsSummary(5),
   translationMarks: () => translationMarkSummary(),
   translateDirection: (request) => correctLineDirection(request),

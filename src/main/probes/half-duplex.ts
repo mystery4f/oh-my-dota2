@@ -12,6 +12,10 @@ import {
   notePlayback,
   resetHalfDuplexForProbe
 } from '../services/voice/half-duplex'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { logsDir } from '../services/logs/base-dir'
+import { reportChainTiming, ChainTimer } from '../services/voice/chain-timing'
 import { finishProbe, probeCases } from './harness'
 
 export async function runHalfDuplexProbe(): Promise<void> {
@@ -78,6 +82,25 @@ export async function runHalfDuplexProbe(): Promise<void> {
     transcriptions.join(' | ')
   )
   push('账面上丢了几次写得出来', halfDuplexSnapshot(clock).dropped === spoken.length, halfDuplexSnapshot(clock).line)
+
+  // —— 计数必须进 logs/voice-chain.jsonl：只在控制台等于没记（打包版没人看控制台）——
+  const before = halfDuplexSnapshot(clock)
+  reportChainTiming(new ChainTimer(null, {}), { spoken: false, stage: 'voice-out', engine: null, chars: 4, segments: 0, mic: '' })
+  const chainFile = join(logsDir(), 'voice-chain.jsonl')
+  let lastRecord: Record<string, unknown> | null = null
+  try {
+    const rows = readFileSync(chainFile, 'utf8').trim().split(String.fromCharCode(10))
+    lastRecord = JSON.parse(rows[rows.length - 1] ?? '{}')
+  } catch {
+    lastRecord = null
+  }
+  const counted = (lastRecord?.halfDuplex ?? null) as { total?: number; dropped?: number } | null
+  push(
+    '链记录带上当晚的半双工计数',
+    counted !== null && counted.dropped === before.dropped && counted.total === before.total,
+    counted === null ? '(记录里没有 halfDuplex)' : `dropped=${counted.dropped} total=${counted.total}`
+  )
+  push('快照有给人看的那一句', halfDuplexSnapshot(clock).line.length > 0, halfDuplexSnapshot(clock).line)
 
   finishProbe('HALF_DUPLEX_PROBE', cases)
 }

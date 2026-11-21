@@ -1,4 +1,5 @@
 import type { DotaDisplayMode } from './dota-video'
+import type { HalfDuplexView } from './half-duplex'
 import type { LogBundleResult } from './log-bundle'
 import type { FirstRunReport } from './first-run'
 import type { ShadowView } from './shadow-voice'
@@ -629,6 +630,7 @@ export const IPC = {
   OVERLAY_STATE: 'overlay:state',
   // 诊断包（#111）：把 logs/ 里的证据打成一个 zip，带 manifest、版本与构建戳，默认脱敏。
   LOG_BUNDLE_EXPORT: 'log:bundle-export',
+  HALF_DUPLEX: 'half-duplex:state',
   /** 本地异常清单（backlog 第七节 P3）：只在内存里留最近 50 条，不联网。 */
   ERRORS_VIEW: 'errors:view',
   /** 译文抽检（#87）：被标记过的译文对（供应商 × 模型的好评率），只读汇总。 */
@@ -944,6 +946,7 @@ export const ipcContract = {
   ftAsrftResetBase: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_RESET_BASE),
   /** 一键导出诊断包；成功了也要把 missing 摆在面板上（缺哪几份日志）。 */
   logBundleExport: invoke<[], LogBundleResult>(IPC.LOG_BUNDLE_EXPORT),
+  halfDuplex: invoke<[], HalfDuplexView>(IPC.HALF_DUPLEX),
   errorsView: invoke<[], ErrorSummary>(IPC.ERRORS_VIEW),
   /** 译文抽检（#87）：面板只读一句话与分组统计，明细在 `logs/translation-marks.jsonl`。 */
   translationMarks: invoke<[], TranslationMarkSummary>(IPC.TRANSLATION_MARKS),

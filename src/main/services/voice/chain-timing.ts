@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { halfDuplexSnapshot } from './half-duplex'
 import { logsDir } from '../logs/base-dir'
 import type { VoiceStage, VoiceStageMark, VoiceStageProgress } from '@shared/voice-stage'
 import type { VoiceChainTiming } from '@shared/voice-timing'
@@ -114,6 +115,11 @@ export interface VoiceChainMeta {
   mic: string
   /** 实际灌进去的那台出声设备（同声腿才有）：队友听到的是不是这一台，只有它答得了。 */
   sink?: string
+  /**
+   * 半双工守卫的当晚计数（本进程内累计）：`dropped` 是「录到的是我们自己的回声」而被丢掉的段数。
+   * 只进控制台等于没记——打包版没人看控制台，「今晚到底丢没丢」只能从这份 jsonl 回答。
+   */
+  halfDuplex?: { total: number; dropped: number }
 }
 
 /**
@@ -136,7 +142,9 @@ export function reportChainTiming(
     ...timing,
     ...(prep === null ? {} : { prep }),
     // sink 只在同声腿里有值：普通对讲的输出设备是设置里选的那台，不必每行重复一遍。
-    ...(meta.sink === undefined || meta.sink === '' ? {} : { sink: meta.sink })
+    ...(meta.sink === undefined || meta.sink === '' ? {} : { sink: meta.sink }),
+    // 计数放在这家一处：任何一句链记录都能回答「到这句为止丢过几段」，不必去翻控制台。
+    halfDuplex: { total: halfDuplexSnapshot().total, dropped: halfDuplexSnapshot().dropped }
   }
   console.log('VOICE_CHAIN_TIMING', JSON.stringify(record))
   appendCappedJsonl(join(logsDir(), 'voice-chain.jsonl'), record)
