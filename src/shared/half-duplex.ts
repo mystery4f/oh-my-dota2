@@ -9,6 +9,21 @@
  * 补回来只会更绕。丢了多少必须能看见，否则「全丢了」和「一次没丢」在日志里长得一样。
  */
 
+/**
+ * 我们的哪条腿在放声音。丢弃时要能说出「是公告在念」还是「同传回放在响」，
+ * 否则日志里只有一句「在播」，收工后无从追。#157 起由渲染层随 voice:playback 一起上报。
+ */
+export type PlaybackLeg = 'announce' | 'echo' | 'reply' | 'interpret' | 'unknown'
+
+const PLAYBACK_LEGS: readonly PlaybackLeg[] = ['announce', 'echo', 'reply', 'interpret']
+
+/** 主进程把渲染层的字符串折成已知腿名：不认识的一律 unknown，不把脏值写进日志。 */
+export function normalizePlaybackLeg(value: unknown): PlaybackLeg {
+  const text = typeof value === 'string' ? value : ''
+  return (PLAYBACK_LEGS as readonly string[]).includes(text) ? (text as PlaybackLeg) : 
+    'unknown'
+}
+
 /** 记账快照：渲染层与面板都读这个形状，所以类型放缝里而不是主进程里。 */
 export interface HalfDuplexSnapshot {
   /** 现在是否处于「自己在说话」的窗口里。 */
@@ -18,6 +33,10 @@ export interface HalfDuplexSnapshot {
   /** 累计识别尝试与其中被丢掉的段数。 */
   total: number
   dropped: number
+  /** 最后一条在放的腿（announce / echo / reply / interpret / unknown）。 */
+  leg: PlaybackLeg
+  /** 当前窗口还剩多少毫秒（含尾巴）；不在窗口里为 0。 */
+  penaltyMs: number
   line: string
 }
 
@@ -72,6 +91,8 @@ export interface HalfDuplexView {
   untilMs: number
   total: number
   dropped: number
+  leg: PlaybackLeg
+  penaltyMs: number
   line: string
 }
 

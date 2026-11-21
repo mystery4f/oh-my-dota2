@@ -67,6 +67,10 @@ export async function transcribeForVoice(
         {
           at: new Date().toISOString(),
           kind: 'half-duplex-drop',
+          // 票面要的四项：时刻、当时哪条腿在放、窗口还剩多久、这段录音从哪来。
+          stage: guard.leg,
+          penaltyMs: guard.penaltyMs,
+          source: 'mic',
           reason: guard.reason,
           dropped: snapshot.dropped,
           total: snapshot.total,

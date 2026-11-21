@@ -15,6 +15,8 @@ export function stopInterpretEcho(): void {
   const audio = current
   current = null
   audio.onended = null
+  // 主动停（新一段要抢播）也算关窗，别把上一段的窗口留给下一句。
+  window.api.voicePlayback(0, 'echo')
   audio.pause()
   audio.src = ''
 }
@@ -28,12 +30,23 @@ export function playInterpretEcho(wav: string): void {
   const done = (): void => {
     if (current === audio) current = null
   }
-  audio.onended = done
+  audio.onended = () => {
+    window.api.voicePlayback(0, 'echo')
+    done()
+  }
   // #129：同传回放同样是我们自己的声音，也要让主进程知道窗口开着，否则它会被再识别一遍。
   audio.onplaying = () => {
     const ms = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration * 1000 : 0
-    window.api.voicePlayback(ms)
+    window.api.voicePlayback(ms, 'echo')
   }
   // 播放被拒（没有输出设备 / 用户手势限制）时安静收场：回放是锦上添花，不能挡住识别那条链。
-  void audio.play().catch(done)
+  audio.onerror = () => {
+    window.api.voicePlayback(0, 'echo')
+    done()
+  }
+  // 播放被拒时同样立刻关窗（起播上报已经开过一次窗口）。
+  void audio.play().catch(() => {
+    window.api.voicePlayback(0, 'echo')
+    done()
+  })
 }

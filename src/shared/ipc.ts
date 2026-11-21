@@ -12,7 +12,7 @@ import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './
 import type { VisionAnswer, VisionReadiness } from './vision'
 import type { HoldSelfTest } from './hold-selftest'
 import type { MatchSnapshot } from './match-snapshot'
-import type { HalfDuplexSnapshot } from './half-duplex'
+import type { HalfDuplexSnapshot, PlaybackLeg } from './half-duplex'
 import type { LatencyBoardRow } from './latency-board'
 import type { ErrorSummary } from './error-log'
 import type { TranslationMarkSummary } from './translation-mark'
@@ -931,7 +931,7 @@ export const ipcContract = {
   sovitsStartServer: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_START_SERVER),
   voiceOutReadiness: invoke<[], VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS),
   // #129：播放侧回报 + 记账快照。send 型：回报只是通知，不阻塞渲染层的播放。
-  voicePlayback: send<[number]>(IPC.VOICE_PLAYBACK),
+  voicePlayback: send<[number, PlaybackLeg?]>(IPC.VOICE_PLAYBACK),
   voiceHalfDuplex: invoke<[], HalfDuplexSnapshot>(IPC.VOICE_HALF_DUPLEX),
   voiceOutShadow: invoke<[], ShadowView>(IPC.VOICE_OUT_SHADOW),
   voiceOutCable: invoke<[], VirtualCableStatus>(IPC.VOICE_OUT_CABLE),

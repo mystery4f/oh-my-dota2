@@ -52,18 +52,24 @@ function pumpSpeech(): void {
       markSpeaking(false)
       pumpSpeech()
     }
-    player.onended = done
+    player.onended = () => {
+      closeWindow()
+      done()
+    }
     player.onerror = () => {
       // 解不开（mime 标错或数据坏了）就整句跳过，不换嗓子出声。
       console.log('VOICE_AUDIO_ERROR', next.text)
+      closeWindow()
       done()
     }
     // #129：公告腿在渲染层播，主进程看不见「它真的响了」——不回报的话，半双工守卫
     // 在公告期间一直是 null，自己的回声会被当成玩家说话识别进去。
     const reportPlayback = (): void => {
       const ms = Number.isFinite(player.duration) && player.duration > 0 ? player.duration * 1000 : 0
-      window.api.voicePlayback(ms)
+      window.api.voicePlayback(ms, 'announce')
     }
+    // 播完 / 放挂都要立刻关窗：只靠时长硬等的话，残留窗口会把下一句正常说话也丢掉。
+    const closeWindow = (): void => window.api.voicePlayback(0, 'announce')
     player.onplaying = reportPlayback
     void player
       .play()

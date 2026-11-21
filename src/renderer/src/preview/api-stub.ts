@@ -651,6 +651,8 @@ const implemented = {
     untilMs: 0,
     total: 41,
     dropped: Number(query.get('dropped') ?? 3),
+    leg: 'unknown',
+    penaltyMs: 0,
     line: '识别 41 段，其中 3 段是自己在说话时录到的，已丢弃'
   }),
   voicePlayback: () => undefined,

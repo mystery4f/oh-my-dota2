@@ -6,6 +6,7 @@
  */
 import { HALF_DUPLEX_GRACE_MS, expireWindow, extendPlaybackWindow, halfDuplexLine, judgeHalfDuplex } from '@shared/half-duplex'
 import {
+  endPlayback,
   halfDuplexSnapshot,
   judgeCaptureAt,
   lastHalfDuplexDropAt,
@@ -125,6 +126,45 @@ export async function runHalfDuplexProbe(): Promise<void> {
     rows.length === 1 && /"dropped":1/.test(rows[0]) && /"total":1/.test(rows[0]),
     rows[0] ?? ''
   )
+
+  // —— #157：公告腿与回放腿也是我们自己的声音 ——
+  // 这两条腿在渲染层播，主进程只能靠 voice:playback 上报；上报里带腿名，丢弃行才分得清是谁在响。
+  const dropRows = (): string[] => {
+    try {
+      return readFileSync(join(logsDir(), 'voice-chain.jsonl'), 'utf8')
+        .split(String.fromCharCode(10))
+        .filter((line) => line.includes('half-duplex-drop'))
+    } catch {
+      return []
+    }
+  }
+
+  resetHalfDuplexForProbe()
+  const announceAt = Date.now()
+  notePlayback(announceAt, 1500, 'announce')
+  const announceDrop = await transcribeForVoice('UklGRg==')
+  const announceRow = dropRows().filter((line) => line.includes('"stage":"announce"')).pop() ?? ''
+  push('公告腿窗口内的录音被丢（不再绕过守卫）', announceDrop.ok === false, announceDrop.error ?? '')
+  push(
+    '丢弃行写明是公告那条腿、并带上窗口剩余毫秒与来源',
+    announceRow.includes('"stage":"announce"') && /"penaltyMs":[1-9]/.test(announceRow) && announceRow.includes('"source":"mic"'),
+    announceRow
+  )
+
+  resetHalfDuplexForProbe()
+  notePlayback(Date.now(), 1500, 'echo')
+  const echoDrop = await transcribeForVoice('UklGRg==')
+  const echoRow = dropRows().filter((line) => line.includes('"stage":"echo"')).pop() ?? ''
+  push('同传回放窗口内的录音被丢', echoDrop.ok === false, echoDrop.error ?? '')
+  push('两段丢弃在日志里分得清是哪条腿', echoRow.includes('"stage":"echo"'), echoRow)
+
+  resetHalfDuplexForProbe()
+  const endAt = Date.now()
+  notePlayback(endAt, 5000, 'announce')
+  endPlayback('announce')
+  const afterEnd = judgeCaptureAt(endAt)
+  push('播完立刻关窗：窗口结束后不残留惩罚', afterEnd.drop === false && afterEnd.penaltyMs === 0, String(afterEnd.penaltyMs))
+  push('关窗后那一段的腿名也清掉了', halfDuplexSnapshot(endAt).leg === 'unknown')
 
   finishProbe('HALF_DUPLEX_PROBE', cases)
 }
