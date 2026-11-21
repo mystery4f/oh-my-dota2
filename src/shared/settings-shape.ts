@@ -70,6 +70,11 @@ export interface AppSettings {
   /** 只看识别（测试用）：转写完就停——不翻译、不进剪贴板、不声出不按键。测口音/调模型用。 */
   voiceTranscribeOnly: boolean
   /**
+   * 子句流水（#71）：识别文本按标点切成子句，第一句翻完就先出声，其余子句的翻译并行发出、
+   * 仍按原顺序朗读。省下的是「等整段翻译」的往返，代价是丢掉跨句上下文，所以默认关。
+   */
+  clauseStreamVoice: boolean
+  /**
    * 对讲耗时统计（默认关）：开了才给每句话记账——浮层那行多一行五段数字，面板记录行与
    * `logs/voice-chain.jsonl` 同步有；关着时一行都不量，界面上也没有数字可画。
    */
@@ -267,6 +272,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsSpeakMode: 'hold',
   voiceOutTestMode: false,
   voiceTranscribeOnly: false,
+  clauseStreamVoice: false,
   voiceShowTiming: false,
   /** 现役模型空 = 由注册表按可用性自动选（#67 起引擎跟着这个 id 走，不再单独存）。 */
   asrActiveModel: '',

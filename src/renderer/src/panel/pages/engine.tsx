@@ -191,6 +191,23 @@ export function EnginePage(): React.ReactElement {
             />
             <SaveFlash flash={save.flash} error={save.error} />
           </Row>
+          <Row
+            label="子句流水"
+            htmlFor="v2-clauseStream"
+            hint="对讲时按标点切成子句：第一句翻完就先出声，其余并行翻、仍按原顺序念。省一次整段往返，代价是丢跨句上下文——默认关"
+          >
+            <input
+              id="v2-clauseStream"
+              type="checkbox"
+              className="h-4 w-4 accent-amber-500"
+              checked={settings.clauseStreamVoice === true}
+              onChange={(e) => void save.wrap(update({ clauseStreamVoice: e.target.checked }))}
+            />
+            <StatusPill tone={settings.clauseStreamVoice === true ? 'ready' : 'idle'}>
+              {settings.clauseStreamVoice === true ? '子句' : '整句'}
+            </StatusPill>
+            <SaveFlash flash={save.flash} error={save.error} />
+          </Row>
         </Group>
 
         <Group label="缓存">

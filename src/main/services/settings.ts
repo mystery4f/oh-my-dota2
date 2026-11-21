@@ -122,6 +122,7 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     // 同声传译（#128）：开关只认布尔，设备只认字符串——空串 = 跟声出输出设备。
     if (typeof merged.interpretMode !== 'boolean') merged.interpretMode = DEFAULT_SETTINGS.interpretMode
     if (typeof merged.interpretInDevice !== 'string') merged.interpretInDevice = ''
+  if (typeof merged.clauseStreamVoice !== 'boolean') merged.clauseStreamVoice = DEFAULT_SETTINGS.clauseStreamVoice
   return merged
 }
 

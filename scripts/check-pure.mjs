@@ -886,6 +886,26 @@ check(
   const open = visionAskReveal({ visible: true, panelOpen: true })
   check('面板开着 -> 不再 toggle', open.show === false && open.openPanel === false)
 }
+// —— 子句流水（#71）：切句不丢字、开关关着就是一整句、账目措辞
+{
+  const { splitClauses, clauseStreamPlan, clauseStreamLine } = await import('../src/shared/clause-plan.ts')
+  const squash = (text) => text.replace(/s+/g, '')
+  const sentence = '他们开雾了。中路不见了，小心！'
+  const clauses = splitClauses(sentence)
+  check('切句拼回来等于原文', squash(clauses.join('')) === squash(sentence))
+  check('切句落在句读后面', clauses[0] === '他们开雾了。')
+  check('短碎片并进前一句', clauses.every((one) => one.length >= 4))
+  check('超长硬切不越界', splitClauses('很长的句子'.repeat(20), 10).every((one) => one.length <= 10))
+  const off = clauseStreamPlan({ text: sentence, enabled: false })
+  check('开关关着 -> 一整句', off.streamed === false && off.clauses.length === 1)
+  const on = clauseStreamPlan({ text: sentence, enabled: true })
+  check('开关打开 -> 多句才流水', on.streamed === true && on.clauses.length >= 2)
+  check(
+    '一行账说清读/跳/首句',
+    clauseStreamLine({ outcomes: ['spoken', 'skipped'], texts: ['a', ''], spoken: 1, skipped: 1, firstSpokenAt: 88, endedAt: 500 }).includes('首句 88ms')
+  )
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

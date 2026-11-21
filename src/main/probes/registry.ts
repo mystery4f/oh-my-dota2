@@ -29,6 +29,7 @@ import { runMatchAttributionProbe } from './match-attribution'
 import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
 import { runInterpretLegProbe } from './interpret-leg'
+import { runClausePlanProbe } from './clause-plan'
 import { runBuildInfoProbe } from './build-info'
 import { runLogsIsolationProbe } from './logs-isolation'
 import { runErrorLogProbe } from './error-log'
@@ -249,6 +250,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'build freshness (ticket 113): an unreadable artifact says so instead of claiming fresh, a packaged build only reports its time, and a source newer than the artifact by more than the 2 s slack is named stale with the one command that fixes it',
     run: runBuildInfoProbe
+  },
+  {
+    flag: '--clause-plan-probe',
+    ci: true,
+    summary:
+      'the clause-stream plan (ticket 71): the transcript is split into clauses, the first clause is translated and spoken before the rest, delivery keeps the original order even when a later clause translates faster, and a clause that fails translation or synthesis is skipped without touching the others',
+    run: runClausePlanProbe
   },
   {
     flag: '--interpret-leg-probe',

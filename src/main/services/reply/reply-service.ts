@@ -5,6 +5,7 @@ import type { VoiceStageProgress } from '@shared/voice-stage'
 import { broadcastToWindows } from '../../windows/broadcast'
 import { decideVoiceOutReply } from '@shared/voice-out'
 import { INTERPRET_STAGE, interpretPlanOf } from '@shared/interpret'
+import { clauseStreamPlan, runClauseStream } from '@shared/clause-plan'
 import { decideInPlaceDelivery, inplaceFailureLine, pickInPlaceDraft } from '@shared/inplace'
 import { loadSettings } from '../settings'
 import { abortTranslation, translateReply } from '../session/durable-translator'
@@ -18,6 +19,64 @@ import { getOverlayManager } from '../../windows/overlay'
  * 回复链深模块（#28）：草稿 → 翻译 → 规范化 → 送达，四条腿共享同一段决策。
  * ipc.ts 只剩 handler 接线；换送达方式（剪贴板 / 按键 / 原地改写 / 声出）都在这里改。
  */
+
+/**
+ * 子句流水的送达段（#71）：翻译并行、朗读按序、首句先出。
+ *
+ * 为什么整段重试逻辑不复用：整句路径失败会整句丢弃并报 stage=translate；
+ * 子句路径的语义是「哪句出不来就跳哪句」，后面的照读——所以在缝里就结账，
+ * 不在这里二次判断。合成失败同样只跳该句，绝不换引擎（仓库铁律）。
+ */
+async function speakClauseStream(args: {
+  planned: string[]
+  settings: ReturnType<typeof loadSettings>
+  timer: ChainTimer
+}): Promise<{ reply: VoiceReplyResult; segments: number }> {
+  const { planned, settings, timer } = args
+  const began = Date.now()
+  let segments = 0
+  let translatedOnce = false
+  const result = await runClauseStream({
+    clauses: planned,
+    translate: async (clause) => {
+      const text = await translateReply(settings.provider, '$' + clause, settings.replyTone)
+      if (!translatedOnce) {
+        translatedOnce = true
+        timer.noteTranslated()
+      }
+      // 模型偶尔把口语标记原样抄进译文：念出来就成了 "dollar"（同整句路径）。
+      return text.replace(/^$s*/, '')
+    },
+    speak: async (text) => {
+      const outcome = await getVoiceOutService().speakReply(text, timer)
+      segments += outcome.segments
+      if (!outcome.spoken) throw new Error(outcome.error ?? '合成失败')
+    }
+  })
+  const joined = result.texts.filter((text) => text !== '').join(' ')
+  if (joined !== '') clipboard.writeText(joined)
+  console.log(
+    'CLAUSE_STREAM ' +
+      JSON.stringify({
+        clauses: planned.length,
+        spoken: result.spoken,
+        skipped: result.skipped,
+        firstSpokenAt: result.firstSpokenAt,
+        endedAt: result.endedAt,
+        ms: Date.now() - began
+      })
+  )
+  const spoke = result.spoken > 0
+  return {
+    reply: {
+      translated: joined === '' ? null : joined,
+      spoken: spoke,
+      stage: spoke ? null : 'voice-out',
+      error: spoke ? null : '合成失败'
+    },
+    segments
+  }
+}
 
 /**
  * 语音对讲一键到底（票 05）：识别文本 → prod 会话翻译（zh→en，复用 replyTone）→
@@ -63,6 +122,15 @@ export async function voiceReply(args: VoiceReplyArgs): Promise<VoiceReplyResult
   // 只看识别（测口音/调模型）：转写完就停，翻译、剪贴板、声出、按键全跳过。
   if (settings.voiceTranscribeOnly) {
     return finish({ translated: null, spoken: false, stage: 'skipped', error: null })
+  }
+  // 子句流水（#71）：先翻第一句就先出声，其余子句翻译并行、朗读仍按原顺序。
+  // 开关关着（默认）时这一段一次都不走，行为与升级前逐字一致。
+  if (settings.clauseStreamVoice === true && settings.interpretMode !== true) {
+    const planned = clauseStreamPlan({ text: recognized, enabled: true })
+    if (planned.streamed) {
+      const streamed = await speakClauseStream({ planned: planned.clauses, settings, timer })
+      return finish(streamed.reply, streamed.segments)
+    }
   }
   let translated: string | null
   try {
