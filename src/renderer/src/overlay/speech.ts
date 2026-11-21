@@ -58,9 +58,19 @@ function pumpSpeech(): void {
       console.log('VOICE_AUDIO_ERROR', next.text)
       done()
     }
+    // #129：公告腿在渲染层播，主进程看不见「它真的响了」——不回报的话，半双工守卫
+    // 在公告期间一直是 null，自己的回声会被当成玩家说话识别进去。
+    const reportPlayback = (): void => {
+      const ms = Number.isFinite(player.duration) && player.duration > 0 ? player.duration * 1000 : 0
+      window.api.voicePlayback(ms)
+    }
+    player.onplaying = reportPlayback
     void player
       .play()
-      .then(() => console.log('VOICE_PLAY_OK', next.text))
+      .then(() => {
+        reportPlayback()
+        console.log('VOICE_PLAY_OK', next.text)
+      })
       .catch((err: unknown) => {
         // 播不出来绝不能静默：Chromium 的 autoplay 策略拒绝时会走到这里。
         console.log('VOICE_PLAY_FAILED', errorMessage(err))

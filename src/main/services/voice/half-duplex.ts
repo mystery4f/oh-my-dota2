@@ -8,18 +8,13 @@
  * 不开同传也守着：公告腿（`speech.ts`）同样把声音放出来，那时的回声一样不该被识别。
  * 这条规则不依赖任何设置，判断只看「我们的播放窗口是否还开着」。
  */
-import { expireWindow, extendPlaybackWindow, halfDuplexLine, judgeHalfDuplex } from '@shared/half-duplex'
-
-export interface HalfDuplexSnapshot {
-  /** 现在是否处于「自己在说话」的窗口里。 */
-  playing: boolean
-  /** 窗口还剩多少毫秒；不在窗口里时为 0。 */
-  untilMs: number
-  /** 累计识别尝试与其中被丢掉的段数。 */
-  total: number
-  dropped: number
-  line: string
-}
+import {
+  expireWindow,
+  extendPlaybackWindow,
+  halfDuplexLine,
+  judgeHalfDuplex,
+  type HalfDuplexSnapshot
+} from '@shared/half-duplex'
 
 let playingUntil: number | null = null
 let total = 0
@@ -41,6 +36,8 @@ export function judgeCaptureAt(now: number): { drop: boolean; reason: 'playback'
   lastDropAt = now
   return { drop: true, reason: verdict.reason, error: '上一句还在播，这段录音是它自己的回声，已丢弃' }
 }
+
+export type { HalfDuplexSnapshot }
 
 export function halfDuplexSnapshot(now: number = Date.now()): HalfDuplexSnapshot {
   playingUntil = expireWindow(playingUntil, now)

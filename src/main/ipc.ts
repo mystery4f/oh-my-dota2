@@ -11,6 +11,7 @@ import { chooseGlossaryPack, glossaryPackStatus } from './services/glossary-pack
 import { loadSettings, saveSettings } from './services/settings'
 import { hotkeysState, saveHotkeysState } from './services/hotkeys'
 import { holdSelfTest } from './services/input/hold-selftest'
+import { notePlayback } from './services/voice/half-duplex'
 import { firstRunReport, recordProviderProbe } from './services/first-run'
 import { envReport } from './services/env-report'
 import { translationInsights } from './services/session/translate-cache'
@@ -292,6 +293,9 @@ const handlers: MainHandlers = {
   sovitsSeed: () => ensureSovitsSeedRef(false),
   // #46 就绪行：首屏读一次，之后靠广播（判断只有一份，在 shared 纯缝里）。
   voiceOutReadiness: () => refreshVoiceOutReadiness(),
+  // #129：渲染层的公告腿自己播音频，只有它能告诉我们「这段真的响了」。
+  voicePlayback: (durationMs) => notePlayback(Date.now(), Number(durationMs) || 0),
+  voiceHalfDuplex: () => halfDuplexSnapshot(),
   voiceOutShadow: () => shadowViewNow(),
   // 幂等启动：服务已在跑就直接返回现状。拉起要 15–40 秒，这里不 await——
   // 面板先看到「正在启动」，就绪由广播翻牌，不会卡住一次点击。

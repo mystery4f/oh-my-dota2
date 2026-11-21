@@ -431,6 +431,16 @@
 - 结论：**「能不能听到」已答：能，48 kHz 环回可用，降噪 + VAD 能把混音切成话段**。剩下没测的是「混音 vs 麦克风同一个句子的错字率」——那需要一个真人对着麦克风说同一句话，探针的 12 秒环回素材只能证明「话能被切出来并识别成人话」，不能给错误率的分母。这条等有人在局内说话时再补，不要用数字装门面。
 - 教训：`about:blank` 上 `navigator.mediaDevices` 根本不存在（不透明来源），探针窗口必须 `loadFile` 到 `overlay.html` 这种可信来源，否则第一句就是 `Cannot read properties of undefined (reading 'getDisplayMedia')`。sherpa 的 `vad.pop()` **只弹出不返回**，取内容要先 `vad.front()` 再 `pop()`，写成 `pop().start` 会 `TypeError`。
 
+### 半双工守卫只守住了主进程那条腿（#129 被测试退回）
+
+**症状**：公告（播报别人的话）期间把自己的声音又识别了一遍 —— 复读；而且「今晚丢了几段」查不到，`VOICE_DROP` 只进了 console。
+
+**根因**：`notePlayback()` 只有主进程 `voice-out.ts` 两个调用点；公告腿在**渲染层**播（`overlay/speech.ts` 自己 `new Audio`），同传回放（`overlay/interpret-echo.ts`）也是。没有任何「这段开始播」的回报，于是 `playingUntil` 一直是 null，守卫永远判「不在播」。探针自己调 `notePlayback()`，所以缺生产调用点时一条断言都不会红 —— 探针钉的是缝，不是调用点。
+
+**修法**：新增 `voice:playback`（`send`，渲染层起播时回报时长）与 `voice:half-duplex`（invoke，读记账快照）；`speech.ts` 与 `interpret-echo.ts` 在 `onplaying` 里回报实际时长；丢弃时除 console 还写一行 `kind: 'half-duplex-drop'` 到 `logs/voice-chain.jsonl`；面板「关于 → 诊断」加一行「自己说话时的回声」（丢过几段 / 没丢过）。
+
+**探针**：`--half-duplex-probe` 增 4 条走**真入口**的断言 —— 播放期调 `transcribeForVoice()` 必须被挡住、计入总数、`voice-chain.jsonl` 里有一行带 `dropped`/`total`。教训：缝上的断言全绿不代表调用点接上了，关键路径至少有一条要穿过生产入口。
+
 ### 短句/长句分流一开，每句话都卡两三秒（#142）
 
 - 症状：打开「短句/长句分流」之后，对讲每说一句就顿一下，短句说完要等好几秒才有声音。面板上只写着「一句话会慢一点」。

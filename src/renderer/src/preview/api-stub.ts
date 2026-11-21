@@ -613,6 +613,15 @@ const implemented = {
     if (query.has('micLive')) setTimeout(() => cb({ recording: true, level: 62, dead: false, reason: null, label: '麦克风阵列 (Realtek(R) Audio)' }), 150)
     return () => {}
   },
+  // #129：预览里给一份「丢过 3 段」的账，不然这一行在预览里永远是空态。
+  voiceHalfDuplex: async () => ({
+    playing: false,
+    untilMs: 0,
+    total: 41,
+    dropped: Number(query.get('dropped') ?? 3),
+    line: '识别 41 段，其中 3 段是自己在说话时录到的，已丢弃'
+  }),
+  voicePlayback: () => undefined,
   // 语音队列（#88）：桩给一份「正在读 + 后头两句」的快照，停止回一句清掉了两条。
   speechQueue: async () => ({
     speaking: `你走中路,我下路`,

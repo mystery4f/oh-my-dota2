@@ -556,3 +556,10 @@ Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `
 ### Domain docs
 
 Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
+
+Half-duplex guard: the playback window is reported from the renderer (`voice:playback`, sent from
+`overlay/speech.ts` and `overlay/interpret-echo.ts` `onplaying`) because the announce leg plays its audio in the
+window, not the main process — a guard that only `voice-out.ts` feeds stays blind during announcements, and that
+blind spot is exactly what a probe on the seam cannot see. Every drop also writes a `half-duplex-drop` row into
+`logs/voice-chain.jsonl` (console alone means "was it dropping tonight?" is unanswerable after the fact); the panel's
+关于 → 诊断 row reads `voice:half-duplex`.

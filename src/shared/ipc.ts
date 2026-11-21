@@ -11,6 +11,7 @@ import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
 import type { VisionAnswer, VisionReadiness } from './vision'
 import type { HoldSelfTest } from './hold-selftest'
+import type { HalfDuplexSnapshot } from './half-duplex'
 import type { ErrorSummary } from './error-log'
 import type { TranslationMarkSummary } from './translation-mark'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
@@ -613,6 +614,10 @@ export const IPC = {
   VOICE_OUT_READINESS: 'voice-out:readiness',
   VOICE_OUT_READINESS_STATE: 'voice-out:readiness-state',
   VOICE_OUT_SHADOW: 'voice-out:shadow',
+  /** #129：渲染层真正起播时回报一句，主进程据此关掉自己的耳朵（公告腿在渲染层播）。 */
+  VOICE_PLAYBACK: 'voice:playback',
+  /** #129：半双工记账快照（丢了多少段），收工后能查「今晚丢没丢」。 */
+  VOICE_HALF_DUPLEX: 'voice:half-duplex',
   /** 虚拟声卡（VB-Cable）检测：声出能不能进游戏语音的前置。 */
   VOICE_OUT_CABLE: 'voice-out:cable',
   /** 一键安装 VB-Cable：下载官方包 → 解压 → 提权启动官方安装器（UAC/重启仍由用户完成）。 */
@@ -904,6 +909,9 @@ export const ipcContract = {
   // #46 声出就绪：一键把服务拉起 + 读/订阅就绪快照（判断只有一份，在 shared 里）。
   sovitsStartServer: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_START_SERVER),
   voiceOutReadiness: invoke<[], VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS),
+  // #129：播放侧回报 + 记账快照。send 型：回报只是通知，不阻塞渲染层的播放。
+  voicePlayback: send<[number]>(IPC.VOICE_PLAYBACK),
+  voiceHalfDuplex: invoke<[], HalfDuplexSnapshot>(IPC.VOICE_HALF_DUPLEX),
   voiceOutShadow: invoke<[], ShadowView>(IPC.VOICE_OUT_SHADOW),
   voiceOutCable: invoke<[], VirtualCableStatus>(IPC.VOICE_OUT_CABLE),
   voiceOutCableInstall: invoke<[], CableInstallResult>(IPC.VOICE_OUT_CABLE_INSTALL),

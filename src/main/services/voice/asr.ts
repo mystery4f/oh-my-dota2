@@ -5,6 +5,8 @@ import type { VoiceTranscribeResult } from '@shared/ipc'
 import { activeAsrModel, engineSpecOf, transcribeAsr } from './asr-model'
 import { stashUtterance } from './corrections'
 import { halfDuplexSnapshot, judgeCaptureAt } from './half-duplex'
+import { appendCappedJsonl } from '../logs/jsonl'
+import { logsDir } from '../logs/base-dir'
 /**
  * 识别入口：没就绪怎么说、结果怎么归一，都在这一处。
  * 引擎与模型的判断不在这个文件里——现役是哪份由 asr-model 的注册表决定，
@@ -41,7 +43,26 @@ export async function transcribeForVoice(wavBase64: string, micLabel?: string): 
   // #129：我们自己的声音还在放，这段录音就是它的回声——不识别，但要记账。
   const guard = judgeCaptureAt(Date.now())
   if (guard.drop) {
-    console.log('VOICE_DROP', JSON.stringify({ reason: guard.reason, ...halfDuplexSnapshot() }))
+    const snapshot = halfDuplexSnapshot()
+    console.log('VOICE_DROP', JSON.stringify({ reason: guard.reason, ...snapshot }))
+    // #129 测试退回的那条：只进 console 等于收工后查不了「今晚丢没丢」。落一行到
+    // voice-chain.jsonl（同一个上限写入器），面板与日志都能数出这个数。
+    try {
+      appendCappedJsonl(
+        join(logsDir(), 'voice-chain.jsonl'),
+        {
+          at: new Date().toISOString(),
+          kind: 'half-duplex-drop',
+          reason: guard.reason,
+          dropped: snapshot.dropped,
+          total: snapshot.total,
+          untilMs: snapshot.untilMs
+        },
+        256 * 1024
+      )
+    } catch {
+      // 记账失败不影响识别链路
+    }
     return { ok: false, text: '', error: guard.error ?? '这段录音已被丢弃' }
   }
   const dir = join(app.getPath('userData'), 'voice')

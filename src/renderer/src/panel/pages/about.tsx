@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { LogBundleResult, UpdateState } from '@shared/ipc'
 import type { BuildInfo } from '@shared/build-info'
 import { ERROR_KIND_LABEL, errorsLine, type ErrorSummary } from '@shared/error-log'
+import type { HalfDuplexSnapshot } from '@shared/half-duplex'
 import { marksLine, type TranslationMarkSummary } from '@shared/translation-mark'
 import {
   settingsExportLine,
@@ -39,6 +40,8 @@ export function AboutPage(): React.ReactElement {
   const [settingsImport, setSettingsImport] = useState<SettingsBundleImportResult | null>(null)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [errors, setErrors] = useState<ErrorSummary | null>(null)
+  // #129：半双工守卫丢了多少段。测试退回时指出的正是「收工后查不了今晚丢没丢」。
+  const [halfDuplex, setHalfDuplex] = useState<HalfDuplexSnapshot | null>(null)
   const [marks, setMarks] = useState<TranslationMarkSummary | null>(null)
 
   useEffect(() => {
@@ -49,6 +52,8 @@ export function AboutPage(): React.ReactElement {
     void window.api.errorsView().then(setErrors)
     // 译文抽检（#87）：只读汇总，明细在 logs/translation-marks.jsonl。
     void window.api.translationMarks().then(setMarks)
+    // 半双工记账（#129）：跨对局累计，进页面读一次就够。
+    void window.api.voiceHalfDuplex().then(setHalfDuplex)
     return window.api.onUpdateStatus(setState)
   }, [])
 
@@ -122,6 +127,16 @@ export function AboutPage(): React.ReactElement {
       </Group>
 
       <Group label="诊断">
+        <Row
+          label="自己说话时的回声"
+          hint={halfDuplex === null ? '正在读半双工记账' : halfDuplex.line}
+        >
+          {halfDuplex === null ? null : (
+            <StatusPill tone={halfDuplex.dropped === 0 ? 'ready' : 'warn'}>
+              {halfDuplex.dropped === 0 ? '没丢过' : `丢了 ${halfDuplex.dropped} 段`}
+            </StatusPill>
+          )}
+        </Row>
         <Row
           label="最近的错误"
           hint={errors === null ? '正在读本地异常清单（只在本机，不联网）' : errorsLine(errors)}

@@ -9,6 +9,18 @@
  * 补回来只会更绕。丢了多少必须能看见，否则「全丢了」和「一次没丢」在日志里长得一样。
  */
 
+/** 记账快照：渲染层与面板都读这个形状，所以类型放缝里而不是主进程里。 */
+export interface HalfDuplexSnapshot {
+  /** 现在是否处于「自己在说话」的窗口里。 */
+  playing: boolean
+  /** 窗口还剩多少毫秒；不在窗口里时为 0。 */
+  untilMs: number
+  /** 累计识别尝试与其中被丢掉的段数。 */
+  total: number
+  dropped: number
+  line: string
+}
+
 /** 播放结束后还要继续闭嘴的尾巴：设备缓冲与回声尾音都在这段里。 */
 export const HALF_DUPLEX_GRACE_MS = 400
 

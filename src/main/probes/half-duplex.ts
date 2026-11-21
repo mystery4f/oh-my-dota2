@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { logsDir } from '../services/logs/base-dir'
 import { reportChainTiming, ChainTimer } from '../services/voice/chain-timing'
+import { transcribeForVoice } from '../services/voice/asr'
 import { finishProbe, probeCases } from './harness'
 
 export async function runHalfDuplexProbe(): Promise<void> {
@@ -101,6 +102,29 @@ export async function runHalfDuplexProbe(): Promise<void> {
     counted === null ? '(记录里没有 halfDuplex)' : `dropped=${counted.dropped} total=${counted.total}`
   )
   push('快照有给人看的那一句', halfDuplexSnapshot(clock).line.length > 0, halfDuplexSnapshot(clock).line)
+  // —— 生产调用点（#129 被测试退回的那条）——
+  // 上面几条都直接调 judgeCaptureAt，所以「真正的入口没回报播放」「丢弃不进日志」这两种坏法
+  // 一条都不会红。这里走一次 transcribeForVoice：它必须自己挡住，并留下可查的账。
+  resetHalfDuplexForProbe()
+  const now = Date.now()
+  notePlayback(now, 2000)
+  const dropped = await transcribeForVoice('UklGRg==')
+  push('走真入口：播放期的录音被挡住', dropped.ok === false && /回声|丢弃/.test(dropped.error ?? ''), dropped.error ?? '')
+  push('走真入口：识别尝试计入总数', halfDuplexSnapshot().total === 1 && halfDuplexSnapshot().dropped === 1)
+
+  let logged: string[] = []
+  try {
+    logged = readFileSync(join(logsDir(), 'voice-chain.jsonl'), 'utf8').split(String.fromCharCode(10))
+  } catch {
+    logged = []
+  }
+  const rows = logged.filter((line) => line.includes('half-duplex-drop'))
+  push('丢弃进 voice-chain.jsonl，不只进 console（收工后查得了）', rows.length === 1, `rows=${rows.length}`)
+  push(
+    '那一行带 dropped 与 total，能看出丢了几段',
+    rows.length === 1 && /"dropped":1/.test(rows[0]) && /"total":1/.test(rows[0]),
+    rows[0] ?? ''
+  )
 
   finishProbe('HALF_DUPLEX_PROBE', cases)
 }

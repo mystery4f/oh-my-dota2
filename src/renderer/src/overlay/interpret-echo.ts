@@ -29,6 +29,11 @@ export function playInterpretEcho(wav: string): void {
     if (current === audio) current = null
   }
   audio.onended = done
+  // #129：同传回放同样是我们自己的声音，也要让主进程知道窗口开着，否则它会被再识别一遍。
+  audio.onplaying = () => {
+    const ms = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration * 1000 : 0
+    window.api.voicePlayback(ms)
+  }
   // 播放被拒（没有输出设备 / 用户手势限制）时安静收场：回放是锦上添花，不能挡住识别那条链。
   void audio.play().catch(done)
 }
