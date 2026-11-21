@@ -17,7 +17,6 @@ import { HelmPage } from './pages/helm'
 import { ChatoutPage } from './pages/chatout'
 import { OverviewPage } from './pages/overview'
 
-
 /**
  * 面板的壳：标题栏 + 侧边栏 + 内容区。八个分区之间的导航只有侧边栏，
  * 不再有 tab；`?s=<分区>` 才能直达某一页（开发时用 OMD2_QUERY 注入）。
@@ -40,11 +39,11 @@ export function PanelApp(): React.ReactElement {
   const openMachineCheck = (): void => {
     select('overview')
     window.setTimeout(() => {
-      document.getElementById('machine-check')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      document
+        .getElementById('machine-check')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }, 60)
   }
-
-
 
   const [searchOpen, setSearchOpen] = React.useState(false)
   // 音色包弹窗由壳持有：朗读页和声出页各给一个按钮，打开的永远是同一个弹窗。
@@ -75,7 +74,12 @@ export function PanelApp(): React.ReactElement {
       case 'about':
         return <AboutPage />
       case 'read':
-        return <ReadPage onOpenVoicePacks={() => setPacksOpen(true)} />
+        return (
+          <ReadPage
+            onOpenVoicePacks={() => setPacksOpen(true)}
+            onOpenMuteList={() => select('talk')}
+          />
+        )
       case 'overlay':
         return <OverlayPage />
       case 'overview':

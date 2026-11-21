@@ -84,15 +84,31 @@ const hotkeyPayload = (): Awaited<ReturnType<WindowApi['getHotkeys']>> => ({
   error: null
 })
 
-const offlineState = (): Awaited<ReturnType<WindowApi['ttsOfflineState']>> => ({
-  available: true,
-  ready: true,
-  bytes: 136314880,
-  dir: 'data/tts-offline',
-  downloading: false,
-  progress: 1,
-  error: null
-})
+/** `?offline=failed|missing` 把离线模型换成「缺文件 / 上一轮失败」，看那两态长什么样。 */
+const offlineState = (): Awaited<ReturnType<WindowApi['ttsOfflineState']>> => {
+  const mode = query.get('offline')
+  if (mode === 'failed')
+    return {
+      available: false,
+      ready: false,
+      bytes: 41_943_040,
+      dir: 'data/tts-offline',
+      downloading: false,
+      progress: 0,
+      error: 'HTTP 404'
+    }
+  if (mode === 'missing')
+    return { available: false, ready: false, bytes: 0, dir: 'data/tts-offline', downloading: false, progress: 0, error: null }
+  return {
+    available: true,
+    ready: true,
+    bytes: 136314880,
+    dir: 'data/tts-offline',
+    downloading: false,
+    progress: 1,
+    error: null
+  }
+}
 
 const asrState = (): Awaited<ReturnType<WindowApi['asrStatus']>> => ({
   available: true,
