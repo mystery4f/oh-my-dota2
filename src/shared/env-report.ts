@@ -173,3 +173,29 @@ export function envCounted(report: EnvReport): number {
 export function envTroubled(report: EnvReport): EnvRow[] {
   return report.rows.filter((row) => row.state === 'warn' || row.state === 'bad')
 }
+
+/** 入口文案只写一次：三处告警都用它，改词不会漏掉一处（#140）。 */
+export const MACHINE_CHECK_LABEL = '看这台机器'
+
+export interface MachineCheckOffer {
+  show: boolean
+  label: string
+  hint: string
+}
+
+/**
+ * 「看这台机器」入口该不该出现（#140）。
+ *
+ * 只在真有告警时出现：全绿时留一个点进去看不出任何东西的按钮，比不给入口更糟——
+ * 用户会以为那按钮能修好什么。`null`/`undefined` 是「还没测」，与「绿」不同，也不算告警。
+ */
+export function machineCheckOffer(warnings: readonly (boolean | null | undefined)[]): MachineCheckOffer {
+  const show = warnings.some((warned) => warned === true)
+  return {
+    show,
+    label: MACHINE_CHECK_LABEL,
+    hint: show
+      ? '这台机器六行体检里能看到 CPU、内存、磁盘、端口、输入/输出设备的实际数字'
+      : '没有告警时不出现这个入口'
+  }
+}

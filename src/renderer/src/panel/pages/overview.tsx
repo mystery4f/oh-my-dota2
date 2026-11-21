@@ -313,6 +313,7 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
             <Row label="游戏发来了新东西" hint={patch.line} stacked />
           </Group>
         ) : null}
+        <div id="machine-check">
         <Group label="这台机器">
           <Row
             label={env ? `${envCounted(env)}/6 行有数据` : '正在读现状…'}
@@ -381,6 +382,7 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
             </div>
           </Row>
         </Group>
+        </div>
 
         <CollapsibleGroup id="overview.hotkeys" label="热键一览" defaultOpen={rejected.length > 0}>
           {(hotkeys?.actions ?? []).map((action) => (

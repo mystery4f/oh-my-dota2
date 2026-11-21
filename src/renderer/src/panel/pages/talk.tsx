@@ -20,6 +20,7 @@ import { formatChainTiming } from '@shared/voice-timing'
 import { queueLine, stopLine, type SpeechQueueSnapshot } from '@shared/speech-queue'
 import type { MicHealthEvent } from '@shared/mic-health'
 import { interpretDeviceLine, interpretFollowNote } from '@shared/interpret'
+import { machineCheckOffer } from '@shared/env-report'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
 import {
@@ -64,10 +65,13 @@ function deviceLabelOf(outputs: { deviceId: string; label: string }[], id: strin
  * 声出用哪个音色包也在这里显示，但换包走弹窗——下载/删除/服务不属于这一页的常规流程。
  */
 export function TalkPage({
-  onOpenVoicePacks
+  onOpenVoicePacks,
+  onOpenMachineCheck
 }: {
   /** 打开音色包弹窗（与朗读页同一个）。 */
   onOpenVoicePacks?: () => void
+  /** 跳到总览的「这台机器」（#140）：告警在别的页时，用户不该自己想到去总览翻六行。 */
+  onOpenMachineCheck?: () => void
 }): React.ReactElement {
   const { settings, update, loadError } = useSettings()
   const save = useSaveFlash()
@@ -277,6 +281,8 @@ export function TalkPage({
   const gate =
     gvReadiness && !gvReadiness.ready ? { locked: true, reason: gvReadiness.line } : { locked: false, reason: '' }
   const action = gvReadiness && !gvReadiness.ready ? gvReadiness.action : null
+  // 断链时才给「看这台机器」：就绪时那按钮点进去看不出任何东西（#140）。
+  const machineCheck = machineCheckOffer([gvReadiness === null ? null : !gvReadiness.ready])
   const runReadinessAction = (choice: VoiceOutAction): void => {
     // 装引擎要 8GB、装音色包要挑，两件事的家都在音色包弹窗里，按钮只负责把人送到。
     if (choice === 'start-service') void window.api.sovitsStartServer()
@@ -684,6 +690,11 @@ export function TalkPage({
               {action ? (
                 <Button size="sm" variant="outline" onClick={() => runReadinessAction(action)}>
                   {READINESS_ACTION_LABEL[action]}
+                </Button>
+              ) : null}
+              {machineCheck.show && onOpenMachineCheck ? (
+                <Button size="sm" variant="ghost" onClick={onOpenMachineCheck}>
+                  {machineCheck.label}
                 </Button>
               ) : null}
             </Row>

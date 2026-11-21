@@ -388,6 +388,7 @@ check(
 )
 // —— 机器体检（ticket 77）：状态配色、判据不动数字、设备数与端口 ——
 const { judgeEnv, envCounted, envTroubled } = await import('../src/shared/env-report.ts')
+const { machineCheckOffer, MACHINE_CHECK_LABEL } = await import('../src/shared/env-report.ts')
 check('体检：内存偏紧是 warn 不是 bad', judgeEnv({ cpuModel: 'x', cpuCores: 8, freeMemBytes: 1024 ** 3, totalMemBytes: 8000 * 1024 ** 2, diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 100 * 1024 ** 3, diskPath: 'D:', gsiPort: 32123, portOwner: 'ours', micCount: 1, speakerCount: 1 }).rows.find((r) => r.id === 'memory').state === 'warn')
 check('体检：磁盘偏紧是 warn 不是 bad', judgeEnv({ cpuModel: 'x', cpuCores: 8, freeMemBytes: 8 * 1024 ** 3, totalMemBytes: 16 * 1024 ** 3, diskFreeBytes: 3 * 1024 ** 3, diskTotalBytes: 100 * 1024 ** 3, diskPath: 'D:', gsiPort: 32123, portOwner: 'ours', micCount: 1, speakerCount: 1 }).rows.find((r) => r.id === 'disk').state === 'warn')
 check('体检：端口被别人占是 bad，空着是 warn，本应用是 ok', (() => { const mk = (portOwner) => judgeEnv({ cpuModel: 'x', cpuCores: 8, freeMemBytes: 8 * 1024 ** 3, totalMemBytes: 16 * 1024 ** 3, diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 100 * 1024 ** 3, diskPath: 'D:', gsiPort: 32123, portOwner, micCount: 1, speakerCount: 1 }).rows.find((r) => r.id === 'port').state; return mk('other') === 'bad' && mk('free') === 'warn' && mk('ours') === 'ok' })())
@@ -942,6 +943,12 @@ check(
   check('errors.jsonl 走脱敏', wanted.length === 1 && wanted[0].mask === true)
   check('不在默认清单里的文件不会被塞进包', wantedLogFiles(['nope.jsonl']).length === 0)
 }
+// #140：「看这台机器」入口只在真有告警时出现。全绿时留一个点进去看不出任何东西的按钮，
+// 比不给入口更糟——用户会以为那按钮能修好什么。
+check('入口：没有告警时不出现（不留死按钮）', machineCheckOffer([false, null, undefined]).show === false)
+check('入口：任一告警就出现', machineCheckOffer([false, true, null]).show === true)
+check('入口：文案只有一处定义', machineCheckOffer([true]).label === MACHINE_CHECK_LABEL && MACHINE_CHECK_LABEL === '看这台机器')
+check('入口：不出现时 hint 也说清为什么', machineCheckOffer([false]).hint.includes('不出现'))
 
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)

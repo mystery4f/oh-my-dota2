@@ -34,6 +34,16 @@ export function PanelApp(): React.ReactElement {
     window.history.replaceState(null, '', url)
   }
 
+  // 「看这台机器」（#140）：切页之后再把那一组滚进视野。总览是懒渲染的，切完当帧还没有节点，
+  // 所以等一帧（rAF）再找；找不到也不报错——宁可少滚一下，也不要为一个滚动动作抛异常。
+  const openMachineCheck = (): void => {
+    select('overview')
+    window.setTimeout(() => {
+      document.getElementById('machine-check')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 60)
+  }
+
+
 
   const [searchOpen, setSearchOpen] = React.useState(false)
   // 音色包弹窗由壳持有：朗读页和声出页各给一个按钮，打开的永远是同一个弹窗。
@@ -71,7 +81,12 @@ export function PanelApp(): React.ReactElement {
         // 上手检查的「去填 Key / 换键」要能换页：导航只有壳知道，页面只拿到这一条回执。
         return <OverviewPage onNavigate={select} />
       case 'talk':
-        return <TalkPage onOpenVoicePacks={() => setPacksOpen(true)} />
+        return (
+          <TalkPage
+            onOpenVoicePacks={() => setPacksOpen(true)}
+            onOpenMachineCheck={openMachineCheck}
+          />
+        )
       case 'chatout':
         return <ChatoutPage />
       default: {

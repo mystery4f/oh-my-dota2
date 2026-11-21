@@ -153,6 +153,12 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
   account: untranslated rows never become samples, a re-mark replaces the earlier verdict by `entryId`, tallies group by
   provider × model. A hotkey never goes silent — no markable row still flashes why, and 0 marks reads as "还没标过",
   never as "all fine". This records *marked* samples only; never quote it as an overall accuracy number.
+- A readiness warning must carry a way into the check (#140): `machineCheckOffer()` in `src/shared/env-report.ts`
+  decides whether the「看这台机器」entry shows (only when something is actually not ready — a green-but-clickable button
+  reads as "this fixes something"), and `openMachineCheck()` in `panel-app.tsx` navigates through the existing
+  `select('overview')` + `?s=` deep link, then scrolls `#machine-check` into view one frame later because the overview
+  is lazily rendered. The label lives once in `MACHINE_CHECK_LABEL`; a new alert spot calls that seam instead of
+  hardcoding the words.
 - Voice-capture three-state ring (#94): the stage line starts with a small ring in `src/renderer/src/overlay/voice-ring.tsx` — hollow=idle, filled=recording, waves=speaking; shapes differ so a grey screenshot still tells them apart. Recording/speaking truth lives once in `voice-ring-store.ts`; `voice-capture.ts` and `speech.ts` only call `setRingRecording`/`setRingSpeaking` (keep that, never revert to bare assignment — the ring and the speech queue both read it).
 - `voiceCapture` (default `Alt+Shift+V`) record → speech chain: speak Chinese → the active recognition model (`asrActiveModel`:
   Qwen3 or Paraformer) transcribes → translate → the reply is spoken through voice-out. How it is pressed is
