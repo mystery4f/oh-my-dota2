@@ -948,6 +948,7 @@ check(
 check('入口：没有告警时不出现（不留死按钮）', machineCheckOffer([false, null, undefined]).show === false)
 check('入口：任一告警就出现', machineCheckOffer([false, true, null]).show === true)
 check('入口：文案只有一处定义', machineCheckOffer([true]).label === MACHINE_CHECK_LABEL && MACHINE_CHECK_LABEL === '看这台机器')
+
 check('入口：不出现时 hint 也说清为什么', machineCheckOffer([false]).hint.includes('不出现'))
 
 // —— 供应商失败矩阵（#86）：每类各有各的话与自己的重试节奏 ——
@@ -968,6 +969,24 @@ const { judgeProviderFailure, failureLine, failuresDistinct, parseRetryAfter } =
   check('失败：三类节奏确实不同', new Set([auth.retry, limited.retry, timeout.retry]).size === 3)
   check('失败：那句话里带下一步动作', failureLine(auth).includes('重新填'))
 }
+// #109：录音集的版本号由内容决定，与文件名/顺序无关；老行没有版本号就说「早于版本号」，不猜。
+const { datasetVersionOf, datasetVersionFact, datasetVersionLine, datasetVersionDelta, datasetVersionDiffLine } =
+  await import('../src/shared/train/dataset-version.ts')
+const dvSet = [
+  { key: 'G14-L01', text: '中路不见了', bytes: 32000 },
+  { key: 'G14-L02', text: '上路要人来', bytes: 24000 }
+]
+check('数据集版本：同一组取两次相同', datasetVersionOf(dvSet) === datasetVersionOf(dvSet))
+check('数据集版本：顺序无关', datasetVersionOf([dvSet[1], dvSet[0]]) === datasetVersionOf(dvSet))
+check(
+  '数据集版本：加一条就变',
+  datasetVersionOf([...dvSet, { key: 'G14-L03', text: '买活好了', bytes: 16000 }]) !== datasetVersionOf(dvSet)
+)
+check('数据集版本：改一个字就变', datasetVersionOf([{ ...dvSet[0], text: '中路不见了！' }, dvSet[1]]) !== datasetVersionOf(dvSet))
+check('数据集版本：空集合也有稳定前缀', datasetVersionOf([]).startsWith('ds1-'))
+check('数据集版本：一行带条数与大小', datasetVersionLine(datasetVersionFact(dvSet)).includes('2 条'))
+check('数据集版本：老行判 unknown 而不是 same', datasetVersionDelta(null, 'ds1-x') === 'unknown')
+check('数据集版本：unknown 的文案不伪造版本号', datasetVersionDiffLine(null, 'ds1-x').includes('早于版本号'))
 
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)

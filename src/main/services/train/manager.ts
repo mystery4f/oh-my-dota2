@@ -22,6 +22,7 @@ import { parseTrainProgress } from '@shared/train/progress'
 import { ensureSovitsServer, pauseSovitsForTraining, setInferenceHold, type SovitsPauseOutcome } from '../voice/sovits-server'
 import { applyAsrFtModel, ftModelDirs, markRunStatus, pruneAsrFtRunDirs, stageFtNextModel } from './asr-ft'
 import { ftWavDurationMs, summarizePendingTakes } from '@shared/train/asr-ft'
+import { datasetVersionOf } from '@shared/train/dataset-version'
 import {
   buildTrainRun,
   finishTrainRun,
@@ -244,7 +245,9 @@ export class TrainManager {
       params: runParamsOf(kind, request),
       data: runDataOf(request),
       artifacts: runArtifactsOf(kind, request),
-      startedAt: this.task?.startedAt
+      startedAt: this.task?.startedAt,
+      // #109：开训前就把这批录音的版本号写进 run 行——跑到一半崩了，也能回答「它本来要吃哪一批」。
+      datasetVersion: kind === 'asr-ft' && request.asrFt?.ledger ? datasetVersionOf(request.asrFt.ledger) : null
     })
     saveTrainRun(this.run)
     // 这次打包吃进去的录音随开训一起记账（split + 指纹），run 行上留一份冻结快照给续训对账；

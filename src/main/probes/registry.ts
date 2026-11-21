@@ -61,6 +61,7 @@ import { runMicHealthProbe } from './mic-health'
 import { runOverlayDigestProbe } from './overlay-digest'
 import { runKeyNounProbe } from './key-nouns'
 import { runFtAuditionProbe } from './ft-audition'
+import { runDatasetVersionProbe } from './dataset-version'
 import { runPatchWatchProbe } from './patch-watch'
 import { runAsrRoutingProbe } from './asr-routing'
 import { runAsrSwitchProbe } from './asr-switch'
@@ -414,6 +415,13 @@ export const PROBES: readonly ProbeEntry[] = [
       'the pre-promotion audition (`src/shared/train/audition.ts` + `src/main/services/train/audition.ts`): both models transcribe the identical held-out recordings, the pairs and CER are graded by one pure seam, and skipping the audition is recorded on the run row',
     ci: true,
     run: runFtAuditionProbe
+  },
+  {
+    flag: '--dataset-version-probe',
+    summary:
+      'the dataset version (`src/shared/train/dataset-version.ts`): a set of recordings gets one content-derived version, the run row keeps the version it trained on even after later takes arrive, and a row that predates the column says so instead of guessing',
+    ci: true,
+    run: runDatasetVersionProbe
   },
   {
     flag: '--key-noun-probe',

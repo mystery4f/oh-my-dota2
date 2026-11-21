@@ -73,6 +73,8 @@ export interface TrainRunRecord {
   audition?: FtAudition | null
   /** 跳过试听的记录（#105）：人点的与自动跳过分开记，票面要求「显式动作要落账」。 */
   auditionSkip?: FtAuditionSkip | null
+  /** 这次训练吃的那批录音的版本号（#109）：内容指纹，与文件名和录音时间无关；老行没有这个字段。 */
+  datasetVersion?: string | null
 }
 
 /** 折线最多留这么多点：1400 step 全画既看不清也让 JSON 变大。 */
@@ -99,6 +101,7 @@ export function buildTrainRun(input: {
   data?: Partial<TrainRunData>
   startedAt?: number
   artifacts?: TrainRunArtifacts
+  datasetVersion?: string | null
 }): TrainRunRecord {
   const startedAt = input.startedAt ?? Date.now()
   return {
@@ -115,7 +118,8 @@ export function buildTrainRun(input: {
     applied: false,
     error: null,
     audition: null,
-    auditionSkip: null
+    auditionSkip: null,
+    datasetVersion: input.datasetVersion ?? null
   }
 }
 
@@ -131,6 +135,7 @@ export function finishTrainRun(
     applied?: boolean
     audition?: FtAudition | null
     auditionSkip?: FtAuditionSkip | null
+    datasetVersion?: string | null
   }
 ): TrainRunRecord {
   return {
@@ -142,7 +147,8 @@ export function finishTrainRun(
     error: patch.error === undefined ? record.error : patch.error,
     applied: patch.applied ?? record.applied,
     audition: patch.audition === undefined ? (record.audition ?? null) : patch.audition,
-    auditionSkip: patch.auditionSkip === undefined ? (record.auditionSkip ?? null) : patch.auditionSkip
+    auditionSkip: patch.auditionSkip === undefined ? (record.auditionSkip ?? null) : patch.auditionSkip,
+    datasetVersion: patch.datasetVersion === undefined ? (record.datasetVersion ?? null) : patch.datasetVersion
   }
 }
 

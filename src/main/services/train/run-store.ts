@@ -24,6 +24,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from 'no
 import { basename, dirname, join } from 'node:path'
 import type { FtLedgerEntry } from '@shared/train/asr-ft'
 import { TRAIN_RUN_STATUSES, type TrainRunRecord, type TrainRunStatus } from '@shared/train/run'
+import { datasetVersionOf } from '@shared/train/dataset-version'
 import type { TrainTaskKind } from '@shared/train/task'
 
 /** 只留最近这么多条 run：一行几百字节到几十 KB，多到上千条才会明显占盘。 */
@@ -49,7 +50,8 @@ const SCHEMA = `
     metrics TEXT,
     packed_ledger TEXT,
     audition TEXT,
-    audition_skip TEXT
+    audition_skip TEXT,
+    dataset_version TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
   CREATE TABLE IF NOT EXISTS dataset_entries (
@@ -96,6 +98,8 @@ interface RunRow {
   /** #105 的试听结果：老库里这两列可能是 undefined（addMissingColumns 之前打开的行）。 */
   audition?: string | null
   audition_skip?: string | null
+  /** #109 的录音集版本：老库没有这一列，读到 undefined 就是「早于版本号」。 */
+  dataset_version?: string | null
 }
 
 interface EntryRow {
@@ -189,7 +193,7 @@ function addMissingColumns(handle: DatabaseSync): void {
   const existing = new Set(
     (handle.prepare('PRAGMA table_info(runs)').all() as { name?: string }[]).map((col) => String(col.name))
   )
-  for (const column of ['audition', 'audition_skip']) {
+  for (const column of ['audition', 'audition_skip', 'dataset_version']) {
     if (existing.has(column)) continue
     handle.exec(`ALTER TABLE runs ADD COLUMN ${column} TEXT`)
   }
@@ -304,7 +308,8 @@ function normalizeRun(value: unknown): TrainRunRecord | null {
     error: typeof value.error === 'string' ? value.error : null,
     // 追加在末尾：键顺序要与 buildTrainRun() 一致，否则「读回来 = 写进去」这条断言靠不住。
     audition: isRecord(value.audition) ? (value.audition as unknown as TrainRunRecord['audition']) : null,
-    auditionSkip: isRecord(value.auditionSkip) ? (value.auditionSkip as unknown as TrainRunRecord['auditionSkip']) : null
+    auditionSkip: isRecord(value.auditionSkip) ? (value.auditionSkip as unknown as TrainRunRecord['auditionSkip']) : null,
+    datasetVersion: typeof value.datasetVersion === 'string' && value.datasetVersion !== '' ? value.datasetVersion : null
   }
 }
 
@@ -331,7 +336,8 @@ function runFromRow(row: RunRow): TrainRunRecord | null {
     artifacts: parse(row.artifacts),
     metrics: row.metrics === null ? null : parse(row.metrics),
     audition: row.audition === null || row.audition === undefined ? null : parse(row.audition),
-    auditionSkip: row.audition_skip === null || row.audition_skip === undefined ? null : parse(row.audition_skip)
+    auditionSkip: row.audition_skip === null || row.audition_skip === undefined ? null : parse(row.audition_skip),
+    datasetVersion: row.dataset_version == null ? null : String(row.dataset_version)
   })
 }
 
@@ -352,8 +358,8 @@ function entryFromRow(row: EntryRow): DatasetEntry {
 function writeRun(handle: DatabaseSync, run: TrainRunRecord): void {
   handle
     .prepare(
-      `INSERT INTO runs (id, kind, experiment, status, started_at, ended_at, applied, error, params, data, artifacts, metrics, audition, audition_skip)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO runs (id, kind, experiment, status, started_at, ended_at, applied, error, params, data, artifacts, metrics, audition, audition_skip, dataset_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          kind = excluded.kind,
          experiment = excluded.experiment,
@@ -367,7 +373,8 @@ function writeRun(handle: DatabaseSync, run: TrainRunRecord): void {
          artifacts = excluded.artifacts,
          metrics = excluded.metrics,
          audition = excluded.audition,
-         audition_skip = excluded.audition_skip`
+         audition_skip = excluded.audition_skip,
+         dataset_version = excluded.dataset_version`
     )
     .run(
       run.id,
@@ -383,7 +390,8 @@ function writeRun(handle: DatabaseSync, run: TrainRunRecord): void {
       JSON.stringify(run.artifacts),
       run.metrics === null ? null : JSON.stringify(run.metrics),
       run.audition === undefined || run.audition === null ? null : JSON.stringify(run.audition),
-      run.auditionSkip === undefined || run.auditionSkip === null ? null : JSON.stringify(run.auditionSkip)
+      run.auditionSkip === undefined || run.auditionSkip === null ? null : JSON.stringify(run.auditionSkip),
+      run.datasetVersion === undefined || run.datasetVersion === null ? null : run.datasetVersion
     )
 }
 
@@ -599,6 +607,23 @@ export function packedLedgerForRun(runId: string): FtLedgerEntry[] | null {
   } catch {
     return null
   }
+}
+
+/**
+ * #109：一行训练记录吃的那批录音的版本号。老行（补列之前写的）返回 null——那是「早于版本号」，
+ * 不是「版本号丢了」，两者在下游的文案里是分开的。
+ */
+export function datasetVersionForRun(runId: string): string | null {
+  const raw = rows<{ dataset_version: string | null }>('SELECT dataset_version FROM runs WHERE id = ?', runId)[0]
+  if (raw === undefined || raw.dataset_version === null || raw.dataset_version === '') return null
+  return String(raw.dataset_version)
+}
+
+/** 现在账本里那一版的版本号：与 run 行上的版本号比，就知道录音目录后来动过没有。 */
+export function currentDatasetVersion(): string {
+  return datasetVersionOf(
+    listDatasetEntries().map((entry) => ({ key: entry.key, text: entry.text, bytes: entry.bytes }))
+  )
 }
 
 /** 已经训过的条目（覆盖标记的清单）：哪句训过、哪句重录过，都对着它比。 */
