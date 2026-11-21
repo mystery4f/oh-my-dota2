@@ -32,6 +32,7 @@ import { summarizeErrors } from '@shared/error-log'
 import { summarizeMarks } from '@shared/translation-mark'
 import { judgeGsiStall, gsiStallWarning } from '@shared/gsi-stall'
 import { judgeEnv } from '@shared/env-report'
+import { shadowView } from '@shared/shadow-voice'
 import { resolveGsiRoot } from '@shared/gsi-lib'
 
 const settings: typeof DEFAULT_SETTINGS = structuredClone(DEFAULT_SETTINGS)
@@ -1034,6 +1035,25 @@ const implemented = {
           action: null
         },
   onVoiceOutReadiness: () => () => {},
+  // #80 影子模式：`?shadow=done` 看「第一局已打完」、`?shadow=off` 看关掉的样子。
+  voiceOutShadow: async () => {
+    const state = query.get('shadow') === 'off' ? 'off' : query.get('shadow') === 'done' ? 'done' : 'active'
+    const report =
+      state === 'active'
+        ? {
+            count: 3,
+            chars: 42,
+            newest: new Date().toISOString(),
+            sample: [
+              { at: new Date().toISOString(), matchid: '7512345678', text: '小心 gank，对面辅助不见了' },
+              { at: new Date().toISOString(), matchid: '7512345678', text: '买个粉，他们有个隐身' }
+            ]
+          }
+        : state === 'done'
+          ? { count: 7, chars: 96, newest: new Date().toISOString(), sample: [] }
+          : { count: 0, chars: 0, newest: null, sample: [] }
+    return shadowView(state, report)
+  },
   overlayStatus: async () => overlaySnap(),
   overlayPanelToggle: async () => {
     overlay.panelOpen = !overlay.panelOpen

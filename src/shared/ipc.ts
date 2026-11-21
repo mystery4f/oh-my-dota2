@@ -1,6 +1,7 @@
 import type { DotaDisplayMode } from './dota-video'
 import type { LogBundleResult } from './log-bundle'
 import type { FirstRunReport } from './first-run'
+import type { ShadowView } from './shadow-voice'
 import type { HotwordApplyResult, HotwordSuggestions } from './asr-hotword-candidates'
 import type { CableInstallResult, VirtualCableStatus, VoiceReplyStage } from './voice-out'
 import type { VoiceChainTiming } from './voice-timing'
@@ -610,6 +611,7 @@ export const IPC = {
   /** #46：声出就绪快照（读一次 + 变更推送），判断在 shared 的纯函数里。 */
   VOICE_OUT_READINESS: 'voice-out:readiness',
   VOICE_OUT_READINESS_STATE: 'voice-out:readiness-state',
+  VOICE_OUT_SHADOW: 'voice-out:shadow',
   /** 虚拟声卡（VB-Cable）检测：声出能不能进游戏语音的前置。 */
   VOICE_OUT_CABLE: 'voice-out:cable',
   /** 一键安装 VB-Cable：下载官方包 → 解压 → 提权启动官方安装器（UAC/重启仍由用户完成）。 */
@@ -900,6 +902,7 @@ export const ipcContract = {
   // #46 声出就绪：一键把服务拉起 + 读/订阅就绪快照（判断只有一份，在 shared 里）。
   sovitsStartServer: invoke<[], SovitsStatus>(IPC.TTS_SOVITS_START_SERVER),
   voiceOutReadiness: invoke<[], VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS),
+  voiceOutShadow: invoke<[], ShadowView>(IPC.VOICE_OUT_SHADOW),
   voiceOutCable: invoke<[], VirtualCableStatus>(IPC.VOICE_OUT_CABLE),
   voiceOutCableInstall: invoke<[], CableInstallResult>(IPC.VOICE_OUT_CABLE_INSTALL),
   onVoiceOutReadiness: listen<VoiceOutReadiness | null>(IPC.VOICE_OUT_READINESS_STATE),

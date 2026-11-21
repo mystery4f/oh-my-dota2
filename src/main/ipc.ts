@@ -45,6 +45,7 @@ import {
 import { ensureSovitsInstall } from './services/voice/sovits-install'
 import { activateSovitsRef, ensureSovitsServer, sovitsStatusSnapshot } from './services/voice/sovits-server'
 import { onVoiceOutReadiness, refreshVoiceOutReadiness } from './services/voice/voice-out-readiness'
+import { shadowViewNow } from './services/voice/shadow'
 import { detectVirtualCable } from './services/voice/virtual-cable'
 import { installVirtualCable } from './services/voice/virtual-cable-install'
 import { listSovitsRefs, sovitsRefsRoot, sovitsWeightsRoot } from './services/voice/sovits-refs'
@@ -290,6 +291,7 @@ const handlers: MainHandlers = {
   sovitsSeed: () => ensureSovitsSeedRef(false),
   // #46 就绪行：首屏读一次，之后靠广播（判断只有一份，在 shared 纯缝里）。
   voiceOutReadiness: () => refreshVoiceOutReadiness(),
+  voiceOutShadow: () => shadowViewNow(),
   // 幂等启动：服务已在跑就直接返回现状。拉起要 15–40 秒，这里不 await——
   // 面板先看到「正在启动」，就绪由广播翻牌，不会卡住一次点击。
   sovitsStartServer: async () => {

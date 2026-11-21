@@ -34,6 +34,7 @@ import { runSettingsBundleProbe } from './settings-bundle'
 import { runBuildInfoProbe } from './build-info'
 import { runLogsIsolationProbe } from './logs-isolation'
 import { runErrorLogProbe } from './error-log'
+import { runShadowVoiceProbe } from './shadow-voice'
 import { runProviderFailureProbe } from './provider-failure'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runOverlayA11yProbe } from './overlay-a11y'
@@ -220,6 +221,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the local error list: what counts as one, how repeats merge, and the line the panel reads',
     run: runErrorLogProbe
+  },
+  {
+    flag: '--shadow-voice-probe',
+    ci: true,
+    summary: 'the first-match shadow: it never speaks, it records what would have been said, and it ends after one match',
+    run: runShadowVoiceProbe
   },
   {
     flag: '--provider-failure-probe',

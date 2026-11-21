@@ -57,6 +57,12 @@ export interface AppSettings {
   /** 声出音色：edge 存声出清单里的英文嗓 id，offline 存离线清单里的本地嗓 id；GV 不用（空串）。 */
   ttsOutVoice: string
   /**
+   * 影子模式（#80）：第一局只记账不出声——会照常翻译、也会记下「本该念的那句」，
+   * 但不合成、不按说话键、不灌话筒。打完一局自动结束（按 `logs/gsi-summary/<matchid>.json`
+   * 的份数判断），不靠人记得回来关。
+   */
+  shadowFirstMatch: boolean
+  /**
    * 说话键（push-to-talk）：游戏内按住才发言的按键，F1–F12 或单个字母/数字。
    * 声出期间由应用自动按下/松开（合成成功才按，头尾各留 200ms 余量）；乱填打回 F5。
    */
@@ -294,6 +300,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   asrRouteShortLong: false,
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
+  shadowFirstMatch: true,
   autoStartCapture: true,
   quickPhrases: DEFAULT_QUICK_PHRASES,
   myNicknames: [],

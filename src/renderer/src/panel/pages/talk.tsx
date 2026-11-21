@@ -20,6 +20,7 @@ import { formatChainTiming } from '@shared/voice-timing'
 import { queueLine, stopLine, type SpeechQueueSnapshot } from '@shared/speech-queue'
 import type { MicHealthEvent } from '@shared/mic-health'
 import { interpretDeviceLine, interpretFollowNote } from '@shared/interpret'
+import type { ShadowView } from '@shared/shadow-voice'
 import { machineCheckOffer } from '@shared/env-report'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
@@ -78,6 +79,7 @@ export function TalkPage({
   // 声出走 GV 时才需要报出当前音色包；换包本身在弹窗里，这里只读。
   const voicePacks = useVoicePacks(settings?.ttsOutEngine === 'sovits')
 
+  const [shadow, setShadow] = useState<ShadowView | null>(null)
   const [asrStatus, setAsrStatus] = useState<OfflineStatus | null>(null)
   // 模型注册表：换模型只是换一个 id，面板因此不需要知道有几种引擎存在。
   const [asrModels, setAsrModels] = useState<AsrState | null>(null)
@@ -130,6 +132,9 @@ export function TalkPage({
     void window.api.voiceOutReadiness().then(setReadiness)
   }, [])
   useEffect(() => window.api.onVoiceOutReadiness(setReadiness), [])
+  useEffect(() => {
+    void window.api.voiceOutShadow().then(setShadow)
+  }, [])
   useEffect(() => {
     void window.api.speechQueue().then(setQueue)
     return window.api.onSpeechQueue(setQueue)
@@ -530,6 +535,14 @@ export function TalkPage({
               </select>
             )}
           </Row>
+          {shadow ? (
+            <Row label="影子模式" hint="第一局先不出声：照常翻译、记账，但不合成、不按说话键">
+              <StatusPill tone={shadow.state === 'active' ? 'warn' : shadow.state === 'done' ? 'ready' : 'idle'}>
+                {shadow.state === 'active' ? '第一局只记账' : shadow.state === 'done' ? '已完成' : '未启用'}
+              </StatusPill>
+              <span className="text-xs text-muted-foreground">{shadow.line}</span>
+            </Row>
+          ) : null}
           <Row
             label="虚拟声卡"
             hint="声出要进 Dota 2 语音：译文播到 CABLE Input，游戏里麦克风选 CABLE Output"

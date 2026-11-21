@@ -13,6 +13,7 @@ import { SegmentPlayer } from './segment-player'
 import { errorMessage } from '@shared/errors'
 import { speechFailHint } from '@shared/speech-plan'
 import { currentVoiceOutReadiness } from './voice-out-readiness'
+import { noteShadowLine, shadowActive } from './shadow'
 import { loadSettings } from '../settings'
 import { interpretLegOf, interpretSinkOf } from '@shared/interpret'
 import { getOverlayManager } from '../../windows/overlay'
@@ -71,6 +72,12 @@ class VoiceOutService {
 
   /** 一键到底的声出腿：译文切段并行合成，按序播出，说话键全程按住。 */
   speakReply(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
+    // 影子模式（#80）：第一局先不出声，只把「本该念的这句」记下来。
+    // 注意这里是在排队与合成之前返回——不合成、不按键、不灌话筒，而不是把音量调小。
+    if (shadowActive()) {
+      noteShadowLine(text)
+      return Promise.resolve({ spoken: false, error: null, segments: 0 })
+    }
     return this.enqueue(() => this.runReply(text, timer))
   }
 
@@ -80,6 +87,11 @@ class VoiceOutService {
    * 与普通声出共用同一条串行链——两组音频同时灌进同一块声卡就是两个字挤在一起。
    */
   interpretSpeak(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
+    // 同声腿也一样：影子期间不许往游戏话筒里灌任何声音。
+    if (shadowActive()) {
+      noteShadowLine(text)
+      return Promise.resolve({ spoken: false, error: null, segments: 0 })
+    }
     return this.enqueue(() => this.runReply(text, timer, 'interpret'))
   }
 

@@ -180,6 +180,11 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
   `hotkey:hold-selftest`; the panel's 热键 → 按住检测 row is the only place a user can tell "按下真的被听见" from
   "按住已经失效、现在是敲一下". A fallback state must say 按住不生效 and how to use 敲一下 — never "已恢复".
 
+- Shadow mode (#80): `src/shared/shadow-voice.ts` owns the three states and the one line the panel shows;
+  `src/main/services/voice/shadow.ts` owns the ledger (`logs/shadow-voice.jsonl`) and the "has a match ended"
+  question. `speakReply()` / `interpretSpeak()` return BEFORE queueing or synthesising while it is active —
+  never implement it as a volume knob. It ends by itself once one match has been archived, so never add a
+  manual "turn it off after the first match" chore, and never let the panel compute the state a second time.
 Two actions may never share an accelerator — the panel refuses the whole table and marks both rows. A key another
 program already owns is reported per row (`被占用`), never silently dropped: that is the only visible form of "I pressed
 it and nothing happened". The overlay and the pause hint print key names from the live table

@@ -40,6 +40,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--translate-guard-probe` the fidelity guard telemetry: blocked / recovered / gaveUp counts, dirty jsonl lines, and one batched write
   - `--minimap-probe` minimap hero dots: cost per frame and correct clustering on a synthetic frame — accuracy stays unmeasured without labelled screenshots
   - `--error-log-probe` the local error list: what counts as one, how repeats merge, and the line the panel reads
+  - `--shadow-voice-probe` the first-match shadow: it never speaks, it records what would have been said, and it ends after one match
   - `--provider-failure-probe` provider failures: timeout, rate limit, bad key and wrong model each get their own sentence and their own retry cadence
   - `--logs-isolation-probe` a probe process writes its logs to a temp dir, never into the user data directory
   - `--first-run-probe` the first-run checklist: six steps, what counts as evidence in each, and why the last one needs the real game
