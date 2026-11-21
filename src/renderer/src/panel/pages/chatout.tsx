@@ -129,7 +129,7 @@ export function ChatoutPage(): React.ReactElement {
             hint={
               groups === null
                 ? '正在读分组'
-                : `${phrasesLine(groups)} · 变量写 {hero} / {time} / {matchid}，发出去前会换成当前对局的值`
+                : `${phrasesLine(groups)} · 组名手填（开局 / 团战 / 打野），变量写 {hero} / {time} / {matchid}，发出去前会换成当前对局的值`
             }
             stacked
           >
