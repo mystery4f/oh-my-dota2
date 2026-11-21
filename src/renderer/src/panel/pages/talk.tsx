@@ -876,17 +876,18 @@ export function TalkPage({
             )}
           </Row>
           {stopNote ? <p className="px-4 pb-3 text-xs text-muted-foreground">{stopNote}</p> : null}
+          {/* 这一格的写口只有朗读页一个（#177）：同一布尔两个可写开关，用户在两页间切会看到旧值，
+              那种「我明明关了它又开了」比少一个开关糟得多。这里只说现在是什么、去哪里改。 */}
           <Row
             label="积压策略"
-            hint="开：新的一句来了，就把它之前还没开口的几句直接跳过——刷新太快时中间的句子会丢，只保证你听到的是最新战况。关：一句不落，按顺序念完。"
+            hint={
+              (settings.ttsDropBacklog ? '现在：只念最新（旧句直接跳过）' : '现在：排着队念完，一句不落') +
+              ' · 改它去朗读页的「刷屏积压」那一行'
+            }
           >
-            <Button
-              size="sm"
-              variant={settings.ttsDropBacklog ? 'secondary' : 'outline'}
-              onClick={() => void save.wrap(update({ ttsDropBacklog: !settings.ttsDropBacklog }))}
-            >
-              {settings.ttsDropBacklog ? '开（丢旧的，只念最新的）' : '关（排着队念完）'}
-            </Button>
+            <StatusPill tone={settings.ttsDropBacklog ? 'ready' : 'idle'}>
+              {settings.ttsDropBacklog ? '只念最新' : '全念'}
+            </StatusPill>
           </Row>
           <Row label="上一次对讲" hint={chainLine}>
             {chainLast?.matchid ? (

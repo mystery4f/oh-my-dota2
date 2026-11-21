@@ -43,8 +43,8 @@ git log -S " <键名>:" --format=%ct -- src/shared/settings-shape.ts
 
 ## 结论分布
 
-- 有读点、单写口：61
-- 多处写：7
+- 有读点、单写口：62
+- 多处写：6
 - 改了要重启（必须重启进程或游戏）：1
 - 下次生效（下一个动作才读）：2
 - 可疑（只有反证命中）：0
@@ -99,7 +99,7 @@ git log -S " <键名>:" --format=%ct -- src/shared/settings-shape.ts
 | `announceTotal` | `boolean` | `false` | 2 | src/renderer/src/panel/pages/read.tsx:1 | 1/0/0 | ok |
 | `announceTriggers` | `Partial<DotaAnnounceTriggers>` | `{ … }` | 3 | src/renderer/src/panel/pages/read.tsx:1 | 0/0/0 | ok |
 | `glossaryPackName` | `string` | `''` | 3 | src/main/services/glossary-pack.ts:1 | 0/0/0 | ok |
-| `ttsDropBacklog` | `boolean` | `true` | 9 | src/renderer/src/panel/pages/read.tsx:1<br>src/renderer/src/panel/pages/talk.tsx:1 | 2/0/0 | 多处写 |
+| `ttsDropBacklog` | `boolean` | `true` | 7 | src/renderer/src/panel/pages/read.tsx:1 | 1/0/0 | ok |
 | `ttsSpeakPrefix` | `'front' \| 'back' \| 'off'` | `'front'` | 9 | src/renderer/src/panel/pages/read.tsx:1 | 0/0/0 | ok |
 | `ttsSpeakSegmentChars` | `number` | `30` | 9 | src/renderer/src/panel/pages/read.tsx:1 | 2/0/0 | ok |
 | `ttsSpeakFrontTpl` | `string` | `'{who}说，{body}'` | 4 | src/renderer/src/panel/pages/read.tsx:1 | 0/0/0 | ok |

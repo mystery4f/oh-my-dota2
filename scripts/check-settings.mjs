@@ -87,8 +87,6 @@ const MULTI_WRITE_NOTES = {
     '有意：音色包页选一个参考音频时三件一起写（`src/renderer/src/panel/pages/packs.tsx:170`），服务端应用整套参考时也写同一组（`src/main/services/voice/sovits-server.ts:233`）',
   ttsSovitsPromptText: '同上：选参考音频时整套写入，音色包页也能单独改这一格',
   ttsSovitsPromptLang: '同上：语言跟着参考音频一起写，面板不给单独编辑',
-  ttsDropBacklog:
-    '未注记（有意保留两处、是否收归由 pm 定）：同一个开关在朗读页（`read.tsx:374`）与对讲页的设置抽屉（`talk.tsx:882`）各一个；两处都是同一个布尔，改哪边都生效，但用户会看到两个「刷屏积压」开关——是否收归一处由 pm 定，脚本不判'
 }
 
 function read(path) {
