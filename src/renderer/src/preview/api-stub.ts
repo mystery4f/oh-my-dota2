@@ -59,6 +59,10 @@ if (query.get('devices') === 'cable') {
 const engine = query.get('engine') as typeof settings.ttsEngine | null
 const outEngine = query.get('outEngine') as typeof settings.ttsOutEngine | null
 const scriptMode = query.get('script')
+// ?outDevice=<id>：预设「用户已经选好某个输出」（#183 的「离开再进三次仍是扬声器」证据用）。
+// 只是把初始状态摆出来，不拦任何写入——写入有没有发生，看下面的 __stubSettingWrites。
+const presetOutDevice = query.get('outDevice')
+if (presetOutDevice !== null) settings.ttsOutputDevice = presetOutDevice
 if (engine) settings.ttsEngine = engine
 if (outEngine) settings.ttsOutEngine = outEngine
 // ?interpret=1：同声模式开着，且这台设备就是虚拟电缆——面板上「同声翻译」那一行才有句子可读。
@@ -572,6 +576,9 @@ const implemented = {
   // React 的 `setState` 会因引用没变而跳过重渲染，面板就停在旧值上（热词并入后输入框还是 0/50）。
   getSettings: async () => ({ ...settings }),
   setSettings: async (patch) => {
+    // 每次写入都记一笔：#183 的验收要证明「已有值时零次写」，光看最终值证明不了。
+    const w = window as unknown as { __stubSettingWrites?: unknown[] }
+    w.__stubSettingWrites = [...(w.__stubSettingWrites ?? []), patch]
     Object.assign(settings, patch)
     return { ...settings }
   },

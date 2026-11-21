@@ -30,6 +30,7 @@ import {
   previewSplit,
   splitPreviewLine
 } from '@shared/speech-split'
+import { planCableAutoSelect } from '@shared/cable-autoselect'
 import { machineCheckOffer } from '@shared/env-report'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
@@ -257,21 +258,24 @@ export function TalkPage({
   // 解构出 wrap：save 是每次渲染新建的对象字面量，进依赖数组会自激。
   const wrap = save.wrap
   const gap = cable ? judgeCableGap(cable, settings?.ttsOutputDevice ?? '', cableOutput?.deviceId ?? null) : null
-  // #90：装好且当前输出不是 CABLE 时自动选上——用户手动选过别的设备就不碰（settings 已变）。
-  // 只在「检测为已装 + 输出还没指到它」瞬间做一次，之后 settings 指向它，条件自然不再成立。
+  // #90 的初衷（装完就能用）保留，但只保留在用户还没表过态的时候（#183）：
+  // 判定在 `planCableAutoSelect()` 里，读起来是一句「chosen 非空就一个字都不写」。
+  // 以前这里是「输出不等于 CABLE 就写 CABLE」，注释却写着「用户手动选过别的设备就不碰」——
+  // 代码做的正好相反，于是用户有意选的扬声器每次进这一页都被改回去。
+  const autoSelect = planCableAutoSelect({
+    chosen: settings?.ttsOutputDevice ?? '',
+    cableId: cableOutput?.deviceId ?? null,
+    error: cable === null ? '检测还没回来' : cable.error,
+    installed: cable?.installed ?? false,
+    driverOnly: cable?.driverOnly ?? false
+  })
   useEffect(() => {
-    if (
-      cable &&
-      cable.error === null &&
-      cable.installed &&
-      !cable.driverOnly &&
-      cableOutput &&
-      settings?.ttsOutputDevice !== cableOutput.deviceId
-    ) {
-      void wrap(update({ ttsOutputDevice: cableOutput.deviceId }))
-    }
-    // wrap / update 都是 useCallback 稳定的，写进来满足 exhaustive-deps 又不会自激。
-  }, [cable, cableOutput, settings?.ttsOutputDevice, wrap, update])
+    if (!autoSelect.write) return
+    // 「它自己变了」必须有据可查：只在这一处真的写的时候出现一次。
+    console.log('CABLE_AUTO_SELECT', JSON.stringify({ from: autoSelect.from, to: autoSelect.to }))
+    void wrap(update({ ttsOutputDevice: autoSelect.to }))
+    // wrap / update 都是稳定引用；autoSelect 每次渲染新建，所以按两个标量进依赖。
+  }, [autoSelect.write, autoSelect.from, autoSelect.to, wrap, update])
 
   // 纠错回路：改对了就把差异词并进热词表，下一句录音就少错一次。
   const hotwordsRef = useRef(settings?.asrHotwords ?? '')
