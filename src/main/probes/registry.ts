@@ -50,6 +50,7 @@ import { runTrainQueueProbe } from './train-queue'
 import { runDiskBudgetProbe } from './disk-budget'
 import { runTrainFailureProbe } from './train-failure'
 import { runCompanionProfileProbe } from './companion-profile'
+import { runMomentumProbe } from './momentum'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -620,6 +621,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the same-match companion profile (`src/shared/companion-profile.ts`): one player reuses their earlier rendering, a new player starts clean, and the profile is dropped at match end',
     run: runCompanionProfileProbe
+  },
+  {
+    flag: '--momentum-probe',
+    ci: true,
+    summary: 'the momentum band (`src/shared/momentum.ts`): no wording reads as a probability, the hover row carries both inputs, and a frame without net worth renders nothing',
+    run: runMomentumProbe
   },
   {
     flag: '--asr-check-live-probe',
