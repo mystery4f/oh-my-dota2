@@ -48,7 +48,10 @@ jobs:
     # behaviours a shared-logic refactor breaks, and until now CI never ran a single probe.
     # A probe exits non-zero when a check fails, so the step is the gate — no parsing needed.
     runs-on: windows-latest
-    timeout-minutes: 20
+    # 59 条纯探针在共享 runner 上背靠背跑，实测已经越过 20 分钟——而 GitHub 把
+    # 「超时」报成 cancelled，看起来像被人手动取消，最容易被误读成「CI 通过」。
+    # 宁可给足时间：超时必须是真超时，不是列表变长导致的假取消。
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
