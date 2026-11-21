@@ -275,6 +275,40 @@ const stubTrainRuns: Awaited<ReturnType<WindowApi['trainRuns']>> = [
     error: null
   }
 ]
+// `?audition=1`：换模前停在「待试听」的那一轮（#105），现役这一步才会摆出两副模型的并排结果。
+if (query.get('audition') === '1') {
+  stubTrainRuns.push({
+    id: 'asr-ft-stub-audition',
+    kind: 'asr-ft',
+    experiment: '地图-20261109080000',
+    params: { epochs: 66, lr: '2e-5', resumeFrom: null },
+    data: { files: 41, durationMs: 132_000, bytes: 442_000 },
+    status: 'trained',
+    startedAt: stubNow - 40 * 60 * 1000,
+    endedAt: stubNow - 6 * 60 * 1000,
+    artifacts: { runDir: 'data/asr-ft-runs/地图-20261109080000', ckptDir: 'data/asr-ft-runs/地图-20261109080000' },
+    metrics: null,
+    applied: false,
+    error: null,
+    audition: {
+      rows: [
+        { key: 'G14-L01', expected: '我的跳刀还没好', before: '我的跳还没好', after: '我的跳刀还没好', beforeCer: 0.14, afterCer: 0, better: 'after' },
+        { key: 'G14-L07', expected: '对面在偷盾，快回来', before: '对面在偷盾快回来', after: '对面在偷盾快回来', beforeCer: 0.1, afterCer: 0.1, better: 'same' },
+        { key: 'G20-L12', expected: '中路不见了', before: '中路不见', after: '中路不见了', beforeCer: 0.2, afterCer: 0, better: 'after' }
+      ],
+      count: 3,
+      better: 2,
+      worse: 0,
+      same: 1,
+      beforeCer: 0.18,
+      afterCer: 0.06,
+      verdict: 'better',
+      at: stubNow - 5 * 60 * 1000
+    },
+    auditionSkip: null
+  })
+}
+
 const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
   task: {
     id: 'train-stub',
@@ -879,6 +913,7 @@ const implemented = {
   },
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
   ftAsrftApply: async () => ({ ok: true, error: null, model: 'ft-stub' }),
+  ftAsrftSkipAudition: async () => ({ ok: true, error: null, model: 'ft-stub' }),
   ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),
   ftAsrftResetBase: async () => ({ ok: true, error: null, model: null }),
   ftAsrftFacts: async () => ({ vramNote: null, incremental: true }),

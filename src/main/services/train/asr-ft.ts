@@ -411,6 +411,83 @@ export function resetAsrFtToBase(): AsrFtSwapResult {
   resetSherpaWorker()
   return { ok: true, error: null, model: null }
 }
+/** 试听（#105）要的三份目录：现役（before）、刚铺好的 .next（after）、备份。 */
+export function ftModelDirs(): { active: string; next: string; bak: string } {
+  return { active: activeDir(), next: stagingDir(), bak: backupDir() }
+}
+
+/**
+ * 把导出产物铺成 `.next`：转正前的铺垫，试听（#105）要拿它和现役并排比。
+ * 拆出来的理由：试听必须发生在换模之前，而换模原先自己顺手铺 .next，没有可供比较的中间态。
+ */
+export function stageFtNextModel(): { ok: boolean; error: string | null; dir: string } {
+  const swap = swapView()
+  const exportDir = swap.lastExportDir
+  if (!exportDir) return { ok: false, error: '还没有导出产物：先跑一次训练，等「导出 ONNX」完成', dir: '' }
+  // 导出腿中途断掉时目录里已经有 conv_frontend/encoder，唯独缺 decoder.int8——
+  // 那时转正会让识别 worker 加载失败，所以先点名缺件，不碰现役模型。
+  const missing = missingFtExportFiles(safeReaddir(exportDir), finetuneEngine().id)
+  if (missing.length > 0) {
+    return { ok: false, error: `导出没跑完（缺 ${missing.join('、')}）：重新点一次「开始训练」，等导出完成`, dir: '' }
+  }
+  const next = stagingDir()
+  const bak = backupDir()
+  try {
+    rmSync(next, { recursive: true, force: true })
+    mkdirSync(next, { recursive: true })
+    // 产物映射来自引擎表：qwen3 是三件 onnx 原样搬，paraformer 要把 model_quant.onnx 改名成 model.int8.onnx。
+    const finetune = finetuneSpec()
+    for (const artifact of finetune.artifacts) {
+      cpSync(join(exportDir, artifact.from), join(next, artifact.to))
+    }
+    // 兜底顺序：刚进备份的上一版 → asr-models 下任何目录 → 对讲下载的官方模型 → 训练底模。
+    // 最后一项是「权重被删光、只剩底模」的场景：全量重训完要能一次转正，不能再回头找运行时模型。
+    const baseModelDir = detectAsrFtEnv().paths.baseModelDir ?? ''
+    const fallbacks = [
+      bak,
+      ...safeReaddir(asrModelsRoot()).map((d) => join(asrModelsRoot(), d)),
+      shippedModelDir(),
+      ...(baseModelDir ? [baseModelDir] : [])
+    ]
+    // 借件：导出目录里没有、sherpa 又要的文件（qwen3 的 tokenizer/、paraformer 的 tokens.txt）。
+    for (const item of finetune.borrow) {
+      const target = join(next, item.path)
+      if (existsSync(target)) continue
+      // tokenizer 单独交给 ensureTokenizerFiles：它可以从平铺布局（HF 底模根目录）逐件拼，
+      // 这里按目录找会直接判死——「删光权重只留底模」那次就是这么卡住的。
+      if (item.path === 'tokenizer') continue
+      const source = fallbacks.map((dir) => join(dir, item.path)).find((path) => existsSync(path))
+      if (source === undefined) {
+        throw new Error(`导出产物缺 ${item.path}，备份和原始模型目录里也没得借`)
+      }
+      cpSync(source, target, { recursive: item.recursive === true })
+    }
+    // qwen3 的词表是三件齐用，逐件再兜一层（借目录只能整目录借，缺一件就是坏目录）。
+    const needsTokenizer = finetune.borrow.some((item) => item.path === 'tokenizer')
+    if (needsTokenizer && ensureTokenizerFiles(next, fallbacks) === 'no-source') {
+      throw new Error('导出产物缺 tokenizer 词表文件，备份和原始模型目录里也没得借')
+    }
+    return { ok: true, error: null, dir: next }
+  } catch (err) {
+    return { ok: false, error: `准备新模型失败：${errorMessage(err)}`, dir: '' }
+  }
+}
+
+/**
+ * 跳过试听直接换上（#105）：票面要求「跳过是显式动作且记在 run 行上」，
+ * 所以先给最近一轮 trained 的 run 打上 auditionSkip，再走正常换模。
+ */
+export function skipFtAudition(): AsrFtSwapResult {
+  const newest = listTrainRuns('asr-ft').find((run) => run.status === 'trained' && !run.applied)
+  if (newest) {
+    patchTrainRun(newest.id, (run) => ({
+      ...run,
+      auditionSkip: { at: Date.now(), auto: false, reason: '' }
+    }))
+  }
+  return applyAsrFtModel()
+}
+
 export function applyAsrFtModel(): AsrFtSwapResult {
   // 先把出厂权重钉一份（#69）：下面 rm-bak / bak-active 一动手，原始权重就只剩这份副本。
   // 失败不拦转正（人能继续用新模型），只在状态里留着缺口。
@@ -422,64 +499,19 @@ export function applyAsrFtModel(): AsrFtSwapResult {
   if (steps.length === 0) {
     return { ok: false, error: '没有可应用的新模型：先跑一次训练，等「导出 ONNX」完成再点' }
   }
-  // 导出腿中途断掉时目录里已经有 conv_frontend/encoder，唯独缺 decoder.int8——
-  // 那时转正会让识别 worker 加载失败，所以先点名缺件，不碰现役模型。
-  if (swap.lastExportDir) {
-    // 引擎 id 必须显式传：`missingFtExportFiles` 不带参数时按 qwen3 的三件 onnx 查，
-    // 拿去查 paraformer 的导出目录会把「模型.int8.onnx + tokens.txt」判成缺件（实测 2026-11-09）。
-    const missing = missingFtExportFiles(safeReaddir(swap.lastExportDir), finetuneEngine().id)
-    if (missing.length > 0) {
-      return { ok: false, error: `导出没跑完（缺 ${missing.join('、')}）：重新点一次「开始训练」，等导出完成再应用` }
-    }
-  }
   const active = activeDir()
   const bak = backupDir()
   const next = stagingDir()
+  // 有导出产物就先铺成 .next（试听 #105 用的就是这一份）；没有导出就沿用已有的 .next（增量起点那种）。
+  if (swap.lastExportDir) {
+    const staged = stageFtNextModel()
+    if (!staged.ok) return { ok: false, error: staged.error ?? '准备新模型失败' }
+  }
   try {
     for (const op of steps) {
       if (op === 'rm-bak') rmSync(bak, { recursive: true, force: true })
       if (op === 'bak-active') renameSync(active, bak)
-      if (op === 'promote-next') {
-        // 只拷 sherpa 加载的三件 int8（+ 词表）：导出目录里还躺着 3–5 GB 的 fp32 外置分片，
-        // 整盘转正会让现役目录翻几倍，下一轮换模又得再拷一遍。
-        if (swap.lastExportDir) {
-          rmSync(next, { recursive: true, force: true })
-          mkdirSync(next, { recursive: true })
-          // 产物映射来自引擎表：qwen3 是三件 onnx 原样搬，paraformer 要把 model_quant.onnx 改名成 model.int8.onnx。
-          const finetune = finetuneSpec()
-          for (const artifact of finetune.artifacts) {
-            cpSync(join(swap.lastExportDir, artifact.from), join(next, artifact.to))
-          }
-          // 兜底顺序：刚进备份的上一版 → asr-models 下任何目录 → 对讲下载的官方模型 → 训练底模。
-          // 最后一项是「权重被删光、只剩底模」的场景：全量重训完要能一次转正，不能再回头找运行时模型。
-          const baseModelDir = detectAsrFtEnv().paths.baseModelDir ?? ''
-          const fallbacks = [
-            bak,
-            ...safeReaddir(asrModelsRoot()).map((d) => join(asrModelsRoot(), d)),
-            shippedModelDir(),
-            ...(baseModelDir ? [baseModelDir] : [])
-          ]
-          // 借件：导出目录里没有、sherpa 又要的文件（qwen3 的 tokenizer/、paraformer 的 tokens.txt）。
-          for (const item of finetune.borrow) {
-            const target = join(next, item.path)
-            if (existsSync(target)) continue
-            // tokenizer 单独交给 ensureTokenizerFiles：它可以从平铺布局（HF 底模根目录）逐件拼，
-            // 这里按目录找会直接判死——「删光权重只留底模」那次就是这么卡住的。
-            if (item.path === 'tokenizer') continue
-            const source = fallbacks.map((dir) => join(dir, item.path)).find((path) => existsSync(path))
-            if (source === undefined) {
-              throw new Error(`导出产物缺 ${item.path}，备份和原始模型目录里也没得借`)
-            }
-            cpSync(source, target, { recursive: item.recursive === true })
-          }
-          // qwen3 的词表是三件齐用，逐件再兜一层（借目录只能整目录借，缺一件就是坏目录）。
-          const needsTokenizer = finetune.borrow.some((item) => item.path === 'tokenizer')
-          if (needsTokenizer && ensureTokenizerFiles(next, fallbacks) === 'no-source') {
-            throw new Error('导出产物缺 tokenizer 词表文件，备份和原始模型目录里也没得借')
-          }
-        }
-        renameSync(next, active)
-      }
+      if (op === 'promote-next') renameSync(next, active)
     }
   } catch (err) {
     // 失败时目录可能停在中间态（现役已挪去 .bak、.next 没换上来）：说清上一版在哪，

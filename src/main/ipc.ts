@@ -74,6 +74,7 @@ import { prepareFtDataset } from './services/train/ft-dataset'
 import { asrCheckState, correctAsrCheckItem, startAsrCheck, stopAsrCheck } from './services/train/asr-check'
 import {
   applyAsrFtModel,
+  skipFtAudition,
   asrFtFacts,
   asrFtStatus,
   resetAsrFtToBase,
@@ -319,6 +320,7 @@ const handlers: MainHandlers = {
     return asrFtInstallState()
   },
   ftAsrftApply: () => applyAsrFtModel(),
+  ftAsrftSkipAudition: () => skipFtAudition(),
   ftAsrftRollback: () => rollbackAsrFtModel(),
   ftAsrftResetBase: () => resetAsrFtToBase(),
   logBundleExport: () => exportLogBundle(),

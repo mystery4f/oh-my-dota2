@@ -20,7 +20,7 @@ import {
 } from '@shared/train/task'
 import { parseTrainProgress } from '@shared/train/progress'
 import { ensureSovitsServer, pauseSovitsForTraining, setInferenceHold, type SovitsPauseOutcome } from '../voice/sovits-server'
-import { applyAsrFtModel, markRunStatus, pruneAsrFtRunDirs } from './asr-ft'
+import { applyAsrFtModel, ftModelDirs, markRunStatus, pruneAsrFtRunDirs, stageFtNextModel } from './asr-ft'
 import { ftWavDurationMs, summarizePendingTakes } from '@shared/train/asr-ft'
 import {
   buildTrainRun,
@@ -32,6 +32,11 @@ import {
 } from '@shared/train/run'
 import { listDatasetEntries, loadTrainRun, markDatasetEntriesTrained, saveDatasetLedger, saveTrainRun } from './run-store'
 import { readAsrMetrics, readGvMetrics } from './run-metrics'
+import { auditionEntriesOf, auditionModelPair, defaultAuditionTranscribe } from './audition'
+import { auditionLine, type FtAudition } from '@shared/train/audition'
+import { finetuneEngine } from './target-engine'
+import { errorMessage } from '@shared/errors'
+import type { AsrFtSwapResult } from '@shared/train/asr-ft'
 import { appendTrainLog } from './log-file'
 
 /**
@@ -404,6 +409,59 @@ export class TrainManager {
       : readGvMetrics(this.request?.gvResolved?.home, run.experiment)
   }
 
+
+  /**
+   * 收场时的转正决策（#105）：先把导出产物铺成 .next，再用这一轮的留出集录音试听。
+   *
+   * 三种收场：
+   * - 铺不成（导出缺件）→ 返回失败，与旧行为一致；
+   * - 没有留出集可听 → 记一条「自动跳过」再直接换上，run 行上留痕；
+   * - 有留出集 → 起一个后台试听，本次不换模（awaiting），人看过对比再选采纳或跳过。
+   */
+  private auditionOrPromote(saved: TrainRunRecord | null): { result: AsrFtSwapResult | null; awaiting: boolean } {
+    const staged = stageFtNextModel()
+    if (!staged.ok) return { result: { ok: false, error: staged.error ?? '准备新模型失败', model: null }, awaiting: false }
+    const entries = auditionEntriesOf(this.request?.asrFt?.ledger ?? [])
+    if (saved === null || entries.length === 0) {
+      if (saved) {
+        const patched = finishTrainRun(saved, {
+          status: 'trained',
+          auditionSkip: { at: Date.now(), auto: true, reason: '没有留出集可听' }
+        })
+        saveTrainRun(patched)
+        this.run = patched
+        this.record('没有留出集可听：自动跳过试听，直接换上')
+      }
+      return { result: applyAsrFtModel(), awaiting: false }
+    }
+    void this.runAudition(saved, entries)
+    return { result: null, awaiting: true }
+  }
+
+  /** 后台试听：两副模型听同一批录音，结论落回 run 行；成功与否都不换模（换模由人点）。 */
+  private async runAudition(saved: TrainRunRecord, entries: Parameters<typeof auditionModelPair>[0]): Promise<void> {
+    const dirs = ftModelDirs()
+    try {
+      const audition: FtAudition = await auditionModelPair(
+        entries,
+        { before: dirs.active, after: dirs.next },
+        defaultAuditionTranscribe(finetuneEngine().id)
+      )
+      const patched = finishTrainRun(saved, { status: 'trained', audition })
+      saveTrainRun(patched)
+      this.run = patched
+      this.record(`${auditionLine(audition)} · 采纳或跳过由你在面板上点`)
+    } catch (err) {
+      const patched = finishTrainRun(saved, {
+        status: 'trained',
+        auditionSkip: { at: Date.now(), auto: true, reason: `试听失败：${errorMessage(err)}` }
+      })
+      saveTrainRun(patched)
+      this.run = patched
+      this.record(`试听失败：${errorMessage(err)}（新模型已铺好，可在面板上直接采纳）`)
+    }
+  }
+
   /**
    * 收场的共同一段：结果补进这一轮并落库。
    * 正常收场与「应用退出」从这里分叉之前完全一样，区别只在要不要广播与通知——
@@ -437,17 +495,22 @@ export class TrainManager {
         metrics: this.runMetrics(this.run)
       })
     }
-    // 训练 + 导出都成功就直接换上去：磁盘上只留一份微调模型，用户不必再点第二个按钮。
-    const promoted = status === 'done' && this.chained && this.run?.kind === 'asr-ft' ? applyAsrFtModel() : null
+    // 训练 + 导出都成功：先铺 .next 并用留出集试听（#105），有对比就停在「待试听」由人采纳或跳过；
+    // 没有留出集可听就照旧自动换上，不让第一轮小数据训练卡在没人能判断的空档里。
+    const promotion = status === 'done' && this.chained && this.run?.kind === 'asr-ft' ? this.auditionOrPromote(saved) : null
+    const promoted = promotion?.result ?? null
+    const awaiting = promotion?.awaiting === true
     // 换模自己会把那一轮翻成 applied；重读一次让内存里的记录与库一致。
     if (promoted?.ok && saved) saved = loadTrainRun(saved.id) ?? saved
     const stage =
       status === 'done'
-        ? promoted
-          ? promoted.ok
-            ? '完成（已换上新模型）'
-            : `完成，但换模失败：${promoted.error ?? '未知错误'}`
-          : '完成'
+        ? awaiting
+          ? '完成（待试听：同一批留出集录音在两副模型上并排比）'
+          : promoted
+            ? promoted.ok
+              ? '完成（已换上新模型）'
+              : `完成，但换模失败：${promoted.error ?? '未知错误'}`
+            : '完成'
         : (failure ?? '已停止')
     if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
     // 收场结论也进日志文件：换模失败、权重平均兜底这类只有一行的判断，事后只能靠这一句复盘。

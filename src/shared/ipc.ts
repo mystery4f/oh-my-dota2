@@ -573,6 +573,7 @@ export const IPC = {
   FT_ASRFT_STATUS: 'ft:asrft-status',
   FT_ASRFT_FACTS: 'ft:asrft-facts',
   FT_ASRFT_APPLY: 'ft:asrft-apply',
+  FT_ASRFT_SKIP_AUDITION: 'ft:asrft-skip-audition',
   FT_ASRFT_ROLLBACK: 'ft:asrft-rollback',
   FT_ASRFT_RESET_BASE: 'ft:asrft-reset-base',
   FT_ASRFT_INSTALL: 'ft:asrft-install',
@@ -901,6 +902,7 @@ export const ipcContract = {
   ftAsrftFacts: invoke<[], AsrFtFacts>(IPC.FT_ASRFT_FACTS),
   ftAsrftInstall: invoke<[], AsrFtInstallState>(IPC.FT_ASRFT_INSTALL),
   ftAsrftApply: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_APPLY),
+  ftAsrftSkipAudition: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_SKIP_AUDITION),
   ftAsrftRollback: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_ROLLBACK),
   ftAsrftResetBase: invoke<[], AsrFtSwapResult>(IPC.FT_ASRFT_RESET_BASE),
   /** 一键导出诊断包；成功了也要把 missing 摆在面板上（缺哪几份日志）。 */

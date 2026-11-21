@@ -666,6 +666,30 @@ check(
   check('日志记录字段齐全', rec.from === 'qwen3' && rec.to === ASR_ROUTE_SHORT_ENGINE && rec.reason === 'short' && typeof rec.note === 'string', JSON.stringify(rec))
 }
 
+// —— 试听对比（#105）：同一批留出集录音在两副模型上的并排结果 ——
+{
+  const { judgeAudition, auditionLine, auditionSkipLine, AUDITION_MAX_ROWS } = await import('../src/shared/train/audition.ts')
+  const pairs = [
+    { key: 'G14-L01', expected: '中路不见了', before: '中路不见', after: '中路不见了' },
+    { key: 'G14-L02', expected: '肉山要打了', before: '肉山要打了', after: '肉山要打了' },
+    { key: 'G14-L03', expected: '撤退', before: '', after: '撤退' }
+  ]
+  const audition = judgeAudition(pairs, 1700000000000)
+  check('逐句胜负与 CER 一致', audition.rows.every((row) => (row.beforeCer === row.afterCer ? row.better === 'same' : row.better === (row.afterCer < row.beforeCer ? 'after' : 'before'))), JSON.stringify(audition.rows.map((row) => [row.key, row.better])))
+  check('整批结论与 CER 同向', audition.verdict === 'better' && audition.beforeCer > audition.afterCer, `${audition.beforeCer}->${audition.afterCer}`)
+  check('空识别按全错算', audition.rows.find((row) => row.key === 'G14-L03').beforeCer === 1, 'expect 1')
+  check('句数统计等于输入句数', audition.count === pairs.length && audition.better + audition.worse + audition.same === pairs.length, `${audition.count}`)
+  const many = Array.from({ length: AUDITION_MAX_ROWS + 3 }, (_unused, index) => ({ key: `K${index}`, expected: '好', before: index === 0 ? '坏' : '好', after: '好' }))
+  const capped = judgeAudition(many, 1)
+  check('表格截断且差异句优先', capped.rows.length === AUDITION_MAX_ROWS && capped.rows[0].key === 'K0', `${capped.rows.length}/${capped.rows[0]?.key}`)
+  check('对比一句话带句数与 CER', auditionLine(audition).includes('3 句') && auditionLine(audition).includes('CER'), auditionLine(audition))
+  check('自动跳过与人点的分开说', auditionSkipLine({ at: 1, auto: true, reason: '没有留出集可听' }).startsWith('自动跳过') && auditionSkipLine({ at: 1, auto: false, reason: '' }) === '跳过试听', auditionSkipLine({ at: 1, auto: true, reason: '没有留出集可听' }))
+  const { buildTrainRun, finishTrainRun } = await import('../src/shared/train/run.ts')
+  const run = buildTrainRun({ kind: 'asr-ft', experiment: 'ft-pure', startedAt: 1700000000000 })
+  const patched = finishTrainRun(run, { status: 'trained', audition, auditionSkip: { at: 1, auto: false, reason: '' } })
+  check('run 行默认没有试听记录、收场能落两条', run.audition === null && run.auditionSkip === null && patched.audition?.count === 3 && patched.auditionSkip?.auto === false, `${patched.audition?.count}/${patched.auditionSkip?.auto}`)
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

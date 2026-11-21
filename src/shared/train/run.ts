@@ -4,6 +4,7 @@
  * 与 FtRunMeta 的分工：那是 ASR 训练目录里的账本（训练脚本的副产物），这里是指标层，两者互不替代。
  */
 import type { TrainTaskKind } from './task'
+import type { FtAudition, FtAuditionSkip } from './audition'
 import type { AsrFtMode } from './asr-ft'
 
 export const TRAIN_RUN_STATUSES = ['running', 'trained', 'applied', 'failed', 'stopped'] as const
@@ -68,6 +69,10 @@ export interface TrainRunRecord {
   /** 是否已转正（ASR 应用 / GV 注册音色包）。 */
   applied: boolean
   error: string | null
+  /** 转正前的试听对比（#105）：同一批留出集录音在新旧模型上的识别结果与 CER。 */
+  audition?: FtAudition | null
+  /** 跳过试听的记录（#105）：人点的与自动跳过分开记，票面要求「显式动作要落账」。 */
+  auditionSkip?: FtAuditionSkip | null
 }
 
 /** 折线最多留这么多点：1400 step 全画既看不清也让 JSON 变大。 */
@@ -108,7 +113,9 @@ export function buildTrainRun(input: {
     artifacts: { ...input.artifacts },
     metrics: null,
     applied: false,
-    error: null
+    error: null,
+    audition: null,
+    auditionSkip: null
   }
 }
 
@@ -122,6 +129,8 @@ export function finishTrainRun(
     artifacts?: TrainRunArtifacts
     error?: string | null
     applied?: boolean
+    audition?: FtAudition | null
+    auditionSkip?: FtAuditionSkip | null
   }
 ): TrainRunRecord {
   return {
@@ -131,7 +140,9 @@ export function finishTrainRun(
     metrics: patch.metrics === undefined ? record.metrics : patch.metrics,
     artifacts: { ...record.artifacts, ...patch.artifacts },
     error: patch.error === undefined ? record.error : patch.error,
-    applied: patch.applied ?? record.applied
+    applied: patch.applied ?? record.applied,
+    audition: patch.audition === undefined ? (record.audition ?? null) : patch.audition,
+    auditionSkip: patch.auditionSkip === undefined ? (record.auditionSkip ?? null) : patch.auditionSkip
   }
 }
 

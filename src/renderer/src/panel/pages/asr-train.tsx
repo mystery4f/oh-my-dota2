@@ -19,6 +19,7 @@ import { routingHint } from '@shared/asr-routing'
 import type { AsrState } from '@shared/asr/models'
 import { normalizeLine } from '@shared/chat-line'
 import { Button } from '@/components/ui/button'
+import { auditionLine, auditionSkipLine } from '@shared/train/audition'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 import { Modal } from '../components/modal'
 import { AsrCheckDialog } from '../components/asr-check-dialog'
@@ -62,6 +63,9 @@ export function AsrTrainPage(): React.ReactElement {
   const [recs, setRecs] = React.useState<Record<string, FtRecInfo>>({})
   const [status, setStatus] = React.useState<AsrFtStatusResult | null>(null)
   const [runs, setRuns] = React.useState<TrainRunRecord[]>([])
+  // 试听（#105）：换模前那一轮会带着 audition 停在 trained 上，等人采纳或跳过。
+  const [auditionNote, setAuditionNote] = React.useState<string | null>(null)
+  const [auditionBusy, setAuditionBusy] = React.useState(false)
   const [groupId, setGroupId] = React.useState('')
   const [lineNo, setLineNo] = React.useState(1)
   const [asrText, setAsrText] = React.useState('')
@@ -120,6 +124,25 @@ export function AsrTrainPage(): React.ReactElement {
   const refreshAll = React.useCallback(async (): Promise<void> => {
     await Promise.all([refreshRecs(), refreshStatus(), refreshRuns()])
   }, [refreshRecs, refreshRuns, refreshStatus])
+
+  // 待试听的那一轮：trained、还没换上、带着对比结论；跳过的那一轮用来在页面上留痕。
+  const awaitingRun = runs.find((run) => run.status === 'trained' && !run.applied && Boolean(run.audition)) ?? null
+  const skippedRun = runs.find((run) => run.status === 'trained' && !run.applied && run.auditionSkip) ?? null
+
+  const settleAudition = React.useCallback(
+    async (skip: boolean): Promise<void> => {
+      setAuditionBusy(true)
+      try {
+        const result = skip ? await window.api.ftAsrftSkipAudition() : await window.api.ftAsrftApply()
+        setAuditionNote(result.ok ? '已换上新模型' : (result.error ?? '换模失败'))
+        await Promise.all([refreshStatus(), refreshRuns()])
+      } finally {
+        setAuditionBusy(false)
+      }
+    },
+    [refreshRuns, refreshStatus]
+  )
+
 
   // 分流说明要讲「缺哪副模型」，读一次模型快照就够（换模型走另一步，回来重挂页面）。
   React.useEffect(() => {
@@ -796,6 +819,35 @@ export function AsrTrainPage(): React.ReactElement {
                     {status?.swap.activeExists ? '已就位' : '缺模型'}
                   </StatusPill>
                 </Row>
+                {awaitingRun?.audition ? (
+                  <Row label="试听对比" stacked hint={`${auditionLine(awaitingRun.audition)} —— 两副模型听的是同一批留出集录音；采纳才换，跳过也会记在这一轮上`}>
+                    <div className="space-y-1 text-xs">
+                      {awaitingRun.audition.rows.map((row) => (
+                        <div key={row.key} className="grid grid-cols-[72px_1fr_1fr] gap-2 rounded border border-border/60 px-2 py-1">
+                          <span className="text-muted-foreground">{row.key}</span>
+                          <span className={row.better === 'before' ? 'text-amber-400' : undefined}>
+                            现役：{row.before || '（没认出来）'}
+                          </span>
+                          <span className={row.better === 'after' ? 'text-emerald-400' : undefined}>
+                            新的：{row.after || '（没认出来）'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button size="sm" disabled={auditionBusy} onClick={() => void settleAudition(false)}>
+                        采纳并换上
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={auditionBusy} onClick={() => void settleAudition(true)}>
+                        跳过试听，直接换上
+                      </Button>
+                      {auditionNote ? <span className="text-xs text-muted-foreground">{auditionNote}</span> : null}
+                    </div>
+                  </Row>
+                ) : null}
+                {!awaitingRun && skippedRun?.auditionSkip ? (
+                  <Row label="试听" hint={auditionSkipLine(skippedRun.auditionSkip)} />
+                ) : null}
                 <Row
                   label="短句/长句分流"
                   stacked

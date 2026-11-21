@@ -50,6 +50,7 @@ import { runGlossaryPackProbe } from './glossary-pack'
 import { runMicHealthProbe } from './mic-health'
 import { runOverlayDigestProbe } from './overlay-digest'
 import { runKeyNounProbe } from './key-nouns'
+import { runFtAuditionProbe } from './ft-audition'
 import { runAsrRoutingProbe } from './asr-routing'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
@@ -290,6 +291,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'game-state announcements (src/shared/dota-announce.ts + src/main/services/voice/announce.ts): wisdom rune / Roshan window / stack and pull windows each fire exactly once per occurrence from the game clock alone, a switched-off trigger stays silent, and with the master switch off the voice pipeline is never called',
     run: runAnnounceProbe
+  },
+  {
+    flag: '--ft-audition-probe',
+    summary:
+      'the pre-promotion audition (`src/shared/train/audition.ts` + `src/main/services/train/audition.ts`): both models transcribe the identical held-out recordings, the pairs and CER are graded by one pure seam, and skipping the audition is recorded on the run row',
+    ci: true,
+    run: runFtAuditionProbe
   },
   {
     flag: '--key-noun-probe',
