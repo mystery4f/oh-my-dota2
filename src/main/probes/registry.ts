@@ -46,6 +46,7 @@ import { runSettingsPersistProbe } from './settings-persist'
 import { runSovitsRefsProbe } from './sovits-refs'
 import { runSovitsVoicepackProbe } from './sovits-voicepack'
 import { runTrainProbe } from './train'
+import { runTrainQueueProbe } from './train-queue'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -517,6 +518,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the pure training decision seam (`src/shared/train.ts`): mutexes, preflight, run state',
     run: runTrainProbe
+  },
+  {
+    flag: '--train-queue-probe',
+    ci: true,
+    summary: 'the training queue (`src/shared/train/queue.ts`): three waiting runs execute in order, and cancelling a waiting entry never reaches the running run',
+    run: runTrainQueueProbe
   },
   {
     flag: '--asr-check-live-probe',

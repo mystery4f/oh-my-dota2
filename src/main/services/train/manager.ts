@@ -35,6 +35,7 @@ import { listDatasetEntries, loadTrainRun, markDatasetEntriesTrained, saveDatase
 import { readAsrMetrics, readGvMetrics } from './run-metrics'
 import { auditionEntriesOf, auditionModelPair, defaultAuditionTranscribe } from './audition'
 import { auditionLine, type FtAudition } from '@shared/train/audition'
+import { TrainQueue, trainQueueLine, trainQueueQueuedLine, type TrainQueueEntry } from '@shared/train/queue'
 import { finetuneEngine } from './target-engine'
 import { errorMessage } from '@shared/errors'
 import type { AsrFtSwapResult } from '@shared/train/asr-ft'
@@ -141,13 +142,23 @@ export class TrainManager {
   private request: TrainStartRequest | null = null
   /** 本次任务的训练记录：开训即落盘，收场补指标与产物（面板两页读它）。 */
   private run: TrainRunRecord | null = null
+  /**
+   * #107：排队的任务。队头出队即开跑；队列**从不**持有正在跑的那一个，
+   * 所以撤排队与停正在跑是两条路，这里不会互相踩。
+   */
+  private readonly queue = new TrainQueue()
+  private readonly queuedStarts = new Map<
+    string,
+    { request: TrainStartRequest; chain: (() => TrainPlan | null) | null; warning: string | null }
+  >()
   onState(listener: (snapshot: TrainSnapshot) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
   snapshot(): TrainSnapshot {
-    return { task: this.task, logs: this.logs.slice(-120) }
+    // #107：队列一起广播——面板换页回来也能立刻看到「后面还排着谁」。
+    return { task: this.task, logs: this.logs.slice(-120), queue: this.queue.list() }
   }
 
   /** 当前任务状态：null = 没有任务（面板和 T2 的互斥判定都从这里读）。 */
@@ -202,7 +213,13 @@ export class TrainManager {
 
   start(request: TrainStartRequest, chain?: () => TrainPlan | null, warning?: string | null): TrainStartResult {
     const gate = canStartTrain(this.status())
-    if (!gate.ok) return { ok: false, error: gate.reason }
+    if (!gate.ok) {
+      // #107：正在跑（preparing/running）时不再是「先停止再开新的」，而是排进队列；
+      // 「还在停」仍然拒绝——那一刻旧进程没退干净，排进去也不知道什么时候能开。
+      const busy = this.task !== null && (this.task.status === 'preparing' || this.task.status === 'running')
+      if (!busy) return { ok: false, error: gate.reason }
+      return this.enqueueStart(request, chain ?? null, warning ?? null)
+    }
     const kind: TrainTaskKind = normalizeTrainKind(request.kind)
     // 整份 request 一起传：asrFt / gvResolved 是备料阶段挂上来的附件，丢掉就一定会报「环境没就绪」
     const plan = deriveTrainPlan({ ...request, kind })
@@ -255,6 +272,50 @@ export class TrainManager {
     if (this.run.kind === 'asr-ft' && request.asrFt?.ledger) saveDatasetLedger(request.asrFt.ledger, this.run.id)
     this.spawnChild(plan.exe === 'node' ? (node ?? 'node') : plan.exe, plan)
     return { ok: true, error: null }
+  }
+
+  /** #107：把这次开训请求排进队列，返回位次（`queued`）。 */
+  private enqueueStart(request: TrainStartRequest, chain: (() => TrainPlan | null) | null, warning: string | null): TrainStartResult {
+    const kind = normalizeTrainKind(request.kind)
+    const label = `${kind} · ${String(request.dataset ?? '演示')}`
+    const id = `queued-${Date.now()}-${this.queue.size() + 1}`
+    const added = this.queue.add({ id, label, requestedAt: Date.now() })
+    if (!added.ok) return { ok: false, error: added.error }
+    this.queuedStarts.set(id, { request, chain, warning })
+    this.record(trainQueueQueuedLine(label, added.position))
+    this.emit(true)
+    return { ok: true, error: null, queued: added.position }
+  }
+
+  /** 队列快照：面板与日志读同一句话，标题里不再各自拼。 */
+  queuedSnapshot(): { entries: TrainQueueEntry[]; line: string } {
+    const entries = this.queue.list()
+    return { entries, line: trainQueueLine(entries) }
+  }
+
+  /**
+   * 撤掉一个还在等的任务。正在跑的那个不在队列里，所以这里永远拒绝它并指路「停止」——
+   * 一次误点不许把正在写权重的那一轮吹掉。
+   */
+  cancelQueued(id: string): { ok: boolean; error: string | null } {
+    const outcome = this.queue.remove(id)
+    if (outcome.error !== null) return { ok: false, error: outcome.error }
+    this.queuedStarts.delete(id)
+    this.record(`已从队列撤掉：${outcome.removed?.label ?? id}`)
+    this.emit(true)
+    return { ok: true, error: null }
+  }
+
+  /** 收场后接上队头；队列空就什么也不做（收场路径不许因此变慢或变吵）。 */
+  private drainQueue(): void {
+    const next = this.queue.shift()
+    if (next === null) return
+    const args = this.queuedStarts.get(next.id)
+    this.queuedStarts.delete(next.id)
+    if (!args) return
+    this.record(`队列接上：${next.label}（${trainQueueLine(this.queue.list())}）`)
+    const outcome = this.start(args.request, args.chain ?? undefined, args.warning ?? undefined)
+    if (!outcome.ok) this.record(`队列里这一轮开不了：${outcome.error ?? '未知原因'}`)
   }
 
   /** 训练腿成功且有链：同一任务接着跑导出腿，状态只换阶段不换任务。 */
@@ -543,9 +604,11 @@ export class TrainManager {
     }
     this.child = null
     this.emit(true)
-    // 任务退干净就该恢复推理（T2 接线）；没停过（kept-off）不演恢复。
-    this.io.holdInference(false)
-    if (shouldResumeInference(this.status())) void this.resumeInference()
+    this.drainQueue()
+    if (!shouldPauseInference(this.status())) {
+      this.io.holdInference(false)
+      if (shouldResumeInference(this.status())) void this.resumeInference()
+    }
   }
 
   /** T2：把 GV 推理拉回来；失败在窗口里明说，别让「怎么没声」变成悬案。 */

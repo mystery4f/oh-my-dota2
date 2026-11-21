@@ -85,6 +85,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--provider-reasoning-probe` the pure 推理 toggle seam (`src/shared/provider-reasoning.ts`), zero network and zero model
   - `--zhipu-live-probe` runs the real wrapped pipeline (warm-up → durable session + ledger) against zhipu
   - `--train-probe` the pure training decision seam (`src/shared/train.ts`): mutexes, preflight, run state
+  - `--train-queue-probe` the training queue (`src/shared/train/queue.ts`): three waiting runs execute in order, and cancelling a waiting entry never reaches the running run
   - `--asr-check-live-probe` runs the real model over the ledger recordings and prints the CER ranking split into train / eval
   - `--voice-runtime-probe` the voice runtime installer state (`src/main/services/voice/runtime.ts`) with temp fixtures
   - `--voice-worker-probe` the NDJSON resident-worker protocol harness (`src/main/services/voice/worker.ts`), zero models

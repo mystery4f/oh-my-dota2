@@ -58,9 +58,13 @@ export interface TrainLogLine {
   text: string
 }
 
+import type { TrainQueueEntry } from './queue'
+
 export interface TrainSnapshot {
   task: TrainTaskInfo | null
   logs: TrainLogLine[]
+  /** #107：还在等的任务（正在跑的那个不在这里）。 */
+  queue?: TrainQueueEntry[]
 }
 
 /** 训练日志文件的一页尾巴：面板「训练日志」只读它，训练本身不依赖这份展示。 */
@@ -103,6 +107,8 @@ export interface TrainStartRequest {
 export interface TrainStartResult {
   ok: boolean
   error: string | null
+  /** #107：没开跑而是排进队列时给位次（1 = 下一个就是你）；直接开跑时为 undefined。 */
+  queued?: number
 }
 
 export interface TrainPlan {
