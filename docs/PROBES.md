@@ -45,6 +45,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--speak-mute-probe` muting one speaker by hero or seat name, without silencing anybody else, and the list survives a restart
   - `--provider-failure-probe` provider failures: timeout, rate limit, bad key and wrong model each get their own sentence and their own retry cadence
   - `--logs-isolation-probe` a probe process writes its logs to a temp dir, never into the user data directory
+  - `--board-probe` the second-screen bar: six rows read off one snapshot, a dash instead of a guess, and an honest line when there is no snapshot at all
   - `--first-run-probe` the first-run checklist: six steps, what counts as evidence in each, and why the last one needs the real game
   - `--match-attribution-probe` which match a row belongs to: one archive per match, the live summary holding only the current one, null instead of a guessed id, and every synthetic row confined to a temp logs dir
   - `--hotword-candidates-probe` hotword candidates from corrections: only >=2-char diffs enter the pool, sorting by count, explicit merge, full table never silently drops

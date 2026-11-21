@@ -7,9 +7,10 @@ import type { QuickPhraseGroup } from './quick-phrases'
 import { DEFAULT_CAPTURE_MODE, DEFAULT_HOTKEYS, type CaptureMode, type HotkeyActionId } from './hotkeys'
 import type { ProviderConfig, ProviderId } from './providers'
 import type { OfflineVoiceId, SpeakMode, VoiceOutEngine } from './voices'
-import type { OverlayTextMode, ReplyTone } from './ipc'
+import type { OverlayGeometry, OverlayTextMode, ReplyTone } from './ipc'
 import type { DotaAnnounceTriggers } from './dota-announce'
 import type { OverlayFontSize } from './overlay-a11y'
+
 import type { BoundsMemory } from './display-geometry'
 import type { SpeechSplitStrategy } from './speech-split'
 
@@ -257,6 +258,15 @@ export interface AppSettings {
    */
   voiceCaptureMode: CaptureMode
   /**
+   * 副屏看板（#124a）：320 宽的长条，六项全部读 `matchSnapshot()`，开关它不动浮层任何状态。
+   */
+  boardVisible: boolean
+  /**
+   * 看板窗口上次摆的位置。**故意不复用 `overlayBoundsByDisplay`**：看板与浮层是两块不同的窗，
+   * 共用一个键会让「动了看板」变成「动了浮层」。
+   */
+  boardBounds: OverlayGeometry | null
+  /**
    * 全局热键表：动作 id → canonical 组合键，空串 = 该动作不绑键。
    * 单独一项而不是五个平铺字段——面板一次改整张表，平铺就要五个归一化分支加五处探针。
    */
@@ -361,5 +371,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayFontSize: 'normal',
   overlayBoundsByDisplay: {},
   voiceCaptureMode: DEFAULT_CAPTURE_MODE,
+  boardVisible: false,
+  boardBounds: null,
   hotkeys: { ...DEFAULT_HOTKEYS }
 }

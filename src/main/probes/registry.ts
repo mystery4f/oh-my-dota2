@@ -63,6 +63,7 @@ import { runTranslateCacheProbe } from './translate-cache'
 import { runMinimapProbe } from './minimap'
 import { runTranslateGuardProbe } from './translate-guard'
 import { runFirstRunProbe } from './first-run'
+import { runBoardProbe } from './board'
 import { runTtsBenchProbe } from './tts-bench'
 import { runTtsOfflineProbe } from './tts-offline'
 import { runTtsPipelineProbe } from './tts-pipeline'
@@ -298,6 +299,12 @@ export const PROBES: readonly ProbeEntry[] = [
     readOnly: true,
     summary: 'a probe process writes its logs to a temp dir, never into the user data directory',
     run: runLogsIsolationProbe
+  },
+  {
+    flag: '--board-probe',
+    ci: true,
+    summary: 'the second-screen bar: six rows read off one snapshot, a dash instead of a guess, and an honest line when there is no snapshot at all',
+    run: runBoardProbe
   },
   {
     flag: '--first-run-probe',

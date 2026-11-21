@@ -104,6 +104,12 @@ path for 30 s; timeout/network: back to the session after 1.5–2 s; 429: honour
   (`judgeFtVram`/`ftVramNote` four-case), export completeness (`missingFtExportFiles` three-case),
   dataset split (`splitTrainEval` holds out the tail), and CER grading (cohorts never merged).
 
+- The second-screen board (#124a) is a 320-wide frameless always-on-top window that reads only
+  `window.api.matchSnapshot()` — the one summary the main process copies out of the GSI frame. It must never
+  create a second GSI reader, and `src/main/windows/board.ts` must not import the overlay manager: "closing the
+  board leaves the game untouched" is structural, not a condition. Missing blocks render `—` (never a guessed
+  `Lv1`), and with no snapshot the whole bar says "先把 GSI 那条连通" instead of showing an empty shell. Its
+  position lives in `settings.boardBounds`, deliberately not `overlayBoundsByDisplay`.
 - `Row` has a `note` slot (#151): a long sentence belongs there, never in `children`. The control slot is
   `shrink-0` and the label column is `flex-1 min-w-0`, so a full sentence passed as a child takes its own width
   and squeezes the label to ~0 — Chinese then breaks one character per line (measured: 46 px tall, 21 lines at

@@ -198,6 +198,22 @@ export function OverlayPage(): React.ReactElement {
           {dota.warning === null ? null : (
             <div className="px-4 pb-3 text-xs leading-relaxed text-amber-500">{dota.warning}</div>
           )}
+          {/* #124a：副屏看板是独立窗口，开关它不动浮层任何状态。 */}
+          <Row
+            label="副屏看板"
+            hint="第二块屏幕上一条 320 宽的常驻条：局号、状态、时间、我玩、存活、最后一帧；全部读同一份 GSI 快照"
+          >
+            <Button
+              size="sm"
+              variant={settings.boardVisible ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ boardVisible: !settings.boardVisible }))}
+            >
+              {settings.boardVisible ? '关' : '开'}
+            </Button>
+            <StatusPill tone={settings.boardVisible ? 'ready' : 'idle'}>
+              {settings.boardVisible ? '已打开' : '未打开'}
+            </StatusPill>
+          </Row>
           <Row
             label="我的昵称"
             htmlFor="v2-nicknames"

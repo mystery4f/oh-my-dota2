@@ -1083,3 +1083,15 @@
 - 修法：`src/shared/provider-failure.ts` 一处判定（`no-key / auth / rate-limit / model-missing / timeout / network / server / bad-response / empty / unknown`），每类自带 `title + hint + retry + retryAfterMs`；`chatCompletion` 抛 `ProviderRequestError`（带 `failure`，`message` 就是 `failureLine()`）；`durable-translator` 的冷却改读每类的 `retryAfterMs`，`retry === 'no'` 的仍锁 30 秒直连。
 - 两个容易判错的细节：Chromium 网络栈报的是 `net::ERR_CONNECTION_REFUSED`（下划线），Node 侧才是 `fetch failed: ECONNREFUSED`——只认后者会把「连不上」归成「原因不明」；超时必须用 `timedOut: err instanceof DOMException || /abort/i` 在 fetch 那一层判，到了上层只剩一句 `aborted`，分不出是超时还是用户取消。
 - 验收：`npm run probe -- --provider-failure-probe`（19 条，含一条真连 `127.0.0.1:9` 的失败分类）；纯侧另有 8 条在 `scripts/check-pure.mjs`。
+
+### 副屏看板：一条 320 宽的窗，读的是同一份快照（#124a）
+
+症状（需求侧）：不想在游戏上盖任何东西的玩家，只能看面板——而面板是对局外的东西，打起来就挡住了。
+
+根因（设计侧）：浮层是唯一能实时显示对局状态的窗口，它天生「盖在游戏上」；当时也没有一份「可读的对局摘要」，谁要看只能自己去 GSI 帧里挑。
+
+修法：`matchSnapshot()`（#124b，主进程从 GSI 那一帧抄出的唯一一份摘要）→ `src/shared/board-view.ts` 把一份快照读成六行（局号 / 状态 / 时间 / 我玩 / 存活 / 最后一帧）+ `src/main/windows/board.ts` 那块 320 宽、无边框、置顶、不进任务栏的窗口 + `src/renderer/src/board/` 那个一秒轮询的页面。
+
+三条口径：**缺块写 `—`**（不许猜成 Lv1 或 0 金）；**没有快照就整条说实话**（「先把 GSI 那条连通」，不排空壳）；**关掉看板不动浮层**——这不是靠条件判断，而是 `windows/board.ts` 根本不 import 浮层管理器，没有那条调用路径。
+
+位置单独记在 `settings.boardBounds`，**不复用** `overlayBoundsByDisplay`：共用键会让「动看板」看起来像「动浮层」。

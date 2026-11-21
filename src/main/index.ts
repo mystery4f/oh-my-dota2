@@ -26,6 +26,7 @@ import { startGsi, stopGsi } from './services/gsi'
 import { startUpdateCheck } from './services/updater'
 import { registerIpc } from './ipc'
 import { installProxyAwareFetch } from './services/session/net-fetch'
+import { getBoardWindow } from './windows/board'
 import { refreshVoiceOutReadiness } from './services/voice/voice-out-readiness'
 import { trainManagerIfStarted } from './services/train/manager'
 import { reconcileTrainState } from './services/train/reconcile'
@@ -355,10 +356,14 @@ app.whenReady().then(() => {
   }
 
   // 写后联动挂在属主发出的观察者缝上（settings/hotkeys），handler 表只做转发。
-  onSettingsSaved(() => {
+  onSettingsSaved((next) => {
     // 换引擎、换参考音频都得让对讲页那一行立刻翻牌。
     void refreshVoiceOutReadiness()
+    // #124a：看板开关只跟这一项走；浮层的可见性与它无关。
+    if (!probeRun) getBoardWindow().sync(next.boardVisible)
   })
+  // 冷启动时按设置补一次：设置是在 whenReady 之前就读进来的。探针不打开真窗口。
+  if (!probeRun) getBoardWindow().sync(loadSettings().boardVisible)
   onHotkeysSaved((result) => {
     // 浮层和自己那行提示上的键名都来自 status()，不重发就会出现「键改了、浮层还在教旧键」。
     if (!result.error) getOverlayManager().refreshStatus()
@@ -373,6 +378,7 @@ app.on('window-all-closed', () => {})
 
 app.on('will-quit', () => {
   quitting = true
+  getBoardWindow().dispose()
   // 遥测的最后一箱：60 秒定时器可能刚好没走到，退出前各拍一次再落盘。
   flushGuardTelemetry()
   snapshotTranslationStats()
