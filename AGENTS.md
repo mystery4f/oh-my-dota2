@@ -61,6 +61,14 @@ path for 30 s; timeout/network: back to the session after 1.5–2 s; 429: honour
 - `npm run check:pure` — assertions over `src/shared/` logic (grade distance, epoch maths) with no Electron:
   `node --experimental-strip-types`, plus `scripts/pure-resolve.mjs` for the extensionless relative imports
   Node's ESM resolver insists on. Anything with a side effect still belongs to a probe. Wired into `npm run lint`.
+- `npm run check:settings` — the settings audit from #177, run at the end of `npm run lint`:
+  counts every `AppSettings` field (three read shapes, write sites, counter-evidence for dynamic keys),
+  lists multi-writer keys with a one-line "is it intentional" note (`MULTI_WRITE_NOTES`), and keeps a
+  dead-config baseline. It exits 0 by default so a new field never looks like a failure; non-zero only when
+  `AppSettings` and `DEFAULT_SETTINGS` disagree or a new dead key appears (`--strict` also gates un-noted
+  multi-writers). `--report` prints the 71-row table, `--settings <path>` reads a real file without writing it.
+  The report is `docs/SETTINGS-audit-2026-11.md`; never delete a dead key because this script named it —
+  every deletion gets its own ticket.
 - `npm run panel:preview` — the dashboard in a plain browser at `localhost:5199`, no Electron and no
   game: `scripts/panel-preview.mts` serves `src/renderer/src/preview/api-stub.ts` as a fake `window.api`
   before the app boots. That stub is typed against `WindowApi`, so a renamed channel or a changed result
