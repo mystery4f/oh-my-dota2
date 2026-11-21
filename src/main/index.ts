@@ -30,6 +30,7 @@ import { loadSettings, onSettingsSaved } from './services/settings'
 import { hotkeysState, installHotkeys, releaseHotkeys, onHotkeysSaved } from './services/hotkeys'
 import { resetSessionsOnBoot, warmTranslator } from './services/session/durable-translator'
 import { flushGuardTelemetry } from './services/session/guard-telemetry'
+import { flushPatchWatch, noteFrame, startPatchWatch } from './services/patch-watch'
 import { snapshotTranslationStats } from './services/session/translate-cache'
 import { translateInPlace } from './services/reply/reply-service'
 import { suppressExperimentalSqliteWarning } from './services/session/warnings'
@@ -213,8 +214,11 @@ app.whenReady().then(() => {
   }
   // 原地直发要两次往返游戏窗口：常驻 PowerShell 桥在后台先起好，省掉每次 600ms 的启动与 Add-Type 编译。
   if (!probeRun) void getInPlaceSender().prewarm()
+  // 补丁巡检（#131）：先把「记过哪些缺口」读回来，面板从第一帧起就不会重复报上一局的东西。
+  if (!probeRun) startPatchWatch()
   // GSI：本地状态源，进对局自动开捕获、打完自动停，并把 player.name 记进 myNicknames。
-  if (!probeRun) void startGsi()
+  // onFrame 只做加法（路径/英雄/事件类型三个集合），窗口到点才判一次补丁巡检。
+  if (!probeRun) void startGsi({ onFrame: (payload) => noteFrame(payload) })
   // 浮层显示/收起/锁定跨启动还原（2026-10-28「记忆收起、锁定、隐藏」）：
   // 锁定与收起由设置字段带回来；这里只补「上次退出时亮着」的那一半。
   if (!probeRun && startup.overlayVisible) getOverlayManager().show()
@@ -325,6 +329,8 @@ app.on('will-quit', () => {
   // 遥测的最后一箱：60 秒定时器可能刚好没走到，退出前各拍一次再落盘。
   flushGuardTelemetry()
   snapshotTranslationStats()
+  // 最后一局没打满窗口也要把缺口写下来：退出就是最后一次机会。
+  flushPatchWatch()
   // 训练进程是 python 子进程，父进程退出不会带走它：先杀树再记账，别留一个跑到天亮的孤儿。
   trainManagerIfStarted()?.shutdown()
   releaseHotkeys()

@@ -51,6 +51,7 @@ import { runMicHealthProbe } from './mic-health'
 import { runOverlayDigestProbe } from './overlay-digest'
 import { runKeyNounProbe } from './key-nouns'
 import { runFtAuditionProbe } from './ft-audition'
+import { runPatchWatchProbe } from './patch-watch'
 import { runAsrRoutingProbe } from './asr-routing'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
@@ -291,6 +292,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'game-state announcements (src/shared/dota-announce.ts + src/main/services/voice/announce.ts): wisdom rune / Roshan window / stack and pull windows each fire exactly once per occurrence from the game clock alone, a switched-off trigger stays silent, and with the master switch off the voice pipeline is never called',
     run: runAnnounceProbe
+  },
+  {
+    flag: '--patch-watch-probe',
+    summary:
+      'the patch watch (`src/shared/patch-watch.ts`): fields the game sends that we never read, declared fields that stopped arriving once the sample is big enough, heroes the glossary cannot translate, and event types without a branch — a healthy install writes nothing and the panel line names the field or hero',
+    ci: true,
+    run: runPatchWatchProbe
   },
   {
     flag: '--ft-audition-probe',

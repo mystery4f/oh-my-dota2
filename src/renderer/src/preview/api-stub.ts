@@ -914,6 +914,11 @@ const implemented = {
   ftAsrftInstall: async () => ({ running: false, stage: 'done', progress: 1, error: null }),
   ftAsrftApply: async () => ({ ok: true, error: null, model: 'ft-stub' }),
   ftAsrftSkipAudition: async () => ({ ok: true, error: null, model: 'ft-stub' }),
+  // `?patch=1`：预览里摆一行「游戏里出现了我们还不认识的」；默认是健康状态（line 为 null）。
+  patchWatch: async () =>
+    query.get('patch') === '1'
+      ? { frames: 240, gaps: 2, line: '游戏里出现了我们还不认识的：map.clock_time、muerta 等 2 项', at: '2026-11-09T13:40:48.101Z' }
+      : { frames: 240, gaps: 0, line: null, at: '2026-11-09T13:40:48.101Z' },
   ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),
   ftAsrftResetBase: async () => ({ ok: true, error: null, model: null }),
   ftAsrftFacts: async () => ({ vramNote: null, incremental: true }),

@@ -80,6 +80,7 @@ import {
   resetAsrFtToBase,
   rollbackAsrFtModel
 } from './services/train/asr-ft'
+import { patchWatchView } from './services/patch-watch'
 import { exportLogBundle } from './services/log-bundle'
 import { correctLineDirection } from './services/session/direction-correction'
 import { readQualityReport } from './services/session/quality-report'
@@ -321,6 +322,7 @@ const handlers: MainHandlers = {
   },
   ftAsrftApply: () => applyAsrFtModel(),
   ftAsrftSkipAudition: () => skipFtAudition(),
+  patchWatch: () => patchWatchView(),
   ftAsrftRollback: () => rollbackAsrFtModel(),
   ftAsrftResetBase: () => resetAsrFtToBase(),
   logBundleExport: () => exportLogBundle(),

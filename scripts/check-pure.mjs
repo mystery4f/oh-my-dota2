@@ -690,6 +690,35 @@ check(
   check('run 行默认没有试听记录、收场能落两条', run.audition === null && run.auditionSkip === null && patched.audition?.count === 3 && patched.auditionSkip?.auto === false, `${patched.audition?.count}/${patched.auditionSkip?.auto}`)
 }
 
+// —— 补丁巡检（#131）：我们和游戏对不上的地方，三种比对各自只在该报的时候报 ——
+{
+  const { collectFramePaths, judgePatchWatch, patchWatchLine, unseenGaps, patchGapKey, heroKey, glossaryHasHero, GSI_READ_PATHS, PATCH_WATCH_MIN_FRAMES } = await import('../src/shared/patch-watch.ts')
+  const frame = {
+    provider: { name: 'Dota 2', appid: 570 },
+    map: { name: 'start', game_state: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS', matchid: '1' },
+    player: { name: 'me' },
+    events: [{ event_type: 'chat_message' }],
+    allplayers: { '0': { name: 'me', hero: 'npc_dota_hero_storm_spirit' } }
+  }
+  const paths = collectFramePaths(frame)
+  check('一帧的路径把对象下探一层、数组记成 k[]', paths.includes('map.matchid') && paths.includes('events[]') && paths.includes('allplayers[].hero'), paths.slice(0, 4).join(','))
+  // 健康帧只看「有没有多出来的」：采样不足一窗时不判 missing（那一条另有用例）。
+  const healthy = { paths, heroes: ['storm_spirit'], eventTypes: ['chat_message'], frames: 1 }
+  check('健康帧零缺口', judgePatchWatch(healthy, ['Storm Spirit']).length === 0, 'expect 0')
+  const unread = judgePatchWatch({ ...healthy, paths: [...paths, 'map.clock_time'] }, ['Storm Spirit'])
+  check('多出来的字段被点名', unread.length === 1 && unread[0].name === 'map.clock_time' && unread[0].kind === 'field-unread', JSON.stringify(unread.map((gap) => gap.name)))
+  check('采样不够就不判 missing', judgePatchWatch({ ...healthy, frames: 1, paths: ['map.matchid'] }, ['Storm Spirit']).every((gap) => gap.kind !== 'field-missing'), 'expect none')
+  const missing = judgePatchWatch({ ...healthy, frames: PATCH_WATCH_MIN_FRAMES, paths: ['map.matchid', 'player.name'] }, ['Storm Spirit']).filter((gap) => gap.kind === 'field-missing')
+  check('采样够了才点名漏掉的必推字段', missing.some((gap) => gap.name === 'map.name') && !missing.some((gap) => gap.name === 'map.matchid' || gap.name === 'draft' || gap.name === 'roshan.state'), missing.map((gap) => gap.name).slice(0, 3).join(','))
+  check('词表缺英雄被点名', judgePatchWatch({ ...healthy, heroes: ['muerta'] }, ['Storm Spirit']).some((gap) => gap.kind === 'hero' && gap.name === 'muerta'), 'expect muerta')
+  check('id 与展示名不同形不算缺口', glossaryHasHero('nevermore', ['Shadow Fiend']) && heroKey('Anti-Mage') === 'antimage', 'expect alias')
+  check('新事件类型被点名', judgePatchWatch({ ...healthy, eventTypes: ['chat_message', 'hero_pick'] }, ['Storm Spirit']).some((gap) => gap.kind === 'event-type' && gap.name === 'hero_pick'), 'expect hero_pick')
+  const one = { kind: 'field-unread', name: 'map.clock_time', detail: '' }
+  check('记过的缺口不再报', unseenGaps([one], [patchGapKey(one)]).length === 0 && unseenGaps([one], []).length === 1, patchGapKey(one))
+  check('面板一句话点到名字', patchWatchLine([one]) === '游戏里出现了我们还不认识的：map.clock_time' && patchWatchLine([]) === '和游戏对得上', patchWatchLine([one]))
+  check('声明表覆盖每个 payload 块', ['provider', 'map', 'player', 'events', 'allplayers', 'hero', 'draft', 'roshan'].every((block) => GSI_READ_PATHS.some((path) => path === block || path.startsWith(block + '.') || path.startsWith(block + '[]'))), GSI_READ_PATHS.length + ' 条')
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

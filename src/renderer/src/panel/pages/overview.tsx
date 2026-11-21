@@ -12,6 +12,7 @@ import type { EnvDeviceCounts, EnvReport } from '@shared/env-report'
 import { envCounted } from '@shared/env-report'
 import type { EnvState } from '@shared/env-report'
 import type { GsiLibrariesView } from '@shared/gsi-lib'
+import type { PatchWatchView } from '@shared/patch-watch'
 import { libraryLabel } from '@shared/gsi-lib'
 import type { SectionId } from '../sections'
 import { Button } from '@/components/ui/button'
@@ -151,6 +152,15 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
       setBusy(false)
     }
   }
+
+  // 补丁巡检：进总览时读一次，没有缺口就什么都不显示（只有「有东西没读过」时才占一行）。
+  const [patch, setPatch] = useState<PatchWatchView | null>(null)
+  useEffect(() => {
+    void window.api
+      .patchWatch()
+      .then(setPatch)
+      .catch(() => setPatch(null))
+  }, [])
 
   /** 「这台机器」只在进总览时测一次 + 手动刷新（pm 定的口径，不加后台轮询）。 */
   const runEnv = async (): Promise<void> => {
@@ -296,6 +306,12 @@ export function OverviewPage({ onNavigate }: { onNavigate: (id: SectionId) => vo
             )}
           </Row>
         </Group>
+        {/* 补丁巡检（#131）：一行、只在有「我们不认识的东西」时出现；健康安装这里什么都没有。 */}
+        {patch !== null && patch.line !== null ? (
+          <Group label="代码适配">
+            <Row label="游戏发来了新东西" hint={patch.line} stacked />
+          </Group>
+        ) : null}
         <Group label="这台机器">
           <Row
             label={env ? `${envCounted(env)}/6 行有数据` : '正在读现状…'}
