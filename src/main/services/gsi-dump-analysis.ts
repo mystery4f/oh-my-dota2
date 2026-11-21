@@ -1,3 +1,4 @@
+import { isRealMatchId } from '@shared/match-id'
 import type { GsiEvent, GsiPayload } from './gsi'
 
 /**
@@ -116,11 +117,6 @@ export function tallyFrame(tally: DumpTally, payload: GsiPayload): void {
   if (typeof matchId === 'string' && matchId.length > 0) tally.matchIds.add(matchId)
   if (payload.allplayers && Object.keys(payload.allplayers).length > 0) tally.allplayersFrames += 1
   collectEventKinds(payload.events, tally.events)
-}
-
-function isRealMatchId(matchId: string): boolean {
-  // 训练场/人机/主菜单都给 "0"；真对局是十几位数字。
-  return matchId.length > 3 && /^\d+$/.test(matchId) && matchId !== '0'
 }
 
 export function summarize(tally: DumpTally): DumpSummary {

@@ -30,6 +30,7 @@ import type { BuildInfo } from './build-info'
 import type { PatchWatchView } from './patch-watch'
 import type { GsiLibrariesView, GsiLibrarySetResult } from './gsi-lib'
 import type { MicHealthEvent } from './mic-health'
+import type { MatchTimelineView } from './match-timeline'
 import type { OverlayFontSize } from './overlay-a11y'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
@@ -677,7 +678,11 @@ export const IPC = {
   GLOSSARY_APPLY: 'glossary:apply',
   // 设置包（#81）：换机器搬设置。导入由主进程弹文件框，渲染层只收结果。
   SETTINGS_BUNDLE_EXPORT: 'settings-bundle:export',
-  SETTINGS_BUNDLE_IMPORT: 'settings-bundle:import'
+  SETTINGS_BUNDLE_IMPORT: 'settings-bundle:import',
+  // 本局时间线（#162）：「这一局发生过什么」，关闸也收；已办只存内存、按 matchid 清。
+  MATCH_TIMELINE: 'match:timeline',
+  MATCH_TIMELINE_DONE: 'match:timeline-done',
+  MATCH_TIMELINE_STATE: 'match:timeline-state'
 } as const
 
 /** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
@@ -1006,7 +1011,11 @@ export const ipcContract = {
   glossaryApply: invoke<[string], GlossaryPackStatus>(IPC.GLOSSARY_APPLY),
   /** 设置包（#81）：导出写进数据目录 export/，导入弹框选文件；两条都只回结果与一句话。 */
   settingsBundleExport: invoke<[], SettingsBundleExportResult>(IPC.SETTINGS_BUNDLE_EXPORT),
-  settingsBundleImport: invoke<[], SettingsBundleImportResult>(IPC.SETTINGS_BUNDLE_IMPORT)
+  settingsBundleImport: invoke<[], SettingsBundleImportResult>(IPC.SETTINGS_BUNDLE_IMPORT),
+  /** 本局时间线（#162）：现取视图；DONE 置办并回最新视图；STATE 是变更广播（不在对局里不推）。 */
+  matchTimeline: invoke<[], MatchTimelineView>(IPC.MATCH_TIMELINE),
+  matchTimelineDone: invoke<[string, boolean], MatchTimelineView>(IPC.MATCH_TIMELINE_DONE),
+  onMatchTimeline: listen<MatchTimelineView>(IPC.MATCH_TIMELINE_STATE)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

@@ -110,7 +110,7 @@ export async function runAnnounceProbe(): Promise<void> {
     )
     push('总闸关着时事件数组为空', out.length === 0)
     push('总闸关着时语音管线与日志零调用（验收第三行）', calls === 0)
-    push('总闸关着时状态也没被推进（打开开关不补报旧窗口）', state.wisdomIndex === -1)
+    push('总闸关着时状态照走（#162：打开开关那一刻不补报旧窗口）', state.wisdomIndex === 1)
   }
 
   // —— 日志：触发 id + 造成它的帧时间

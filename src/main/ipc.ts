@@ -102,6 +102,12 @@ import { readQualityReport } from './services/session/quality-report'
 import { latencyBoardView } from './services/session/latency-board'
 import { readBuildInfo } from './services/build-info'
 import { onSpeechQueueChange, speechQueueSnapshot, stopSpeech } from './services/voice/speech-pipeline'
+import {
+  broadcastMatchTimeline,
+  markTimelineDone,
+  matchTimelineView,
+  onMatchTimelineChange
+} from './services/voice/match-timeline'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
 import { closeGvWebui, openGvWebui, registerGvWeights, scanGvDatasets } from './services/train/gv'
 import { discoverSovitsHome } from './services/voice/sovits-server'
@@ -389,7 +395,9 @@ const handlers: MainHandlers = {
   qualityReport: () => readQualityReport(),
   latencyBoard: () => latencyBoardView(),
   speechQueue: () => speechQueueSnapshot(),
-  speechStop: () => stopSpeech()
+  speechStop: () => stopSpeech(),
+  matchTimeline: () => matchTimelineView(),
+  matchTimelineDone: (id, done) => markTimelineDone(String(id ?? ''), done === true),
 }
 
 export function registerIpc(): void {
@@ -407,4 +415,6 @@ export function registerIpc(): void {
   onVoiceOutReadiness((snapshot) => broadcast(IPC.VOICE_OUT_READINESS_STATE, snapshot))
   // #88：语音队列一变就推新快照（排队/开读/读完/停止都走这）。
   onSpeechQueueChange(() => broadcast(IPC.SPEECH_QUEUE_STATE, speechQueueSnapshot()))
+  // #162：本局时间线一变就推新视图（新事件到达、置办都走这）；不在对局里不推。
+  onMatchTimelineChange(() => broadcastMatchTimeline())
 }
