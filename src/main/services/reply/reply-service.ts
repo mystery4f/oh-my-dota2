@@ -5,11 +5,13 @@ import type { VoiceStageProgress } from '@shared/voice-stage'
 import { broadcastToWindows } from '../../windows/broadcast'
 import { decideVoiceOutReply } from '@shared/voice-out'
 import { INTERPRET_STAGE, interpretPlanOf } from '@shared/interpret'
+import { reviewOf } from '@shared/voice-review'
 import { clauseStreamPlan, runClauseStream } from '@shared/clause-plan'
 import { decideInPlaceDelivery, inplaceFailureLine, pickInPlaceDraft } from '@shared/inplace'
 import { loadSettings } from '../settings'
 import { abortTranslation, translateReply } from '../session/durable-translator'
 import { toPrintableAscii } from '@shared/chat-line'
+import { noteCorrection } from '../voice/hotword-candidates'
 import { getInPlaceSender } from '../input/chat-inplace'
 import { getVoiceOutService } from '../voice/voice-out'
 import { ChainTimer, reportChainTiming } from '../voice/chain-timing'
@@ -86,7 +88,18 @@ async function speakClauseStream(args: {
  */
 export async function voiceReply(args: VoiceReplyArgs): Promise<VoiceReplyResult> {
   const settings = loadSettings()
-  const recognized = String(args.text ?? '').trim()
+  // #98：人可以先把识别结果改对再送——改过就用改过的，同时把这一对记进纠错集。
+  const review = reviewOf({ transcript: args.editedFrom ?? args.text ?? '', edited: args.text })
+  if (review.pair !== null) {
+    try {
+      noteCorrection(review.pair.before, review.pair.after)
+      console.log('VOICE_REVIEW', JSON.stringify({ before: review.pair.before.slice(0, 40), after: review.pair.after.slice(0, 40) }))
+    } catch (err) {
+      // 记样本失败不该拦住这一句：先让它说出去，纠错集下次再说。
+      console.log('VOICE_REVIEW_FAIL', errorMessage(err))
+    }
+  }
+  const recognized = String(review.text ?? '').trim()
   // 对讲计时：识别那一段由 transcribeForVoice 记着，这里领走——链从识别开始算，不是从翻译开始。
   // 对讲计时：识别那一段的耗时与麦克风由渲染层随参数显式带来（asrMs/mic），链从识别开始算。
   const rowId = args.rowId

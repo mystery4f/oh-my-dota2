@@ -52,6 +52,7 @@ import { runTrainFailureProbe } from './train-failure'
 import { runCompanionProfileProbe } from './companion-profile'
 import { runMomentumProbe } from './momentum'
 import { runEndpointProbe } from './endpoint'
+import { runVoiceReviewProbe } from './voice-review'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -643,6 +644,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the end-of-utterance window (`src/shared/endpoint.ts`): each preset cuts at its own silence window, a preset change applies on the next recording, and a breath shorter than the minimum voiced time never ends an utterance',
     run: runEndpointProbe
+  },
+  {
+    flag: '--voice-review-probe',
+    ci: true,
+    summary: 'the edited-transcript rule (`src/shared/voice-review.ts`): an edit is what gets translated and recorded as a correction pair, while an untouched or re-cleared line behaves exactly as before',
+    run: runVoiceReviewProbe
   },
   {
     flag: '--asr-check-live-probe',

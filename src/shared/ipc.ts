@@ -197,6 +197,8 @@ export interface VoiceReplyResult {
 export interface VoiceReplyArgs {
   text: string
   rowId?: string
+  /** #98：识别原文（人改过的话）——和 `text` 不同时，这一对进纠错集，翻译与朗读都用 `text`。 */
+  editedFrom?: string
   /** 识别段耗时（毫秒）与麦克风：由 transcribeAudio 的结果原样带回，显式传递，不再有全局票据。 */
   asrMs?: number
   mic?: string
