@@ -6,6 +6,7 @@ import { formatChainOverlay, formatChainTiming, formatMs } from '@shared/voice-t
 import type { VoiceStageProgress } from '@shared/voice-stage'
 import { DEFAULT_SETTINGS } from '@shared/ipc'
 import { appendCappedJsonl } from '../services/logs/jsonl'
+import { logsDir, setLogsDirForProbe } from '../services/logs/base-dir'
 import { ChainTimer, reportChainTiming } from '../services/voice/chain-timing'
 
 /**
@@ -128,12 +129,16 @@ export async function runVoiceChainProbe(): Promise<void> {
     push('appendCappedJsonl: 目录不存在时自己建（不会静默丢一条）', readFileSync(broken, 'utf8').includes('"ok":true'), broken)
 
     // —— reportChainTiming: 控制台一行 + 文件一行，返回同一份计时 ——
+    // 写盘那条腿必须指到临时目录：以前这里直接往真实的 `logs/voice-chain.jsonl` 写、
+    // 还先把它清空，既毁掉玩家的对讲计时记录，也让别的探针（「真实日志没被动过」那条）
+    // 随机变红。setLogsDirForProbe 就是为这种事留的缝。
+    setLogsDirForProbe(join(dir, 'logs'))
     const logged = new ChainTimer(null)
     logged.noteTranslated()
     logged.noteFirstAudio()
     logged.notePlayStart()
     const returned = reportChainTiming(logged, { spoken: true, stage: null, engine: 'probe-marker', chars: 3, segments: 1, mic: logged.mic })
-    const logFile = join(app.getPath('userData'), 'logs', 'voice-chain.jsonl')
+    const logFile = join(logsDir(), 'voice-chain.jsonl')
     writeFileSync(logFile, '')
     reportChainTiming(logged, { spoken: true, stage: null, engine: 'probe-marker', chars: 3, segments: 1, mic: logged.mic })
     const written = readFileSync(logFile, 'utf8')
@@ -190,6 +195,7 @@ export async function runVoiceChainProbe(): Promise<void> {
     const prepText = readFileSync(logFile, 'utf8')
     push('起播拆账：prep 落进 voice-chain.jsonl（为什么 2 秒有据可查）', prepText.includes('"prep":{"readyMs":1900'), prepText.slice(0, 160))
   } finally {
+    setLogsDirForProbe(null)
     rmSync(dir, { recursive: true, force: true })
   }
 

@@ -47,7 +47,9 @@ const SCHEMA = `
     data TEXT NOT NULL,
     artifacts TEXT NOT NULL,
     metrics TEXT,
-    packed_ledger TEXT
+    packed_ledger TEXT,
+    audition TEXT,
+    audition_skip TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
   CREATE TABLE IF NOT EXISTS dataset_entries (
@@ -91,6 +93,9 @@ interface RunRow {
   artifacts: string
   metrics: string | null
   packed_ledger: string | null
+  /** #105 的试听结果：老库里这两列可能是 undefined（addMissingColumns 之前打开的行）。 */
+  audition?: string | null
+  audition_skip?: string | null
 }
 
 interface EntryRow {
@@ -170,12 +175,27 @@ function quarantine(file: string, reason: string): void {
   console.log('TRAIN_STORE_QUARANTINED', reason)
 }
 
+/**
+ * 老库补列：`CREATE TABLE IF NOT EXISTS` 不会给已存在的表加字段，而试听结果（#105）是后加的，
+ * 少了这两列就等于「训练记录一看就旧了才写进去的字段，重启后没了」。只加不减，列已在就跳过。
+ */
+function addMissingColumns(handle: DatabaseSync): void {
+  const existing = new Set(
+    (handle.prepare('PRAGMA table_info(runs)').all() as { name?: string }[]).map((col) => String(col.name))
+  )
+  for (const column of ['audition', 'audition_skip']) {
+    if (existing.has(column)) continue
+    handle.exec(`ALTER TABLE runs ADD COLUMN ${column} TEXT`)
+  }
+}
+
 function openOnce(file: string): DatabaseSync {
   mkdirSync(dirname(file), { recursive: true })
   const next = new DatabaseSync(file)
   try {
     next.exec('PRAGMA journal_mode = WAL')
     next.exec(SCHEMA)
+    addMissingColumns(next)
     // 索引坏了 prepare/run 会抛，但 SELECT 仍能读到旧行——症状是「列表还在、新记录写不进」，
     // 所以必须在打开时查一次，别等用户发现「训练完列表没变」。
     const check = next.prepare('PRAGMA quick_check(1)').get() as { quick_check?: string } | undefined
@@ -275,7 +295,10 @@ function normalizeRun(value: unknown): TrainRunRecord | null {
     artifacts: isRecord(value.artifacts) ? (value.artifacts as TrainRunRecord['artifacts']) : {},
     metrics: isRecord(value.metrics) ? (value.metrics as unknown as TrainRunRecord['metrics']) : null,
     applied: value.applied === true,
-    error: typeof value.error === 'string' ? value.error : null
+    error: typeof value.error === 'string' ? value.error : null,
+    // 追加在末尾：键顺序要与 buildTrainRun() 一致，否则「读回来 = 写进去」这条断言靠不住。
+    audition: isRecord(value.audition) ? (value.audition as unknown as TrainRunRecord['audition']) : null,
+    auditionSkip: isRecord(value.auditionSkip) ? (value.auditionSkip as unknown as TrainRunRecord['auditionSkip']) : null
   }
 }
 
@@ -300,7 +323,9 @@ function runFromRow(row: RunRow): TrainRunRecord | null {
     params: parse(row.params),
     data: parse(row.data),
     artifacts: parse(row.artifacts),
-    metrics: row.metrics === null ? null : parse(row.metrics)
+    metrics: row.metrics === null ? null : parse(row.metrics),
+    audition: row.audition === null || row.audition === undefined ? null : parse(row.audition),
+    auditionSkip: row.audition_skip === null || row.audition_skip === undefined ? null : parse(row.audition_skip)
   })
 }
 
@@ -321,8 +346,8 @@ function entryFromRow(row: EntryRow): DatasetEntry {
 function writeRun(handle: DatabaseSync, run: TrainRunRecord): void {
   handle
     .prepare(
-      `INSERT INTO runs (id, kind, experiment, status, started_at, ended_at, applied, error, params, data, artifacts, metrics)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO runs (id, kind, experiment, status, started_at, ended_at, applied, error, params, data, artifacts, metrics, audition, audition_skip)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          kind = excluded.kind,
          experiment = excluded.experiment,
@@ -334,7 +359,9 @@ function writeRun(handle: DatabaseSync, run: TrainRunRecord): void {
          params = excluded.params,
          data = excluded.data,
          artifacts = excluded.artifacts,
-         metrics = excluded.metrics`
+         metrics = excluded.metrics,
+         audition = excluded.audition,
+         audition_skip = excluded.audition_skip`
     )
     .run(
       run.id,
@@ -348,7 +375,9 @@ function writeRun(handle: DatabaseSync, run: TrainRunRecord): void {
       JSON.stringify(run.params),
       JSON.stringify(run.data),
       JSON.stringify(run.artifacts),
-      run.metrics === null ? null : JSON.stringify(run.metrics)
+      run.metrics === null ? null : JSON.stringify(run.metrics),
+      run.audition === undefined || run.audition === null ? null : JSON.stringify(run.audition),
+      run.auditionSkip === undefined || run.auditionSkip === null ? null : JSON.stringify(run.auditionSkip)
     )
 }
 

@@ -170,9 +170,11 @@ export async function runMatchAttributionProbe(): Promise<void> {
     `${realSummaryBefore.length} → ${readOrEmpty(realSummaryFile).length} bytes`
   )
   push(
-    '探针过后真实 voice-chain.jsonl 没被写、也没被截断（行数与内容都不变）',
-    readOrEmpty(realVoiceFile) === realVoiceBefore && !readOrEmpty(realVoiceFile).includes('probe-marker'),
-    `${realVoiceBefore.split('\n').filter(Boolean).length} → ${readOrEmpty(realVoiceFile).split('\n').filter(Boolean).length} 行`
+    '探针过后真实 voice-chain.jsonl 没被写、也没被截断（逐字节不变）',
+    // 逐字节相等就够证明「这个探针没写真实文件」；再叠一条「不含 probe-marker」只会把别的
+    // 探针历史遗留的脏行算到自己头上（`--voice-chain-probe` 以前真的往这里写过）。
+    readOrEmpty(realVoiceFile) === realVoiceBefore,
+    `${realVoiceBefore.length} → ${readOrEmpty(realVoiceFile).length} bytes`
   )
 
   const failed = cases.filter((item) => !item.ok)
