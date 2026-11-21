@@ -17,14 +17,16 @@ function readRegistry() {
   const rows = []
   // 摘要可能跨行、也可以用 `+` 拼起来，所以从 flag 往后吃到本行的 `run:` 再拼字符串字面量；
   // 中间允许出现别的字段（`ci: true` 就是夹在 flag 和 summary 之间的那种），字段顺序不该绑死解析。
-  const pattern = /flag: '(--[a-z-]+)'/g
+  // flag 里可以有数字（`--overlay-a11y-probe` 就是），别用 [a-z-] 把它悄悄漏掉。
+  const pattern = /flag: '(--[a-z0-9-]+)'/g
   let match
   while ((match = pattern.exec(source)) !== null) {
     const rest = source.slice(match.index)
     const summaryAt = rest.indexOf('summary:')
     const runAt = rest.indexOf('run:')
     if (summaryAt === -1 || runAt === -1 || summaryAt > runAt) continue
-    const literals = rest.slice(summaryAt, runAt).match(/'([^']*)'/g) ?? []
+    // 单引号与双引号都算：带撇号的摘要是双引号写的，只认单引号会让那一行在清单里留白。
+    const literals = rest.slice(summaryAt, runAt).match(/'[^']*'|"[^"]*"/g) ?? []
     const summary = literals.map((item) => item.slice(1, -1)).join('')
     rows.push({ flag: match[1], summary })
   }

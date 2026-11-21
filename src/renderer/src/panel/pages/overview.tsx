@@ -29,6 +29,7 @@ const EMPTY_OVERLAY: OverlayStatus = {
   collapsed: false,
   readAloud: false,
   opacity: 0.34,
+  fontSize: 'normal',
   geometry: { x: 0, y: 0, width: 0, height: 0 },
   hint: null,
   hotkeys: {},

@@ -3,13 +3,37 @@
    颜色只花在三个地方——选中、主操作反馈、警告。全部尺寸手动给出，
    不引面板主题（透明窗口挂不得 body 底色）。 */
 
+/* 字号三档（#100）：像素表在 src/shared/overlay-a11y.ts，这里只是它的 CSS 落点。
+   默认（normal）与改动前逐像素一致，老用户升级后一个像素都不动；
+   data-font 由 app.tsx 按 OverlayStatus.fontSize 写到根节点上。 */
 #root-inner {
+  /* 字号三档（#100）的 normal 组：像素表在 src/shared/overlay-a11y.ts，这里只是它的 CSS 落点，
+     与改动前逐像素一致，老用户升级后一个像素都不动；data-font 由 app.tsx 按
+     OverlayStatus.fontSize 写到根节点上。 */
+  --ov-fs-mini: 10px;
+  --ov-fs-small: 11px;
+  --ov-fs-body: 12px;
+  --ov-fs-title: 13px;
   box-sizing: border-box;
   height: 100vh;
   display: flex;
   flex-direction: column;
   padding: 8px;
   background: transparent;
+}
+
+#root-inner[data-font='small'] {
+  --ov-fs-mini: 9px;
+  --ov-fs-small: 10px;
+  --ov-fs-body: 11px;
+  --ov-fs-title: 12px;
+}
+
+#root-inner[data-font='large'] {
+  --ov-fs-mini: 11px;
+  --ov-fs-small: 12px;
+  --ov-fs-body: 13.5px;
+  --ov-fs-title: 14.5px;
 }
 
 /* 解锁 = 配置态：一圈虚线轮廓标出「这是窗口」，锁定后什么都不画。 */
@@ -32,7 +56,7 @@
   border-radius: 6px;
   background: rgba(10, 8, 6, 0.72);
   color: rgba(255, 255, 255, 0.85);
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   line-height: 1.4;
   text-align: right;
   /* 耗时统计（voiceShowTiming）在浮层上写两行：总时长 / 各段拆解。 */
@@ -49,7 +73,7 @@
   gap: 4px;
   margin-right: 6px;
   vertical-align: middle;
-  font-size: 10px;
+  font-size: var(--ov-fs-mini);
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.72);
 }
@@ -115,13 +139,13 @@
 
 .orig {
   color: rgba(231, 229, 228, 0.92);
-  font-size: 12px;
+  font-size: var(--ov-fs-body);
   line-height: 1.4;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 .trans {
   color: #f5f0e0;
-  font-size: 13px;
+  font-size: var(--ov-fs-title);
   font-weight: 500;
   line-height: 1.4;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
@@ -129,6 +153,11 @@
 .trans + .orig,
 .orig + .trans {
   margin-top: 2px;
+}
+/* 大档字号下长英文/长链接也要在行内折行，别横向撑出浮层（#100 的「每档都装在窗口里」）。 */
+.orig,
+.trans {
+  overflow-wrap: anywhere;
 }
 /* 词库直接给的结果标一个「词」：和现翻的亮色区分开。 */
 .trans.cached {
@@ -142,7 +171,7 @@
   border-radius: 3px;
   background: rgba(251, 191, 36, 0.18);
   color: #fcd34d;
-  font-size: 10px;
+  font-size: var(--ov-fs-mini);
   line-height: 1.5;
   vertical-align: 1px;
 }
@@ -154,7 +183,7 @@
   border-radius: 3px;
   background: rgba(251, 146, 60, 0.16);
   color: #fdba74;
-  font-size: 10px;
+  font-size: var(--ov-fs-mini);
   line-height: 1.5;
   vertical-align: 1px;
 }
@@ -166,7 +195,7 @@
   border-radius: 3px;
   background: rgba(148, 163, 184, 0.14);
   color: #94a3b8;
-  font-size: 10px;
+  font-size: var(--ov-fs-mini);
   line-height: 1.5;
   vertical-align: 1px;
 }
@@ -180,12 +209,12 @@
 }
 /* 对讲行的阶段留痕（voice-stage）：短段靠留在这里存在，不靠停留抢帧。 */
 .trace {
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   color: rgba(253, 230, 138, 0.75);
 }
-/* 语音对讲的第三行：已播绿 / 未播红。 */
+/* 语音对讲的第三行：已播绿 / 未播红——绿和红只当强调，✓/✕ 才是状态（#100）。 */
 .spoken {
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   line-height: 1.4;
   margin-top: 2px;
   /* 耗时统计开着时这一行写两行（「已播 · 共 X」/ 各段拆解）：换行要真换行。 */
@@ -194,14 +223,20 @@
 .spoken.ok {
   color: #86efac;
 }
+.spoken.ok::before {
+  content: '✓ ';
+}
 .spoken.err {
   color: #f87171;
+}
+.spoken.err::before {
+  content: '✕ ';
 }
 /* 空态提示行 */
 .row.hint {
   border: 1px dashed rgba(148, 163, 184, 0.35);
   color: rgba(214, 211, 209, 0.7);
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   background: rgba(12, 10, 9, 0.5);
 }
 /* 超过 12 秒的旧行渐隐：保留上下文但不占视野。 */
@@ -230,7 +265,7 @@
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.4);
   cursor: grab;
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   color: rgba(226, 232, 240, 0.95);
 }
 #bar:active {
@@ -286,7 +321,7 @@
   background: rgba(15, 23, 42, 0.72);
   color: rgba(226, 232, 240, 0.95);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ov-fs-body);
   cursor: pointer;
 }
 #root-inner[data-locked='false'] #mini {
@@ -302,7 +337,7 @@
   border-radius: 999px;
   background: rgba(251, 191, 36, 0.9);
   color: #1c1917;
-  font-size: 10px;
+  font-size: var(--ov-fs-mini);
   font-weight: 600;
   line-height: 1.4;
   animation: breathe 2s ease-in-out infinite;
@@ -348,7 +383,7 @@
   background: transparent;
   color: rgba(148, 163, 184, 0.9);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ov-fs-body);
   cursor: pointer;
 }
 .tab:hover {
@@ -365,7 +400,7 @@
   background: transparent;
   color: rgba(148, 163, 184, 0.9);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   cursor: pointer;
 }
 .panel-close:hover {
@@ -386,7 +421,7 @@
   background: rgba(255, 255, 255, 0.05);
   color: rgba(240, 235, 224, 0.95);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ov-fs-body);
   outline: none;
 }
 .panel-search input::placeholder {
@@ -397,7 +432,7 @@
 }
 .panel-search .hit {
   color: rgba(148, 163, 184, 0.85);
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   font-variant-numeric: tabular-nums;
 }
 #panel-body {
@@ -427,19 +462,19 @@
 }
 .copy-primary {
   color: rgba(240, 235, 224, 0.95);
-  font-size: 13px;
+  font-size: var(--ov-fs-title);
   line-height: 1.4;
 }
 .copy-secondary {
   color: rgba(148, 163, 184, 0.7);
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .copied {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--ov-fs-mini);
   color: transparent;
 }
 .copied.ok {
@@ -452,7 +487,7 @@
   border-radius: 3px;
   background: rgba(148, 163, 184, 0.16);
   color: #cbd5e1;
-  font-size: 10px;
+  font-size: var(--ov-fs-mini);
   line-height: 1.6;
   cursor: pointer;
   flex: none;
@@ -463,7 +498,7 @@
   align-items: baseline;
   gap: 8px;
   padding: 4px 10px 6px;
-  font-size: 12px;
+  font-size: var(--ov-fs-body);
   line-height: 1.45;
   color: #e2e8f0;
 }
@@ -479,7 +514,7 @@
 #digest .digest-toggle {
   flex: none;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   color: #94a3b8;
   background: rgba(148, 163, 184, 0.14);
   border: none;
@@ -519,12 +554,12 @@
 .panel-note {
   padding: 10px;
   color: rgba(148, 163, 184, 0.85);
-  font-size: 12px;
+  font-size: var(--ov-fs-body);
   line-height: 1.5;
 }
 .panel-note.kbd-note {
   padding-top: 6px;
-  font-size: 10px;
+  font-size: var(--ov-fs-mini);
   color: rgba(148, 163, 184, 0.55);
 }
 .retry {
@@ -535,7 +570,7 @@
   background: transparent;
   color: rgba(226, 232, 240, 0.9);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--ov-fs-small);
   cursor: pointer;
 }
 .retry:hover {

@@ -43,7 +43,8 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--hotword-candidates-probe` hotword candidates from corrections: only >=2-char diffs enter the pool, sorting by count, explicit merge, full table never silently drops
   - `--interpret-listen-probe` can we hear the machine at all: loopback opens at 48 kHz, the track really carries sound, and GTCRN+VAD carve speech-sized segments
   - `--translate-accuracy-probe` runs the real provider over a fixed line set and reports per-line accuracy and latency
-  - `--overlay-geometry-probe` 
+  - `--overlay-geometry-probe` pure arithmetic of the overlay's geometry, hint priority, state reduction and unread counting
+  - `--overlay-a11y-probe` every overlay text pair clears AA against its own backdrop, the three font steps fit the minimum window, and no state is told apart by colour alone
   - `--hotkey-probe` the global-hotkey seam with zero window and zero game: accelerator round trip and collisions
   - `--download-probe` a download that drops mid-way resumes from the partial file, a source ignoring Range restarts clean, and a bad mirror falls through with the one actually used named in the log
   - `--hold-watch-probe` the hold-to-talk chain in three layers: the resident script reports OK, HOLD edges are recorded once each, and a dead script surfaces as fallback instead of silence

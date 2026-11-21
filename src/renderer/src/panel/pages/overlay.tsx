@@ -5,7 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CollapsibleGroup, Group, Panel, Row, StatusPill } from '../components/primitives'
 import { selectClass } from '../components/select-class'
+import { OVERLAY_FONT_SIZES, type OverlayFontSize } from '@shared/overlay-a11y'
 import { useSaveFlash, useSettings } from '../use-settings'
+
+const FONT_LABEL: Record<OverlayFontSize, string> = { small: '小', normal: '标准', large: '大' }
 
 const EMPTY_OVERLAY: OverlayStatus = {
   visible: false,
@@ -17,6 +20,7 @@ const EMPTY_OVERLAY: OverlayStatus = {
   collapsed: false,
   readAloud: false,
   opacity: 0.45,
+  fontSize: 'normal',
   geometry: { x: 0, y: 0, width: 520, height: 260 },
   hint: null,
   hotkeys: {},
@@ -113,6 +117,23 @@ export function OverlayPage(): React.ReactElement {
               <span className="w-10 text-right font-mono text-[13px] tabular-nums">
                 {Math.round(overlay.opacity * 100)}%
               </span>
+            </div>
+          </Row>
+          <Row
+            label="字号"
+            hint="三档都装在最小窗口里（240×120）：大档一行还有 15 个字，小档 18 个"
+          >
+            <div className="flex items-center gap-2">
+              {OVERLAY_FONT_SIZES.map((size) => (
+                <Button
+                  key={size}
+                  variant={overlay.fontSize === size ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => act(window.api.overlaySetFont(size))}
+                >
+                  {FONT_LABEL[size]}
+                </Button>
+              ))}
             </div>
           </Row>
           <Row

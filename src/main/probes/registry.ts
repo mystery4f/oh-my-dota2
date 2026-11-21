@@ -28,6 +28,7 @@ import { runMatchAttributionProbe } from './match-attribution'
 import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
 import { runOverlayGeometryProbe } from './overlay-geometry'
+import { runOverlayA11yProbe } from './overlay-a11y'
 import { runProviderReasoningProbe } from './provider-reasoning'
 import { runSettingsPersistProbe } from './settings-persist'
 import { runSovitsRefsProbe } from './sovits-refs'
@@ -215,6 +216,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: "pure arithmetic of the overlay's geometry, hint priority, state reduction and unread counting",
     run: runOverlayGeometryProbe
+  },
+  {
+    flag: '--overlay-a11y-probe',
+    ci: true,
+    summary: 'every overlay text pair clears AA against its own backdrop, the three font steps fit the minimum window, and no state is told apart by colour alone',
+    run: runOverlayA11yProbe
   },
   {
     flag: '--hotkey-probe',

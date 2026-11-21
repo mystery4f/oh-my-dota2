@@ -20,6 +20,7 @@
  */
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type VoiceChainSummary, type WindowApi } from '@shared/ipc'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
+import type { OverlayFontSize } from '@shared/overlay-a11y'
 import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
 import { estimateFtCost, summarizePendingTakes } from '@shared/train/asr-ft'
 import { gradeAsrCheck, type AsrCheckItem, type AsrCheckState } from '@shared/train/asr-check'
@@ -125,6 +126,8 @@ const overlay = {
   collapsed: false,
   readAloud: false,
   opacity: 0.45,
+  // ?font=small|large 让预览也能看三档字号；?s=overlay 的按钮同样走这条桩。
+  fontSize: (query.get('font') ?? 'normal') as OverlayFontSize,
   geometry: { x: 220, y: 180, width: 520, height: 260 },
   hint: null,
   hotkeys: {
@@ -993,6 +996,11 @@ const implemented = {
   },
   overlaySetText: async (mode) => {
     overlay.textMode = mode
+    return overlaySnap()
+  },
+  // 三档字号（#100）：改完把 status 回给面板，按钮的选中态跟着走。
+  overlaySetFont: async (size) => {
+    overlay.fontSize = size
     return overlaySnap()
   }
 } satisfies Partial<WindowApi>

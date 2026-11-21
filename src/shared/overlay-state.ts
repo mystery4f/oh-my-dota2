@@ -5,6 +5,7 @@
  * 曾两次翻车的鼠标规则（shouldIgnoreMouse）与「收起顺手锁上」都冻结在事件里，探针钉死。
  */
 import type { AppSettings, OverlayGeometry, OverlayTextMode } from './ipc'
+import { normalizeOverlayFontSize, type OverlayFontSize } from './overlay-a11y'
 
 /** 浮层自有状态；窗口几何（win.getBounds）不算在内，由 manager 现查现报。 */
 export interface OverlayState {
@@ -19,6 +20,8 @@ export interface OverlayState {
   /** 抬头先给一行战况摘要，逐行消息收在展开后面（#99）。 */
   digest: boolean
   opacity: number
+  /** 字号三档（#100）：只影响浮层自己的文字大小，改一档整块浮层跟着换。 */
+  fontSize: OverlayFontSize
   /** 为什么取不到字；null = 一切正常。 */
   hint: string | null
 }
@@ -31,6 +34,8 @@ export type OverlayEvent =
   | { type: 'set-text'; mode: OverlayTextMode }
   | { type: 'set-digest'; on: boolean }
   | { type: 'set-opacity'; value: number }
+  /** 字号三档：面板三个按钮直接发这个事件，落盘后跨启动记住。 */
+  | { type: 'set-font'; size: OverlayFontSize }
   | { type: 'set-hint'; hint: string | null }
   /** 显示/隐藏跨启动记住（「记忆隐藏」）。 */
   | { type: 'set-visible'; visible: boolean }
@@ -45,7 +50,7 @@ export type OverlayEvent =
 
 /** 这次归约要写进设置文件的字段；空对象 = 不写盘。 */
 export type OverlayPersistPatch = Partial<
-  Pick<AppSettings, 'overlayLocked' | 'overlayCollapsed' | 'overlayText' | 'overlayDigest' | 'overlayOpacity' | 'overlayBounds' | 'overlayVisible' | 'ttsReadAloud'>
+  Pick<AppSettings, 'overlayLocked' | 'overlayCollapsed' | 'overlayText' | 'overlayDigest' | 'overlayOpacity' | 'overlayFontSize' | 'overlayBounds' | 'overlayVisible' | 'ttsReadAloud'>
 >
 
 export interface OverlayReduction {
@@ -81,7 +86,8 @@ export interface StageLine {
  */
 export function stageLine(input: { message: string | null; hint: string | null; locked: boolean }): StageLine | null {
   if (input.message !== null && input.message !== '') return { text: input.message, warn: false }
-  if (input.hint !== null && input.hint !== '') return { text: input.hint, warn: true }
+  // 警告行加 ⚠ 前缀（#100）：只换颜色的话，色弱与灰度截图里跟普通阶段行没区别。
+  if (input.hint !== null && input.hint !== '') return { text: `⚠ ${input.hint}`, warn: true }
   if (!input.locked) return { text: '未锁定 · 可拖动（5 秒后自动锁定）', warn: false }
   return null
 }
@@ -97,6 +103,7 @@ export function overlayStateFromSettings(settings: AppSettings): OverlayState {
     textMode: settings.overlayText,
     digest: settings.overlayDigest,
     opacity: clampOpacity(settings.overlayOpacity),
+    fontSize: normalizeOverlayFontSize(settings.overlayFontSize),
     hint: null
   }
 }
@@ -164,6 +171,18 @@ export function reduceOverlay(event: OverlayEvent, state: OverlayState): Overlay
       return {
         state: { ...state, opacity },
         persist: changed ? { overlayOpacity: opacity } : {},
+        changed,
+        clickThrough: false,
+        idle: 'keep'
+      }
+    }
+    case 'set-font': {
+      const size = normalizeOverlayFontSize(event.size)
+      const changed = size !== state.fontSize
+      // 字号只改文字大小，不动窗口：撑不下时是列表内部滚动，不是让窗口自己长大。
+      return {
+        state: { ...state, fontSize: size },
+        persist: changed ? { overlayFontSize: size } : {},
         changed,
         clickThrough: false,
         idle: 'keep'

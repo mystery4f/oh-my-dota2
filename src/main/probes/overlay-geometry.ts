@@ -207,6 +207,7 @@ export function runOverlayGeometryProbe(): void {
     textMode: 'translated',
     digest: false,
     opacity: 0.34,
+    fontSize: 'normal',
     hint: null,
     ...overrides
   })

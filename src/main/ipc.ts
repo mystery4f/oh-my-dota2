@@ -178,6 +178,7 @@ const handlers: MainHandlers = {
   overlaySnap: () => getOverlayManager().snap(),
   overlaySetLocked: (locked) => getOverlayManager().setLocked(locked),
   overlaySetOpacity: (value) => getOverlayManager().setOpacity(value),
+  overlaySetFont: (size) => getOverlayManager().setFont(size),
   copyText: (text) => {
     clipboard.writeText(String(text ?? ''))
     return true

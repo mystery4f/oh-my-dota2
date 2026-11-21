@@ -275,6 +275,12 @@
 - 需求（2026-10-28）：「记忆收起、锁定、隐藏，在下一次启动的时候按这个来」。
 - 修法：锁定本来就有 `overlayLocked` 持久化；补 `overlayCollapsed`（toggleCollapse 两个分支各自 saveSettings）和 `overlayVisible`（toggle 藏时写 false；show() 亮出后写 true）。启动时 `whenReady` 里 `startup.overlayVisible` 为真才 `show()`——浮层从不自动弹出，只还原用户上次的选择。收起态下 show() 先 reposition 再套 `miniGeometry`，重启见面也是小图标不是整块。
 - 教训：显示状态要在「用户动作发生的当下」持久化（toggle/show 里），而不是退出时快照——强制退出（dev:stop 的 Stop-Process）不走 will-quit，退出时快照必丢。
+### 浮层字小、灰度下分不清已播未播（#100）
+- 症状：浮层文字只有一套大小（原文 12px / 译文 13px），想看清只能坐近一点；已播行与未播行只靠绿色和灰色区分，灰度截图、色弱用户、甚至投影仪偏色时看着一模一样。
+- 根因：字号与颜色全是 `src/renderer/src/overlay/overlay.css` 里的字面量，26 处 `font-size` 只有 10/11/12/13 四个数，没有任何地方能检查「对比度够不够」「状态有没有非颜色标记」——它既不在类型里，也不在探针里。
+- 修法：像素与颜色表搬进 `src/shared/overlay-a11y.ts`（`FONT_SCALE` 三档、`OVERLAY_TEXT_PAIRS` 十五对、`OVERLAY_STATE_MARKS` 十条），CSS 只留四个变量 `--ov-fs-mini/small/body/title` 由根节点 `data-font` 切换（normal 与改动前逐像素一致）；`.spoken.ok` 加 `✓ `、`.spoken.err` 加 `✕ `、阶段行警告加 `⚠ ` 前缀，颜色不再是唯一信号；`check:pure` 守一道漂移——CSS 里不许再有字面量 `font-size`，三组像素必须等于 `overlayFontScale()`。
+- 口径：探针算的 AA 是「文字相对**行底色叠纯黑**」的比值，最差一对 `.panel-note` 5.79:1；亮场景靠 `text-shadow` 兜，那个离屏算不出来。所以结论只能是「在自家底色上达标」，不许说成「任何游戏画面都看得清」。
+- 教训：`scripts/gen-probes-md.mjs` 的 flag 正则原来是 `[a-z-]+`，`--overlay-a11y-probe` 因为带数字被整行漏进 `docs/PROBES.md`，而 `--overlay-geometry-probe` 的摘要用双引号（含 `overlay's`）只认单引号的解析器又把它变成空行——两处都不报错，靠 `check:probes` 的行数差才发现。
 ### 静音时 whisper 输出 `[BLANK_AUDIO]` 幻觉
 - 修法：录音段取**最响的那 100 毫秒**的音量（不是整段平均——按住两秒只说一个词，平均值会被前后静音拖到阈值下）：低于 0.0005 判「麦克风没有声音：检查输入设备」（数字静音：端点选错、系统没授权、设备静音键），低于 0.012 判「没有检测到语音」，都直接丢掉这段并留一行 `VOICE_CAPTURE_REJECT`；转写结果再过滤 `[BLANK_AUDIO]` 等标记。
 - 实测（2026-11-14）：`data/asr-ft` 里 86 条真实说话的录音，整段平均最小 0.0216、最响 100ms 窗最小 0.0782——两者差 3.6 倍，用平均判会把「说了一个词」判成没说话。

@@ -210,6 +210,7 @@ export function App(): JSX.Element {
       data-locked={status.locked ? 'true' : 'false'}
       data-collapsed={collapsed ? 'true' : 'false'}
       data-panel={status.panelOpen ? 'true' : 'false'}
+      data-font={status.fontSize}
       style={{ '--row-alpha': String(status.opacity ?? 0.34) } as React.CSSProperties}
     >
       {status.panelOpen ? (

@@ -8,6 +8,7 @@ import type { ProviderConfig, ProviderId } from './providers'
 import type { OfflineVoiceId, SpeakMode, VoiceOutEngine } from './voices'
 import type { OverlayTextMode, OverlayGeometry, ReplyTone } from './ipc'
 import type { DotaAnnounceTriggers } from './dota-announce'
+import type { OverlayFontSize } from './overlay-a11y'
 
 export interface AppSettings {
   provider: ProviderConfig
@@ -195,6 +196,11 @@ export interface AppSettings {
   overlayVisible: boolean
   /** 每行底色不透明度（0.05–0.9）：游戏画面亮的时候要淡，暗图要深一点才看得清。 */
   overlayOpacity: number
+  /**
+   * 浮层字号三档（#100）：small / normal / large。每一档的四个像素值、以及「大档会不会撑破最小窗口」
+   * 的判据都在 `src/shared/overlay-a11y.ts`，探针逐档验证；脏值一律回落 normal。
+   */
+  overlayFontSize: OverlayFontSize
   /** 用户调过的浮层几何；null = 跟随捕获区域自动摆放。 */
   overlayBounds: OverlayGeometry | null
   /**
@@ -294,6 +300,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayCollapsed: false,
   overlayVisible: false,
   overlayOpacity: 0.34,
+  overlayFontSize: 'normal',
   overlayBounds: null,
   voiceCaptureMode: DEFAULT_CAPTURE_MODE,
   hotkeys: { ...DEFAULT_HOTKEYS }

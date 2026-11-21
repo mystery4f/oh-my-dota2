@@ -11,6 +11,7 @@
  * 跑法：node --experimental-strip-types scripts/check-pure.mjs（Node 22 需要这个开关）。
  */
 import { registerHooks } from 'node:module'
+import { readFileSync } from 'node:fs'
 import { pureResolve } from './pure-resolve.mjs'
 
 // 先装钩子再 import：`src/shared/` 的 import 不带扩展名，Node 解析器需要被补全一次。
@@ -717,6 +718,56 @@ check(
   check('记过的缺口不再报', unseenGaps([one], [patchGapKey(one)]).length === 0 && unseenGaps([one], []).length === 1, patchGapKey(one))
   check('面板一句话点到名字', patchWatchLine([one]) === '游戏里出现了我们还不认识的：map.clock_time' && patchWatchLine([]) === '和游戏对得上', patchWatchLine([one]))
   check('声明表覆盖每个 payload 块', ['provider', 'map', 'player', 'events', 'allplayers', 'hero', 'draft', 'roshan'].every((block) => GSI_READ_PATHS.some((path) => path === block || path.startsWith(block + '.') || path.startsWith(block + '[]'))), GSI_READ_PATHS.length + ' 条')
+}
+// —— 浮层可读性（#100）：每一对文字 ≥ AA、三档字号装在最小窗口里、状态不只靠颜色 ——
+{
+  const {
+    AA_NORMAL,
+    OVERLAY_FONT_MAX_RATIO,
+    OVERLAY_FONT_SIZES,
+    OVERLAY_MIN_CHARS_PER_LINE,
+    contrastRatio,
+    judgeOverlayContrast,
+    judgeOverlayFontSteps,
+    judgeStateMarks,
+    normalizeOverlayFontSize,
+    overlayFontScale
+  } = await import('../src/shared/overlay-a11y.ts')
+  const contrast = judgeOverlayContrast()
+  check('浮层每一对文字对比度 ≥ AA', contrast.failures.length === 0, contrast.failures.join('；') || `${contrast.pairs.length} 对`)
+  check('最差的一对也 ≥ AA', contrast.worst.ratio >= AA_NORMAL, `${contrast.worst.token} ${contrast.worst.ratio}:1`)
+  check('黑白对比度 21、同色 1', contrastRatio('#ffffff', '#000000') === 21 && contrastRatio('#808080', '#808080') === 1)
+  const steps = judgeOverlayFontSteps()
+  check('三档字号都装在最小窗口里', steps.failures.length === 0, steps.failures.join('；') || '小/标准/大')
+  check(
+    '字号单调递增且放大不超上限',
+    OVERLAY_FONT_SIZES.map((size) => overlayFontScale(size).title).every((v, i, all) => i === 0 || v > all[i - 1]) &&
+      steps.steps.every((step) => step.growth <= OVERLAY_FONT_MAX_RATIO),
+    steps.steps.map((step) => `${step.size}:${step.scale.title}px`).join(' ')
+  )
+  check(
+    '每档一行至少 12 个字',
+    steps.steps.every((step) => step.charsPerLine >= OVERLAY_MIN_CHARS_PER_LINE),
+    steps.steps.map((step) => `${step.size}:${step.charsPerLine}`).join(' ')
+  )
+  check('字号脏值回落 normal', normalizeOverlayFontSize('huge') === 'normal' && normalizeOverlayFontSize(12) === 'normal')
+  check('每个有颜色的状态都有颜色以外的标记', judgeStateMarks().failures.length === 0)
+
+  // CSS 与像素表漂移：overlay.css 里不许再有字面量 font-size，变量值必须与 overlayFontScale 一致。
+  const css = readFileSync(new URL('../src/renderer/src/overlay/overlay.css', import.meta.url), 'utf8')
+  const literal = /font-size:\s*[\d.]+px/.test(css)
+  check('overlay.css 不再有字面量 font-size', !literal)
+  const declared = [...css.matchAll(/--ov-fs-(mini|small|body|title):\s*([\d.]+)px/g)].map((hit) => [hit[1], Number(hit[2])])
+  const normalCss = declared.slice(0, 4)
+  const smallCss = declared.slice(4, 8)
+  const largeCss = declared.slice(8, 12)
+  const same = (rows, scale) =>
+    rows.length === 4 && rows.every(([key, value]) => scale[key] === value)
+  check(
+    'overlay.css 的三档像素与 overlay-a11y 一致',
+    same(normalCss, overlayFontScale('normal')) && same(smallCss, overlayFontScale('small')) && same(largeCss, overlayFontScale('large')),
+    `${normalCss.length}/${smallCss.length}/${largeCss.length}`
+  )
 }
 
 if (failed > 0) {

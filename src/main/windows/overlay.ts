@@ -6,6 +6,7 @@ import {
   type OverlayStatus,
   type OverlayTextMode
 } from '@shared/ipc'
+import type { OverlayFontSize } from '@shared/overlay-a11y'
 import { broadcastToWindows } from './broadcast'
 import { loadSettings, saveSettings } from '../services/settings'
 import {
@@ -71,6 +72,7 @@ class OverlayManager {
       collapsed: this.s.collapsed,
       readAloud: settings.ttsReadAloud,
       opacity: this.s.opacity,
+      fontSize: this.s.fontSize,
       geometry: this.currentGeometry(),
       hint: this.s.hint,
       // 浮层要写的键随状态一起下发：它拿不到设置，键名只能从主进程带过去。
@@ -114,6 +116,11 @@ class OverlayManager {
 
   setOpacity(value: number): OverlayStatus {
     return this.commit({ type: 'set-opacity', value })
+  }
+
+  /** 字号三档（#100）：不重开窗、不重排几何，只换根节点上的那组 CSS 变量。 */
+  setFont(size: OverlayFontSize): OverlayStatus {
+    return this.commit({ type: 'set-font', size })
   }
 
   /** 工具条上的朗读开关：改的是同一条设置，重启后仍然记住。 */

@@ -336,6 +336,14 @@ it and nothing happened". The overlay and the pause hint print key names from th
 - `eslint` allows exactly one warning (`--max-warnings 1`), so any non-component export in a `.tsx`
   file breaks the build: pure helpers (`runTone`, `formatDuration`, …) live in their own `.ts`
   module next to the component.
+- Overlay readability (#100): font sizes and every text colour live in ONE table, `src/shared/overlay-a11y.ts`
+  (`FONT_SCALE`, `OVERLAY_TEXT_PAIRS`, `OVERLAY_STATE_MARKS`); `src/renderer/src/overlay/overlay.css` may only use the four
+  `--ov-fs-mini/small/body/title` variables switched by the root's `data-font` — `check:pure` fails on a literal `font-size` or on
+  a pixel that disagrees with `overlayFontScale()`. The AA numbers the probe prints are measured against `ROW_BACKDROP` over
+  black, which is NOT the same as "readable on any game frame": a bright scene is covered by `text-shadow` and cannot be
+  computed offscreen, so never quote the ratio as proof of the latter. Any state a colour expresses must also carry a
+  non-colour marker (`.spoken.ok` → `✓ `, `.spoken.err` → `✕ `, a hint → `⚠ `) — adding a colour without adding its pair to
+  the table leaves that pair unchecked.
 - Overlay diagnostics: a locked overlay is click-through *and* content-protected, so it is absent from
   every screenshot and ignores the mouse. Never conclude "the overlay is not showing" from a desktop
   capture — read the panel badge or the `overlay:status` payload instead. Both rules are pure seams in

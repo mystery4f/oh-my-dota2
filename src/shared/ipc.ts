@@ -15,6 +15,7 @@ import type { SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
 import type { PatchWatchView } from './patch-watch'
 import type { GsiLibrariesView, GsiLibrarySetResult } from './gsi-lib'
 import type { MicHealthEvent } from './mic-health'
+import type { OverlayFontSize } from './overlay-a11y'
 
 import type { AsrFtFacts, AsrFtInstallState, AsrFtStatusResult, AsrFtSwapResult } from '@shared/train/asr-ft'
 import type { VoiceRuntimeState } from '@shared/voice-runtime'
@@ -424,6 +425,8 @@ export interface OverlayStatus {
   /** 朗读开关的当前状态。 */
   readAloud: boolean
   opacity: number
+  /** 字号三档（#100）：浮层根节点按它切 --ov-fs-*，权重来自 overlay-a11y 的同一张表。 */
+  fontSize: OverlayFontSize
   /** 浮层当前的实际几何（DIP），面板拿它显示，拖拽拿它算增量。 */
   geometry: OverlayGeometry
   /** 为什么取不到字（null = 一切正常）——只在异常时显示，正常时整块保持干净。 */
@@ -606,6 +609,7 @@ export const IPC = {
   OVERLAY_SNAP: 'overlay:snap',
   OVERLAY_LOCK: 'overlay:lock',
   OVERLAY_OPACITY: 'overlay:opacity',
+  OVERLAY_FONT: 'overlay:font',
   OVERLAY_STATE: 'overlay:state',
   // 诊断包（#111）：把 logs/ 里的证据打成一个 zip，带 manifest、版本与构建戳，默认脱敏。
   LOG_BUNDLE_EXPORT: 'log:bundle-export',
@@ -830,6 +834,7 @@ export const ipcContract = {
   overlaySnap: invoke<[], OverlayStatus>(IPC.OVERLAY_SNAP),
   overlaySetLocked: invoke<[boolean], OverlayStatus>(IPC.OVERLAY_LOCK),
   overlaySetOpacity: invoke<[number], OverlayStatus>(IPC.OVERLAY_OPACITY),
+  overlaySetFont: invoke<[OverlayFontSize], OverlayStatus>(IPC.OVERLAY_FONT),
   // 语音链：识别 / 翻译 / 声出
   voiceReply: invoke<[VoiceReplyArgs], VoiceReplyResult>(IPC.VOICE_REPLY),
   reportVoiceState: send<[boolean]>(IPC.OVERLAY_VOICE_STATE),
