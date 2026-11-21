@@ -6,13 +6,20 @@
  * 一个从没说过话的安装本来就没有 voice-chain.jsonl，manifest 的 missing 就是它的位置。
  */
 
-/** 默认收集的证据文件（相对 `<userData>/logs`），顺序即 manifest 与压缩包里的顺序。 */
+/**
+ * 默认收集的证据文件（相对 `<userData>/logs`），顺序即 manifest 与压缩包里的顺序。
+ *
+ * `optional: true` 的一份**缺席不算缺口**（#152）：`capture-ticks.jsonl` 原本由抓屏 OCR 的
+ * 逐帧遥测写，那条链路已经整体退役（`src/main/services/data-dir.ts` 的 `RETIRED_KEYS`），
+ * 现在没有任何生产者。列表里留着它，是为了老用户的安装目录里那份历史文件还能被带走；
+ * 但一个从没跑过旧版本的安装永远不会有它，把它算进「缺了」会让每次导包都报一个假缺口。
+ */
 export const LOG_BUNDLE_FILES = [
   { name: 'inplace.log', mask: true },
   { name: 'gsi-chat.jsonl', mask: true },
   { name: 'gsi-summary.json', mask: true },
   { name: 'voice-chain.jsonl', mask: true },
-  { name: 'capture-ticks.jsonl', mask: true },
+  { name: 'capture-ticks.jsonl', mask: true, optional: true },
   // 崩溃账本（#115）：持久化的那份在 error-log.ts，这里把它也打进包，用户才拿得出来。
   { name: 'errors.jsonl', mask: true }
 ] as const

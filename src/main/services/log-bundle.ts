@@ -63,7 +63,7 @@ export async function exportLogBundle(options: LogBundleOptions = {}): Promise<L
     for (const wanted of LOG_BUNDLE_FILES) {
       const full = join(logsDir, wanted.name)
       if (!existsSync(full)) {
-        missing.push(wanted.name)
+        if (!('optional' in wanted && wanted.optional === true)) missing.push(wanted.name)
         continue
       }
       const raw = await readFile(full)

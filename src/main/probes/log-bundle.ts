@@ -173,11 +173,13 @@ export async function runLogBundleProbe(): Promise<void> {
     )
     push(
       '缺失的文件被列出，不静默跳过',
-      manifest.missing.length === LOG_BUNDLE_FILES.length - 3 &&
+      // 3 份在场 + capture-ticks 缺席但不入 missing（#152）：total - 3 到场 - 1 可选 = total - 4
+      manifest.missing.length === LOG_BUNDLE_FILES.length - 4 &&
         manifest.missing.includes('gsi-summary.json') &&
-        manifest.missing.includes('capture-ticks.jsonl') &&
+        !manifest.missing.includes('capture-ticks.jsonl') &&
         !names.includes('gsi-summary.json'),
-      manifest.missing.join(',')
+      // 可选文件（capture-ticks）缺席时只报自己那句，不进 missing（#152）。
+      '可选缺席：capture-ticks.jsonl'
     )
     push(
       '导出结果把缺的文件也交给面板',
