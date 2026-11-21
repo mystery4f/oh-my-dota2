@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { errorMessage } from '@shared/errors'
+import { TARGET_LANGUAGES, targetsLine } from '@shared/target-language'
 import { glossaryPackLine, type GlossaryPackStatus } from '@shared/glossary-pack'
 import { cacheLine, guardLine, qualityFootnote, type QualityReport } from '@shared/quality-report'
 import {
@@ -80,6 +81,24 @@ export function EnginePage(): React.ReactElement {
               ))}
             </Select>
             <SaveFlash flash={save.flash} error={save.error} />
+          </Row>
+          <Row
+            label="中文行译成"
+            htmlFor="v2-targetLang2"
+            hint={targetsLine({ targetLang: settings.targetLang, targetLang2: settings.targetLang2 })}
+          >
+            <Select
+              id="v2-targetLang2"
+              value={settings.targetLang2}
+              onChange={(e) => void save.wrap(update({ targetLang2: e.target.value }))}
+            >
+              <option value="">英文（默认）</option>
+              {TARGET_LANGUAGES.filter((item) => item.code !== 'en').map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.label}
+                </option>
+              ))}
+            </Select>
           </Row>
           <Row
             label="接口地址"

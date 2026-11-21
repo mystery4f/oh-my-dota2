@@ -32,6 +32,11 @@ export interface AppSettings {
   translationMaxWords?: number
   proxyUrl: string
   targetLang: string
+  /**
+   * #120：中文行译成哪种语言（空 = 英文）。混编局里队友只说英文时没用，但俄语/东南亚局就是它。
+   * 与 `targetLang` 一起由 `src/shared/target-language.ts` 归一，坏值回落默认。
+   */
+  targetLang2: string
   ttsOutputDevice: string
   /**
    * 同声传译（票 128）：我说中文，英文灌进游戏自己的话筒。
@@ -291,6 +296,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   translationMaxWords: 16,
   proxyUrl: '',
   targetLang: 'zh-CN',
+  targetLang2: '',
   ttsOutputDevice: '',
   interpretMode: false,
   interpretInDevice: '',

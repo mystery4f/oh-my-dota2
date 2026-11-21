@@ -391,6 +391,11 @@ it and nothing happened". The overlay and the pause hint print key names from th
   stage says 等太久了，已停止 and the stop reason travels to main (`VoiceStopReason = 'release' |
   'silence' | 'timeout'`), which writes one `{"stage":"capture-stop","reason":"timeout"}` line into
   `logs/voice-chain.jsonl`. A cap that stops silently reads as "the key broke".
+- Target language (#120): `src/shared/target-language.ts` decides the ONE language a line is translated
+  into — `targetLang` for foreign lines (default 简体中文), `targetLang2` for Chinese lines (default
+  English) — and an unknown code falls back to the default rather than reaching the prompt. Only a
+  non-default target appends the single `Output language: …` line, so the default path is byte-for-byte
+  the old prompt and one call still produces one line.
 - Quick phrases (#117): `src/shared/quick-phrases.ts` owns groups, `{hero}`/`{time}`/`{matchid}`
   substitution and the rule that an empty group is hidden — not rendered as an empty shell. Placeholders
   it does not recognise (a typo like `{heor}`) stay verbatim, so the mistake is visible instead of being

@@ -1,4 +1,6 @@
 import type { ProviderConfig, ReplyTone, TestResult, TranslateDirection } from '@shared/ipc'
+import { resolveTargetLanguage, targetInstruction } from '@shared/target-language'
+import { loadSettings } from '../settings'
 import { errorMessage } from '@shared/errors'
 import { chatCompletion, type ChatMessage } from './openai-compat'
 
@@ -216,14 +218,24 @@ function collapseRepeatedHalf(text: string): string {
   return head === tail ? head : text
 }
 
+/** 一次调用的系统提示：方向提示词 + （非默认目标语言时的）那一句输出语言要求。 */
+const BACKSLASH_N2 = String.fromCharCode(10) + String.fromCharCode(10)
+
+export function targetSystemPrompt(direction: TranslateDirection, target: string, maxWords: number): string {
+  const base = withMaxWords(SYSTEM_PROMPTS[direction], maxWords)
+  const extra = targetInstruction(direction, target)
+  return extra === null ? base : base + BACKSLASH_N2 + extra
+}
+
 export async function translateText(
   provider: ProviderConfig,
   text: string,
   direction: TranslateDirection,
-  maxWords = DEFAULT_MAX_WORDS
+  maxWords = DEFAULT_MAX_WORDS,
+  target = resolveTargetLanguage(direction, loadSettings())
 ): Promise<string> {
   const messages: ChatMessage[] = [
-    { role: 'system', content: withMaxWords(SYSTEM_PROMPTS[direction], maxWords) },
+    { role: 'system', content: targetSystemPrompt(direction, target, maxWords) },
     { role: 'user', content: text }
   ]
   const raw = await chatCompletion({ provider, messages, temperature: 0 })
