@@ -6,7 +6,7 @@
  */
 
 import { exitProbe, guardProbe, probeCases } from './harness'
-import { buildSpeakerChannels, channelsLine, judgeSpeakerRelation, normalizeSlot, speakerLabel } from '@shared/speaker-channel'
+import { buildSpeakerChannels, channelsLine, judgeSpeakerRelation, normalizeSlot, sideOf, speakerLabel } from '@shared/speaker-channel'
 import {
   noteSpeakerEvent,
   noteSpeakerSelf,
@@ -21,8 +21,6 @@ function channel(overrides: Partial<Parameters<typeof buildSpeakerChannels>[0]> 
   return buildSpeakerChannels({
     matchid: '7500000001',
     mySlot: 2,
-    myTeam: 'radiant',
-    teamOf: (slot) => (normalizeSlot(slot) < 5 ? 'radiant' : 'dire'),
     heroOf: () => '',
     events: [],
     ...overrides
@@ -50,9 +48,11 @@ export async function runSpeakerChannelProbe(): Promise<void> {
 
   // —— 座位归一与关系：真对局只有座位，没有名字 ——
   push('座位：128+ 写法折回 0–4', normalizeSlot(130) === 2, String(normalizeSlot(130)))
-  push('关系：自己就是自己（两种写法都认）', judgeSpeakerRelation(2, 2, 'radiant', () => 'radiant') === 'self' && judgeSpeakerRelation(130, 2, 'radiant', () => 'radiant') === 'self', 'self')
-  push('关系：阵营相同是队友、不同是对手', judgeSpeakerRelation(3, 2, 'radiant', (s) => (normalizeSlot(s) < 5 ? 'radiant' : 'dire')) === 'teammate' && judgeSpeakerRelation(7, 2, 'radiant', (s) => (normalizeSlot(s) < 5 ? 'radiant' : 'dire')) === 'opponent', 'teammate/opponent')
-  push('关系：阵营没拿到时不猜', judgeSpeakerRelation(7, 2, '', () => '') === 'unknown', 'unknown')
+  push('关系：自己就是自己（原样相等才算，折回座位号不算）', judgeSpeakerRelation(2, 2) === 'self' && judgeSpeakerRelation(130, 2) !== 'self', `self / 130→${judgeSpeakerRelation(130, 2)}`)
+  // 同一局内两侧是推得出来的事实：0–4 一侧、5–9 一侧，128+ 的写法折成夜魇。
+  push('关系：同侧是队友、异侧是对手（只比座位）', judgeSpeakerRelation(3, 2) === 'teammate' && judgeSpeakerRelation(7, 2) === 'opponent', 'teammate/opponent')
+  push('关系：128+ 的写法算夜魇、不是「折回 0–4 的队友」', sideOf(130) === 1 && judgeSpeakerRelation(130, 2) === 'opponent', `sideOf(130)=${sideOf(130)}`)
+  push('关系：认不出自己座位时不猜', judgeSpeakerRelation(7, null) === 'unknown', 'unknown')
   push('标签：我 / 队友 2 / 对手 3 按座位算', speakerLabel('self', 2) === '我' && speakerLabel('teammate', 1) === '队友 2' && speakerLabel('opponent', 7) === '对手 3', `${speakerLabel('self', 2)}|${speakerLabel('teammate', 1)}|${speakerLabel('opponent', 7)}`)
 
   // —— 组装：一条频道一人、顺序确定、最近一句是最新 ——
@@ -86,14 +86,16 @@ export async function runSpeakerChannelProbe(): Promise<void> {
   noteSpeakerEvent({ matchid: '7500000009', slot: 7, at: AT + 2, gameTime: 102, channel: 11, text: '   ' })
   const live = speakerChannels()
   push('账本：两条有效 + 一条空文本被丢', live.channels.length === 2 && live.channels.every((one) => one.spoken === 1), JSON.stringify(live.channels.map((one) => [one.label, one.spoken])))
-  push('账本：关系由座位与阵营算出来', live.channels.map((one) => one.relation).join(',') === 'teammate,opponent', live.channels.map((one) => one.label).join(','))
+  push('账本：关系由座位两侧算出来', live.channels.map((one) => one.relation).join(',') === 'teammate,opponent', live.channels.map((one) => one.label).join(','))
   push('账本：英雄跟着座位走', live.channels.find((one) => one.slot === 3)?.hero === 'axe', String(live.channels.find((one) => one.slot === 3)?.hero))
   noteSpeakerEvent({ matchid: '7500000010', slot: 3, at: AT + 3, gameTime: 1, channel: 11, text: '新一局' })
   const next = speakerChannels()
   push('换局：上一局的频道全清掉', next.matchid === '7500000010' && next.channels.length === 1 && next.channels[0]?.lastText === '新一局', JSON.stringify({ matchid: next.matchid, channels: next.channels.map((one) => one.lastText) }))
-  // 换局后阵营表也清了：座位对得出来（selfSlot 还在），但「队友还是对手」要等新一帧给阵营才敢说。
-  push('换局：座位仍然认得出自己、关系先不猜', next.channels[0]?.relation === 'unknown' && next.selfSlot === 2, `${next.channels[0]?.relation} · selfSlot=${next.selfSlot}`)
+  // 同局内两侧是座位算出来的，所以换局后立刻能算；但**上一局的阵营表必须已清**（下一行钉它）。
+  push('换局：座位仍然认得出自己', next.selfSlot === 2, String(next.selfSlot))
   push('换局：上一局的英雄不会跟过来', next.channels[0]?.hero === '', String(next.channels[0]?.hero))
+  // 同侧/异侧是座位算出来的，所以换局之后立刻又算得出来——这里不靠上一局的阵营表。
+  push('换局：关系立刻按新座位重算', next.channels[0]?.relation === 'teammate', String(next.channels[0]?.relation))
   const unknownLine = channelsLine(blinder.channels, null)
   push('三种空态三句话互不相同', channel().line !== blinder.line && unknownLine.includes('认不出谁是谁'), `${channel().line} / ${unknownLine}`)
 

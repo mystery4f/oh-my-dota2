@@ -120,6 +120,7 @@ tags: [docs, index]
 
 | 文件 | 用途 |
 | --- | --- |
+| `docs/agents/ear-acceptance.md` 耳验清单（测试照着读就能做：#93 逐人静音、#129 同传半双工三条腿） — 判据区分「没生效」与「生效但别处坏了」 | 当前 |
 | `docs/agents/issue-tracker.md` | 用 `gh` 管 GitHub Issue 的流程 |
 | `docs/agents/triage-labels.md` | 五个分诊标签的含义 |
 | `docs/agents/domain.md` | 单上下文领域文档：根 `GLOSSARY.md` + `docs/adr/` |

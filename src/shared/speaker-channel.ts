@@ -56,15 +56,25 @@ export function normalizeSlot(slot: number): number {
   return ((slot % 128) + 128) % 128
 }
 
-/** 座位 → 关系。`mySlot` 为 null（还没拿到 / 认不出）时一律 `unknown`。 */
-export function judgeSpeakerRelation(slot: number, mySlot: number | null, myTeam: string, teamOf: (slot: number) => string): SpeakerRelation {
+/**
+ * 座位 → 关系。`mySlot` 为 null（还没拿到 / 认不出）时一律 `unknown`。
+ *
+ * 阵营**同局内是推得出来的事实**，不是猜：GSI 的座位两种写法里，`< 128` 一侧、`>= 128`
+ * 另一侧；折成 0–9 的写法则是 0–4 / 5–9。和自己的座位比一下就知道同侧还是异侧。
+ * 「同侧」只在**同一局内**成立——`matchid` 一变座位就重排，所以账本换局必须清零（见
+ * `src/main/services/voice/speaker-channels.ts` 的 `adoptMatch`），绝不沿用上一局。
+ */
+export function judgeSpeakerRelation(slot: number, mySlot: number | null): SpeakerRelation {
   if (mySlot === null) return 'unknown'
-  const seat = normalizeSlot(slot)
-  if (seat === normalizeSlot(mySlot)) return 'self'
-  const team = teamOf(slot)
-  if (team && myTeam) return team === myTeam ? 'teammate' : 'opponent'
-  // 阵营没拿到：同一个 0–4 / 5–9 分区只能说明「和我同半边」，说不清是哪一边，不猜。
-  return 'unknown'
+  // 身份只认原样相等：`130` 与 `2` 折回同一个座位号，却是两条不同半场的人，折着比会把对手认成自己。
+  if (slot === mySlot) return 'self'
+  return sideOf(slot) === sideOf(mySlot) ? 'teammate' : 'opponent'
+}
+
+/** 哪一侧：天辉 0、夜魇 1。`128+` 的写法直接算夜魇；0–9 的写法按 0–4 / 5–9 分。 */
+export function sideOf(slot: number): 0 | 1 {
+  if (slot >= 128) return 1
+  return normalizeSlot(slot) >= 5 ? 1 : 0
 }
 
 /** 座位 → 标签。队友 2 = 我方第 2 个说话的人（按座位序），对手同理。 */
@@ -85,8 +95,10 @@ function ordinalOf(seat: number): number {
 export interface BuildChannelsInput {
   matchid: string | null
   mySlot: number | null
-  myTeam: string
-  teamOf: (slot: number) => string
+  /** 只作展示（队伍名），**不参与**关系判定——关系只看座位两侧。 */
+  myTeam?: string
+  /** 同上：座位到队伍名的映射，只为展示。 */
+  teamOf?: (slot: number) => string
   heroOf: (slot: number) => string
   events: readonly { slot: number; at: number; gameTime: number | null; channel: number | null; text: string }[]
 }
@@ -99,7 +111,7 @@ export function buildSpeakerChannels(input: BuildChannelsInput): SpeakerChannels
   const bySlot = new Map<number, SpeakerChannel>()
   for (const event of input.events) {
     const seat = normalizeSlot(event.slot)
-    const relation = judgeSpeakerRelation(event.slot, input.mySlot, input.myTeam, input.teamOf)
+    const relation = judgeSpeakerRelation(event.slot, input.mySlot)
     const existing = bySlot.get(seat)
     const item: SpeakerEvent = {
       at: event.at,
