@@ -22,6 +22,7 @@ import { runGsiFramesReportProbe } from './gsi-frames-report'
 import { runDownloadProbe } from './download'
 import { runHoldWatchProbe } from './hold-watch'
 import { runSpeakerChannelProbe } from './speaker-channel'
+import { runHelmEmptyProbe } from './helm'
 import { runVisionProbe } from './vision'
 import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
@@ -422,6 +423,13 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--vision-probe',
     summary: 'look at the screen once: the payload is one message with the prompt and a data URL, a text-only model is refused with words, and no frame reaches the disk',
     run: runVisionProbe
+  },
+  {
+    flag: '--helm-empty-probe',
+    ci: true,
+    summary:
+      'the cockpit head and channel lines: three empty states verbatim, every missing field its own dash, living written as 活着, and hotkeys read from the live table',
+    run: runHelmEmptyProbe
   },
   {
     flag: '--speaker-channel-probe',

@@ -13,6 +13,7 @@ import { AboutPage } from './pages/about'
 import { ReadPage } from './pages/read'
 import { OverlayPage } from './pages/overlay'
 import { TalkPage } from './pages/talk'
+import { HelmPage } from './pages/helm'
 import { ChatoutPage } from './pages/chatout'
 import { OverviewPage } from './pages/overview'
 
@@ -80,6 +81,8 @@ export function PanelApp(): React.ReactElement {
       case 'overview':
         // 上手检查的「去填 Key / 换键」要能换页：导航只有壳知道，页面只拿到这一条回执。
         return <OverviewPage onNavigate={select} />
+      case 'helm':
+        return <HelmPage />
       case 'talk':
         return (
           <TalkPage

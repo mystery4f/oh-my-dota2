@@ -503,6 +503,53 @@ const implemented = {
       abilities: { ability_0: { name: 'nevermore_shadowraze1', level: 4 }, ability_1: { name: 'nevermore_presence', level: 2 } },
       items: { slot0: { name: 'item_blink', id: 1 }, slot1: { name: 'item_tango', id: 2 } }
     }),
+  /**
+   * #161 驾驶室：真对局拿不到别人名字，所以默认这一屏**没有**英雄名（也就没有静音开关）。
+   * `?ch=hero` 造观战/训练场那种「拿到了英雄名」的情形，看静音那一段长什么样。
+   */
+  speakerChannels: async () => {
+    const now = Date.now()
+    const mode = query.get('ch')
+    if (mode === 'empty') return { matchid: null, channels: [], line: '这局还没人说话', selfSlot: null }
+    const hero = mode === 'hero'
+    return {
+      matchid: '7600111222',
+      selfSlot: 2,
+      line: '3 个人说过话 · 我 1 句 · 队友 1 句 · 对手 2 句',
+      channels: [
+        {
+          slot: 2,
+          label: '我',
+          relation: 'self',
+          hero: hero ? 'nevermore' : '',
+          spoken: 1,
+          lastAt: now - 40_000,
+          lastText: '我出跳刀了，开团喊我',
+          events: []
+        },
+        {
+          slot: 3,
+          label: '队友 2',
+          relation: 'teammate',
+          hero: hero ? 'axe' : '',
+          spoken: 1,
+          lastAt: now - 25_000,
+          lastText: '先别急，等我吼到三个再上，这波我们要一波带走对面',
+          events: []
+        },
+        {
+          slot: 7,
+          label: '对手 3',
+          relation: 'opponent',
+          hero: hero ? 'lina' : '',
+          spoken: 2,
+          lastAt: now - 8_000,
+          lastText: 'gg',
+          events: []
+        }
+      ]
+    }
+  },
   holdSelfTest: async () => {
     // #95 预览：假边随刷新轮转。切换语音对讲模式的面板按钮会真的盖掉沉浸模式设置，
     // 退出预览再进 fresh browser 页面即还原。

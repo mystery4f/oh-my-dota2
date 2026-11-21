@@ -10,6 +10,7 @@ import { SECTION_GROUPS, SECTIONS, type SectionId } from './sections'
 /** 每个分区补几个常用叫法：中英文、口语、旧版叫法都算。 */
 const KEYWORDS: Record<SectionId, string[]> = {
   overview: ['自检', '状态', '四条链路', 'status'],
+  helm: ['驾驶室', '一屏', '抬头', '频道', '谁在说话', 'cockpit'],
   engine: [
     'api key', 'key', '密钥', '模型', 'deepseek', 'openai', 'ollama', 'mimo', '智谱', 'ark', '火山', '方舟', '豆包', 'doubao',
     'glm', '自定义', '代理', 'proxy', '推理', '思考', '词数', '缓存', '试验台', '试翻'

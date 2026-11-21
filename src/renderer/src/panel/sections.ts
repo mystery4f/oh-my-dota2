@@ -4,6 +4,7 @@
  */
 export const SECTIONS = [
   { id: 'overview', title: '总览', hint: '四种链路的当前状态' },
+  { id: 'helm', title: '驾驶室', hint: '一屏看现在该干什么：抬头事实 + 谁说在话 + 三个热键' },
   { id: 'engine', title: '翻译引擎', hint: '模型服务与试验台' },
   { id: 'voice', title: '音色训练', hint: '两腿各自开训，跑完注册成音色包' },
   { id: 'asr', title: '识别训练', hint: '录音、打包、微调、换模，一条链路' },
@@ -21,7 +22,7 @@ export const DEFAULT_SECTION: SectionId = 'overview'
 
 /** 侧边栏分组：对局三页在前，系统三页在后，总览与关于各占一头。 */
 export const SECTION_GROUPS: { label: string; ids: SectionId[] }[] = [
-  { label: '对局', ids: ['talk', 'chatout', 'read', 'overlay'] },
+  { label: '对局', ids: ['helm', 'talk', 'chatout', 'read', 'overlay'] },
   { label: '系统', ids: ['engine', 'voice', 'asr', 'hotkeys'] }
 ]
 
