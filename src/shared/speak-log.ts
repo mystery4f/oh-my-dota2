@@ -23,8 +23,12 @@ export const SPEAK_LOGGED_REASONS: readonly SpeakSkipReason[] = ['mute', 'own', 
 /** 与控制台那两行保持一致的截断长度：够认出是哪一句，不把整段对局聊天抄进日志。 */
 export const SPEAK_LOG_TEXT_MAX = 30
 
-/** 腿名：朗读腿固定 `announce`；认不出来源时写 `unknown`，不许猜。 */
-export type SpeakLogStage = 'announce' | 'read' | 'unknown'
+/**
+ * 写这一行的腿。**只有朗读腿（`announceEntries()`）会写 `speak-skip`** —— 回复腿与同传腿
+ * 给了就念、从不跳过，所以这里没有它们，也没有 `read`：留一个没有写者的枚举值，下一个人
+ * 就会以为朗读腿与公告腿是两条。将来真有第二条写者，再加它的名字（#163 同一条理由）。
+ */
+export type SpeakLogStage = 'announce' | 'unknown'
 
 export interface SpeakSkipLine {
   at: string
