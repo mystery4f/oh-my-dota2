@@ -73,6 +73,7 @@ export function Row({
   htmlFor,
   stacked,
   flush,
+  note,
   children
 }: {
   label: string
@@ -80,6 +81,14 @@ export function Row({
   htmlFor?: string
   stacked?: boolean
   flush?: boolean
+  /**
+   * 一句要占满整行的说明（#151）。放在控件**下方**、独占一行、可断词。
+   *
+   * 为什么需要它：控件槽是 `shrink-0`、标签区是 `flex-1 min-w-0`，把一整句告警塞进 children
+   * 会让它按自己的最小宽度占位，把左边标签压到接近 0——中文没有断词机会，结果一字一列。
+   * 长句子属于「说明」而不是「控件」，给它自己的槽是唯一不破坏其它行的改法。
+   */
+  note?: React.ReactNode
   children?: React.ReactNode
 }): React.ReactElement {
   const Label = htmlFor ? 'label' : 'span'
@@ -97,6 +106,18 @@ export function Row({
       <div className={cn('py-3', !flush && 'px-4')}>
         <div>{name}</div>
         <div className="mt-2">{children}</div>
+        {note ? <div className="mt-1.5 text-xs break-words text-muted-foreground">{note}</div> : null}
+      </div>
+    )
+
+  if (note)
+    return (
+      <div className={cn('py-2', !flush && 'px-4')}>
+        <div className="flex min-h-11 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="min-w-0 flex-1">{name}</div>
+          <div className="flex shrink-0 items-center gap-2">{children}</div>
+        </div>
+        <div className="mt-1 text-xs break-words">{note}</div>
       </div>
     )
 

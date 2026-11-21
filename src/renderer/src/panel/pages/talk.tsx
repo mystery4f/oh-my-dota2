@@ -586,14 +586,14 @@ export function TalkPage({
           <Row
             label="虚拟声卡"
             hint="声出要进 Dota 2 语音：译文播到 CABLE Input，游戏里麦克风选 CABLE Output"
+            note={
+              cable === null ? (
+                <span className="text-muted-foreground">检查中…</span>
+              ) : (
+                <span className={gap!.action === 'none' ? 'text-muted-foreground' : 'text-amber-400'}>{gap!.line}</span>
+              )
+            }
           >
-            {cable === null ? (
-              <span className="text-xs text-muted-foreground">检查中…</span>
-            ) : (
-              <span className={`text-xs ${gap!.action === 'none' ? 'text-muted-foreground' : 'text-amber-400'}`}>
-                {gap!.line}
-              </span>
-            )}
             <Button size="sm" variant="outline" onClick={recheckCable}>
               重新检测
             </Button>
@@ -672,12 +672,14 @@ export function TalkPage({
                 <option value={settings.interpretInDevice}>（已保存，当前未接入）</option>
               ) : null}
             </select>
-            <span className="text-xs text-muted-foreground">
+          </Row>
+          <Row label="这条链走到哪" note={
+            <span className={settings.interpretMode ? '' : 'text-muted-foreground'}>
               {settings.interpretInDevice === ''
                 ? interpretFollowNote(deviceLabelOf(outputs, settings.ttsOutputDevice))
                 : interpretDeviceLine(deviceLabelOf(outputs, settings.interpretInDevice))}
             </span>
-          </Row>
+          } />
         </Group>
 
         {/* #88：队列真相在主进程（speech-pipeline 握着 lanes 与在途的段），面板只画快照，不自己数。 */}

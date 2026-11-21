@@ -104,6 +104,11 @@ path for 30 s; timeout/network: back to the session after 1.5–2 s; 429: honour
   (`judgeFtVram`/`ftVramNote` four-case), export completeness (`missingFtExportFiles` three-case),
   dataset split (`splitTrainEval` holds out the tail), and CER grading (cohorts never merged).
 
+- `Row` has a `note` slot (#151): a long sentence belongs there, never in `children`. The control slot is
+  `shrink-0` and the label column is `flex-1 min-w-0`, so a full sentence passed as a child takes its own width
+  and squeezes the label to ~0 — Chinese then breaks one character per line (measured: 46 px tall, 21 lines at
+  1280). `note` renders on its own full-width line under the control and wraps. Two call sites today: the virtual
+  cable gap line and the interpretation chain line.
 - Second screen (#124b) has ONE data source: `noteSnapshot(payload)` in `src/main/services/match-snapshot.ts` is
   fed by the same frame `src/main/services/gsi.ts` already parsed, and `currentSnapshot()` is what the window
   reads through `match:snapshot` — never a second GSI listener. `cfgBody` already requests hero/items/abilities
