@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import type { VoiceTranscribeResult } from '@shared/ipc'
 import { activeAsrModel, engineSpecOf, transcribeAsr } from './asr-model'
 import { stashUtterance } from './corrections'
+import { halfDuplexSnapshot, judgeCaptureAt } from './half-duplex'
 /**
  * 识别入口：没就绪怎么说、结果怎么归一，都在这一处。
  * 引擎与模型的判断不在这个文件里——现役是哪份由 asr-model 的注册表决定，
@@ -37,6 +38,12 @@ export async function transcribeWav(wavPath: string): Promise<VoiceTranscribeRes
 export async function transcribeForVoice(wavBase64: string, micLabel?: string): Promise<VoiceTranscribeResult> {
   const base64 = String(wavBase64 ?? '')
   if (!base64) return { ok: false, text: '', error: '音频为空' }
+  // #129：我们自己的声音还在放，这段录音就是它的回声——不识别，但要记账。
+  const guard = judgeCaptureAt(Date.now())
+  if (guard.drop) {
+    console.log('VOICE_DROP', JSON.stringify({ reason: guard.reason, ...halfDuplexSnapshot() }))
+    return { ok: false, text: '', error: guard.error ?? '这段录音已被丢弃' }
+  }
   const dir = join(app.getPath('userData'), 'voice')
   mkdirSync(dir, { recursive: true })
   const wavPath = join(dir, 'utterance.wav')

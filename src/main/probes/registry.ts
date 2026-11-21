@@ -67,6 +67,7 @@ import { runFtAuditionProbe } from './ft-audition'
 import { runDatasetVersionProbe } from './dataset-version'
 import { runVoiceDeviceSwitchProbe } from './voice-device-switch'
 import { runSpeechRateProbe } from './speech-rate'
+import { runHalfDuplexProbe } from './half-duplex'
 import { runPatchWatchProbe } from './patch-watch'
 import { runAsrRoutingProbe } from './asr-routing'
 import { runAsrSwitchProbe } from './asr-switch'
@@ -459,6 +460,13 @@ export const PROBES: readonly ProbeEntry[] = [
       'the long-line speed rule (`src/shared/speech-rate.ts`): a line past the length threshold speaks faster up to one ceiling, a short line keeps the user rate untouched, and no input can land outside the engine-accepted range',
     ci: true,
     run: runSpeechRateProbe
+  },
+  {
+    flag: '--half-duplex-probe',
+    summary:
+      'the half-duplex guard (`src/shared/half-duplex.ts` + `src/main/services/voice/half-duplex.ts`): while our own audio is playing, a captured utterance is dropped and counted instead of transcribed, so interpretation mode cannot feed its own output back into ASR',
+    ci: true,
+    run: runHalfDuplexProbe
   },
   {
     flag: '--key-noun-probe',

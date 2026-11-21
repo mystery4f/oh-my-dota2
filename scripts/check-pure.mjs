@@ -1016,6 +1016,11 @@ check('长句加速：长句更快且不越界', (() => {
   return rate > 1 && rate <= SPEECH_RATE_MAX
 })())
 check('长句加速：加速吃满后不再随长度上涨', rateForLine({ text: '很长'.repeat(80), baseRate: 1 }) === 1.18)
+// #129：自己说话时不听自己——窗口内丢弃、窗口外放行，丢弃要能数出来。
+const { judgeHalfDuplex, halfDuplexLine } = await import('../src/shared/half-duplex.ts')
+check('半双工：播放窗口内丢弃', judgeHalfDuplex({ playingUntil: 2000, now: 1500 }).drop === true)
+check('半双工：窗口过后放行', judgeHalfDuplex({ playingUntil: 1000, now: 5000 }).drop === false)
+check('半双工：丢弃与否的文案不同', halfDuplexLine(0, 3) !== halfDuplexLine(2, 3))
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
