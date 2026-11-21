@@ -1181,6 +1181,39 @@ check(
   check('监听：没帧与没事件是两句话', empty.left.text === HELM_LISTEN_NO_FRAME && empty.right.text === HELM_LISTEN_NO_EVENT, JSON.stringify([empty.left.text, empty.right.text]))
 }
 
+// —— 驾驶室第三片（#167）：静音名单与一句话链 ——
+{
+  const { muteToggle, helmChainLine, HELM_CHAIN_NEVER, HELM_CHAIN_NO_MATCH, HELM_CHAIN_OTHER_MATCH } = await import(
+    '../src/shared/helm.ts'
+  )
+  const added = muteToggle([], 'axe')
+  check('静音：空名单点一下加进去', added.changed && added.next.join(',') === 'axe', added.next.join(','))
+  const off = muteToggle(['axe', 'lina'], 'axe')
+  check('静音：再点一次是移除且逐字回到原值顺序', off.changed && off.next.join(',') === 'lina', off.next.join(','))
+  check('静音：加回来是追加在末尾（不改已有顺序）', muteToggle(off.next, 'axe').next.join(',') === 'lina,axe', muteToggle(off.next, 'axe').next.join(','))
+  const blank = muteToggle(['axe'], '  ')
+  check('静音：空白名不写、名单不变', !blank.changed && blank.reason === 'blank' && blank.next.length === 1, JSON.stringify(blank))
+  const trimmed = muteToggle(['axe'], ' axe ')
+  check('静音：先 trim 再比，不会写第二条同名', trimmed.next.length === 0, JSON.stringify(trimmed.next))
+  check('静音：不改入参', (() => {
+    const cur = ['axe']
+    muteToggle(cur, 'lina')
+    return cur.length === 1
+  })())
+
+  const base = { transcript: '对面中单不见了', translated: 'Their mid is missing.', spoken: true, stage: null, error: null, sink: 'CABLE Input' }
+  const same = helmChainLine({ latest: { ...base, matchid: '7600111222' }, snapshotMatchId: '7600111222' })
+  check('一句话链：同局给听到与说了两行', same.empty === null && same.heard.text === '对面中单不见了' && same.said.text.includes('灌入'), same.said.text)
+  check('一句话链：没灌设备就不写灌入', !helmChainLine({ latest: { ...base, sink: undefined, matchid: '7600111222' }, snapshotMatchId: '7600111222' }).said.text.includes('灌入'))
+  check('一句话链：三种没得看各一句，互不冒充', [
+    helmChainLine({ latest: null, snapshotMatchId: '7600111222' }).empty === HELM_CHAIN_NEVER,
+    helmChainLine({ latest: { ...base, matchid: null }, snapshotMatchId: '7600111222' }).empty === HELM_CHAIN_NO_MATCH,
+    helmChainLine({ latest: { ...base, matchid: '7512345678' }, snapshotMatchId: '7600111222' }).empty === HELM_CHAIN_OTHER_MATCH
+  ].every(Boolean))
+  const failed = helmChainLine({ latest: { ...base, matchid: '7600111222', stage: 'voice-out', error: 'x'.repeat(200) }, snapshotMatchId: '7600111222' })
+  check('一句话链：失败原因截断到一句（≤96 字）', failed.failure !== null && failed.failure.length <= 96, String(failed.failure?.length))
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

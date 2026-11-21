@@ -303,3 +303,113 @@ export function helmListenLine(input: HelmListenInput): HelmListenLine {
     timeline.matchid !== (input.snapshotMatchId ?? '')
   return { left, right, crossMatch }
 }
+
+/* ——— 第三片（issue #167）：频道静音 + 一句话链 ——— */
+
+/** 静音名单里写不进去的两种输入：空白与重复（重复只保留一个，不是错误，只是不写）。 */
+export type MuteRefusal = 'blank' | 'unchanged'
+
+export interface MuteToggle {
+  /** 名单要不要变：不变就是 false，调用方不必再落盘。 */
+  changed: boolean
+  /** 变完之后的新名单（永远是新数组，不改入参）。 */
+  next: string[]
+  /** 没变的原因；变了就是 null。 */
+  reason: MuteRefusal | null
+}
+
+/**
+ * 点一下频道上的静音勾：**已在该英雄就移除，不在就加进去**（同一份 `settings.ttsMuteHeroes`，
+ * 与「不念谁」共用）。规则都收在这里，面板不许自己拼数组：
+ *
+ * - `trim()` 之后为空 ⇒ 不写（`reason: 'blank'`）——没有英雄名的行本来就没有控件，
+ *   这条是防第二道门（面板传错、旧数据带空串）。
+ * - 名字按**去空白后逐字比较**，不猜大小写英雄名：GSI 给的是短名，两边都来自同一处。
+ * - 移除后逐字回到原值（不是「重新排序」）：名单顺序是人写顺序，界面不该偷偷改它。
+ */
+export function muteToggle(current: readonly string[], hero: string): MuteToggle {
+  const name = typeof hero === 'string' ? hero.trim() : ''
+  if (name === '') return { changed: false, next: [...current], reason: 'blank' }
+  const at = current.indexOf(name)
+  if (at >= 0) {
+    const next = current.filter((_, index) => index !== at)
+    return { changed: true, next, reason: null }
+  }
+  return { changed: true, next: [...current, name], reason: null }
+}
+
+/** 一句话链：还没有任何对讲。 */
+export const HELM_CHAIN_NEVER = '这局还没对讲过'
+/** 一句话链：这一条不在对局里（菜单、GSI 断了）。 */
+export const HELM_CHAIN_NO_MATCH = '不在对局里'
+/** 一句话链：上一句属别的局——不给看，也不拿它冒充这一局。 */
+export const HELM_CHAIN_OTHER_MATCH = '上一句在别的局，这里不显示'
+/** 一句话链：取不到（主进程那条读口出错）。 */
+export const HELM_CHAIN_UNREADABLE = '这句话读不到'
+
+export interface HelmChainHeard {
+  text: string
+  tone: 'ok' | 'bad' | 'dim'
+}
+
+export interface HelmChainLine {
+  /** 它听到了什么（识别原文）。 */
+  heard: HelmChainHeard
+  /** 它说了什么（译文 + 播到哪台设备）。 */
+  said: HelmChainHeard
+  /** 卡住时的半句（`卡在 <阶段>：<一句原因>`）；顺利为 null。 */
+  failure: string | null
+  /** 没有一整句可显示时的**一句**说明（四种原因各一句）；有句子时为 null。 */
+  empty: string | null
+}
+
+/** 「一句话链」的输入：主进程内存里最后一条（带 matchid）+ 当前快照 + 可能的读口错误。 */
+export interface HelmChainInput {
+  latest: {
+    matchid: string | null
+    transcript: string
+    translated: string | null
+    spoken: boolean
+    stage?: string | null
+    error?: string | null
+    sink?: string | null
+  } | null
+  snapshotMatchId: string | null
+  readError?: string | null
+}
+
+/**
+ * 一句话链。三种「没得看」必须三句话（还没说过 / 不在对局里 / 属别的局），
+ * 读口出错另算一句——它们互不冒充，这是 #165 监听行同一条规矩的延续。
+ *
+ * 跨局用**快照 matchid + isRealMatchId** 判，与监听行完全同一条规则：
+ * 两处若各用一套判据，早晚各说各的。
+ */
+export function helmChainLine(input: HelmChainInput): HelmChainLine {
+  const error = (input.readError ?? '').trim()
+  const empty = (text: string): HelmChainLine => ({
+    heard: { text, tone: 'dim' },
+    said: { text, tone: 'dim' },
+    failure: null,
+    empty: text
+  })
+  if (error !== '') return empty(`${HELM_CHAIN_UNREADABLE}：${firstSentence(error)}`)
+  const latest = input.latest
+  if (latest === null) return empty(HELM_CHAIN_NEVER)
+  if (!isRealMatchId(latest.matchid)) return empty(HELM_CHAIN_NO_MATCH)
+  if (latest.matchid !== (input.snapshotMatchId ?? '') && isRealMatchId(input.snapshotMatchId ?? '')) {
+    return empty(HELM_CHAIN_OTHER_MATCH)
+  }
+  const heard = latest.transcript.trim() === '' ? '没听清' : latest.transcript.trim()
+  const translated = (latest.translated ?? '').trim()
+  const sink = (latest.sink ?? '').trim()
+  const said = translated === '' ? '没有译文' : sink === '' ? translated : `${translated} · 灌入「${sink}」`
+  const failure =
+    latest.stage == null ? null : `卡在 ${latest.stage}：${firstSentence(latest.error ?? '原因不明', 80)}`
+  return {
+    heard: { text: heard, tone: latest.transcript.trim() === '' ? 'bad' : 'ok' },
+    said: { text: said, tone: translated === '' ? 'bad' : 'ok' },
+    failure,
+    empty: null
+  }
+}

@@ -1,6 +1,7 @@
 /**
  * #161 驾驶室第一片：抬头事实行、频道行、三个热键提示。
  * #165 第二片：三个固定动作的可用状态、监听行（三档帧龄 + 三种「没东西」+ 跨局不串人）。
+ * #167 第三片：频道静音（名单去空白/移除/不许重复）与一句话链（只留一条、跨局不显示、失败截一句）。
  *
  * 逐字断言三句空态（pm 的签字要求），并把「缺块写 `—`」断言到**每一位**：
  * 英雄、等级、比赛时间、状态、帧龄各来一例——只断言「有 `—`」等于没断言。
@@ -8,8 +9,15 @@
 
 import { exitProbe, guardProbe, probeCases } from './harness'
 import { formatAccelerator, UNBOUND_LABEL } from '@shared/hotkeys'
+import { chainLast, noteChainLast, resetChainLastForProbe } from '../services/voice/chain-last'
 import {
   HELM_ACTION_BUSY,
+  HELM_CHAIN_NEVER,
+  HELM_CHAIN_NO_MATCH,
+  HELM_CHAIN_OTHER_MATCH,
+  HELM_CHAIN_UNREADABLE,
+  helmChainLine,
+  muteToggle,
   HELM_ACTION_LOOKING,
   HELM_ACTION_OVERLAY_OFF,
   HELM_ACTION_UNBOUND,
@@ -170,6 +178,58 @@ export async function runHelmEmptyProbe(): Promise<void> {
   push('监听：跨局时左半照常报帧龄（帧是这一局的）', crossLine.left.tone === 'ok', crossLine.left.text)
   const notRealId = helmListenLine({ gsiLastAt: nowMs - 900, now: nowMs, snapshotMatchId: '0', timeline: { matchid: '0', entries: [{ gameTime: 30, text: '不该显示' }] } })
   push('监听：matchid 为 "0"（菜单/训练场）不算对局，不显示任何事件', notRealId.right.text === HELM_LISTEN_NO_EVENT, notRealId.right.text)
+
+
+  // ——— 第三片（#167）：频道静音（名单只有一份，规则只在纯缝里） ———
+  const zero = muteToggle([], 'axe')
+  push('静音：空名单点一下 = 加进去', zero.changed && zero.next.join(',') === 'axe', JSON.stringify(zero))
+  const added = muteToggle(['axe'], 'lina')
+  push('静音：已有别人时追加在后面（不改原有顺序）', added.next.join(',') === 'axe,lina', added.next.join(','))
+  const removed = muteToggle(['axe', 'lina'], 'axe')
+  push('静音：已在名单里再点一次是移除，不是重复添加', removed.changed && removed.next.join(',') === 'lina', JSON.stringify(removed.next))
+  const back = muteToggle(removed.next, 'axe')
+  push('静音：加回来是追加在末尾（不改已有顺序）', back.next.join(',') === 'lina,axe', back.next.join(','))
+  const blank = muteToggle(['axe'], '   ')
+  push('静音：空白英雄名一律不写（reason=blank，且名单不变）', !blank.changed && blank.reason === 'blank' && blank.next.join(',') === 'axe', JSON.stringify(blank))
+  const twice = muteToggle(['axe'], 'axe ')
+  push('静音：名字先 trim 再比（"axe " 也算已在名单）', twice.changed && twice.next.length === 0, JSON.stringify(twice.next))
+
+  // ——— 第三片：最后一条对讲（只在内存、只留一条、不带上一局的 id） ———
+  resetChainLastForProbe()
+  push('一句话链：刚启动时读口是 null（不是空串）', chainLast() === null, String(chainLast()))
+  const stubSummary = {
+    transcript: '对面中单不见了',
+    translated: 'Their mid is missing.',
+    spoken: true,
+    stage: null,
+    error: null,
+    sink: 'CABLE Input (VB-Audio Virtual Cable)'
+  }
+  noteChainLast(stubSummary as never, null)
+  push('一句话链：不在对局时 matchid 照实存 null，不回填上一局', chainLast()?.matchid === null, JSON.stringify(chainLast()?.matchid))
+  noteChainLast(stubSummary as never, '7600111222')
+  push('一句话链：只留最后一条（后写覆盖前写）', chainLast()?.matchid === '7600111222' && chainLast()?.summary.transcript === '对面中单不见了', JSON.stringify(chainLast()?.matchid))
+  push('一句话链：留的是同一份内容，不重新合成', chainLast()?.summary === stubSummary, String(chainLast()?.summary === stubSummary))
+
+  // ——— 第三片：一句话链的界面判定 ———
+  const chainSame = helmChainLine({ latest: { ...stubSummary, matchid: '7600111222' }, snapshotMatchId: '7600111222' })
+  push('一句话链：同局时听到原话、说了译文并带上灌入设备', chainSame.heard.text === '对面中单不见了' && chainSame.said.text.includes('灌入「CABLE Input') && chainSame.empty === null, chainSame.said.text)
+  const chainNoSink = helmChainLine({ latest: { ...stubSummary, sink: undefined, matchid: '7600111222' }, snapshotMatchId: '7600111222' })
+  push('一句话链：没有灌入设备时不写「灌入」半句', !chainNoSink.said.text.includes('灌入'), chainNoSink.said.text)
+  const chainNever = helmChainLine({ latest: null, snapshotMatchId: '7600111222' })
+  push('一句话链：还没对讲过是一句独立空态', chainNever.empty === HELM_CHAIN_NEVER && chainNever.heard.tone === 'dim', String(chainNever.empty))
+  const chainNoMatch = helmChainLine({ latest: { ...stubSummary, matchid: null }, snapshotMatchId: '7600111222' })
+  push('一句话链：不在对局里是另一句，且不显示内容', chainNoMatch.empty === HELM_CHAIN_NO_MATCH, String(chainNoMatch.empty))
+  const chainOther = helmChainLine({ latest: { ...stubSummary, matchid: '7512345678' }, snapshotMatchId: '7600111222' })
+  push('一句话链：上一句属别的局时一条都不显示', chainOther.empty === HELM_CHAIN_OTHER_MATCH && !chainOther.said.text.includes('mid is missing'), String(chainOther.empty))
+  const chainFail = helmChainLine({
+    latest: { ...stubSummary, matchid: '7600111222', spoken: false, stage: 'voice-out', error: '声出失败：Edge 返回 0 字节。后面的细节'.padEnd(200, '很') },
+    snapshotMatchId: '7600111222'
+  })
+  push('一句话链：失败行带阶段，原因截到一句（不超过 80 字 + 前缀）', chainFail.failure?.startsWith('卡在 voice-out：') === true && (chainFail.failure?.length ?? 0) <= 96, String(chainFail.failure?.length))
+  push('一句话链：失败时仍显示听到的那句（别把前半段也弄丢）', chainFail.heard.text === '对面中单不见了', chainFail.heard.text)
+  const chainReadErr = helmChainLine({ latest: null, snapshotMatchId: null, readError: 'ipc 通道断了。后面的话不该出现' })
+  push('一句话链：读口出错单独一句，只取第一句', chainReadErr.empty?.startsWith(HELM_CHAIN_UNREADABLE) === true && !chainReadErr.empty?.includes('后面的话'), String(chainReadErr.empty))
 
   const failed = cases.filter((one) => !one.ok)
   for (const one of cases) console.log(`${one.ok ? 'PASS' : 'FAIL'} | ${one.name} | ${one.detail}`)

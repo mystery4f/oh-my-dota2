@@ -18,6 +18,7 @@ import {
   normalizeMuteList,
   parseMuteList
 } from '@shared/speak-mute'
+import { muteToggle } from '@shared/helm'
 
 // 名单里静音的是「玩家3」与 nevermore，所以这里必须换一个人——否则这条断言自己就把人静音了。
 const OTHER = '[玩家5] [路人甲] ⚔ 中路没人'
@@ -79,6 +80,13 @@ export function runSpeakMuteProbe(): void {
   })
   push('被静音的人：跳过原因是 muted-player', speakSkipReason(entry('[玩家3] ⚔ x') as never, speakOptions as never) === 'muted-player')
   push('别人照常念（返回 null）', speakSkipReason(entry(OTHER) as never, speakOptions as never) === null)
+  // #167：驾驶室勾选出来的名单必须真的落到这条判据上——原因写 muted-player，不是 mute（两者混了日志就骗人）
+  const fromHelm = muteToggle([], 'axe')
+  push(
+    '驾驶室勾出来的名单走 muted-player（不是 mute）',
+    fromHelm.changed && speakSkipReason(entry('[玩家3] ⚔ axe 在哪里', 'axe') as never, { ...speakOptions, muteTable: muteTableOf({ muteHeroes: fromHelm.next, muteNames: [] }) } as never) === 'muted-player',
+    JSON.stringify(fromHelm.next)
+  )
 
   // —— 落盘：重启后还在（走真 saveSettings/loadSettings，探针根是临时数据目录） ——
   saveSettings({ ttsMuteNames: ['玩家3'], ttsMuteHeroes: ['nevermore'] })
