@@ -504,7 +504,7 @@ async function translateWithSession(
       await resetHistory(direction, tone, scope)
       return ensureTerminalPunct(text, await submitOnce())
     }, reportGuardEvent)
-    trackLatency(Date.now() - startedAt, 'session', 1)
+    trackLatency(Date.now() - startedAt, 'session', 1, provider.id)
     return translated
   })
 }
@@ -619,10 +619,10 @@ async function translateDirect(
       ensureTerminalPunct(text, await translateText(provider, text, direction, maxWords)),
       reportGuardEvent
     )
-    trackLatency(Date.now() - startedAt, 'direct', 1)
+    trackLatency(Date.now() - startedAt, 'direct', 1, provider.id)
     return output
   } catch (err) {
-    trackLatency(Date.now() - startedAt, 'error', 1)
+    trackLatency(Date.now() - startedAt, 'error', 1, provider.id)
     throw err
   }
 }
@@ -684,7 +684,7 @@ export async function translateLine(
       const translated = outcome.settled.value
       // 对冲/等待期间被作废的句子：成绩、记账本、失败冷却一律不记，就当没翻过。
       ensureAlive()
-      trackLatency(Date.now() - startedAt, outcome.via, 1)
+      trackLatency(Date.now() - startedAt, outcome.via, 1, provider.id)
       lastFallback = outcome.via === 'session' ? null : '直连对冲先返回（会话层较慢）'
       if (translated) {
         // 保真守卫放弃时译文 === 原文：原样行不进记账本（与 writeTranslation 的原样跳过同一条规则）。
@@ -697,7 +697,7 @@ export async function translateLine(
       // 记成失败会让下一句白等 30 秒冷却，表现出来就是「按了没反应」。
       ensureAlive()
       const message = errorMessage(err)
-      trackLatency(Date.now() - startedAt, message.includes('timed out') ? 'timeout' : 'error', 1)
+      trackLatency(Date.now() - startedAt, message.includes('timed out') ? 'timeout' : 'error', 1, provider.id)
       noteFailure(message)
     }
   }
@@ -849,7 +849,7 @@ async function translateBlockwise(
       return output
     } catch (err) {
       const message = errorMessage(err)
-      trackLatency(Date.now() - startedAt, message.includes('timed out') ? 'timeout' : 'error', texts.length)
+      trackLatency(Date.now() - startedAt, message.includes('timed out') ? 'timeout' : 'error', texts.length, provider.id)
       noteFailure(message)
     }
   }

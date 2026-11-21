@@ -96,6 +96,7 @@ import { renderGroups } from '@shared/quick-phrases'
 import { phraseVars } from './services/voice/phrase-context'
 import { correctLineDirection } from './services/session/direction-correction'
 import { readQualityReport } from './services/session/quality-report'
+import { latencyBoardView } from './services/session/latency-board'
 import { readBuildInfo } from './services/build-info'
 import { onSpeechQueueChange, speechQueueSnapshot, stopSpeech } from './services/voice/speech-pipeline'
 import { asrFtInstallState, installAsrFtEnv } from './services/train/asr-ft-install'
@@ -372,6 +373,7 @@ const handlers: MainHandlers = {
   },
   translateDirection: (request) => correctLineDirection(request),
   qualityReport: () => readQualityReport(),
+  latencyBoard: () => latencyBoardView(),
   speechQueue: () => speechQueueSnapshot(),
   speechStop: () => stopSpeech()
 }

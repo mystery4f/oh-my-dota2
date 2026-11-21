@@ -11,6 +11,8 @@ export interface LatencySample {
   ms: number
   source: LatencySource
   lines: number
+  /** #114：哪一家服务商——按供应商分组才算得出「谁快谁慢」。空串表示没记到。 */
+  provider: string
 }
 
 /** 翻译抖动统计：服务端首字节能从 1.3s 抖到 31s，只看单次没用，必须看分位数。 */
@@ -30,9 +32,14 @@ export interface LatencySummary {
 const LATENCY_WINDOW = 60
 const latencySamples: LatencySample[] = []
 
-export function trackLatency(ms: number, source: LatencySource, lines: number): void {
-  latencySamples.push({ at: Date.now(), ms: Math.round(ms), source, lines })
+export function trackLatency(ms: number, source: LatencySource, lines: number, provider = ''): void {
+  latencySamples.push({ at: Date.now(), ms: Math.round(ms), source, lines, provider })
   if (latencySamples.length > LATENCY_WINDOW) latencySamples.splice(0, latencySamples.length - LATENCY_WINDOW)
+}
+
+/** #114：采样窗口原样交出去（只读快照）——延迟板只认这些真实回合。 */
+export function latencySamplesForBoard(): { provider: string; ms: number; source: LatencySource }[] {
+  return latencySamples.map((sample) => ({ provider: sample.provider, ms: sample.ms, source: sample.source }))
 }
 
 export function latencySummary(): LatencySummary {

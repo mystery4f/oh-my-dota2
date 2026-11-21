@@ -12,6 +12,7 @@ import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './
 import type { VisionAnswer, VisionReadiness } from './vision'
 import type { HoldSelfTest } from './hold-selftest'
 import type { HalfDuplexSnapshot } from './half-duplex'
+import type { LatencyBoardRow } from './latency-board'
 import type { ErrorSummary } from './error-log'
 import type { TranslationMarkSummary } from './translation-mark'
 import type { ReplayStarSummary } from './replay-star'
@@ -658,6 +659,8 @@ export const IPC = {
   SPEECH_QUEUE: 'speech:queue',
   SPEECH_QUEUE_STATE: 'speech:queue-state',
   SPEECH_STOP: 'speech:stop',
+  /** #114 延迟板：只由真实回合的样本算出 P50/P95 与失败类。 */
+  LATENCY_BOARD: 'latency:board',
   OVERLAY_DIGEST: 'overlay-digest',
   // 麦克风健康（#96）：浮层边录边报电平和掉线，主进程转广播给面板。
   MIC_HEALTH: 'mic:health',
@@ -983,6 +986,7 @@ export const ipcContract = {
   speechQueue: invoke<[], SpeechQueueSnapshot>(IPC.SPEECH_QUEUE),
   onSpeechQueue: listen<SpeechQueueSnapshot>(IPC.SPEECH_QUEUE_STATE),
   speechStop: invoke<[], SpeechStopResult>(IPC.SPEECH_STOP),
+  latencyBoard: invoke<[], LatencyBoardRow[]>(IPC.LATENCY_BOARD),
   /** 麦克风健康（#96）：采集端上报，主进程转手广播；面板只收不发。 */
   reportMicHealth: send<[MicHealthEvent]>(IPC.MIC_HEALTH),
   onMicHealth: listen<MicHealthEvent>(IPC.MIC_HEALTH),

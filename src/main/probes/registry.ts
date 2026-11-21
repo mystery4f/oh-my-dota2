@@ -53,6 +53,7 @@ import { runCompanionProfileProbe } from './companion-profile'
 import { runMomentumProbe } from './momentum'
 import { runEndpointProbe } from './endpoint'
 import { runVoiceReviewProbe } from './voice-review'
+import { runLatencyBoardProbe } from './latency-board'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -659,6 +660,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the edited-transcript rule (`src/shared/voice-review.ts`): an edit is what gets translated and recorded as a correction pair, while an untouched or re-cleared line behaves exactly as before',
     run: runVoiceReviewProbe
+  },
+  {
+    flag: '--latency-board-probe',
+    ci: true,
+    summary: 'the per-provider latency board (`src/shared/latency-board.ts`): P50/P95 recomputed from the recorded samples only, and a provider with no turns says so instead of showing 0 ms',
+    run: runLatencyBoardProbe
   },
   {
     flag: '--asr-check-live-probe',
