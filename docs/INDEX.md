@@ -10,130 +10,130 @@ tags: [docs, index]
 
 ## 按问题找
 
-| 我想知道                                | 读这个                                                                                                                                                                         |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 现在做到哪一步、下一步是什么            | `docs/PLAN.md`（计划真相源）、`docs/TODO.md`（跨会话交接）                                                                                                                     |
-| 这个功能为什么这么设计                  | `docs/DESIGN.md`；浮层看 `docs/DESIGN-overlay-v2.md`，面板看 `docs/DESIGN-panel-v3.md`（新形态）与 `docs/DESIGN-panel-v2.md`（旧稿），语音素材看 `docs/DESIGN-voice-corpus.md` |
-| 某个决定是怎么定下来的、能不能改        | `docs/adr/`（一个决定一个文件，含数据、决定、后果）                                                                                                                            |
-| 怎么手工验收一遍                        | `docs/ACCEPTANCE.md`（中文清单 + 排错表）                                                                                                                                      |
-| 某个数字（延迟、耗时、内存）从哪来      | `docs/BENCH.md`；探针清单 `docs/PROBES.md`                                                                                                                                     |
-| 出过的坑：症状 → 原因 → 修法            | `docs/NOTES.md`（中文长文）                                                                                                                                                    |
-| 写代码前该守什么规矩                    | `docs/STANDARDS.md`（反重复标准，含三个可照抄的范例）                                                                                                                          |
-| 术语、缩写、英雄中文名                  | 根 `GLOSSARY.md`（项目领域词：识别、训练、热词、转正…）；`docs/GLOSSARY.md` 只剩 GV/TTS 那套词表                                                                               |
-| 离线朗读模型从哪下、怎么加载            | `docs/VOICES.md`                                                                                                                                                               |
-| 音色包（GV 微调产物）怎么训练、怎么发布 | `docs/VOICEPACKS.md`                                                                                                                                                           |
-| Dota2 语音怎么变成训练集                | `docs/DESIGN-voice-corpus.md`                                                                                                                                                  |
-| 项目管理约定（issue / 标签 / 领域文档） | `docs/agents/` 下三个文件                                                                                                                                                      |
+| 我想知道 | 读这个 |
+| --- | --- |
+| 现在做到哪一步、下一步是什么 | `docs/PLAN.md`（计划真相源）、`docs/TODO.md`（跨会话交接） |
+| 这个功能为什么这么设计 | `docs/DESIGN.md`；浮层看 `docs/DESIGN-overlay-v2.md`，面板看 `docs/DESIGN-panel-v3.md`（新形态）与 `docs/DESIGN-panel-v2.md`（旧稿），语音素材看 `docs/DESIGN-voice-corpus.md` |
+| 某个决定是怎么定下来的、能不能改 | `docs/adr/`（一个决定一个文件，含数据、决定、后果） |
+| 怎么手工验收一遍 | `docs/ACCEPTANCE.md`（中文清单 + 排错表） |
+| 某个数字（延迟、耗时、内存）从哪来 | `docs/BENCH.md`；探针清单 `docs/PROBES.md` |
+| 出过的坑：症状 → 原因 → 修法 | `docs/NOTES.md`（中文长文） |
+| 写代码前该守什么规矩 | `docs/STANDARDS.md`（反重复标准，含三个可照抄的范例） |
+| 术语、缩写、英雄中文名 | 根 `GLOSSARY.md`（项目领域词：识别、训练、热词、转正…）；`docs/GLOSSARY.md` 只剩 GV/TTS 那套词表 |
+| 离线朗读模型从哪下、怎么加载 | `docs/VOICES.md` |
+| 音色包（GV 微调产物）怎么训练、怎么发布 | `docs/VOICEPACKS.md` |
+| Dota2 语音怎么变成训练集 | `docs/DESIGN-voice-corpus.md` |
+| 项目管理约定（issue / 标签 / 领域文档） | `docs/agents/` 下三个文件 |
 
 ## 真相源与待办
 
-| 文件                                    | 用途                                                                                                                              | 状态               |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `docs/PLAN.md`                          | 计划真相源，里程碑带勾选与证据                                                                                                    | 现行               |
-| `docs/PLAN-train-v3.md`                 | 训练管理 v3 那一轮的执行计划（已落地；现状看 AGENTS.md / ARCH-notes）                                                             | 历史快照           |
-| `docs/TODO.md`                          | 跨会话交接的待办                                                                                                                  | 现行               |
-| `GLOSSARY.md`（根）                     | 项目领域术语表：识别引擎 / 模型 / 微调腿 / 转正 / 热词 / 推理互斥…                                                                | 现行               |
-| `docs/IDEAS.md`                         | 功能想法池（未排期）                                                                                                              | 现行               |
-| `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 那一轮的待验收项                                                                                                                  | 历史快照           |
-| `docs/HANDOFF-2026-11-10.md`            | 架构走查实施交接：待跑的三个探针、探针盖不到的手测项、环境坑                                                                      | 现行               |
-| `docs/REQ-backlog-2026-11.md`           | 需求账本：候选池逐条现状证据 + 期望，末尾标注落成的 issue 编号（取票顺序看 issue 号）                                             | 现行               |
-| `docs/LANDING-shortlist-2026-11.md`     | 原型剩余十二屏落差表：逐屏四列（原型位置 / 真面板现状 `文件:行` / 数据来源 / 缺什么），末尾一张纸的结论分「数据缺」与「只是没画」 | 现行               |
-| `docs/LANDING-diff-2026-11.md`          | 原型 ↔ main 落地差集：每组差在哪、真面板位置、settings 键、探针覆盖、落地要动什么                                                 | 进行中：原型补差集 |
-| `docs/COMPETITIVE-2026-11.md`           | 同类对局助手竞品分析（2026-11）：开源与官方竞品盘点、能力矩阵、定位图、可搬的四条、明确不追的清单                                 | 现行               |
-| `docs/SPIKE-asr-streaming.md`           | #72 量测报告：流式识别 vs 整句识别的延迟与错字率（含尾块静音坑与复现步骤）                                                        | 历史快照           |
-| `docs/HANDOFF.md`                       | 讲话卡顿与浮层鼠标的常驻交接：麦克风选型根因、已推提交、未真机验证的改动、环境坑（每轮直接改这一份）                              | 现行               |
+| 文件 | 用途 | 状态 |
+| --- | --- | --- |
+| `docs/PLAN.md` | 计划真相源，里程碑带勾选与证据 | 现行 |
+| `docs/PLAN-train-v3.md` | 训练管理 v3 那一轮的执行计划（已落地；现状看 AGENTS.md / ARCH-notes） | 历史快照 |
+| `docs/TODO.md` | 跨会话交接的待办 | 现行 |
+| `GLOSSARY.md`（根） | 项目领域术语表：识别引擎 / 模型 / 微调腿 / 转正 / 热词 / 推理互斥… | 现行 |
+| `docs/IDEAS.md` | 功能想法池（未排期） | 现行 |
+| `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 那一轮的待验收项 | 历史快照 |
+| `docs/HANDOFF-2026-11-10.md` | 架构走查实施交接：待跑的三个探针、探针盖不到的手测项、环境坑 | 现行 |
+| `docs/REQ-backlog-2026-11.md` | 需求账本：候选池逐条现状证据 + 期望，末尾标注落成的 issue 编号（取票顺序看 issue 号） | 现行 |
+| `docs/LANDING-shortlist-2026-11.md` | 原型剩余十二屏落差表：逐屏四列（原型位置 / 真面板现状 `文件:行` / 数据来源 / 缺什么），末尾一张纸的结论分「数据缺」与「只是没画」 | 现行 |
+| `docs/LANDING-diff-2026-11.md` | 原型 ↔ main 落地差集：每组差在哪、真面板位置、settings 键、探针覆盖、落地要动什么 | 进行中：原型补差集 |
+| `docs/COMPETITIVE-2026-11.md` | 同类对局助手竞品分析（2026-11）：开源与官方竞品盘点、能力矩阵、定位图、可搬的四条、明确不追的清单 | 现行 |
+| `docs/SPIKE-asr-streaming.md` | #72 量测报告：流式识别 vs 整句识别的延迟与错字率（含尾块静音坑与复现步骤） | 历史快照 |
+| `docs/HANDOFF.md` | 讲话卡顿与浮层鼠标的常驻交接：麦克风选型根因、已推提交、未真机验证的改动、环境坑（每轮直接改这一份） | 现行 |
 
 ## 设计与规范
 
-| 文件                               | 用途                                                                                                          | 状态                        |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------- |
-| `docs/DESIGN.md`                   | 路线决定（零注入）、M1–M4 范围                                                                                | 现行                        |
-| `docs/DESIGN-overlay-v2.md`        | 浮层 v2 设计                                                                                                  | 现行                        |
-| `docs/DESIGN-panel-v2.md`          | 面板 v2 设计                                                                                                  | 历史稿                      |
-| `docs/DESIGN-panel-v3.md`          | 面板 v3 新形态：一屏驾驶室 + 三个热键                                                                         | 待签字（老板暂缓）          |
-| `docs/DESIGN-voice-corpus.md`      | 语音素材：Dota2 语音 → 训练集，含四引擎实测与选型结论                                                         | 草稿（待签字）              |
-| `docs/DESIGN-asr-engine-table.md`  | ASR 引擎表：换模型 / 接新引擎不再破坏性，四层结构、迁移规则、探针断言与 paraformer 第二行（含 FunASR 微调腿） | 已落地（识别 + 微调双引擎） |
-| `docs/DESIGN-asr-script-editor.md` | 读稿编辑器：面板里改组与句子、编号与删除策略、以及「改了稿只能从底模重训」的谱系判据                          | 已落地                      |
-| `docs/STANDARDS.md`                | 反重复标准、表与分支的取舍、纯接缝契约                                                                        | 现行                        |
-| `docs/ARCH-notes.md`               | 面板文件清单、训练产物与解析、发布流程、Windows 进程检查的坑（从 AGENTS.md 移出）                             | 现行                        |
-| `docs/GLOSSARY.md`                 | GV / 朗读词表（项目领域词见根 `GLOSSARY.md`）                                                                 | 现行                        |
+| 文件 | 用途 | 状态 |
+| --- | --- | --- |
+| `docs/DESIGN.md` | 路线决定（零注入）、M1–M4 范围 | 现行 |
+| `docs/DESIGN-overlay-v2.md` | 浮层 v2 设计 | 现行 |
+| `docs/DESIGN-panel-v2.md` | 面板 v2 设计 | 历史稿 |
+| `docs/DESIGN-panel-v3.md` | 面板 v3 新形态：一屏驾驶室 + 三个热键 | 待签字（老板暂缓） |
+| `docs/DESIGN-voice-corpus.md` | 语音素材：Dota2 语音 → 训练集，含四引擎实测与选型结论 | 草稿（待签字） |
+| `docs/DESIGN-asr-engine-table.md` | ASR 引擎表：换模型 / 接新引擎不再破坏性，四层结构、迁移规则、探针断言与 paraformer 第二行（含 FunASR 微调腿） | 已落地（识别 + 微调双引擎） |
+| `docs/DESIGN-asr-script-editor.md` | 读稿编辑器：面板里改组与句子、编号与删除策略、以及「改了稿只能从底模重训」的谱系判据 | 已落地 |
+| `docs/STANDARDS.md` | 反重复标准、表与分支的取舍、纯接缝契约 | 现行 |
+| `docs/ARCH-notes.md` | 面板文件清单、训练产物与解析、发布流程、Windows 进程检查的坑（从 AGENTS.md 移出） | 现行 |
+| `docs/GLOSSARY.md` | GV / 朗读词表（项目领域词见根 `GLOSSARY.md`） | 现行 |
 
 ## 音频与训练
 
-| 文件                          | 用途                                                       | 状态           |
-| ----------------------------- | ---------------------------------------------------------- | -------------- |
-| `docs/VOICES.md`              | 离线音色目录：模型来源、三种目录布局、实测采样率与延迟、坑 | 现行           |
-| `docs/VOICEPACKS.md`          | GPT-SoVITS 微调包的训练、版本、上传与下线                  | 现行           |
-| `docs/DESIGN-voice-corpus.md` | 语料提取与文本获得方案（含 ASR 准确率实测）                | 草稿（待签字） |
+| 文件 | 用途 | 状态 |
+| --- | --- | --- |
+| `docs/VOICES.md` | 离线音色目录：模型来源、三种目录布局、实测采样率与延迟、坑 | 现行 |
+| `docs/VOICEPACKS.md` | GPT-SoVITS 微调包的训练、版本、上传与下线 | 现行 |
+| `docs/DESIGN-voice-corpus.md` | 语料提取与文本获得方案（含 ASR 准确率实测） | 草稿（待签字） |
 
 ## 验收、基准、探针
 
-| 文件                 | 用途                               | 状态 |
-| -------------------- | ---------------------------------- | ---- |
-| `docs/ACCEPTANCE.md` | 手工验收清单 + 排错表（中文）      | 现行 |
-| `docs/BENCH.md`      | 实测基线与复现方法                 | 现行 |
-| `docs/PROBES.md`     | 探针一览：一行一个，写清它钉住什么 | 现行 |
+| 文件 | 用途 | 状态 |
+| --- | --- | --- |
+| `docs/ACCEPTANCE.md` | 手工验收清单 + 排错表（中文） | 现行 |
+| `docs/BENCH.md` | 实测基线与复现方法 | 现行 |
+| `docs/PROBES.md` | 探针一览：一行一个，写清它钉住什么 | 现行 |
 
 ## 工程笔记
 
-| 文件            | 用途                             | 状态 |
-| --------------- | -------------------------------- | ---- |
+| 文件 | 用途 | 状态 |
+| --- | --- | --- |
 | `docs/NOTES.md` | 症状 → 原因 → 修法（中文，长文） | 现行 |
 
 ## 决定记录（ADR）
 
 一个决定一个文件；小修先在旧文件末尾追加「更正」。只有整条决定被推翻、继续按旧文件写会误导时，才新开一份并在标题下写明「取代：<旧文件>」，同时回旧文件顶部标注「已被 <新文件> 取代」——两条互相指认，索引里两份都留着。
 
-| 文件                                                  | 决定                                                                                                                                                                          |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/adr/asr-train-rewrite.md`                       | 识别训练重写：只训现役引擎（腿退回引擎内部）、三源数据全吃、状态卡驱动页面、迁移只留数据与底模                                                                                |
-| `docs/adr/asr-ft-run-retention.md`                    | 训练目录只留增量起点：换模成功后才清，留当前轮 + 下一轮起点，清目录不删历史行                                                                                                 |
-| `docs/adr/train-crash-reconcile.md`                   | 训练被中断后的收尾：退出时杀进程树并记失败，启动时把僵住的 running 行改判、删掉没有产物的 .next，脚本开训前从仓库刷新                                                         |
-| `docs/adr/asr-ft-disk-reclaim.md`                     | 训练残留的统一回收：启动时只留最新一份导出产物与一份能接着训的 run 目录，其余连半成品删掉                                                                                     |
-| `docs/adr/asr-check-batch.md`                         | 全量识别比对：数据步一个按钮 + 弹层，用现役模型跑全库、归一化后判一致，结果不落库                                                                                             |
-| `docs/adr/asr-check-cer.md`                           | 逐条 CER：三档不够用；CER 口径一处写、合计取总错字÷总字数、训练见过/留出/未记切分分开报、改稿写回账本                                                                         |
-| `docs/adr/asr-and-offline-testability.md`             | 四处「先拆纯缝再谈可测」：离线模型判定、失败文案映射、分流接线、体检端口注入                                                                                                  | 现行 |
-| `docs/adr/asr-base-copy.md`                           | 底模副本 `asr-models/<engine>-base/`：转正只轮换现役↔`.bak`（两次之后原件就没了），副本首次使用才写入、缺件只报告不修，「重置为底模」走同一套 swap 所以当前权重变 `.bak`      |
-| `docs/adr/asr-finetune-leg.md`                        | 识别微调成为正式训练腿（两引擎、增量、底模保留、转正/回滚）；热词只给支持提示的引擎。取代 `asr-hotwords-not-finetune.md`                                                      |
-| `docs/adr/asr-hotwords-not-finetune.md`               | 识别个性化走热词注入；两次更正（Qwen3 可微调、后续切 FunASR paraformer）。**已被 `asr-finetune-leg.md` 取代**，留作决策历史                                                   |
-| `docs/adr/domain-models-out-of-ipc.md`                | 领域模型迁出 IPC 契约文件：供应商/音色/设置形状各归各家，契约只留通道表，字段声明表按删除测试否决                                                                             |
-| `docs/adr/overlay-reply-and-send-channels-removed.md` | 移除浮层回复框与两条非原地文出通道                                                                                                                                            |
-| `docs/adr/provider-keys-per-provider.md`              | 翻译供应商按家记忆密钥                                                                                                                                                        |
-| `docs/adr/train-manager-orchestrator.md`              | 训练管理页采用编排器定位                                                                                                                                                      |
-| `docs/adr/train-run-model-and-panel-pages.md`         | 训练记录成为一等公民                                                                                                                                                          |
-| `docs/adr/tts-backlog-drop.md`                        | sovits 朗读丢弃积压（默认开启）                                                                                                                                               |
-| `docs/adr/tts-length-cap-rejected.md`                 | 念白限长 40 的提案被否决                                                                                                                                                      |
-| `docs/adr/tts-parallel-infer.md`                      | `parallel_infer` 保持 false                                                                                                                                                   |
-| `docs/adr/tts-repeat-cache.md`                        | sovits 重复句缓存                                                                                                                                                             |
-| `docs/adr/voice-out-vb-cable.md`                      | 声出经 VB-Cable 进游戏语音：检测放主进程（驱动层，不靠空 label）、面板四步引导、测试结果报实际设备                                                                            |
-| `docs/adr/voice-capture-hold.md`                      | 语音对讲按住说：`voiceCaptureMode` 默认 hold，松开靠常驻 PowerShell 轮询 GetAsyncKeyState（不挂钩子），失败退回敲一下                                                         |
-| `docs/adr/voice-ndjson-worker.md`                     | 两个语音子进程的 NDJSON 协议收成一个 harness：脚本名/超时/标签作参数，协议本体只有一份，探针用假 worker 钉住配对、清算、超时                                                  |
-| `docs/adr/voice-readiness-mutation-broadcast.md`      | 声出就绪的重算改由语音域变更点广播触发，handler 表不再逐个包刷新（选参考那次漏刷新的事故根因）                                                                                |
-| `docs/adr/voice-stage-trace.md`                       | 对讲行的阶段留痕：短段靠标记留存而不是停留（实测翻译 1ms、合成 0–2ms），事件走快照，结算后收掉后缀，起播拆账落盘                                                              |
-| `docs/adr/translate-guard-telemetry.md`               | 保真守卫只报三段计数（blocked / recovered / gaveUp）：漏检率测不出来，事件攒批写 `logs/translate-guard.jsonl`，记账本战绩同批拍快照                                           |
-| `docs/adr/first-run-checklist.md`                     | 上手检查六步证据链：每步给可核对证据，最后一步只认真游戏帧（cfg 只在 Dota 启动时读），外加多 Steam 库 / 中文路径 / 移动硬盘三处加固                                           |
-| `docs/adr/match-attribution.md`                       | 一行话属于哪一局：voice-chain 每行带 `matchid`（`liveMatchId()` 只认 90 秒内的活帧，拿不到写显式 null 不猜），gsi-summary 按局归档 `<matchid>.json` 只留 20 份且当前局永不删  |
-| `docs/adr/hotword-candidates.md`                      | 热词候选只建议不自动应用：纠错的差异词≥2 字才进池，面板勾选后才写一次 `asrHotwords`（写一次=重载一次识别器），表满丢的词必须列出来                                            |
-| `docs/adr/overlay-readability.md`                     | 浮层三档字号 + AA 对比度 + 状态不只靠颜色：像素与颜色表都在 `src/shared/overlay-a11y.ts`，CSS 只留 `--ov-fs-*`；AA 是「相对行底色叠纯黑」算的，不是「任何游戏画面上都看得清」 |
-| `docs/adr/vision-look.md`                             | 看一眼画面（#135）：热键截一帧问视觉模型，图片只走 data URL 不落盘；能否看图由模型名启发式判定，判不准时给的是「去换一个能看图的模型」而不是「不支持」                        |
+| 文件 | 决定 |
+| --- | --- |
+| `docs/adr/asr-train-rewrite.md` | 识别训练重写：只训现役引擎（腿退回引擎内部）、三源数据全吃、状态卡驱动页面、迁移只留数据与底模 |
+| `docs/adr/asr-ft-run-retention.md` | 训练目录只留增量起点：换模成功后才清，留当前轮 + 下一轮起点，清目录不删历史行 |
+| `docs/adr/train-crash-reconcile.md` | 训练被中断后的收尾：退出时杀进程树并记失败，启动时把僵住的 running 行改判、删掉没有产物的 .next，脚本开训前从仓库刷新 |
+| `docs/adr/asr-ft-disk-reclaim.md` | 训练残留的统一回收：启动时只留最新一份导出产物与一份能接着训的 run 目录，其余连半成品删掉 |
+| `docs/adr/asr-check-batch.md` | 全量识别比对：数据步一个按钮 + 弹层，用现役模型跑全库、归一化后判一致，结果不落库 |
+| `docs/adr/asr-check-cer.md` | 逐条 CER：三档不够用；CER 口径一处写、合计取总错字÷总字数、训练见过/留出/未记切分分开报、改稿写回账本 |
+| `docs/adr/asr-and-offline-testability.md` | 四处「先拆纯缝再谈可测」：离线模型判定、失败文案映射、分流接线、体检端口注入 | 现行 |
+| `docs/adr/asr-base-copy.md` | 底模副本 `asr-models/<engine>-base/`：转正只轮换现役↔`.bak`（两次之后原件就没了），副本首次使用才写入、缺件只报告不修，「重置为底模」走同一套 swap 所以当前权重变 `.bak` |
+| `docs/adr/asr-finetune-leg.md` | 识别微调成为正式训练腿（两引擎、增量、底模保留、转正/回滚）；热词只给支持提示的引擎。取代 `asr-hotwords-not-finetune.md` |
+| `docs/adr/asr-hotwords-not-finetune.md` | 识别个性化走热词注入；两次更正（Qwen3 可微调、后续切 FunASR paraformer）。**已被 `asr-finetune-leg.md` 取代**，留作决策历史 |
+| `docs/adr/domain-models-out-of-ipc.md` | 领域模型迁出 IPC 契约文件：供应商/音色/设置形状各归各家，契约只留通道表，字段声明表按删除测试否决 |
+| `docs/adr/overlay-reply-and-send-channels-removed.md` | 移除浮层回复框与两条非原地文出通道 |
+| `docs/adr/provider-keys-per-provider.md` | 翻译供应商按家记忆密钥 |
+| `docs/adr/train-manager-orchestrator.md` | 训练管理页采用编排器定位 |
+| `docs/adr/train-run-model-and-panel-pages.md` | 训练记录成为一等公民 |
+| `docs/adr/tts-backlog-drop.md` | sovits 朗读丢弃积压（默认开启） |
+| `docs/adr/tts-length-cap-rejected.md` | 念白限长 40 的提案被否决 |
+| `docs/adr/tts-parallel-infer.md` | `parallel_infer` 保持 false |
+| `docs/adr/tts-repeat-cache.md` | sovits 重复句缓存 |
+| `docs/adr/voice-out-vb-cable.md` | 声出经 VB-Cable 进游戏语音：检测放主进程（驱动层，不靠空 label）、面板四步引导、测试结果报实际设备 |
+| `docs/adr/voice-capture-hold.md` | 语音对讲按住说：`voiceCaptureMode` 默认 hold，松开靠常驻 PowerShell 轮询 GetAsyncKeyState（不挂钩子），失败退回敲一下 |
+| `docs/adr/voice-ndjson-worker.md` | 两个语音子进程的 NDJSON 协议收成一个 harness：脚本名/超时/标签作参数，协议本体只有一份，探针用假 worker 钉住配对、清算、超时 |
+| `docs/adr/voice-readiness-mutation-broadcast.md` | 声出就绪的重算改由语音域变更点广播触发，handler 表不再逐个包刷新（选参考那次漏刷新的事故根因） |
+| `docs/adr/voice-stage-trace.md` | 对讲行的阶段留痕：短段靠标记留存而不是停留（实测翻译 1ms、合成 0–2ms），事件走快照，结算后收掉后缀，起播拆账落盘 |
+| `docs/adr/translate-guard-telemetry.md` | 保真守卫只报三段计数（blocked / recovered / gaveUp）：漏检率测不出来，事件攒批写 `logs/translate-guard.jsonl`，记账本战绩同批拍快照 |
+| `docs/adr/first-run-checklist.md` | 上手检查六步证据链：每步给可核对证据，最后一步只认真游戏帧（cfg 只在 Dota 启动时读），外加多 Steam 库 / 中文路径 / 移动硬盘三处加固 |
+| `docs/adr/match-attribution.md` | 一行话属于哪一局：voice-chain 每行带 `matchid`（`liveMatchId()` 只认 90 秒内的活帧，拿不到写显式 null 不猜），gsi-summary 按局归档 `<matchid>.json` 只留 20 份且当前局永不删 |
+| `docs/adr/hotword-candidates.md` | 热词候选只建议不自动应用：纠错的差异词≥2 字才进池，面板勾选后才写一次 `asrHotwords`（写一次=重载一次识别器），表满丢的词必须列出来 |
+| `docs/adr/overlay-readability.md` | 浮层三档字号 + AA 对比度 + 状态不只靠颜色：像素与颜色表都在 `src/shared/overlay-a11y.ts`，CSS 只留 `--ov-fs-*`；AA 是「相对行底色叠纯黑」算的，不是「任何游戏画面上都看得清」 |
+| `docs/adr/vision-look.md` | 看一眼画面（#135）：热键截一帧问视觉模型，图片只走 data URL 不落盘；能否看图由模型名启发式判定，判不准时给的是「去换一个能看图的模型」而不是「不支持」 |
 
 ## 协作约定
 
-| 文件                                                                                                                                                      | 用途                                             |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `docs/agents/ear-acceptance.md` 耳验清单（测试照着读就能做：#93 逐人静音、#129 同传半双工三条腿） — 判据区分「没生效」与「生效但别处坏了」                | 当前                                             |
-| `docs/agents/ears-run-sheet.md` 一局内做完的耳验单（9 步、约 40 分钟，老板照着按；附表另有现场三个盲区与回报五行）                                        | 当前                                             |
-| `docs/agents/helm-acceptance.md` 驾驶室验收表（抬头三态、频道只许座位写法、只有拿到英雄名才有静音开关、一句话链四种空态、最近几条；`#165`/`#167`/`#170`） | 当前                                             |
-| `docs/agents/issue-tracker.md`                                                                                                                            | 用 `gh` 管 GitHub Issue 的流程                   |
-| `docs/agents/triage-labels.md`                                                                                                                            | 五个分诊标签的含义                               |
-| `docs/agents/domain.md`                                                                                                                                   | 单上下文领域文档：根 `GLOSSARY.md` + `docs/adr/` |
-| `docs/agents/prototype-to-landing.md`                                                                                                                     | 原型 → 落地的过关规则：票面五行、签字、交付门禁  |
+| 文件 | 用途 |
+| --- | --- |
+| `docs/agents/ear-acceptance.md` 耳验清单（测试照着读就能做：#93 逐人静音、#129 同传半双工三条腿） — 判据区分「没生效」与「生效但别处坏了」 | 当前 |
+| `docs/agents/ears-run-sheet.md` 一局内做完的耳验单（9 步、约 40 分钟，老板照着按；附表另有现场三个盲区与回报五行） | 当前 |
+| `docs/agents/helm-acceptance.md` 驾驶室验收表（抬头三态、频道只许座位写法、只有拿到英雄名才有静音开关、一句话链四种空态、最近几条；`#165`/`#167`/`#170`） | 当前 |
+| `docs/agents/issue-tracker.md` | 用 `gh` 管 GitHub Issue 的流程 |
+| `docs/agents/triage-labels.md` | 五个分诊标签的含义 |
+| `docs/agents/domain.md` | 单上下文领域文档：根 `GLOSSARY.md` + `docs/adr/` |
+| `docs/agents/prototype-to-landing.md` | 原型 → 落地的过关规则：票面五行、签字、交付门禁 |
 
 ## 历史快照
 
 保留归档，不再更新；引用它们时注意日期，里面的路径和结论可能已经失效。
 
-| 文件                                        | 内容                      |
-| ------------------------------------------- | ------------------------- |
-| `docs/ACCEPTANCE-PENDING-2026-11-02.md`     | 2026-11-02 那轮待验收清单 |
-| `docs/agents/retro-asr-finetune-2026-11.md` | 同一次的复盘              |
+| 文件 | 内容 |
+| --- | --- |
+| `docs/ACCEPTANCE-PENDING-2026-11-02.md` | 2026-11-02 那轮待验收清单 |
+| `docs/agents/retro-asr-finetune-2026-11.md` | 同一次的复盘 |
