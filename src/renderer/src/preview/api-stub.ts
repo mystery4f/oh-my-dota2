@@ -182,6 +182,8 @@ const overlaySnap = (): Awaited<ReturnType<WindowApi['overlayStatus']>> => ({
 
 /** `?packs=all` 把每个包都当成装好的：用来看「要下的东西」收成一行那半边的样子。 */
 const packsAllInstalled = query.get('packs') === 'all'
+/** #175：抬头三态的开关键——`?ov=stalled|notready|ok`，一屏一态，截图在同一次会话里拍。 */
+const overviewMode = query.get('ov')
 
 const sovitsPacks: Awaited<ReturnType<WindowApi['sovitsVoicepacks']>> = [
   {
@@ -896,11 +898,14 @@ const implemented = {
    * `?mach=warn` 切到「内存偏紧 + 端口空闲、被别人占了不知道」那一屏。
    */
   envReport: async (devices) => {
+    // `?mach=tight` 只造「内存偏紧」：仰头（#175）在就绪态要显示「另有 N 项提醒」，
+    // 没有这个开关那一行永远出不来——warn 不许因为「不降级」就从界面上消失。
+    const tightMode = query.get('mach') === 'tight'
     const warnMode = query.get('mach') === 'warn'
     return judgeEnv({
       cpuModel: 'Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz',
       cpuCores: 12,
-      freeMemBytes: warnMode ? 1_073_741_824 : 5_642_354_688,
+      freeMemBytes: tightMode || warnMode ? 1_073_741_824 : 5_642_354_688,
       totalMemBytes: 17_179_869_184,
       diskFreeBytes: 123_456_543_232,
       diskTotalBytes: 512_110_190_592,
@@ -934,7 +939,7 @@ const implemented = {
     }\\steamapps\\common\\dota 2 beta\\game\\dota\\cfg\\gamestate_integration\\gamestate_integration_ohmydota2.cfg`
   }),
   captureStatus: async () => {
-    const stalled = query.get('stall') === '1'
+    const stalled = query.get('stall') === '1' || overviewMode === 'stalled'
     const lastAt = stalled ? Date.now() - 7 * 60_000 : Date.now() - 4_000
     return {
       running: !stalled,
@@ -1220,7 +1225,7 @@ const implemented = {
   sovitsStartServer: async () => sovitsStatus,
   // `?warn=1` 造一条断链告警：没有它，「看这台机器」这个入口在预览里永远看不到（#140）。
   voiceOutReadiness: async () =>
-    query.get('warn') === '1'
+    overviewMode !== 'ok' && (query.get('warn') === '1' || overviewMode === 'notready')
       ? {
           ready: false,
           reason: 'service-down',
