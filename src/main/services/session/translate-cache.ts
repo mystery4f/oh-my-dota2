@@ -37,14 +37,31 @@ function excludedOriginsFor(caller: TranslationOrigin): TranslationOrigin[] {
   return []
 }
 
-const REQUIRED_COLUMNS = [
+/**
+ * 当前表结构该有的全部列（#146）。
+ *
+ * 以前只列「后来补上的那几个字段」，于是一份 `provider` 时代的旧库全部满足那份清单——
+ * 表没被重建，`CREATE TABLE IF NOT EXISTS` 也只是空转，症状是每次读写都抛
+ * `table pair has no column named providerKey`，缓存永久坏死却没有任何提示。
+ * 现在按整表核对：缺任何一列就整表重建（它是缓存，不是账本数据）。
+ */
+const TABLE_COLUMNS = [
+  'id',
+  'providerKey',
+  'tone',
+  'a',
   'a_raw',
+  'b',
+  'a_han',
   'direction',
   'origin',
   'a_len',
   'b_len',
   'a_words',
   'b_words',
+  'hits',
+  'created_at',
+  'last_hit_at',
   'last_origin'
 ]
 
@@ -79,8 +96,16 @@ export function roughWordCount(text: string): number {
   return han + words
 }
 
+/** 探针用的库文件覆盖（#146）：只在 mkdtemp 里造老库，绝不碰真账本。 */
+let fileOverride: string | null = null
+
+export function setTranslationCacheFileForProbe(file: string | null): void {
+  closeTranslationCache()
+  fileOverride = file
+}
+
 export function translationCachePath(): string {
-  return join(app.getPath('userData'), FILE_NAME)
+  return fileOverride ?? join(app.getPath('userData'), FILE_NAME)
 }
 
 /**
@@ -146,7 +171,12 @@ function open(): DatabaseSync | null {
         const columns = (next.prepare('PRAGMA table_info(pair)').all() as { name: string }[]).map(
           (column) => column.name
         )
-        if (!REQUIRED_COLUMNS.every((name) => columns.includes(name))) next.exec('DROP TABLE pair')
+        const missing = TABLE_COLUMNS.filter((name) => !columns.includes(name))
+        if (missing.length > 0) {
+          // 旧世代（provider 时代）的表就落在这里：providerKey 不在列里，整表重建。
+          next.exec('DROP TABLE pair')
+          console.log('TRANSLATE_CACHE_REBUILT ' + JSON.stringify({ missing }))
+        }
       }
       next.exec(`
         CREATE TABLE IF NOT EXISTS pair (

@@ -1,5 +1,8 @@
 import { exitProbe } from './harness'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { DatabaseSync } from 'node:sqlite'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   clearTranslationCache,
   providerKey,
@@ -18,6 +21,7 @@ import {
   translationCacheSize,
   translationCacheStats,
   translationCacheRows,
+  setTranslationCacheFileForProbe,
   translationInsights,
   writeTranslation
 } from '../services/session/translate-cache'
@@ -243,6 +247,51 @@ export async function runTranslateCacheProbe(): Promise<void> {
   // 收尾：隔离夹具不留垃圾
   await clearTranslationCache(isoA)
   add('来源隔离夹具清掉', translationCachePairsFor(isoKey) === 0)
+
+  // —— 老库自愈（#146）：provider 时代的表缺 providerKey，必须整表重建而不是永久读写失败 ——
+  const oldDir = mkdtempSync(join(tmpdir(), 'translate-cache-legacy-'))
+  const oldFile = join(oldDir, 'translate-cache.sqlite')
+  const legacy = new DatabaseSync(oldFile)
+  legacy.exec(`CREATE TABLE pair (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    tone TEXT NOT NULL,
+    a TEXT NOT NULL,
+    a_raw TEXT NOT NULL,
+    b TEXT NOT NULL,
+    a_han INTEGER NOT NULL,
+    direction TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    a_len INTEGER NOT NULL,
+    b_len INTEGER NOT NULL,
+    a_words INTEGER NOT NULL,
+    b_words INTEGER NOT NULL,
+    hits INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_hit_at INTEGER NOT NULL,
+    last_origin TEXT NOT NULL,
+    UNIQUE(provider, tone, a)
+  )`)
+  legacy.close()
+  setTranslationCacheFileForProbe(oldFile)
+  writeTranslation('老库', PROBE, 'terse', 'legacy', { direction: 'zh-en', origin: 'probe' })
+  add(
+    '老库缺 providerKey：写进去读得回来（整表重建，不再永久坏死）',
+    readTranslation('老库', 'zh-en', PROBE, 'terse', 'probe') === 'legacy'
+  )
+  const rebuilt = new DatabaseSync(oldFile)
+  const rebuiltColumns = (rebuilt.prepare('PRAGMA table_info(pair)').all() as { name: string }[]).map(
+    (column) => column.name
+  )
+  rebuilt.close()
+  add(
+    '重建后的表有 providerKey、没有 provider',
+    rebuiltColumns.includes('providerKey') && !rebuiltColumns.includes('provider'),
+    rebuiltColumns.join(',')
+  )
+  setTranslationCacheFileForProbe(null)
+  rmSync(oldDir, { recursive: true, force: true })
+  add('换回真账本后仍读得到自己的行', readTranslation('你好', 'zh-en', PROBE, 'terse', 'probe') === 'hello')
 
   const failed = checks.filter((item) => !item.ok)
   console.log(
