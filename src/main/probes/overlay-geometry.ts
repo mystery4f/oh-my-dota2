@@ -11,6 +11,7 @@ import {
   resizeFromLeft,
   shouldIgnoreMouse,
   shouldProtectContent,
+  visionAskReveal,
   snapToEdges,
   SNAP_PX,
   resizeFromRight
@@ -141,6 +142,17 @@ export function runOverlayGeometryProbe(): void {
   // 防截屏会吞掉部分鼠标事件（WDA_EXCLUDEFROMCAPTURE），所以它只能跟「不可操作」同义。
   push('锁定就挡截图', shouldProtectContent(true, false) === true, 'locked=true')
   push('面板开着不挡截图', shouldProtectContent(true, true) === false, 'locked+panel')
+  // #144：看一眼热键在隐藏状态下必须先把浮层亮出来，不能静默 return
+  const hidden = visionAskReveal({ visible: false, panelOpen: false })
+  push('隐藏时按看一眼 -> 先亮出来并开面板', hidden.show === true && hidden.openPanel === true, JSON.stringify(hidden))
+  const openPanel = visionAskReveal({ visible: true, panelOpen: true })
+  push(
+    '面板已经开着 -> 不再 toggle（一次按键不关掉答案落地的地方）',
+    openPanel.show === false && openPanel.openPanel === false,
+    JSON.stringify(openPanel)
+  )
+  const visibleOnly = visionAskReveal({ visible: true, panelOpen: false })
+  push('浮层在但不带面板 -> 只开面板', visibleOnly.show === false && visibleOnly.openPanel === true, JSON.stringify(visibleOnly))
 
   // 阶段行只显示一句话，优先级曾写死在 JSX 的 if 链里（探针够不着），所以搬成纯函数。
   push('阶段行：一次性反馈盖过 hint', stageLine({ message: '录音中', hint: '引擎缺失', locked: true })?.text === '录音中')

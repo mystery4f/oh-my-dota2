@@ -280,8 +280,8 @@ app.whenReady().then(() => {
     // 热键这条路没人接返回值，所以结果广播回渲染层，失败也必须是条消息而不是静默。
     visionAsk: () => {
       const overlay = getOverlayManager()
-      if (!overlay.status().visible) return
-      if (!overlay.status().panelOpen) overlay.togglePanel()
+      // 隐藏时也要有反应（#144）：先亮出来再开面板，热键不许静默。
+      overlay.revealForAsk()
       void askScreen().then((answer) => {
         broadcast(IPC.VISION_RESULT, answer)
         if (!answer.ok) overlay.flashHint(answer.error ?? '看图失败')

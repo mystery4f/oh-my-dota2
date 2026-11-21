@@ -14,6 +14,7 @@ import {
   shouldIgnoreMouse,
   shouldProtectContent,
   snapToEdges,
+  visionAskReveal,
   windowBoundsFor
 } from '@shared/overlay-geometry'
 import { overlayStateFromSettings, reduceOverlay, type OverlayEvent, type OverlayState } from '@shared/overlay-state'
@@ -269,6 +270,16 @@ class OverlayManager {
       win?.moveTop()
       win?.focus()
     })
+  }
+  /**
+   * 看一眼（#135/#144）：热键调这一个方法——隐藏时先亮出来，面板没开就打开。
+   * 以前热键里写的是「不可见就直接 return」，于是隐藏状态下按了完全没反应（#144）。
+   */
+  revealForAsk(): void {
+    const status = this.status()
+    const plan = visionAskReveal({ visible: status.visible, panelOpen: status.panelOpen })
+    if (plan.show) this.show()
+    if (plan.openPanel) this.togglePanel()
   }
   /** Ask the overlay window to start or stop microphone capture (hotkey driven). */
   toggleVoiceCapture(): void {

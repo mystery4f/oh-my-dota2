@@ -102,6 +102,21 @@ export function shouldIgnoreMouse(locked: boolean, panelOpen: boolean): boolean 
 }
 
 /**
+ * 「看一眼」热键要做的两件事（#135/#144）：浮层藏着就先亮出来，面板没开就打开。
+ *
+ * 为什么不静默：热键按了没反应，用户唯一的判断是「热键坏了」——这正是 AGENTS.md 里
+ * 「the hotkey must never go silent」那条。voiceCapture 早就是这么做的（隐藏时先 show()），
+ * 这条路以前少写了这一句，于是隐藏状态下按 Alt+Shift+G 什么都不会发生（#144）。
+ * 面板已经开着就别再 toggle，否则一次按键会把答案落地的地方关掉。
+ */
+export function visionAskReveal(status: { visible: boolean; panelOpen: boolean }): {
+  show: boolean
+  openPanel: boolean
+} {
+  return { show: !status.visible, openPanel: !status.panelOpen }
+}
+
+/**
  * 防截屏跟着「能不能操作」走，不跟着锁定走：
  * WDA_EXCLUDEFROMCAPTURE 在 Windows 上会让窗口丢掉一部分鼠标事件，
  * 呼出面板打开正是「我要点它」的时刻，防护必须让开。

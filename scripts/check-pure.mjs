@@ -877,6 +877,15 @@ check(
     rendererOnly.note
   )
 }
+
+// —— 看一眼热键（#144）：隐藏时先亮出来，面板开着别再 toggle
+{
+  const { visionAskReveal } = await import('../src/shared/overlay-geometry.ts')
+  const hidden = visionAskReveal({ visible: false, panelOpen: false })
+  check('隐藏时按看一眼 -> 先亮出来并开面板', hidden.show === true && hidden.openPanel === true)
+  const open = visionAskReveal({ visible: true, panelOpen: true })
+  check('面板开着 -> 不再 toggle', open.show === false && open.openPanel === false)
+}
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
