@@ -99,6 +99,11 @@ path for 30 s; timeout/network: back to the session after 1.5–2 s; 429: honour
   Exit codes and the flush-before-exit rule live in `src/main/probes/harness.ts`
   (`exitProbe` / `finishProbe` / `reportProbe`): never call `app.exit(0)` unconditionally — that is how a failed probe
   used to look green, and eslint now rejects `app.exit` / `process.exit` anywhere under `src/main/probes/`.
+  A probe that hangs and a probe that threw look identical without help: the dispatcher prints `PROBE_START {flag,at,pid}`
+  before `run()` (#158), a rejected run goes through `failProbe()` and prints `PROBE_THREW <flag> <message>`, and a probe
+  that may wait forever calls `guardProbe(name)` so a 20 s stall becomes one SKIP plus exit 0 instead of a 400 s kill.
+  Segment text inside a probe is always derived from `splitForSpeech(...)` — `segmentChars: 2` quietly became 10 when #85
+  moved splitting into `src/shared/speech-split.ts`, and the stale gate keys threw in an async body where nothing heard it.
 
 `--train-probe` pins the training decision seam: mutexes, preflight, run state, VRAM advisory
   (`judgeFtVram`/`ftVramNote` four-case), export completeness (`missingFtExportFiles` three-case),

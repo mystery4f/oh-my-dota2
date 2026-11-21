@@ -21,6 +21,7 @@ import { warmEdge } from './services/voice/edge'
 import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-server'
 import { autoVoicePackSetup } from './services/voice/sovits-voicepack'
 import { PROBES, ciProbeFlags, renderProbeCatalogue } from './probes/registry'
+import { failProbe, probeStart } from './probes/harness'
 import { startGlossaryPack } from './services/glossary-pack'
 import { startGsi, stopGsi } from './services/gsi'
 import { startUpdateCheck } from './services/updater'
@@ -214,7 +215,13 @@ app.whenReady().then(() => {
     return
   }
   for (const probe of PROBES) {
-    if (process.argv.includes(probe.flag)) void probe.run()
+    if (!process.argv.includes(probe.flag)) continue
+    // 开工即打印（#158）：没有这一行，CI 日志里「没跑起来」和「卡在等待」无法区分。
+    probeStart(probe.flag)
+    // 探针体一抛，异步里就静默了（以前表现为零输出 + 超时被杀），这里当场判失败（#158）。
+    Promise.resolve(probe.run()).catch((error: unknown) => {
+      failProbe(probe.flag, error)
+    })
   }
 
   const startup = loadSettings()

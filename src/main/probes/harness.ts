@@ -27,6 +27,75 @@ export interface ProbeVerdict {
   code: number
 }
 
+/**
+ * 开工即打印（#158）：一条输出都没有时，必须能立刻分清「探针没跑起来」和
+ * 「跑起来了、卡在第一段等待」。以前这两种在 CI 日志里长得一模一样。
+ *
+ * 分发处调一次，探针自己不用管——这样不会有人忘记。
+ */
+export function probeStart(flag: string): void {
+  console.log('PROBE_START ' + JSON.stringify({ flag, at: new Date().toISOString(), pid: process.pid }))
+}
+
+/** 当前走到哪一段（#158）：超时 SKIP 时把这句话带出去，日志才说得出卡在哪。 */
+let currentStep = '(还没进第一段)'
+
+/** 标一段的开始（立即打印，不等 finishProbe）。 */
+export function probeStep(label: string): void {
+  currentStep = label
+  console.log('PROBE_STEP ' + label)
+}
+
+export function currentProbeStep(): string {
+  return currentStep
+}
+
+/**
+ * 看住一条可能永远不返回的探针（#158）。
+ *
+ * 到点就写一条 SKIP（带「最后一次进到哪一段」与一句原因）并 **exit 0**：
+ * 全 SKIP 也算跑完——CI 要的是「这条探针没有断言失败」，而挂住 400 秒被 kill
+ * 在 CI 里与「没跑起来」长得一模一样。
+ */
+export function guardProbe(name: string, ms: number = 20_000): NodeJS.Timeout {
+  return setTimeout(() => {
+    const step = currentProbeStep()
+    console.log(`SKIP 等待超时（${Math.round(ms / 1000)} 秒）：最后一次进到「${step}」——这一段等不到回应，按跳过处理`)
+    console.log('SKIP 原因：这一段等不到回应——常见是闸门名对不上（切段结果变了）、或某个 promise 永不 settle；探针本身不抛，才走到这里')
+    console.log(`${name} ${JSON.stringify({ ok: true, passed: 0, failed: 0, skipped: 1, timedOut: true, lastStep: step })}`)
+    exitProbe(true)
+  }, ms)
+}
+
+/**
+ * 探针自己抛了（#158）：异步里的异常会变成 unhandled rejection，
+ * 以前的表现是「零输出 + 超时 400 秒被杀」，看着像环境卡死。这里当场说出来。
+ */
+export function failProbe(name: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  console.log(`PROBE_THREW ${name} ${message}`)
+  if (error instanceof Error && error.stack) console.log(error.stack)
+  console.log(`${name} ${JSON.stringify({ ok: false, passed: 0, failed: 1, threw: true, lastStep: currentStep })}`)
+  exitProbe(false)
+}
+
+/** 一段等待的上限（#158）：宁可 SKIP 并说出原因，也不许把 CI 挂死。 */
+export const PROBE_WAIT_MS = 20_000
+
+/**
+ * 给一个 promise 加等待上限。超时就 resolve `{ timedOut: true }`——**不抛**，
+ * 因为调用处要据此写一条 SKIP，而不是让异步里的一抛静默掉整个探针。
+ */
+export function withCap<T>(promise: Promise<T>, label: string, ms: number = PROBE_WAIT_MS): Promise<{ ok: true; value: T } | { ok: false; timedOut: true; label: string }> {
+  let timer: NodeJS.Timeout | null = null
+  const cap = new Promise<{ ok: false; timedOut: true; label: string }>((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, timedOut: true, label }), ms)
+  })
+  return Promise.race([promise.then((value) => ({ ok: true as const, value })), cap]).finally(() => {
+    if (timer !== null) clearTimeout(timer)
+  })
+}
+
 export function probeVerdict(cases: readonly ProbeCase[]): ProbeVerdict {
   const failed = cases.filter((item) => !item.ok).length
   const passed = cases.length - failed

@@ -2,7 +2,8 @@ import type { SpeechSynthAdapters } from '../services/voice/speech-pipeline'
 import { speechQueueSnapshot, speakPipeline, stopSpeech } from '../services/voice/speech-pipeline'
 import type { SpeechRequest } from '../services/voice/speech-pipeline'
 import { queueLine, stopLine } from '@shared/speech-queue'
-import { finishProbe, probeCases } from './harness'
+import { finishProbe, probeCases, guardProbe, probeStep } from './harness'
+import { SEGMENT_CHARS_MIN, splitForSpeech } from '@shared/speech-split'
 
 /**
  * 语音队列与打断（#88）的时序锁：真管线跑一遍，假引擎用闸门控住合成时机。
@@ -50,39 +51,66 @@ const base = (engine: SpeechRequest['engine'], text: string, extra: Partial<Spee
   ...extra
 })
 
+/**
+ * 段文本一律**由切段器现算**（#158）：探针不再写死 `segmentChars: SEGMENT_CHARS_MIN`。
+ * #85 把切段搬进 `@shared/speech-split` 后上限被钳到 10–60，`2` 实际等于 10，
+ * `SEG_TEXT`（6 字）从而整句一段；探针却去取 `gates.get(`edge:${SEGMENTS[0]}`)`，
+ * `undefined.open()` 抛在 async 里——一声不响、`finishProbe` 永远到不了。
+ */
+const SEG_TEXT = '甲一二三四五六七八，乙一二三四五六七八，丙一二三四五六七八'
+const SEGMENTS = splitForSpeech(SEG_TEXT, SEGMENT_CHARS_MIN, 'punctuation')
+
+/** 取闸门；取不到就给出「想等哪个、现在有哪些」——比 `undefined.open` 好读。 */
+function gateFor(
+  gates: Map<string, { promise: Promise<Buffer | null>; open: (audio: Buffer | null) => void }>,
+  key: string
+): { promise: Promise<Buffer | null>; open: (audio: Buffer | null) => void } {
+  const hit = gates.get(key)
+  if (hit === undefined) throw new Error(`闸门没等到：expected ${key}，现在有 ${[...gates.keys()].join('|')}`)
+  return hit
+}
+
 export async function runSpeechQueueProbe(): Promise<void> {
+  // #158：看住这条可能永远不返回的探针；到点写 SKIP 并 exit 0，不许挂死 CI。
+  guardProbe('SPEECH_QUEUE_PROBE')
   const { cases, push } = probeCases()
 
+  // 前置：后面所有闸门都按切段器真实输出取名，段数不够就直接 FAIL，别让查找炸在 async 里。
+  push('前置：切段器把这段切成三段', SEGMENTS.length === 3, `${SEGMENTS.length} 段 · ${SEGMENTS.join('|')}`)
+
+  probeStep('空闲也算一种状态：不许拿空数组冒充「在说」')
   // —— 空闲也算一种状态：不许拿空数组冒充「在说」 ——
   const idle = speechQueueSnapshot()
   push('空闲：快照说没在说、没排队', idle.speaking === null && idle.pending === 0 && idle.lanes.length === 0, JSON.stringify(idle))
   push('空闲：面板文案是「空闲」', queueLine(idle) === '空闲', queueLine(idle))
 
+  probeStep('内联投递（声出整句）也能被停止：停止后一段都不再开')
   // —— 内联投递（声出整句）也能被停止：停止后一段都不再开 ——
   {
     const f = makeGated()
     const seen: string[] = []
     const speak = speakPipeline(
-      base('edge', '甲，乙，丙', { split: true, segmentChars: 2, adapters: f.adapters }),
+      base('edge', SEG_TEXT, { split: true, segmentChars: SEGMENT_CHARS_MIN, adapters: f.adapters }),
       (segment) => {
         seen.push(segment.text)
       }
     )
-    push('在说：快照报出正在读的那句', speechQueueSnapshot().speaking === '甲，乙，丙', String(speechQueueSnapshot().speaking))
-    f.gates.get('edge:甲，')!.open(wav('甲，'))
+    push('在说：快照报出正在读的那句', speechQueueSnapshot().speaking === SEG_TEXT, String(speechQueueSnapshot().speaking))
+    gateFor(f.gates, `edge:${SEGMENTS[0]}`)!.open(wav(SEGMENTS[0]))
     await tick()
-    push('在说：第一段已投递后才谈得上停', JSON.stringify(seen) === JSON.stringify(['甲，']), JSON.stringify(seen))
+    push('在说：第一段已投递后才谈得上停', JSON.stringify(seen) === JSON.stringify([SEGMENTS[0]]), JSON.stringify(seen))
     const stopped = stopSpeech()
     push('内联停止：回报打断属实、排队本来就没有', stopped.interrupted && stopped.cleared === 0, JSON.stringify(stopped))
     // 停止后才回来的两段：合成已完成，投递闸必须自己扔掉。
-    f.gates.get('edge:乙，')!.open(wav('乙，'))
-    f.gates.get('edge:丙')!.open(wav('丙'))
+    gateFor(f.gates, `edge:${SEGMENTS[1]}`)!.open(wav(SEGMENTS[1]))
+    gateFor(f.gates, `edge:${SEGMENTS[2]}`)!.open(wav(SEGMENTS[2]))
     const outcome = await speak
-    push('停止后：没有任何后续段开播', JSON.stringify(seen) === JSON.stringify(['甲，']), JSON.stringify(seen))
+    push('停止后：没有任何后续段开播', JSON.stringify(seen) === JSON.stringify([SEGMENTS[0]]), JSON.stringify(seen))
     push('停止后：本次投递的账是 1 播 2 丢', outcome.delivered === 1 && outcome.dropped === 2, JSON.stringify(outcome))
     push('停止完：快照回到空闲', speechQueueSnapshot().speaking === null, JSON.stringify(speechQueueSnapshot()))
   }
 
+  probeStep('排队三单一起停：余量归零、排队的那几个当场结单')
   // —— 排队三单一起停：余量归零、排队的那几个当场结单 ——
   {
     const f = makeGated()
@@ -102,6 +130,7 @@ export async function runSpeechQueueProbe(): Promise<void> {
     push('排队停止：快照余量归零、通道清空', after.pending === 0 && after.lanes.length === 0 && after.speaking === null, JSON.stringify(after))
   }
 
+  probeStep('停止不许粘住：下一句照常出声')
   // —— 停止不许粘住：下一句照常出声 ——
   {
     const adapters: SpeechSynthAdapters = {
@@ -111,7 +140,7 @@ export async function runSpeechQueueProbe(): Promise<void> {
     }
     const seen: string[] = []
     const outcome = await speakPipeline(
-      base('edge', '甲，乙，丙', { split: true, segmentChars: 2, adapters }),
+      base('edge', SEG_TEXT, { split: true, segmentChars: SEGMENT_CHARS_MIN, adapters }),
       (segment) => {
         seen.push(segment.text)
       }
@@ -120,6 +149,7 @@ export async function runSpeechQueueProbe(): Promise<void> {
     push('读完之后：快照回到空闲', speechQueueSnapshot().speaking === null && speechQueueSnapshot().pending === 0, JSON.stringify(speechQueueSnapshot()))
   }
 
+  probeStep('停止回执的三种说法：读到段尾 / 清掉几句 / 本来就没在说')
   // —— 停止回执的三种说法：读到段尾 / 清掉几句 / 本来就没在说 ——
   push('回执：边读边清说全', stopLine({ cleared: 2, interrupted: true }) === '这句读到段尾 · 清掉 2 句排队', stopLine({ cleared: 2, interrupted: true }))
   push('回执：只清排队', stopLine({ cleared: 1, interrupted: false }) === '清掉 1 句排队', stopLine({ cleared: 1, interrupted: false }))
