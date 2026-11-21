@@ -7,6 +7,8 @@ import { normalizeSpeakKey, normalizeSpeakMode, normalizeVoiceOutEngine } from '
 import { normalizeCaptureMode, normalizeHotkeyMap } from '@shared/hotkeys'
 import { healProvider } from '@shared/providers'
 import { maxWordsFromSettings } from './providers'
+import { rememberBounds, LEGACY_BOUNDS_KEY } from '@shared/display-geometry'
+import type { OverlayGeometry } from '@shared/ipc'
 
 function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -93,6 +95,21 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     // 声出引擎：只认三引擎层的合法值，乱填打回 edge（英文占位）；声出音色不在这里钳，
     // resolveVoiceOutSynth 决策时对不上清单自会打回默认（和 ttsVoice 同一策略）。
     merged.ttsOutEngine = normalizeVoiceOutEngine(merged.ttsOutEngine)
+    // 每屏一份浮层几何（#101）：旧文件里那份唯一的 overlayBounds 搬进新表，键用 LEGACY_BOUNDS_KEY。
+    // 那个键对应不到任何屏幕，于是 planBounds 自然走「记的屏幕不在了 → 整块落回主屏」那条路，
+    // 正好是升级后该发生的事。搬完就把死字段删掉，否则下次落盘又把旧的写回去。
+    const legacyBounds = (merged as AppSettings & { overlayBounds?: unknown }).overlayBounds
+    if (legacyBounds !== null && typeof legacyBounds === 'object' && 'width' in legacyBounds) {
+      merged.overlayBoundsByDisplay = rememberBounds(
+        merged.overlayBoundsByDisplay,
+        LEGACY_BOUNDS_KEY,
+        legacyBounds as OverlayGeometry
+      )
+    }
+    delete (merged as AppSettings & { overlayBounds?: unknown }).overlayBounds
+    if (merged.overlayBoundsByDisplay === null || typeof merged.overlayBoundsByDisplay !== 'object') {
+      merged.overlayBoundsByDisplay = {}
+    }
     // 退役字段 asrEngine（#67）：引擎由 asrActiveModel 指向的模型所属引擎决定，这个字段已无读者。
     // 老 settings.json 里还躺着它（whisper / qwen3 / sensevoice）：读入时直接删掉，不迁移也不写回，
     // 否则下一次落盘会把死字段再写回去，用户以为改了引擎其实没人读。

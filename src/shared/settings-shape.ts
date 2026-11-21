@@ -6,9 +6,10 @@
 import { DEFAULT_CAPTURE_MODE, DEFAULT_HOTKEYS, type CaptureMode, type HotkeyActionId } from './hotkeys'
 import type { ProviderConfig, ProviderId } from './providers'
 import type { OfflineVoiceId, SpeakMode, VoiceOutEngine } from './voices'
-import type { OverlayTextMode, OverlayGeometry, ReplyTone } from './ipc'
+import type { OverlayTextMode, ReplyTone } from './ipc'
 import type { DotaAnnounceTriggers } from './dota-announce'
 import type { OverlayFontSize } from './overlay-a11y'
+import type { BoundsMemory } from './display-geometry'
 
 export interface AppSettings {
   provider: ProviderConfig
@@ -217,7 +218,13 @@ export interface AppSettings {
    */
   overlayFontSize: OverlayFontSize
   /** 用户调过的浮层几何；null = 跟随捕获区域自动摆放。 */
-  overlayBounds: OverlayGeometry | null
+  /**
+   * 每块屏幕各记一份浮层几何（#101）：屏幕 id → 几何。
+   *
+   * 之前只有一份，接着外接屏摆好、拔掉再插回来就白摆了。记的那块屏幕不在了由
+   * `planBounds()` 决定整块落回主屏可见区；空表 = 还没在任何屏幕上摆过。
+   */
+  overlayBoundsByDisplay: BoundsMemory
   /**
    * 语音对讲热键怎么按：hold = 按住说话、松开触发；toggle = 按一下开录、再按一下触发。
    * 只影响「语音对讲」这一个动作；其余热键永远是敲一下。
@@ -319,7 +326,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayVisible: false,
   overlayOpacity: 0.34,
   overlayFontSize: 'normal',
-  overlayBounds: null,
+  overlayBoundsByDisplay: {},
   voiceCaptureMode: DEFAULT_CAPTURE_MODE,
   hotkeys: { ...DEFAULT_HOTKEYS }
 }

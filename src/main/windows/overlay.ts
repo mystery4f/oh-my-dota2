@@ -17,7 +17,20 @@ import {
   visionAskReveal,
   windowBoundsFor
 } from '@shared/overlay-geometry'
-import { overlayStateFromSettings, reduceOverlay, type OverlayEvent, type OverlayState } from '@shared/overlay-state'
+import {
+  overlayStateFromSettings,
+  reduceOverlay,
+  type OverlayEvent,
+  type OverlayPersistPatch,
+  type OverlayState
+} from '@shared/overlay-state'
+import {
+  forgetBounds,
+  planBounds,
+  rememberBounds,
+  type BoundsPlan,
+  type DisplayFacts
+} from '@shared/display-geometry'
 import { formatAccelerator } from '@shared/hotkeys'
 
 /** 配置态（可拖可点）闲置多久后自动锁回穿透。 */
@@ -31,10 +44,20 @@ const OVERLAY_GAP = 12
  * forwarding so the game underneath keeps receiving input.
  */
 
+/** Electron 的屏幕清单 → 纯缝认识的样子（探针喂假数据跑同一套判断）。 */
+function displayFacts(): DisplayFacts[] {
+  const primaryId = screen.getPrimaryDisplay().id
+  return screen.getAllDisplays().map((display) => ({
+    id: String(display.id),
+    workArea: display.workArea,
+    primary: display.id === primaryId
+  }))
+}
+
 class OverlayManager {
   private win: BrowserWindow | null = null
   /** 浮层自有状态全走纯缝 reduceOverlay（#31）；这里只存当前值并执行效果。 */
-  private s: OverlayState = overlayStateFromSettings(loadSettings())
+  private s: OverlayState = overlayStateFromSettings(loadSettings(), planBounds(loadSettings().overlayBoundsByDisplay, displayFacts())?.geometry ?? null)
   private statusListeners = new Set<(state: OverlayStatus) => void>()
   /** 上次语音录制的热键触发时刻：挡键盘自动重复的连发（见 toggleVoiceCapture）。 */
   private lastVoiceToggleAt = 0
@@ -43,6 +66,9 @@ class OverlayManager {
   /** 一次性提示的到期时刻：在这之前，每拍 2 秒的「为什么没字」不许把它盖掉。 */
   private flashUntil = 0
   private flashTimer: NodeJS.Timeout | null = null
+  /** 屏幕拓扑监听（#101）：只挂一次，窗口关了摘掉，避免多次重开后回调叠成一堆。 */
+  private displaysWatched = false
+  private onDisplaysChanged: (() => void) | null = null
 
   /**
    * 状态策略走纯缝（reduceOverlay），这里只执行效果：落盘、闲置表、穿透、广播。
@@ -52,7 +78,7 @@ class OverlayManager {
   private commit(event: OverlayEvent, sync?: () => void): OverlayStatus {
     const reduction = reduceOverlay(event, this.s)
     this.s = reduction.state
-    if (Object.keys(reduction.persist).length > 0) saveSettings(reduction.persist)
+    if (Object.keys(reduction.persist).length > 0) this.persist(reduction.persist)
     if (reduction.idle === 'arm') this.armIdle()
     else if (reduction.idle === 'clear') this.clearIdle()
     if (reduction.clickThrough) this.applyClickThrough()
@@ -387,7 +413,10 @@ class OverlayManager {
     win.setIgnoreMouseEvents(shouldIgnoreMouse(this.s.locked, this.s.panelOpen))
     win.on('closed', () => {
       this.win = null
+      this.unwatchDisplays()
     })
+    // 屏幕拓扑一变（拔掉副屏、投影仪接上、分辨率改了）就重算一次：记的那块屏幕不在了要整块落回主屏（#101）。
+    this.watchDisplays()
     if (process.env.ELECTRON_RENDERER_URL) {
       void win.loadURL(process.env.ELECTRON_RENDERER_URL + '/overlay.html')
     } else {
@@ -413,6 +442,31 @@ class OverlayManager {
    * 用户亲手拖过的几何优先；没拖过才跟着捕获区域走。
    * 这样换区域不会把手工排版冲掉，想回到默认就点「还原」。
    */
+  /** 屏幕拓扑变化的监听只挂一次（同一个 manager 可能重开好几次窗口）。 */
+  private watchDisplays(): void {
+    if (this.displaysWatched) return
+    this.displaysWatched = true
+    this.onDisplaysChanged = (): void => {
+      const plan = this.plan()
+      if (plan === null) return
+      this.s = { ...this.s, custom: plan.geometry }
+      this.reposition()
+      this.broadcast()
+    }
+    screen.on('display-added', this.onDisplaysChanged)
+    screen.on('display-removed', this.onDisplaysChanged)
+    screen.on('display-metrics-changed', this.onDisplaysChanged)
+  }
+
+  private unwatchDisplays(): void {
+    if (!this.displaysWatched || this.onDisplaysChanged === null) return
+    screen.removeListener('display-added', this.onDisplaysChanged)
+    screen.removeListener('display-removed', this.onDisplaysChanged)
+    screen.removeListener('display-metrics-changed', this.onDisplaysChanged)
+    this.displaysWatched = false
+    this.onDisplaysChanged = null
+  }
+
   private reposition(): void {
     if (!this.win) return
     // 收起状态下窗口只有 132x34：此时重算几何会把它瞬间撑回全尺寸，小图标就废了。
@@ -421,8 +475,46 @@ class OverlayManager {
     this.win.setBounds(this.s.custom ? clampGeometry(this.s.custom, wa) : this.defaultGeometry(wa))
   }
 
+  /**
+   * 这一屏上的几何该是多少（#101）。
+   *
+   * 传了窗口当前 bounds 就按「窗口主要在哪块屏幕上」查；没有窗口时（首帧、重开）按设置里
+   * 记着的那条查——记的屏幕不在了会整块落回主屏，而不是留在没人看得见的坐标上。
+   */
+  private plan(at: Rectangle | null = null): BoundsPlan | null {
+    const settings = loadSettings()
+    return planBounds(settings.overlayBoundsByDisplay, displayFacts(), {
+      key: null,
+      point: at === null ? null : { x: at.x + Math.round(at.width / 2), y: at.y + Math.round(at.height / 2) }
+    })
+  }
+
+  /** 落盘：把「这一屏的几何」翻译成每屏一份的表（#101）。状态机不碰屏幕 id，翻译只在这一处。 */
+  private persist(patch: OverlayPersistPatch): void {
+    const { overlayBounds, ...rest } = patch
+    if (overlayBounds === undefined) {
+      saveSettings(rest)
+      return
+    }
+    const key = this.displayKey()
+    const memory = loadSettings().overlayBoundsByDisplay
+    saveSettings({
+      ...rest,
+      overlayBoundsByDisplay: overlayBounds === null ? forgetBounds(memory, key) : rememberBounds(memory, key, overlayBounds)
+    })
+  }
+
+  /** 窗口此刻在哪块屏幕上（几何为空时按主屏）。 */
+  private displayKey(): string {
+    const rect = this.win?.getBounds() ?? null
+    const plan = rect === null ? this.plan() : this.plan(rect)
+    return plan?.display.id ?? ''
+  }
+
   private workArea(): Rectangle {
-    return screen.getPrimaryDisplay().workArea
+    const rect = this.win?.getBounds() ?? null
+    const plan = rect === null ? this.plan() : this.plan(rect)
+    return plan?.display.workArea ?? screen.getPrimaryDisplay().workArea
   }
 
   private broadcast(): void {

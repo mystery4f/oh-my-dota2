@@ -384,6 +384,15 @@ it and nothing happened". The overlay and the pause hint print key names from th
   refusal text must be "换一个能看图的模型", never "this model can't take images". Three failures stay three sentences:
   model can't see / frame is empty / model didn't answer. Never poll or pre-capture: every shot is a billed call the
   user asked for by pressing the key.
+- Per-display geometry (#101): `settings.overlayBoundsByDisplay` maps a display id to that screen's geometry (max 8,
+  oldest dropped). `planBounds()` in `src/shared/display-geometry.ts` decides which one applies right now — a display
+  still present gets its memory clamped into its own work area, a display that is gone sends the overlay back to the
+  primary **fully inside** it (`fitInside`, not `clampGeometry`'s 80px grip: that grip is for a window the user dragged
+  off-screen, while a vanished display is nobody's mistake). `overlay.ts` is the only place that translates
+  `OverlayPersistPatch.overlayBounds` (a virtual key — the state machine must never learn display ids) into the map,
+  and it listens to `display-added` / `display-removed` / `display-metrics-changed` to re-plan on the spot. Legacy
+  `overlayBounds` migrates under `LEGACY_BOUNDS_KEY = 'previous'`, a key no display can match, so it lands on the
+  primary by the same rule instead of needing its own migration branch.
 - Overlay diagnostics: a locked overlay is click-through *and* content-protected, so it is absent from
   every screenshot and ignores the mouse. Never conclude "the overlay is not showing" from a desktop
   capture — read the panel badge or the `overlay:status` payload instead. Both rules are pure seams in

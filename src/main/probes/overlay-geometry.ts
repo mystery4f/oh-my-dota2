@@ -19,6 +19,16 @@ import {
 import { filterHistory, historyCopyText, nextUnread } from '@shared/overlay-ledger'
 import type { CaptureEntry } from '@shared/ipc'
 import { reduceOverlay, stageLine, type OverlayState } from '@shared/overlay-state'
+import {
+  BOUNDS_MEMORY_KEEP,
+  LEGACY_BOUNDS_KEY,
+  boundsPlanLine,
+  fitInside,
+  forgetBounds,
+  planBounds,
+  rememberBounds,
+  type DisplayFacts
+} from '@shared/display-geometry'
 
 const WORK = { x: 0, y: 0, width: 1920, height: 1040 }
 
@@ -288,6 +298,80 @@ export function runOverlayGeometryProbe(): void {
     '复制出去的是整行原文/译文，不是过滤命中的那一段',
     historyCopyText(history[0]) === '[队友] [阿杰] ⚔ 中路miss' && historyCopyText(history[1]) === 'ward',
     `${historyCopyText(history[0])} | ${historyCopyText(history[1])}`
+  )
+
+
+  // —— 每屏一份浮层几何（#101）：两根线，一根「两块屏各记各的」，一根「记的屏没了要整块落回主屏」
+  const firstScreen: DisplayFacts = { id: '1', workArea: { x: 0, y: 0, width: 1920, height: 1040 }, primary: true }
+  const secondScreen: DisplayFacts = { id: '2', workArea: { x: 1920, y: 0, width: 2560, height: 1400 }, primary: false }
+  const bothScreens = [firstScreen, secondScreen]
+  const onFirst = { x: 100, y: 120, width: 520, height: 300 }
+  const onSecond = { x: 2400, y: 400, width: 640, height: 340 }
+  const memory = rememberBounds(rememberBounds({}, '1', onFirst), '2', onSecond)
+  push(
+    '两块屏幕各记一份几何（互不覆盖）',
+    Object.keys(memory).length === 2 && memory['1'].x === 100 && memory['2'].x === 2400,
+    JSON.stringify(Object.keys(memory))
+  )
+  const planFirst = planBounds(memory, bothScreens, { key: '1' })
+  const planSecond = planBounds(memory, bothScreens, { key: '2' })
+  push(
+    '各回各屏：查第一块拿第一份、查第二块拿第二份',
+    planFirst?.landed === 'remembered' &&
+      planFirst.geometry?.x === 100 &&
+      planSecond?.landed === 'remembered' &&
+      planSecond.geometry?.x === 2400,
+    `${planFirst?.geometry?.x} / ${planSecond?.geometry?.x}`
+  )
+  const unplugged = planBounds(memory, [firstScreen], { key: '2' })
+  const insidePrimary =
+    unplugged !== null &&
+    unplugged.geometry !== null &&
+    unplugged.geometry.x >= firstScreen.workArea.x &&
+    unplugged.geometry.y >= firstScreen.workArea.y &&
+    unplugged.geometry.x + unplugged.geometry.width <= firstScreen.workArea.x + firstScreen.workArea.width &&
+    unplugged.geometry.y + unplugged.geometry.height <= firstScreen.workArea.y + firstScreen.workArea.height
+  push(
+    '拔掉副屏：整块落在主屏可见区内（不是留 80 像素露头）',
+    unplugged?.landed === 'primary' && insidePrimary && unplugged.geometry?.width === 640,
+    JSON.stringify(unplugged?.geometry) + ' · ' + (unplugged === null ? '' : boundsPlanLine(unplugged))
+  )
+  const oversized = fitInside({ x: -500, y: -300, width: 3000, height: 2000 }, firstScreen.workArea)
+  push(
+    '副屏比主屏大时尺寸一起压，位置夹回工作区',
+    oversized.width === 1920 && oversized.height === 1040 && oversized.x === 0 && oversized.y === 0,
+    JSON.stringify(oversized)
+  )
+  const legacy = planBounds({ [LEGACY_BOUNDS_KEY]: onSecond }, bothScreens, { key: LEGACY_BOUNDS_KEY })
+  push(
+    '旧版那份唯一几何按「屏幕不在了」处理：落回主屏且整块可见',
+    legacy?.landed === 'primary' &&
+      legacy.geometry !== null &&
+      legacy.geometry.x + legacy.geometry.width <= 1920 &&
+      legacy.geometry.y + legacy.geometry.height <= 1040,
+    JSON.stringify(legacy?.geometry)
+  )
+  let many: Record<string, { x: number; y: number; width: number; height: number }> = {}
+  for (let index = 0; index < BOUNDS_MEMORY_KEEP + 3; index += 1) {
+    many = rememberBounds(many, String(index), { ...onFirst, x: index })
+  }
+  const manyKeys = Object.keys(many)
+  push(
+    `最多记 ${BOUNDS_MEMORY_KEEP} 块屏，超了先丢最早记的`,
+    manyKeys.length === BOUNDS_MEMORY_KEEP && !manyKeys.includes('0') && manyKeys.includes(String(BOUNDS_MEMORY_KEEP + 2)),
+    manyKeys.join(',')
+  )
+  push(
+    '「还原」只忘当前这块屏，别屏的几何留着',
+    Object.keys(forgetBounds(memory, '2')).join(',') === '1' && forgetBounds(memory, 'nope') === memory,
+    Object.keys(forgetBounds(memory, '2')).join(',')
+  )
+  push(
+    '一句话说清几何是哪来的（三种情况三种话）',
+    boundsPlanLine(planFirst as never).includes('这块屏幕') &&
+      boundsPlanLine(unplugged as never).includes('不在了') &&
+      boundsPlanLine({ geometry: null, display: firstScreen, landed: 'primary' }).includes('还没在这块屏幕上摆过'),
+    boundsPlanLine(planFirst as never)
   )
 
   const failed = cases.filter((item) => !item.ok)

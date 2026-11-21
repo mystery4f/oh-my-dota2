@@ -50,8 +50,19 @@ export type OverlayEvent =
 
 /** 这次归约要写进设置文件的字段；空对象 = 不写盘。 */
 export type OverlayPersistPatch = Partial<
-  Pick<AppSettings, 'overlayLocked' | 'overlayCollapsed' | 'overlayText' | 'overlayDigest' | 'overlayOpacity' | 'overlayFontSize' | 'overlayBounds' | 'overlayVisible' | 'ttsReadAloud'>
->
+  Pick<
+    AppSettings,
+    'overlayLocked' | 'overlayCollapsed' | 'overlayText' | 'overlayDigest' | 'overlayOpacity' | 'overlayFontSize' | 'overlayVisible' | 'ttsReadAloud'
+  >
+> & {
+  /**
+   * **虚拟键**：这一屏上的几何（`null` = 这屏忘了）。
+   *
+   * 设置文件里存的是 `overlayBoundsByDisplay`（每屏一份，#101），状态机不该知道屏幕 id，
+   * 所以这里只表达「当前这一屏的几何变了」，落盘前由 `overlay.ts` 的 `persist()` 翻译。
+   */
+  overlayBounds?: OverlayGeometry | null
+}
 
 export interface OverlayReduction {
   state: OverlayState
@@ -93,13 +104,14 @@ export function stageLine(input: { message: string | null; hint: string | null; 
 }
 
 /** 启动时从设置文件还原浮层自有状态。 */
-export function overlayStateFromSettings(settings: AppSettings): OverlayState {
+export function overlayStateFromSettings(settings: AppSettings, custom: OverlayGeometry | null = null): OverlayState {
   return {
     locked: settings.overlayLocked,
     collapsed: settings.overlayCollapsed,
     panelOpen: false,
     expandedBounds: null,
-    custom: settings.overlayBounds,
+    // 每屏一份（#101）：具体哪份由窗口层按屏幕算好传进来，状态机不碰屏幕 id。
+    custom,
     textMode: settings.overlayText,
     digest: settings.overlayDigest,
     opacity: clampOpacity(settings.overlayOpacity),
