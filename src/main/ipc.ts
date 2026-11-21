@@ -62,6 +62,7 @@ import {
   selectVoicePack,
   sovitsVoicePacks
 } from './services/voice/sovits-voicepack'
+import { chainLast, noteChainLast } from './services/voice/chain-last'
 import { getOverlayManager } from './windows/overlay'
 import { broadcastToWindows as broadcast } from './windows/broadcast'
 import { listTrainRuns, loadTrainRun } from './services/train/run-store'
@@ -243,8 +244,10 @@ const handlers: MainHandlers = {
   },
   glossaryApply: (name) => chooseGlossaryPack(String(name ?? '')),
   reportVoiceChain: (result) => {
+    noteChainLast(result)
     broadcast(IPC.VOICE_CHAIN_RESULT, result)
   },
+  voiceChainLast: () => chainLast(),
   transcribeAudio: (wavBase64, micLabel, stopReason) => transcribeForVoice(wavBase64, micLabel, stopReason),
   // #66：纠错落库。开关（settings.asrCorrectionsToDataset）在主进程判；面板只报「票据 + 改对的那句」。
   voiceCorrection: (input) => saveVoiceCorrection(input),

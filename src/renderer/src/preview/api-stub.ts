@@ -1179,6 +1179,28 @@ const implemented = {
   matchTimelineDone: async () => stubMatchTimeline(),
   // 说话按钮：?captureBusy=1 模拟被 500 ms 去抖挡回来（界面必须说一句，不能静默）。
   voiceCaptureToggle: async () => ({ sent: !query.has('captureBusy') }),
+  // 驾驶室第三片（#167）：最后一条对讲。默认是「这一局刚说过一句」；四个开关各演一种没得看。
+  voiceChainLast: async () => {
+    if (query.has('chainNull')) return null
+    const summary = {
+      transcript: '对面中单不见了，小心 gank',
+      translated: 'Their mid is missing, careful of a gank.',
+      spoken: true,
+      stage: null,
+      error: null,
+      sink: 'CABLE Input (VB-Audio Virtual Cable)'
+    }
+    if (query.has('chainCross')) return { matchid: '7512345678', summary }
+    if (query.has('chainNoMatch')) return { matchid: null, summary }
+    if (query.has('chainFail')) {
+      return {
+        matchid: '7600111222',
+        summary: { ...summary, spoken: false, stage: 'voice-out', sink: undefined, error: '声出失败：Edge 返回 0 字节。这一行故意很长，用来验证界面只保留第一句并截断，后面的细节不该进面板。' }
+      }
+    }
+    return { matchid: '7600111222', summary }
+  },
+
   overlayPanelToggle: async () => {
     overlay.panelOpen = !overlay.panelOpen
     return overlaySnap()

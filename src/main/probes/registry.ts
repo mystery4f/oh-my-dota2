@@ -437,7 +437,7 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--helm-empty-probe',
     ci: true,
     summary:
-      'the cockpit head, its three fixed actions and the listen line: empty states verbatim, every missing field its own dash, one reason per disabled action, and a timeline from another match never shown',
+      'the cockpit head, its three fixed actions, the mute checkboxes and the one-line chain: empty states verbatim, one reason per disabled action, a timeline from another match never shown, and a muted hero that never becomes a duplicate',
     run: runHelmEmptyProbe
   },
   {

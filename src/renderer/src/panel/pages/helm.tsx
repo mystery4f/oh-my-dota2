@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import type { AppSettings, OverlayStatus } from '@shared/ipc'
+import type { OverlayStatus } from '@shared/ipc'
 import type { MatchSnapshot } from '@shared/match-snapshot'
 import type { MatchTimelineView } from '@shared/match-timeline'
 import type { MicHealthEvent } from '@shared/mic-health'
@@ -10,10 +10,14 @@ import {
   helmActions,
   helmChannelsView,
   helmHead,
+  helmChainLine,
   helmHotkeyHints,
-  helmListenLine
+  helmListenLine,
+  muteToggle
 } from '@shared/helm'
+import type { VoiceChainLast } from '@shared/ipc'
 import { Button } from '@/components/ui/button'
+import { useSettings } from '../use-settings'
 import { Group, Row, StatusPill } from '../components/primitives'
 
 /**
@@ -32,22 +36,23 @@ export function HelmPage(): React.ReactElement {
   const [overlay, setOverlay] = useState<OverlayStatus | null>(null)
   const [lastAt, setLastAt] = useState<number | null>(null)
   const [captureError, setCaptureError] = useState<string | null>(null)
-  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const { settings, update } = useSettings()
   const [recording, setRecording] = useState(false)
   const [looking, setLooking] = useState(false)
   const [busyNote, setBusyNote] = useState<string | null>(null)
   const [lastLook, setLastLook] = useState<string | null>(null)
+  const [chainLast, setChainLast] = useState<VoiceChainLast | null>(null)
+  const [chainError, setChainError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   const refresh = useCallback(async (): Promise<void> => {
-    const [snap, spk, cap, cfg, line, ov] = await Promise.all([
+    const [snap, spk, cap, line, ov] = await Promise.all([
       window.api.matchSnapshot().catch(() => null),
       window.api.speakerChannels().catch(() => null),
       window.api
         .captureStatus()
         .then((status) => ({ lastAt: status?.gsi?.lastAt ?? null, error: null as string | null }))
         .catch((err: unknown) => ({ lastAt: null, error: err instanceof Error ? err.message : String(err) })),
-      window.api.getSettings().catch(() => null),
       window.api.matchTimeline().catch(() => null),
       window.api.overlayStatus().catch(() => null)
     ])
@@ -55,7 +60,6 @@ export function HelmPage(): React.ReactElement {
     setChannels(spk)
     setLastAt(cap.lastAt)
     setCaptureError(cap.error)
-    setSettings(cfg)
     setTimeline(line)
     setOverlay(ov)
     setNow(Date.now())
@@ -69,10 +73,38 @@ export function HelmPage(): React.ReactElement {
 
   // 录音真值只来自浮层的采集上报（#96 那条），面板不自己猜。
   useEffect(() => window.api.onMicHealth((event: MicHealthEvent) => setRecording(event.recording)), [])
+  // 一句话链：广播只负责「有新的一条了」，真正的归属（哪一局）只问读口。
+  useEffect(() => {
+    const read = (): void => {
+      window.api
+        .voiceChainLast()
+        .then((last) => {
+          setChainLast(last)
+          setChainError(null)
+        })
+        .catch((err: unknown) => setChainError(err instanceof Error ? err.message : String(err)))
+    }
+    read()
+    return window.api.onVoiceChainResult(read)
+  }, [])
 
   const head = helmHead(snapshot, lastAt, now)
   const view = helmChannelsView(channels?.channels ?? [], settings?.ttsMuteHeroes ?? [])
   const hints = settings === null ? [] : helmHotkeyHints(settings.hotkeys, formatAccelerator, UNBOUND_LABEL)
+  const chain = helmChainLine({
+    latest: chainLast === null ? null : { ...chainLast.summary, matchid: chainLast.matchid },
+    snapshotMatchId: snapshot?.matchid ?? null,
+    readError: chainError
+  })
+  const toggleMute = useCallback(
+    (hero: string): void => {
+      const result = muteToggle(settings?.ttsMuteHeroes ?? [], hero)
+      // 没变（空名/本来就是那样）就不落盘：一次多余保存=主进程多一次归一化写盘。
+      if (!result.changed) return
+      void update({ ttsMuteHeroes: result.next })
+    },
+    [settings, update]
+  )
   const listen = helmListenLine({
     gsiLastAt: captureError === null ? lastAt : null,
     now,
@@ -185,6 +217,28 @@ export function HelmPage(): React.ReactElement {
         </Row>
       </Group>
 
+      <Group label="一句话链">
+        {chain.empty === null ? (
+          <>
+            <Row label="听到" note={chain.heard.text}>
+              {chain.heard.tone === 'bad' ? <StatusPill tone="warn">没听清</StatusPill> : null}
+            </Row>
+            <Row label="说了" note={chain.said.text}>
+              {chain.said.tone === 'bad' ? <StatusPill tone="warn">没有译文</StatusPill> : null}
+            </Row>
+            {chain.failure === null ? null : (
+              <Row label="卡住" stacked>
+                <span className="text-xs text-muted-foreground">{chain.failure}</span>
+              </Row>
+            )}
+          </>
+        ) : (
+          <Row label="链" stacked>
+            <span className="text-sm text-muted-foreground">{chain.empty}</span>
+          </Row>
+        )}
+      </Group>
+
       <Group label="谁在说话">
         {view.rows.length === 0 ? (
           <Row label="频道" stacked>
@@ -203,7 +257,16 @@ export function HelmPage(): React.ReactElement {
               }
             >
               {row.muteable ? (
-                <StatusPill tone={row.muted ? 'idle' : 'ready'}>{row.muted ? '已静音' : '在读'}</StatusPill>
+                <span className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="accent-amber-500"
+                    checked={row.muted}
+                    onChange={() => toggleMute(row.hero)}
+                    aria-label={`单独静音 ${row.label}`}
+                  />
+                  <StatusPill tone={row.muted ? 'idle' : 'ready'}>{row.muted ? '已静音' : '在读'}</StatusPill>
+                </span>
               ) : null}
             </Row>
           ))

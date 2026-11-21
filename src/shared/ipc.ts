@@ -211,6 +211,17 @@ export interface VoiceReplyArgs {
 }
 
 /** 语音链在面板上的回显：一条摘要覆盖 成功 / 某环失败 / 压根没识别到话。 */
+/**
+ * 最后一条对讲（#167）：只留一条、只在内存、不落盘。
+ *
+ * `matchid` 在生成这条摘要时问 `liveMatchId()`：不在对局里就照实是 null，
+ * **不许**回填上一局的 id——那会让面板把别人的局当成这一局。
+ */
+export interface VoiceChainLast {
+  matchid: string | null
+  summary: VoiceChainSummary
+}
+
 export interface VoiceChainSummary {
   /** 识别到的原文；没识别到为空串。 */
   transcript: string
@@ -532,6 +543,8 @@ export const IPC = {
   OVERLAY_VOICE_RESULT: 'overlay:voice-chain-result',
   VOICE_RECORD_STATE: 'voice:record-state',
   VOICE_CHAIN_RESULT: 'voice:chain-result',
+  // 驾驶室第三片（#167）：最后一条对讲只留内存一份，面板据此画「一句话链」。
+  VOICE_CHAIN_LAST: 'voice:chain-last',
   VOICE_REPLY: 'voice:reply',
   VOICE_RECORD_TOGGLE: 'voice:record-toggle',
   /** 按住模式的两条推送：热键按下就开录，松开就停录并触发整条语音链。 */
@@ -910,6 +923,8 @@ export const ipcContract = {
   onVoiceRecordStop: listen<void>(IPC.VOICE_RECORD_STOP),
   onVoiceRecordState: listen<{ recording: boolean }>(IPC.VOICE_RECORD_STATE),
   onVoiceChainResult: listen<VoiceChainSummary>(IPC.VOICE_CHAIN_RESULT),
+  /** 驾驶室一句话链：内存里最后一条（带它属于那一局），启动后还没对讲过就是 null。 */
+  voiceChainLast: invoke<[], VoiceChainLast | null>(IPC.VOICE_CHAIN_LAST),
   onVoiceRuntimeState: listen<VoiceRuntimeStatus>(IPC.VOICE_RUNTIME_STATE),
   // 第二个参数是录音设备（`label|deviceId 前 8 位`），只进日志：deviceId 按 origin 加盐，
   // 和 settings 里存的那串对不上，人眼认名字。
