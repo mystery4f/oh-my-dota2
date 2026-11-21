@@ -3,10 +3,10 @@ import { Sidebar } from './components/sidebar'
 import { Section } from './components/primitives'
 import { openCollapseGroup } from './collapse'
 import { SearchPalette } from './components/search'
-import { VoicePackDialog } from './components/voice-pack-dialog'
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections'
 import { EnginePage } from './pages/engine'
 import { VoiceTrainPage } from './pages/voice-train'
+import { PacksPage } from './pages/packs'
 import { AsrTrainPage } from './pages/asr-train'
 import { HotkeysPage } from './pages/hotkeys'
 import { AboutPage } from './pages/about'
@@ -46,8 +46,6 @@ export function PanelApp(): React.ReactElement {
   }
 
   const [searchOpen, setSearchOpen] = React.useState(false)
-  // 音色包弹窗由壳持有：朗读页和声出页各给一个按钮，打开的永远是同一个弹窗。
-  const [packsOpen, setPacksOpen] = React.useState(false)
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -67,6 +65,8 @@ export function PanelApp(): React.ReactElement {
         return <EnginePage />
       case 'voice':
         return <VoiceTrainPage />
+      case 'packs':
+        return <PacksPage />
       case 'asr':
         return <AsrTrainPage />
       case 'hotkeys':
@@ -76,7 +76,7 @@ export function PanelApp(): React.ReactElement {
       case 'read':
         return (
           <ReadPage
-            onOpenVoicePacks={() => setPacksOpen(true)}
+            onOpenVoicePacks={() => select('packs')}
             onOpenMuteList={() => select('talk')}
           />
         )
@@ -90,7 +90,7 @@ export function PanelApp(): React.ReactElement {
       case 'talk':
         return (
           <TalkPage
-            onOpenVoicePacks={() => setPacksOpen(true)}
+            onOpenVoicePacks={() => select('packs')}
             onOpenMachineCheck={openMachineCheck}
           />
         )
@@ -144,8 +144,6 @@ export function PanelApp(): React.ReactElement {
           </div>
         </main>
       </div>
-
-      <VoicePackDialog open={packsOpen} onClose={() => setPacksOpen(false)} />
     </div>
   )
 }

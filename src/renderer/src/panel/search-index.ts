@@ -16,6 +16,7 @@ const KEYWORDS: Record<SectionId, string[]> = {
     'glm', '自定义', '代理', 'proxy', '推理', '思考', '词数', '缓存', '试验台', '试翻'
   ],
   voice: ['音色训练', '微调', 'gpt-sovits', 'sovits', 'gpt 腿', '声学', '语义', '实验', '备料', 'webui', '训练记录'],
+  packs: ['音色包', '参考音频', '微调权重', '引擎包', 'sovits', 'gpt-sovits', '服务', '下载', '记住', 'lina', 'mirana'],
   asr: ['识别训练', '口音', '微调', '录音', '读稿', '数据集', '打包', 'qwen3-asr', 'paraformer', '换模', '回滚', '训练记录'],
   talk: ['麦克风', '说话键', '语音输入', 'asr', 'qwen3', 'paraformer', '热词', '识别', '运行时', '音色包', 'gpt-sovits'],
   chatout: ['直发', '发送', '回车', 'enter', '语气', '回复'],

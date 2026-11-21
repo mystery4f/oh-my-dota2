@@ -179,6 +179,9 @@ const overlaySnap = (): Awaited<ReturnType<WindowApi['overlayStatus']>> => ({
   geometry: { ...overlay.geometry }
 })
 
+/** `?packs=all` 把每个包都当成装好的：用来看「要下的东西」收成一行那半边的样子。 */
+const packsAllInstalled = query.get('packs') === 'all'
+
 const sovitsPacks: Awaited<ReturnType<WindowApi['sovitsVoicepacks']>> = [
   {
     id: 'mirana',
@@ -1120,7 +1123,10 @@ const implemented = {
   sovitsStatus: async () => sovitsStatus,
   sovitsInstall: async () => sovitsStatus,
   sovitsRefs: async () => sovitsRefs,
-  sovitsVoicepacks: async () => sovitsPacks,
+  sovitsVoicepacks: async () =>
+    packsAllInstalled
+      ? sovitsPacks.map((pack) => ({ ...pack, installed: true, installedVersion: pack.version, haveBytes: pack.bytes, upgradable: false }))
+      : sovitsPacks,
   sovitsVoicepackInstall: async () => sovitsPacks,
   sovitsVoicepackDelete: async () => sovitsPacks,
   sovitsSelectPack: async (id) => {

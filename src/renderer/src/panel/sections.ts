@@ -7,6 +7,7 @@ export const SECTIONS = [
   { id: 'helm', title: '驾驶室', hint: '一屏看现在该干什么：抬头事实 + 谁说在话 + 三个热键' },
   { id: 'engine', title: '翻译引擎', hint: '模型服务与试验台' },
   { id: 'voice', title: '音色训练', hint: '两腿各自开训，跑完注册成音色包' },
+  { id: 'packs', title: '音色包', hint: '装包、选音色、参考音频与本地服务，都在这' },
   { id: 'asr', title: '识别训练', hint: '录音、打包、微调、换模，一条链路' },
   { id: 'talk', title: '对讲', hint: '我说给别人听' },
   { id: 'chatout', title: '直发', hint: '打字发进聊天框' },
@@ -23,7 +24,7 @@ export const DEFAULT_SECTION: SectionId = 'overview'
 /** 侧边栏分组：对局三页在前，系统三页在后，总览与关于各占一头。 */
 export const SECTION_GROUPS: { label: string; ids: SectionId[] }[] = [
   { label: '对局', ids: ['helm', 'talk', 'chatout', 'read', 'overlay'] },
-  { label: '系统', ids: ['engine', 'voice', 'asr', 'hotkeys'] }
+  { label: '系统', ids: ['engine', 'voice', 'packs', 'asr', 'hotkeys'] }
 ]
 
 export function isSectionId(value: string | null): value is SectionId {
