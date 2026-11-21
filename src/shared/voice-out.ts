@@ -306,6 +306,9 @@ export function pttWatchdogMs(window: PttWindow): number {
 /**
  * 说话键归一化：只认 F1–F12 和单个字母/数字（与 SendInput 的 VK 码能对上的集合）。
  * 空串 / 乱填（"ctrl"、"FF"、"F13"）一律打回默认 F5——半失效的键比默认键更难排查。
+ *
+ * `interpret` 是例外：它不表示失败，表示这一条走的是同声腿（#128，英文灌进队友耳朵的那条）——
+ * 票面要求这一腿在 voice-chain.jsonl 里能单独计时，所以它借 stage 这个字段自报家门。
  */
 export function normalizeSpeakKey(raw: string): string {
   const key = (typeof raw === 'string' ? raw : '').trim().toUpperCase()
@@ -328,8 +331,13 @@ export function speakKeyVk(key: string): number | null {
  * 按「语音对讲」热键说中文 → whisper 识别 → prod 会话翻成英文 → 按设置的声出引擎合成进语音频道。
  * 什么时候触发声出、走哪条静默分支、段落怎么投、第三行写什么，都先在这里定死。 */
 
-/** 一键到底在哪一环停的：识别、翻译、声出、skipped=只看识别模式（转写完直接跳过后续）。成功为 null。 */
-export type VoiceReplyStage = 'recognize' | 'translate' | 'voice-out' | 'skipped'
+/**
+ * 一键到底在哪一环停的：识别、翻译、声出、skipped=只看识别模式（转写完直接跳过后续）。成功为 null。
+ *
+ * `interpret` 是唯一的例外：它不表示失败，表示这一条走的是同声腿（#128，英文灌进游戏话筒）——
+ * 票面要求这一腿在 voice-chain.jsonl 里单独可计时，所以它借 stage 这个字段自报家门。
+ */
+export type VoiceReplyStage = 'recognize' | 'translate' | 'voice-out' | 'skipped' | 'interpret'
 
 /** 识别 + 翻译之后、声出决策之前的输入。translated 为 null 表示翻译这一环已经失败。 */
 export interface VoiceReplyInput {

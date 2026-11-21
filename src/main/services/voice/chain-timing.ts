@@ -112,6 +112,8 @@ export interface VoiceChainMeta {
   segments: number
   /** 实际打开的那台输入设备；识别不是从对讲来的、或没量到时为空串。 */
   mic: string
+  /** 实际灌进去的那台出声设备（同声腿才有）：队友听到的是不是这一台，只有它答得了。 */
+  sink?: string
 }
 
 /**
@@ -132,7 +134,9 @@ export function reportChainTiming(
     matchid: matchId,
     ...meta,
     ...timing,
-    ...(prep === null ? {} : { prep })
+    ...(prep === null ? {} : { prep }),
+    // sink 只在同声腿里有值：普通对讲的输出设备是设置里选的那台，不必每行重复一遍。
+    ...(meta.sink === undefined || meta.sink === '' ? {} : { sink: meta.sink })
   }
   console.log('VOICE_CHAIN_TIMING', JSON.stringify(record))
   appendCappedJsonl(join(logsDir(), 'voice-chain.jsonl'), record)

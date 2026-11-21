@@ -31,6 +31,16 @@ export interface AppSettings {
   targetLang: string
   ttsOutputDevice: string
   /**
+   * 同声传译（票 128）：我说中文，英文灌进游戏自己的话筒。
+   * 关着时整条对讲链一个字都不变——这是默认值，也是「升级不影响现役玩法」的保证。
+   */
+  interpretMode: boolean
+  /**
+   * 同声灌哪台设备：'' = 跟 ttsOutputDevice（已经设成虚拟声卡的人不用再配一次）。
+   * 选错的表现是队友听不到：设备 id 在人耳看来是一串盐值，所以面板按名字选（见 talk.tsx）。
+   */
+  interpretInDevice: string
+  /**
    * 讲话设备（声音输入）：'' = 自动挑（跳过虚拟声卡与蓝牙通话端点，见 pickCaptureDevice）。
    * 选蓝牙耳机的麦克风会让 Windows 把耳机从音乐模式切到通话模式：游戏声音断一两秒、之后变单声道闷音。
    * 那是协议限制，软件绕不过；要一边听游戏一边说话，选内置的「麦克风阵列」。
@@ -249,6 +259,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proxyUrl: '',
   targetLang: 'zh-CN',
   ttsOutputDevice: '',
+  interpretMode: false,
+  interpretInDevice: '',
   micDevice: '',
   ttsMonitorLocal: false,
   ttsSpeakKey: 'F5',

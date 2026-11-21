@@ -119,6 +119,9 @@ export function normalizeSettings(merged: AppSettings, raw: Partial<AppSettings>
     // 长过 GLOSSARY_PACK_NAME_MAX 的名直接打回内置（装不上比装一个奇怪名字安全）。
     if (typeof merged.glossaryPackName !== 'string') merged.glossaryPackName = ''
     else merged.glossaryPackName = merged.glossaryPackName.trim().replace(/[/\\:*?"<>|]/g, '')
+    // 同声传译（#128）：开关只认布尔，设备只认字符串——空串 = 跟声出输出设备。
+    if (typeof merged.interpretMode !== 'boolean') merged.interpretMode = DEFAULT_SETTINGS.interpretMode
+    if (typeof merged.interpretInDevice !== 'string') merged.interpretInDevice = ''
   return merged
 }
 

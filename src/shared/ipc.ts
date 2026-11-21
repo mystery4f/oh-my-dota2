@@ -179,6 +179,8 @@ export interface VoiceReplyResult {
   error: string | null
   /** 分段计时：识别/翻译/首音/起播/播完各花了多久（voice-reply-latency）；量不到的段为 null。 */
   timing?: VoiceChainTiming
+  /** 同声腿（#128）实际灌进去的那台设备的 label；普通对讲腿为 undefined。 */
+  sink?: string
 }
 
 /** 对讲入参：`rowId` 由渲染端生成，阶段快照靠它才落得到那一条行上。 */
@@ -209,6 +211,8 @@ export interface VoiceChainSummary {
    * 主进程按它取录音。同一句说过两遍时文本一样、录音不同，只有票据分得清是哪一段。
    */
   utteranceId?: string
+  /** 同声腿（#128）实际灌进去的那台设备的 label：面板记录行与浮层都念得出「播到哪」。 */
+  sink?: string
 }
 
 /** One deduped chat line pushed to the overlay / dashboard stream. */

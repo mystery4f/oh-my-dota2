@@ -39,6 +39,12 @@ const outEngine = query.get('outEngine') as typeof settings.ttsOutEngine | null
 const scriptMode = query.get('script')
 if (engine) settings.ttsEngine = engine
 if (outEngine) settings.ttsOutEngine = outEngine
+// ?interpret=1：同声模式开着，且这台设备就是虚拟电缆——面板上「同声翻译」那一行才有句子可读。
+if (query.get('interpret') === '1') {
+  settings.interpretMode = true
+  settings.interpretInDevice = ''
+  settings.ttsOutputDevice = 'cable-0'
+}
 /**
  * `?voiceDemo` 时预览页自己收一次「对讲完成」：面板「识别记录」行与浮层的完成行都要有真实结果才看得见。
  * 数字就是 `formatChainTiming` 会画的那五段，缺一段不写 0。
@@ -50,6 +56,8 @@ const stubVoiceChain: VoiceChainSummary = {
   stage: null,
   error: null,
   utteranceId: 'stub-utterance',
+  // ?interpret=1：这一条走的是同声腿——阶段名单列，还带着灌进去的那台设备（票 128）。
+  ...(query.get('interpret') === '1' ? { stage: 'interpret', sink: 'CABLE Input (VB-Audio Virtual Cable)' } : {}),
   timing: {
     asrMs: 690,
     translateMs: 1180,

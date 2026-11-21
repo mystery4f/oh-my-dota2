@@ -28,6 +28,7 @@ import { runMatchReportProbe } from './match-report'
 import { runMatchAttributionProbe } from './match-attribution'
 import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
+import { runInterpretLegProbe } from './interpret-leg'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runOverlayA11yProbe } from './overlay-a11y'
 import { runProviderReasoningProbe } from './provider-reasoning'
@@ -208,6 +209,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'hotword candidates from corrections: only >=2-char diffs enter the pool, sorting by count, explicit merge, full table never silently drops',
     run: runHotwordCandidatesProbe
+  },
+  {
+    flag: '--interpret-leg-probe',
+    ci: true,
+    summary:
+      'the interpretation leg (ticket 128): an empty recognition or translation never reaches the game mic, the chosen game-mic device wins over the output device, the leg never presses the talk key and never replays the translation locally, and with the mode off the recorded chain meta is unchanged',
+    run: runInterpretLegProbe
   },
   {
     flag: '--interpret-listen-probe',

@@ -14,11 +14,15 @@ import { errorMessage } from '@shared/errors'
 import { speechFailHint } from '@shared/speech-plan'
 import { currentVoiceOutReadiness } from './voice-out-readiness'
 import { loadSettings } from '../settings'
+import { interpretLegOf } from '@shared/interpret'
 import { getOverlayManager } from '../../windows/overlay'
 
 
 /** 顺序递增的请求号：窗口只认当前这一单，旧单的 READY/ENDED 一律忽略。 */
 let nextRequestId = 1
+
+/** 声出腿：reply = 普通对讲（按住说话键）；interpret = 同声（灌进游戏话筒，不按键）。 */
+type VoiceReplyLeg = 'reply' | 'interpret'
 
 
 
@@ -39,6 +43,8 @@ export interface VoiceOutSpeakOutcome {
   error: string | null
   /** 切出的段数（合成失败的段也算）：GV 每多一段就多一次每请求地板。 */
   segments: number
+  /** 实际灌进去的那台设备（渲染层回报的 label）；同声腿靠它回答「播到哪」，普通对讲腿为空。 */
+  sink?: string
 }
 
 
@@ -66,6 +72,15 @@ class VoiceOutService {
   /** 一键到底的声出腿：译文切段并行合成，按序播出，说话键全程按住。 */
   speakReply(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
     return this.enqueue(() => this.runReply(text, timer))
+  }
+
+  /**
+   * 同声腿（票 128）：英文灌进游戏话筒，不按说话键。
+   * 不按键不是省事：那台设备是游戏的常开话筒，再按一次 F5 只会让开麦和音频错拍。
+   * 与普通声出共用同一条串行链——两组音频同时灌进同一块声卡就是两个字挤在一起。
+   */
+  interpretSpeak(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
+    return this.enqueue(() => this.runReply(text, timer, 'interpret'))
   }
 
   private async run(): Promise<VoiceOutTestResult> {
@@ -155,9 +170,9 @@ class VoiceOutService {
   }
 
   /** 错误绝不往外抛：链上还排着别的活，抛出去会污染后面每一单。 */
-  private async runReply(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
+  private async runReply(text: string, timer?: ChainTimer, leg: VoiceReplyLeg = 'reply'): Promise<VoiceOutSpeakOutcome> {
     try {
-      return await this.runReplyInner(text, timer)
+      return await this.runReplyInner(text, timer, leg)
     } catch (err) {
       const error = errorMessage(err)
       console.log('VOICE_REPLY_ERROR', JSON.stringify({ error }))
@@ -165,21 +180,29 @@ class VoiceOutService {
     }
   }
 
-  private async runReplyInner(text: string, timer?: ChainTimer): Promise<VoiceOutSpeakOutcome> {
+  private async runReplyInner(text: string, timer?: ChainTimer, leg: VoiceReplyLeg = 'reply'): Promise<VoiceOutSpeakOutcome> {
     const settings = loadSettings()
+    // 同声腿（#128）的播放参数整份来自纯规则：设备、不按键、本机不再放一遍。
+    const legPlan = leg === 'interpret' ? interpretLegOf(settings) : null
     // 引擎/封装/嗓逐段按设置解析（与测试腿同一个 resolveVoiceOutSynth）：音色传面板「声出音色」
     // （ttsOutVoice）——测试声出验的就是对讲要用的这把嗓；GV 本就不选嗓（音色由参考音频决定），
     // 解析层自己打回各引擎默认。
     const plan = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, text)
+    // 实际灌进去的那台设备（窗口回报的 label）：空串 = 还没报上来（失败在更早的一步）。
+    let playedSink = ''
     const player = new SegmentPlayer({
-      device: settings.ttsOutputDevice,
-      monitorLocal: settings.ttsMonitorLocal,
-      testMode: settings.voiceOutTestMode,
+      device: legPlan === null ? settings.ttsOutputDevice : legPlan.device,
+      monitorLocal: legPlan === null ? settings.ttsMonitorLocal : legPlan.monitorLocal,
+      testMode: legPlan === null ? settings.voiceOutTestMode : legPlan.keyless,
       keyVk: speakKeyVk(settings.ttsSpeakKey),
       speakMode: settings.ttsSpeakMode,
       onHint: showHint,
       // 起播那一刻（键已按下、窗口开始播）才是计时的「起播」点，不是调用 play 的时刻。
-      onSpeak: () => timer?.notePlayStart(),
+      onSpeak: (info) => {
+        // 播到哪台设备是渲染层回报的事实：同声腿靠它回答「队友那边听到的是这一台吗」。
+        playedSink = info.sinkLabel || ''
+        timer?.notePlayStart()
+      },
       // 起播那 2 秒的拆账跟着这条链一起落盘（voice-chain.jsonl 的 prep 字段）。
       onPrep: (prep) => timer?.notePrep(prep),
       onKeyError: (error, requestId) => console.log('VOICE_REPLY_KEY_ERROR', JSON.stringify({ requestId, error }))
@@ -250,7 +273,7 @@ class VoiceOutService {
       // 音频播出去了（本地能听见），但频道没开——队友没听到，按失败算并说明原因。
       return { spoken: false, error: player.error, segments: segmentCount }
     }
-    return { spoken: true, error: null, segments: segmentCount }
+    return { spoken: true, error: null, segments: segmentCount, sink: playedSink }
   }
 }
 

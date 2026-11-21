@@ -8,11 +8,26 @@ import { encodeWav16k } from '@shared/wav'
 import { describeCaptureDevice } from '../lib/mic'
 import { levelPercent, micDead, micDeadNotice, shouldRunChain, type MicDeadReason } from '@shared/mic-health'
 import { startPcmRecorder, type PcmRecorder } from '../lib/pcm-recorder'
+import { playInterpretEcho, stopInterpretEcho } from './interpret-echo'
 
 /** 录音上限：一条对讲顶多 20 秒，超时自动停——忘记停也不会一直占着麦克风。 */
 const RECORD_MAX_MS = 20_000
 /** 开麦超时：设备被占用或驱动卡住时 getUserMedia 可能永远不落定，超时判负，别让对讲从此挂死。 */
 const MIC_OPEN_TIMEOUT_MS = 3000
+
+/**
+ * 同声模式（#128）下把原音放回自己耳朵；别的模式一根手指都不碰。
+ * 读设置失败就当没开：回放是附加动作，不能因为读不到设置挡住识别那条链。
+ */
+async function echoIfInterpret(wav: string): Promise<void> {
+  try {
+    const settings = await window.api.getSettings()
+    if (settings.interpretMode !== true) return
+    playInterpretEcho(wav)
+  } catch {
+    // 读设置失败 = 当没开（见上）。
+  }
+}
 
 /**
  * 带超时的开麦。超时判负之后流才开成功的：立刻关掉，别留一路开着的话筒。
@@ -253,6 +268,8 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     setRingRecording(true)
     window.api.reportVoiceState(true)
     levelSentAt = 0
+    // 上一句的中文回放可能还在响：开新一句先掐掉，否则两句叠在一起听不清。
+    stopInterpretEcho()
     reportHealth({ recording: true, level: 0, dead: false, reason: null, label: '' })
     sink.stage(recordingStageLine(sink.voiceCaptureMode(), sink.voiceCaptureKey()))
     recordTimer = setTimeout(() => void stop(), RECORD_MAX_MS)
@@ -307,7 +324,10 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       return
     }
     sink.stage('识别中…')
-    const result = await window.api.transcribeAudio(encodeWav16k(chunks, rate), recordDevice)
+    const wav = encodeWav16k(chunks, rate)
+    // 同声模式（#128）：先把刚才那句中文原样放回自己耳朵，再去识别——回放是本地音频，不占链上的时间。
+    void echoIfInterpret(wav)
+    const result = await window.api.transcribeAudio(wav, recordDevice)
     const transcript = result.text.trim()
     if (!result.ok || !transcript) {
       const transcriptError = result.error ?? result.note ?? '未识别到语音'
@@ -333,7 +353,10 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       // 耗时拆解挂在那一行自己身上：条目还在，数字就在——阶段行两秒后清掉也不带走它。
       const base = spokenStatusLine(reply.spoken, reply.error)
       const detail = formatChainOverlay(reply.timing)
-      sink.patchRow({ id: rowId, spoken: detail === null ? base : { ...base, text: `${base.text} · ${detail}` } })
+      // 同声腿（#128）把「灌到哪台设备」念在行上：队友听不听得见，只差这一台对不对。
+      const where = reply.sink === undefined || reply.sink === '' ? '' : ` · 灌入「${reply.sink}」`
+      const text = `${base.text}${where}${detail === null ? '' : ` · ${detail}`}`
+      sink.patchRow({ id: rowId, spoken: { ...base, text } })
     }
     sink.reportChain({
       transcript,
@@ -343,7 +366,9 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       error: reply.error,
       timing: reply.timing,
       // 面板纠错凭这张票取原音：同一句说两遍时文本一样，只有票分得清是哪一段录音。
-      utteranceId: result.utteranceId
+      utteranceId: result.utteranceId,
+      // 同声腿才有：面板记录行据此念出「灌到哪」。
+      ...(reply.sink === undefined ? {} : { sink: reply.sink })
     })
     // 结果已经写进那一行里了；这里只补一句「播没播」——耗时数字在条目里，不在这里重复。
     // 阶段行只说结局：数字在上面的条目里，不需要抢两行的高度。

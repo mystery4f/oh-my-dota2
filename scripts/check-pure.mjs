@@ -804,6 +804,24 @@ check(
   check('绿点为空时不编造', detectDots(rgba, size, size, 'green').length === 0)
 }
 
+// —— 同声腿（#128）：进/退、设备优先级、不按说话键、关掉时老链条同形
+{
+  const { INTERPRET_STAGE: interpStage, interpretDeviceLine: interpLine, interpretLegOf: interpLeg, interpretPlanOf: interpPlan } =
+    await import('../src/shared/interpret.ts')
+  check('同声腿：识别为空不进', !interpPlan({ recognized: '  ', translated: 'hello' }).speak)
+  check('同声腿：译文为空不进', !interpPlan({ recognized: '打野', translated: '' }).speak)
+  check('同声腿：正常一句进', interpPlan({ recognized: '打野', translated: 'jungle' }).speak)
+  check('同声腿：显式设备优先于输出设备', interpLeg({ interpretInDevice: 'cable-in', ttsOutputDevice: 'spk' }).device === 'cable-in')
+  check('同声腿：没指定就跟输出设备', interpLeg({ interpretInDevice: ' ', ttsOutputDevice: 'cable-0' }).device === 'cable-0')
+  check(
+    '同声腿：不按说话键、本机不回放译文',
+    interpLeg({ interpretInDevice: 'a', ttsOutputDevice: 'b' }).keyless === true &&
+      interpLeg({ interpretInDevice: 'a', ttsOutputDevice: 'b' }).monitorLocal === false
+  )
+  check('同声腿：阶段名独立可测', interpStage === 'interpret')
+  check('同声腿：没选设备时面板说清下一步', interpLine('').includes('Dota 2') && interpLine('CABLE Input').includes('CABLE Input'))
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

@@ -19,6 +19,7 @@ import { extractHotwordDiff, mergeHotwords } from '@shared/asr-hotwords'
 import { formatChainTiming } from '@shared/voice-timing'
 import { queueLine, stopLine, type SpeechQueueSnapshot } from '@shared/speech-queue'
 import type { MicHealthEvent } from '@shared/mic-health'
+import { interpretDeviceLine } from '@shared/interpret'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
 import {
@@ -578,6 +579,43 @@ export function TalkPage({
               ) : null}
             </select>
           </Row>
+          <Row
+            label="同声翻译"
+            hint="开：按住热键说中文，英文直接灌进这台设备——把它设成 Dota 2 的麦克风，队友听到的就是英文；你这句中文同时在本机回放。不按说话键，电缆那一路在游戏里本来就是常开的话筒。"
+          >
+            <Button
+              size="sm"
+              variant={settings.interpretMode ? 'secondary' : 'outline'}
+              onClick={() => void save.wrap(update({ interpretMode: !settings.interpretMode }))}
+            >
+              {settings.interpretMode ? '开' : '关'}
+            </Button>
+            <select
+              id="v2-interpretDevice"
+              value={settings.interpretInDevice}
+              onChange={(e) => void save.wrap(update({ interpretInDevice: e.target.value }))}
+              className={`${selectClass} max-w-72`}
+              disabled={!settings.interpretMode}
+            >
+              <option value="">跟输出设备</option>
+              {outputs.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `输出设备 ${d.deviceId.slice(0, 8)}…`}
+                </option>
+              ))}
+              {settings.interpretInDevice && !outputs.some((d) => d.deviceId === settings.interpretInDevice) ? (
+                <option value={settings.interpretInDevice}>（已保存，当前未接入）</option>
+              ) : null}
+            </select>
+            <span className="text-xs text-muted-foreground">
+              {interpretDeviceLine(
+                (settings.interpretInDevice || settings.ttsOutputDevice) === ''
+                  ? ''
+                  : (outputs.find((d) => d.deviceId === (settings.interpretInDevice || settings.ttsOutputDevice))?.label ??
+                      '（已保存，当前未接入）')
+              )}
+            </span>
+          </Row>
         </Group>
 
         {/* #88：队列真相在主进程（speech-pipeline 握着 lanes 与在途的段），面板只画快照，不自己数。 */}
@@ -720,7 +758,8 @@ export function TalkPage({
                     <span>
                       {entry.corrected ? '✏️ ' : ''}🎤 原文「{entry.transcript || '（空）'}」→ 译文「
                       {entry.translated ?? (entry.stage === 'skipped' ? '（只看识别）' : '（翻译失败）')}」
-                      {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}{' '}
+                      {entry.stage === 'skipped' ? '' : entry.spoken ? ' · 已播放' : ' · 未播放'}
+                      {entry.sink ? ` · 灌入「${entry.sink}」` : ''}{' '}
                       {entry.timing ? (
                         <span className="mr-1 text-muted-foreground" title="一次对讲的分段耗时：识别 → 译 → 首音 → 起播 → 播完">
                           {formatChainTiming(entry.timing)}

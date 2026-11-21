@@ -4,6 +4,7 @@ import { IPC, type InPlaceResult, type VoiceReplyArgs, type VoiceReplyResult } f
 import type { VoiceStageProgress } from '@shared/voice-stage'
 import { broadcastToWindows } from '../../windows/broadcast'
 import { decideVoiceOutReply } from '@shared/voice-out'
+import { INTERPRET_STAGE, interpretPlanOf } from '@shared/interpret'
 import { decideInPlaceDelivery, inplaceFailureLine, pickInPlaceDraft } from '@shared/inplace'
 import { loadSettings } from '../settings'
 import { abortTranslation, translateReply } from '../session/durable-translator'
@@ -41,17 +42,18 @@ export async function voiceReply(args: VoiceReplyArgs): Promise<VoiceReplyResult
   // 耗时统计是可选开的（面板「对讲 → 耗时统计」，默认关）：关着就一行都不量，
   // 浮层、面板记录、logs/voice-chain.jsonl 就不会有数字——没有「量了但不显示」的中间态。
   // 每一条出口都带着同一份计时离开：失败的那次同样看得出崩在哪一段。
-  const finish = (result: VoiceReplyResult, segments = 0): VoiceReplyResult =>
+  const finish = (result: VoiceReplyResult, segments = 0, stageOverride?: string): VoiceReplyResult =>
     timed
       ? {
           ...result,
           timing: reportChainTiming(timer, {
             spoken: result.spoken,
-            stage: result.stage,
+            stage: stageOverride ?? result.stage,
             engine: settings.ttsOutEngine,
             chars: result.translated?.length ?? 0,
             segments,
-            mic: timer.mic
+            mic: timer.mic,
+            ...(result.sink === undefined || result.sink === '' ? {} : { sink: result.sink })
           })
         }
       : result
@@ -87,15 +89,26 @@ export async function voiceReply(args: VoiceReplyArgs): Promise<VoiceReplyResult
     })
   }
   clipboard.writeText(plan.text)
-  const spoken = await getVoiceOutService().speakReply(plan.text, timer)
+  // 同声腿（#128）：同一句译文，播的地方不一样——灌进游戏话筒，而不是念给本机听。
+  // 判定走纯规则，开关关着时这一行与升级前逐字一致（spoken 仍来自 speakReply）。
+  const interpret = settings.interpretMode === true
+  const gate = interpret ? interpretPlanOf({ recognized, translated: plan.text }) : null
+  if (gate !== null && !gate.speak) {
+    return finish({ translated: null, spoken: false, stage: 'translate', error: '这句没有可灌的内容' })
+  }
+  const spoken = interpret
+    ? await getVoiceOutService().interpretSpeak(plan.text, timer)
+    : await getVoiceOutService().speakReply(plan.text, timer)
   return finish(
     {
       translated: plan.text,
       spoken: spoken.spoken,
       stage: spoken.spoken ? null : 'voice-out',
-      error: spoken.error
+      error: spoken.error,
+      ...(spoken.sink === undefined ? {} : { sink: spoken.sink })
     },
-    spoken.segments
+    spoken.segments,
+    interpret ? INTERPRET_STAGE : undefined
   )
 }
 
