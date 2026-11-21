@@ -1,6 +1,6 @@
 # 面板 v3 设计（新形态，待签字）
 
-状态：草稿，等签字后开工。原型在未跟踪目录 `src/renderer/src/prototype/`（一次性代码，正式实现时删除），预览入口 `npm run panel:preview` → `http://localhost:5199/src/prototype/preview.html?screen=helm`。
+状态：草稿，等签字后开工。**2026-11-21 老板：暂时没空看，先放着** —— 签字与落地顺序都没定，谁都不许先开落地票。原型在 `src/renderer/src/prototype/`（一次性代码，正式实现时删除），预览入口 `npm run panel:preview` → `http://localhost:5199/src/prototype/preview.html?screen=helm`。
 
 ## 一句话
 

@@ -49,7 +49,7 @@ tags: [docs, index]
 | `docs/DESIGN.md` | 路线决定（零注入）、M1–M4 范围 | 现行 |
 | `docs/DESIGN-overlay-v2.md` | 浮层 v2 设计 | 现行 |
 | `docs/DESIGN-panel-v2.md` | 面板 v2 设计 | 历史稿 |
-| `docs/DESIGN-panel-v3.md` | 面板 v3 新形态：一屏驾驶室 + 三个热键 | 待签字 |
+| `docs/DESIGN-panel-v3.md` | 面板 v3 新形态：一屏驾驶室 + 三个热键 | 待签字（老板暂缓） |
 | `docs/DESIGN-voice-corpus.md` | 语音素材：Dota2 语音 → 训练集，含四引擎实测与选型结论 | 草稿（待签字） |
 | `docs/DESIGN-asr-engine-table.md` | ASR 引擎表：换模型 / 接新引擎不再破坏性，四层结构、迁移规则、探针断言与 paraformer 第二行（含 FunASR 微调腿） | 已落地（识别 + 微调双引擎） |
 | `docs/DESIGN-asr-script-editor.md` | 读稿编辑器：面板里改组与句子、编号与删除策略、以及「改了稿只能从底模重训」的谱系判据 | 已落地 |
