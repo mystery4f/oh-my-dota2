@@ -1074,6 +1074,28 @@ check(
   check('战绩图：空图也画得出来', matchReportSvg(empty).includes('这一局没有语音活动'))
 }
 
+// —— 整块淡入（#102）：只在这两种事件上淡，别的都不淡 ——
+{
+  const { FADE_MS, FADE_QUIET_MS, fadeTriggerOf, shouldFade } = await import('../src/shared/overlay-motion.ts')
+  const shown = { visible: true, collapsed: false }
+  const icon = { visible: true, collapsed: true }
+  check('整块淡入：收起图标展开算①', fadeTriggerOf({ before: icon, after: shown, newLines: 0 }) === 'expanded')
+  check('整块淡入：隐藏变可见算①', fadeTriggerOf({ before: { visible: false, collapsed: false }, after: shown, newLines: 0 }) === 'expanded')
+  check('整块淡入：面板开关不算展开', fadeTriggerOf({ before: shown, after: icon, newLines: 0 }) === null)
+  check('整块淡入：只看形态没新行不淡', fadeTriggerOf({ before: shown, after: shown, newLines: 0 }) === null)
+  check('整块淡入：新行进来算②', fadeTriggerOf({ before: shown, after: shown, newLines: 2 }) === 'new-lines')
+  check('整块淡入：一秒内第二行不再淡', shouldFade({ before: shown, after: shown, newLines: 1, sinceLastMs: FADE_QUIET_MS - 1, reducedMotion: false }) === false)
+  check('整块淡入：过了安静期照淡', shouldFade({ before: shown, after: shown, newLines: 1, sinceLastMs: FADE_QUIET_MS, reducedMotion: false }) === true)
+  check('整块淡入：展开不受安静期限制', shouldFade({ before: icon, after: shown, newLines: 0, sinceLastMs: 0, reducedMotion: false }) === true)
+  check('整块淡入：减少动态效果一律不淡', shouldFade({ before: icon, after: shown, newLines: 3, sinceLastMs: 99999, reducedMotion: true }) === false)
+  check('整块淡入：时长 160ms、安静期 1s', FADE_MS === 160 && FADE_QUIET_MS === 1000, `${FADE_MS}/${FADE_QUIET_MS}`)
+  const css = readFileSync(new URL('../src/renderer/src/overlay/overlay.css', import.meta.url), 'utf8')
+  check('整块淡入：CSS 里没有第二份时长', css.includes(`${FADE_MS}ms`) === false)
+  check('整块淡入：CSS 里没有第二份不透明度过渡', /transition:s*opacity/.test(css) === false)
+  const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+  check('减少动态效果：一条媒体查询管住两处入场', reduced.includes('#stage') && reduced.includes('.row'))
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

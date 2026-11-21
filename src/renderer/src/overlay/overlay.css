@@ -585,3 +585,17 @@
   background: rgba(148, 163, 184, 0.3);
   border-radius: 3px;
 }
+
+/* 减少动态效果（#102）：一条媒体查询管两处入场——整块淡入（渲染层写的内联过渡）与行的 rise-in。
+   环的 voice-ring-pulse 不在这里：它是状态指示，不是入场。 */
+@media (prefers-reduced-motion: reduce) {
+  #root-inner {
+    transition: none !important;
+  }
+  #stage {
+    animation: none;
+  }
+  .row {
+    animation: none;
+  }
+}

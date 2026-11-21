@@ -14,6 +14,8 @@ import { subscribeSpeech } from './speech'
 import { createVoiceCapture, type VoiceRowPatch } from './voice-capture'
 import { stageLine } from '@shared/overlay-state'
 import { digestLine } from '@shared/overlay-digest'
+import type { OverlayPosture } from '@shared/overlay-motion'
+import { newBlockFadeState, playBlockFade } from './block-fade'
 
 
 /**
@@ -32,6 +34,13 @@ export function App(): JSX.Element {
   const [digestOpen, setDigestOpen] = useState(false)
   // 麦克风电平（#96）：录着的时候每块 PCM 刷一次，停录归零。
   const [level, setLevel] = useState(0)
+  // 整块淡入（#102）：判定在共享纯缝里，这里只记住「上次的形态」和「这批真的新增了几行」。
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const fadeState = useRef(newBlockFadeState())
+  const postureRef = useRef<OverlayPosture | null>(null)
+  const newLinesRef = useRef(0)
+  const knownIdsRef = useRef(new Set<string>())
+  const [fadeTicket, setFadeTicket] = useState(0)
 
   // 阶段行的一次性反馈：给了 holdMs 就到点自动收起，下一条顶掉上一条的计时（旧模块级 setter 换成组件内 ref）。
   const stageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -68,8 +77,33 @@ export function App(): JSX.Element {
     statusRef.current = status
   }, [status])
 
+  // ①②两种触发收在一处：形态变了或真来了新行，就判一次要不要淡（判定全在 overlay-motion）。
+  useEffect(() => {
+    if (!status) return
+    const after: OverlayPosture = { visible: status.visible, collapsed: status.collapsed && !status.panelOpen }
+    const before = postureRef.current
+    postureRef.current = after
+    const newLines = newLinesRef.current
+    newLinesRef.current = 0
+    // 第一次拿到状态时不知道「之前」是什么形态，那一次不算展开。
+    if (before === null) return
+    playBlockFade(rootRef.current, { before, after, newLines }, fadeState.current)
+  }, [status, fadeTicket])
+
   /** 收到任何一批消息：进账本；收起且面板没开才计未读。 */
   const acceptBatch = useCallback((batch: CaptureEntry[]): void => {
+    // 只认「账本真的多了一行」：同一条内容的补丁与手动刷新都不算新东西（#102）。
+    const known = knownIdsRef.current
+    let fresh = 0
+    for (const entry of batch) {
+      if (known.has(entry.id)) continue
+      known.add(entry.id)
+      fresh += 1
+    }
+    if (fresh > 0) {
+      newLinesRef.current += fresh
+      setFadeTicket((ticket) => ticket + 1)
+    }
     setRows((current) => batch.reduce(pushEntry, current))
     // 收起且面板没开才累加；看得到行的地方清零。判定在共享纯函数里，这里只给当下视角。
     const view = statusRef.current
@@ -77,11 +111,15 @@ export function App(): JSX.Element {
   }, [])
 
   const acceptUpdate = useCallback((batch: CaptureEntry[]): void => {
+    for (const entry of batch) knownIdsRef.current.add(entry.id)
     setRows((current) => batch.reduce(pushEntry, current))
   }, [])
 
   /** 手动触发是「拍一张照」：先清空再重建，避免旧行残留。 */
   const acceptReplace = useCallback((batch: CaptureEntry[]): void => {
+    // 手动刷新是「拍快照」：账本整个换掉，既不淡入也不算新行（#102 的①和②之外）。
+    knownIdsRef.current = new Set(batch.map((entry) => entry.id))
+    newLinesRef.current = 0
     setRows(() => batch.reduce(pushEntry, [] as LedgerRow[]))
     showStage(batch.length === 0 ? '没有识别到聊天内容' : `已刷新 ${batch.length} 条`, 1500)
   }, [showStage])
@@ -206,6 +244,7 @@ export function App(): JSX.Element {
   const collapsed = status.collapsed && !status.panelOpen
   return (
     <div
+      ref={rootRef}
       id="root-inner"
       data-locked={status.locked ? 'true' : 'false'}
       data-collapsed={collapsed ? 'true' : 'false'}
