@@ -950,6 +950,25 @@ check('入口：任一告警就出现', machineCheckOffer([false, true, null]).s
 check('入口：文案只有一处定义', machineCheckOffer([true]).label === MACHINE_CHECK_LABEL && MACHINE_CHECK_LABEL === '看这台机器')
 check('入口：不出现时 hint 也说清为什么', machineCheckOffer([false]).hint.includes('不出现'))
 
+// —— 供应商失败矩阵（#86）：每类各有各的话与自己的重试节奏 ——
+const { judgeProviderFailure, failureLine, failuresDistinct, parseRetryAfter } = await import(
+  '../src/shared/provider-failure.ts'
+)
+{
+  const auth = judgeProviderFailure({ status: 401, message: 'HTTP 401 Invalid API key' })
+  const limited = judgeProviderFailure({ status: 429, message: 'HTTP 429', retryAfter: '7' })
+  const server = judgeProviderFailure({ status: 503, message: 'HTTP 503' })
+  const timeout = judgeProviderFailure({ message: 'aborted', timedOut: true })
+  check('失败：key 错，重试没用（换直连）', auth.retry === 'no' && auth.kind === 'auth')
+  check('失败：限流按 Retry-After 等 7 秒', limited.kind === 'rate-limit' && limited.retryAfterMs === 7000)
+  check('失败：5xx 隔 3 秒再试', server.kind === 'server' && server.retryAfterMs === 3000)
+  check('失败：超时 1.5 秒就能再试', timeout.kind === 'timeout' && timeout.retryAfterMs === 1500)
+  check('失败：四类文案互不相同', failuresDistinct([auth, limited, server, timeout]))
+  check('失败：Retry-After 认不出时返回 null', parseRetryAfter('later') === null)
+  check('失败：三类节奏确实不同', new Set([auth.retry, limited.retry, timeout.retry]).size === 3)
+  check('失败：那句话里带下一步动作', failureLine(auth).includes('重新填'))
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

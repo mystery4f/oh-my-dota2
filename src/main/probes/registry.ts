@@ -34,6 +34,7 @@ import { runSettingsBundleProbe } from './settings-bundle'
 import { runBuildInfoProbe } from './build-info'
 import { runLogsIsolationProbe } from './logs-isolation'
 import { runErrorLogProbe } from './error-log'
+import { runProviderFailureProbe } from './provider-failure'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runOverlayA11yProbe } from './overlay-a11y'
 import { runProviderReasoningProbe } from './provider-reasoning'
@@ -218,6 +219,13 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the local error list: what counts as one, how repeats merge, and the line the panel reads',
     run: runErrorLogProbe
+  },
+  {
+    flag: '--provider-failure-probe',
+    ci: true,
+    summary:
+      'provider failures: timeout, rate limit, bad key and wrong model each get their own sentence and their own retry cadence',
+    run: runProviderFailureProbe
   },
   {
     flag: '--logs-isolation-probe',

@@ -34,6 +34,12 @@ The AI provider seam lives in `src/main/services/providers/`: `openai-compat.ts`
 live in `SYSTEM_PROMPTS`) plus `chatCompletion` / `translateText`; the voice-chain summary type
 is `VoiceChainSummary` in `src/shared/ipc.ts`. Read these shapes before calling the provider —
 guessing the fields costs a rework round.
+Provider failures are classified once, in `src/shared/provider-failure.ts` (`judgeProviderFailure`
+→ `{kind, title, hint, retry, retryAfterMs}`): a thrown `ProviderRequestError` carries that object,
+and `failureLine()` is the sentence the panel, the overlay hint and the log all print — never hand
+a raw `模型服务返回 HTTP …` to a user, and never let one sentence cover auth, rate limit and timeout.
+Retry cadence follows the class (auth/model-missing: `no`, so `durable-translator` keeps the direct
+path for 30 s; timeout/network: back to the session after 1.5–2 s; 429: honour `Retry-After`).
 ## Commands
 
 - `npm run dev` — dashboard with hot reload (app name `oh-my-dota2`)

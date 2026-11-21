@@ -905,3 +905,11 @@
 - 真凶（2026-11-10 晚定位）：不是合成也不是往虚拟声卡播放，而是**按住 F6 时 Dota 自己开麦**——面板「测试模式」（只放音频、不按说话键）下完全不卡，一开正常模式就卡。Dota 的 `G:\steam\userdata\<id>\570\local\cfg\machine_convars.vcfg` 里 `snd_mixahead` 是 `0.001`（1 毫秒缓冲），开麦那一下的设备初始化就足以让音频线程欠载，表现就是整片静音再回来；同文件还有 `snd_ducktovolume 0.55` + `snd_duckerreleasetime 2.5`（语音活跃时把游戏音量压到 55%，2.5 秒才恢复）。
 - 修法（游戏侧，不需要改 app）：`D:\SteamLibrary\steamapps\common\dota 2 beta\game\dota\cfg\autoexec.cfg` 末尾加 `snd_mixahead "0.05"`、`snd_ducktovolume "1"`、`snd_duckerreleasetime "2.5"`。用户在控制台先试 `snd_mixahead 0.05`，回「好像可以了」。
 - 还可以再省一大笔：sovits 的 api_v2 常驻 2.8 GB 显存，不在说话时也不还；`dwm.exe` 3.8 GB 需要单独查（浮层收起后是否回落）。
+
+### 同一句「翻译失败」盖住了三类完全不同的毛病（#86）
+
+- 症状：对局里译文突然开始直连兜底，界面与日志只有一句「翻译失败」，用户不知道是 key 错了、服务商限流、还是网络抖了一下。三件事的下一步动作完全不同（改 key / 等一会 / 直接再试），一句泛化文案等于什么都不说。
+- 根因：`src/main/services/providers/openai-compat.ts` 里所有失败都走同一个 `throw new Error('模型服务返回 HTTP …')`；`durable-translator` 的失败冷却又是一个定值 `RETRY_AFTER_MS = 30_000`——所以 429 之后整整 30 秒不去试会话层（白多付直连钱），而 key 错了反而每句都撞一次 401。
+- 修法：`src/shared/provider-failure.ts` 一处判定（`no-key / auth / rate-limit / model-missing / timeout / network / server / bad-response / empty / unknown`），每类自带 `title + hint + retry + retryAfterMs`；`chatCompletion` 抛 `ProviderRequestError`（带 `failure`，`message` 就是 `failureLine()`）；`durable-translator` 的冷却改读每类的 `retryAfterMs`，`retry === 'no'` 的仍锁 30 秒直连。
+- 两个容易判错的细节：Chromium 网络栈报的是 `net::ERR_CONNECTION_REFUSED`（下划线），Node 侧才是 `fetch failed: ECONNREFUSED`——只认后者会把「连不上」归成「原因不明」；超时必须用 `timedOut: err instanceof DOMException || /abort/i` 在 fetch 那一层判，到了上层只剩一句 `aborted`，分不出是超时还是用户取消。
+- 验收：`npm run probe -- --provider-failure-probe`（19 条，含一条真连 `127.0.0.1:9` 的失败分类）；纯侧另有 8 条在 `scripts/check-pure.mjs`。

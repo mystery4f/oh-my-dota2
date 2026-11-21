@@ -38,6 +38,7 @@ import {
 import { reportGuardEvent } from './guard-telemetry'
 
 import { latencySummary, trackLatency, type LatencySummary } from './translator-latency'
+import { failureLine, judgeProviderFailure } from '@shared/provider-failure'
 /** Longest block sent to the model in one submission; longer ticks are split. */
 const BLOCK_LIMIT = 8
 /** A reasoning model can spend several seconds per answer; anything past this is a stall. */
@@ -108,6 +109,8 @@ let opening: Promise<SessionRuntime> | null = null
 let lastFallback: string | null = null
 let failedAt = 0
 let failedReason: string | null = null
+/** 本次失败对应的直连兜底窗口（毫秒），由失败分类决定。 */
+let failedWaitMs = RETRY_AFTER_MS
 let lastRaw: string | null = null
 const turns = new Map<string, number>()
 
@@ -512,9 +515,17 @@ function isEcho(source: string, output: string): boolean {
   return a.length > 0 && a === normalizeLine(output)
 }
 
+/**
+ * 记一次失败，并按失败的种类决定「直连要顶多久」（#86）。
+ *
+ * 以前一律 30 秒：限流 429 其实几秒后就该再试会话层（能省一次直连），
+ * 而 key 错这种重试没用的，反而应该长时间留在直连上，别每秒去撞一次 401。
+ */
 function noteFailure(reason: string): void {
+  const failure = judgeProviderFailure({ message: reason })
   failedAt = Date.now()
-  failedReason = reason
+  failedReason = failureLine(failure)
+  failedWaitMs = failure.retry === 'no' ? RETRY_AFTER_MS : (failure.retryAfterMs ?? RETRY_AFTER_MS)
 }
 
 const CAPTURE_BUDGETS = { warm: CAPTURE_WARM_TIMEOUT_MS, cold: CAPTURE_COLD_TIMEOUT_MS }
@@ -649,7 +660,7 @@ export async function translateLine(
     if (hit.tone !== tone) console.log('TRANSLATE_CACHE_CROSS_TONE', { want: tone, got: hit.tone })
     return hit.value
   }
-  const cooling = failedReason !== null && Date.now() - failedAt < RETRY_AFTER_MS
+  const cooling = failedReason !== null && Date.now() - failedAt < failedWaitMs
   // 关掉思考后模型偶尔会把原文原样吐回（多半是历史里混进了同样的回声）。
   // 只对非中文方向判定：中文行本来就该原样返回。
   const sessionAttempt = async (): Promise<string> => {
@@ -806,7 +817,7 @@ async function translateBlockwise(
 ): Promise<string[]> {
   if (texts.length === 0) return []
   const startedAt = Date.now()
-  const cooling = failedReason !== null && Date.now() - failedAt < RETRY_AFTER_MS
+  const cooling = failedReason !== null && Date.now() - failedAt < failedWaitMs
   if (!cooling) {
     try {
       const output: string[] = []
