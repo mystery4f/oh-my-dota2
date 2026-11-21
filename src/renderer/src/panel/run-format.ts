@@ -38,7 +38,12 @@ export function runStamp(run: TrainRunRecord): string {
   return sameDay ? hhmm : `${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')} ${hhmm}`
 }
 
-export function runHint(run: TrainRunRecord): string {
+/**
+ * `includeError` 默认 true：这是给「只有 `runHint()` 这一处说失败原因」的页面用的（音色训练页）。
+ * 识别训练页改成显示 `judgeRunOutcome(run).line`（#171）之后传 `false`——同一句只出一个地方，
+ * 而不是两处都拼一遍。
+ */
+export function runHint(run: TrainRunRecord, opts: { includeError?: boolean } = {}): string {
   const parts: string[] = [runStamp(run)]
   // ASR 微调的一行摘要先说开训口径：与面板上「增量微调 / 全量重训」两个按钮同名，扫历史时对得上。
   if (run.kind === 'asr-ft' && run.params.mode) {
@@ -50,7 +55,7 @@ export function runHint(run: TrainRunRecord): string {
     if (run.metrics.lastLoss !== null) parts.push(`loss ${run.metrics.lastLoss.toFixed(4)}`)
   }
   parts.push(formatDuration(runElapsedMs(run)))
-  if (run.error) parts.push(run.error)
+  if (opts.includeError !== false && run.error) parts.push(run.error)
   return parts.join(' · ')
 }
 

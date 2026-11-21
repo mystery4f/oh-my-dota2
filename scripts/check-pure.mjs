@@ -19,6 +19,7 @@ registerHooks({ resolve: pureResolve })
 const { gradeAsrCheck, gradeSpoken, summarizeAsrCheck } = await import('../src/shared/train/asr-check.ts')
 const { formatCer, measureCer, normalizeSpoken, rankByCer, summarizeCer, summarizeCerByCohort } = await import('../src/shared/train/cer.ts')
 const { FT_TARGET_STEPS, deriveFtEpochsFor, deriveFtResumeEpochs } = await import('../src/shared/train/asr-ft.ts')
+const { judgeRunOutcome, RUN_OUTCOMES } = await import('../src/shared/train/outcome.ts')
 const { DEVICE_ID_PLACEHOLDER, maskLogText, wantedLogFiles } = await import('../src/shared/log-bundle.ts')
 const { filterHistory, historyCopyText } = await import('../src/shared/overlay-ledger.ts')
 const { judgeDownloadFailure } = await import('../src/shared/download-failure.ts')
@@ -1212,6 +1213,52 @@ check(
   ].every(Boolean))
   const failed = helmChainLine({ latest: { ...base, matchid: '7600111222', stage: 'voice-out', error: 'x'.repeat(200) }, snapshotMatchId: '7600111222' })
   check('一句话链：失败原因截断到一句（≤96 字）', failed.failure !== null && failed.failure.length <= 96, String(failed.failure?.length))
+}
+
+// —— 训练结局的同一判据（#171）：七个取值各一例，判不出来就不许说 ——
+{
+  const run = (over = {}) => ({
+    id: 'r1',
+    kind: 'asr-ft',
+    experiment: 'ft-1',
+    status: 'trained',
+    startedAt: 1,
+    endedAt: 2,
+    applied: false,
+    error: null,
+    params: { epochs: 5 },
+    data: { files: 10 },
+    artifacts: {},
+    metrics: { steps: 100, epochs: 5, bestLoss: 1, lastLoss: 1, series: [] },
+    audition: null,
+    auditionSkip: null,
+    ...over
+  })
+  const v = (over) => judgeRunOutcome(run(over))
+  const running = v({ status: 'running' })
+  const stopped = v({ status: 'stopped' })
+  const failed = v({ status: 'failed', error: '训练脚本退出码 1：CUDA out of memory（已用 6.7 / 8.2 GB）' })
+  const applied = v({ status: 'trained', applied: true, audition: { rows: [] } })
+  const awaiting = v({ status: 'trained' })
+  // 早停只在「试听这条线已经走完」之后才轮得到判（否则先命中「待试听」），所以这里带一个跳过记录。
+  const early = v({ auditionSkip: { kind: 'manual', at: 1 }, metrics: { steps: 60, epochs: 3, bestLoss: 1, lastLoss: 1, series: [] } })
+  const plain = v({ auditSkip: null, kind: 'gv-gpt', audition: null, auditionSkip: null })
+  check('结局：五个 status 与四种收场都有归属，七个取值全覆盖',
+    RUN_OUTCOMES.length === 7 &&
+      [running.outcome, stopped.outcome, failed.outcome, applied.outcome, awaiting.outcome, early.outcome, plain.outcome]
+        .join(',') === 'running,stopped,failed,applied,awaiting-audition,early-stop,trained',
+    [running.outcome, stopped.outcome, failed.outcome, applied.outcome, awaiting.outcome, early.outcome, plain.outcome].join(','))
+  check('结局：evidence 说得清判据来自哪个字段',
+    running.evidence === 'status=running' && early.evidence === 'metrics.epochs=3 < params.epochs=5',
+    `${running.evidence} | ${early.evidence}`)
+  check('结局：老行没有 params.epochs 一律落 trained，绝不判早停',
+    judgeRunOutcome(run({ params: {}, auditionSkip: { kind: 'auto', at: 1 }, metrics: { steps: 3, epochs: 1, bestLoss: 1, lastLoss: 1, series: [] } })).outcome === 'trained',
+    '')
+  check('结局：failed 的 line 与 run.error 逐字节相同（含中文与括号）',
+    failed.line === '训练脚本退出码 1：CUDA out of memory（已用 6.7 / 8.2 GB）' && failed.line === run({ status: 'failed', error: failed.line }).error,
+    String(failed.line.length))
+  check('结局：已转正优先于待试听（转正后不该再等试听）', applied.outcome === 'applied', applied.outcome)
+  check('结局：ASR 训完且两种试听记录都为空才算待试听', awaiting.outcome === 'awaiting-audition' && v({ auditionSkip: { kind: 'manual' } }).outcome === 'trained', awaiting.outcome)
 }
 
 if (failed > 0) {

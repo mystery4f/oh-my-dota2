@@ -9,15 +9,24 @@ import { runHint, runTone, runTitle } from '../run-format'
 export function RunRow({
   run,
   flush,
-  action
+  action,
+  outcomeLine
 }: {
   run: TrainRunRecord
   action?: React.ReactNode
   flush?: boolean
+  /**
+   * 「这一轮到底怎样」的一句话（#171，来自 `judgeRunOutcome()`）。
+   *
+   * 传了就在这里显示，并且让 `runHint()` 不再拼 `run.error`——同一句只出一个地方。
+   * 不传的页面（音色训练）输出逐字节不变。
+   */
+  outcomeLine?: string
 }): React.ReactElement {
   return (
-    <Row flush={flush} label={runTitle(run)} hint={runHint(run)}>
+    <Row flush={flush} label={runTitle(run)} hint={runHint(run, { includeError: !outcomeLine })}>
       <StatusPill tone={runTone(run.status)}>{runStatusLabel(run.status)}</StatusPill>
+      {outcomeLine ? <span className="text-xs text-muted-foreground">{outcomeLine}</span> : null}
       {action}
     </Row>
   )

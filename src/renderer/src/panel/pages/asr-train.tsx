@@ -25,6 +25,7 @@ import { Modal } from '../components/modal'
 import { AsrCheckDialog } from '../components/asr-check-dialog'
 import { ScriptEditor } from '../components/script-editor'
 import { PreflightList, RunRow, Sparkline } from '../components/run-view'
+import { judgeRunOutcome } from '@shared/train/outcome'
 import { TrainTaskRow } from '../components/train-task-row'
 import { TrainLogBox } from '../components/train-log-box'
 import { useTrainConsole } from '../use-train-console'
@@ -792,7 +793,7 @@ export function AsrTrainPage(): React.ReactElement {
                       <Group label="最近训练">
                         {runs.slice(0, 3).map((run) => (
                           <div key={run.id}>
-                            <RunRow run={run} />
+                            <RunRow run={run} outcomeLine={judgeRunOutcome(run).line} />
                             <Sparkline run={run} />
                           </div>
                         ))}
