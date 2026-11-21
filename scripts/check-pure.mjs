@@ -333,6 +333,30 @@ check('诊断包：译文与句子不被动（只换身份键）', maskLogText('
 check('诊断包：没有身份字段的那份不算脱敏', !maskLogText('{"grabMs":18}', true).masked)
 check('诊断包：显式关掉时原文保留', maskLogText('{"name":"小明"}', false).text === '{"name":"小明"}')
 check(
+  '诊断包：pretty JSON 的昵称也换掉，排版不动',
+  (() => {
+    const out = maskLogText('{\n  "name": "张三"\n}', true)
+    return out.masked && !out.text.includes('张三') && out.text.includes('"name": "玩家1"') && out.text.includes('\n')
+  })()
+)
+check(
+  '诊断包：键名大小写不同也换',
+  (() => {
+    const out = maskLogText('{"Name":"王五"}', true)
+    return out.masked && !out.text.includes('王五')
+  })()
+)
+check(
+  '诊断包：跨文件共用一张编号表，同一个人还是同一个号',
+  (() => {
+    const shared = new Map()
+    return (
+      maskLogText('{"name":"赵六"}', true, shared).text.includes('玩家1') &&
+      maskLogText('{"nick":"赵六"}', true, shared).text.includes('玩家1')
+    )
+  })()
+)
+check(
   '诊断包：只收表里点名的文件，顺序按表',
   wantedLogFiles(['voice-chain.jsonl', 'nope.txt', 'inplace.log']).map((f) => f.name).join(',') ===
     'inplace.log,voice-chain.jsonl'

@@ -58,6 +58,8 @@ export async function exportLogBundle(options: LogBundleOptions = {}): Promise<L
     const entries: ZipEntry[] = []
     const files: LogBundleFile[] = []
     const missing: string[] = []
+    // 一个包一张编号表：同一个人在每个文件里都是同一个「玩家N」（#139）
+    const aliases = new Map<string, string>()
     for (const wanted of LOG_BUNDLE_FILES) {
       const full = join(logsDir, wanted.name)
       if (!existsSync(full)) {
@@ -65,7 +67,7 @@ export async function exportLogBundle(options: LogBundleOptions = {}): Promise<L
         continue
       }
       const raw = await readFile(full)
-      const masked = maskLogText(raw.toString('utf8'), wanted.mask && mask)
+      const masked = maskLogText(raw.toString('utf8'), wanted.mask && mask, aliases)
       const data = Buffer.from(masked.text, 'utf8')
       entries.push({ name: wanted.name, data })
       files.push({ name: wanted.name, bytes: raw.length, masked: masked.masked })

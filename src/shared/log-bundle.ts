@@ -53,9 +53,19 @@ export function nicknameAlias(index: number): string {
 /** 设备 id 的占位：长度与真 id 无关，免得从占位里反推 id 长度。 */
 export const DEVICE_ID_PLACEHOLDER = '********'
 
-const NICK_RE = /"(name|nick)":"((?:[^"\\]|\\.)*)"/g
-const MIC_RE = /"mic":"((?:[^"\\]|\\.)*)\|([A-Za-z0-9_-]{1,8})"/g
-const DEVICE_RE = /"(deviceId|device_id)":"((?:[^"\\]|\\.)*)"/g
+/**
+ * 三个键的匹配（#139）：键名不分大小写、冒号两边可以有空格、键的引号里可以有空格。
+ *
+ * 以前只认 `"name":"张三"` 这一种紧凑小写形状，于是 pretty-print 的
+ * `  "name": "张三",` 和 `{"Name":"王五"}` 原样漏出去，而 manifest 还写 `masked: false`
+ * （那本来是「这份里没有身份字段」的意思）——包交出去，人以为已经脱敏了。
+ *
+ * 捕获组 1 是「键加上它的冒号与空白」，替换时原样吐回去，只换值：
+ * 这样 pretty 日志的排版不改，脱敏后的包仍然能当证据看。
+ */
+const NICK_RE = /("\s*(?:name|nick)\s*"\s*:\s*)"((?:[^"\\]|\\.)*)"/gi
+const MIC_RE = /("\s*mic\s*"\s*:\s*)"((?:[^"\\]|\\.)*)\|([A-Za-z0-9_-]{1,8})"/gi
+const DEVICE_RE = /("\s*(?:deviceId|device_id)\s*"\s*:\s*)"((?:[^"\\]|\\.)*)"/gi
 
 /**
  * 一行里的身份字段换成占位。
@@ -65,22 +75,22 @@ const DEVICE_RE = /"(deviceId|device_id)":"((?:[^"\\]|\\.)*)"/g
  * 任意字符串都当身份去换，会把译文和句子一起毁掉，那时这份包就没有证据价值了。
  */
 export function maskLogLine(line: string, aliases: Map<string, string>): string {
-  let out = line.replace(NICK_RE, (whole, key: string, value: string) => {
+  let out = line.replace(NICK_RE, (whole, prefix: string, value: string) => {
     if (!value) return whole
     let alias = aliases.get(value)
     if (alias === undefined) {
       alias = nicknameAlias(aliases.size + 1)
       aliases.set(value, alias)
     }
-    return `"${key}":"${alias}"`
+    return `${prefix}"${alias}"`
   })
-  out = out.replace(MIC_RE, (whole, label: string, id: string) => {
+  out = out.replace(MIC_RE, (whole, prefix: string, label: string, id: string) => {
     if (!id) return whole
-    return `"mic":"${label}|${DEVICE_ID_PLACEHOLDER}"`
+    return `${prefix}"${label}|${DEVICE_ID_PLACEHOLDER}"`
   })
-  out = out.replace(DEVICE_RE, (whole, key: string, value: string) => {
+  out = out.replace(DEVICE_RE, (whole, prefix: string, value: string) => {
     if (!value || value === DEVICE_ID_PLACEHOLDER) return whole
-    return `"${key}":"${DEVICE_ID_PLACEHOLDER}"`
+    return `${prefix}"${DEVICE_ID_PLACEHOLDER}"`
   })
   return out
 }
@@ -88,10 +98,17 @@ export function maskLogLine(line: string, aliases: Map<string, string>): string 
 /**
  * 整份日志的脱敏结果。`masked` 决定 manifest 怎么写字：false 表示这份里没有身份字段，
  * 不是「忘了脱敏」——探针分得开这两种情况。
+ *
+ * `shared` 是跨文件的编号表：一个包里同一局同一个人，在 gsi-chat、voice-chain 里必须都是「玩家1」，
+ * 所以导出时只建一张表、每个文件都用它。不传就是单文件用（旧调用行为不变）。
  */
-export function maskLogText(text: string, enabled: boolean): { text: string; masked: boolean } {
+export function maskLogText(
+  text: string,
+  enabled: boolean,
+  shared?: Map<string, string>
+): { text: string; masked: boolean } {
   if (!enabled || !text) return { text, masked: false }
-  const aliases = new Map<string, string>()
+  const aliases = shared ?? new Map<string, string>()
   let masked = false
   const lines = text.split('\n')
   for (let i = 0; i < lines.length; i++) {

@@ -92,6 +92,33 @@ export async function runLogBundleProbe(): Promise<void> {
     push('没有身份字段的那份不算脱敏（manifest 说没换就是没换）', !plain.masked && plain.text.includes('"grabMs":18'), `masked=${plain.masked}`)
     const off = maskLogText(CHAT, false)
     push('显式关掉脱敏时原文保留', !off.masked && off.text === CHAT, `len=${off.text.length}`)
+
+    // —— #139：不在紧凑小写形状里的身份字段也必须换掉 ——
+    const pretty = maskLogText('{\n  "name": "张三",\n  "text": "hello"\n}\n', true)
+    push(
+      'pretty JSON（键后有空格）也脱敏，排版不动',
+      pretty.masked && !pretty.text.includes('张三') && pretty.text.includes('"name": "玩家1"') && pretty.text.includes('\n  "text": "hello"'),
+      pretty.text.replace(/\n/g, '\\n')
+    )
+    const upper = maskLogText('{"Name":"王五"}\n', true)
+    push('键名大小写不同也脱敏', upper.masked && !upper.text.includes('王五'), `masked=${upper.masked}`)
+    const spacedMic = maskLogText('{"mic": "麦克风 (Realtek)|device01"}\n', true)
+    push(
+      'mic 两边带空格也换成占位',
+      spacedMic.masked && !spacedMic.text.includes('device01') && spacedMic.text.includes('麦克风 (Realtek)|'),
+      spacedMic.text.trim()
+    )
+    const shared = new Map<string, string>()
+    const firstFile = maskLogText('{"name":"赵六"}\n', true, shared)
+    const secondFile = maskLogText('{"nick":"赵六"}\n', true, shared)
+    push(
+      '跨文件共用编号表：同一个名字在另一份里还是同一个号',
+      firstFile.text.includes('玩家1') &&
+        secondFile.text.includes('玩家1') &&
+        !secondFile.text.includes('玩家2') &&
+        maskLogText('{"name":"别人的名字"}\n', true, shared).text.includes('玩家2'),
+      `${firstFile.text.trim()} | ${secondFile.text.trim()}`
+    )
     push(
       '只收表里点名的文件，且按表里顺序',
       wantedLogFiles(['voice-chain.jsonl', 'not-a-log.txt', 'gsi-chat.jsonl']).map((f) => f.name).join(',') ===
