@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { LogBundleResult, UpdateState } from '@shared/ipc'
 import type { BuildInfo } from '@shared/build-info'
 import { ERROR_KIND_LABEL, errorsLine, type ErrorSummary } from '@shared/error-log'
+import { catalogLine, type ProbeCatalog } from '@shared/probe-catalog'
 import type { HalfDuplexSnapshot } from '@shared/half-duplex'
 import { marksLine, type TranslationMarkSummary } from '@shared/translation-mark'
 import {
@@ -43,6 +44,8 @@ export function AboutPage(): React.ReactElement {
   // #129：半双工守卫丢了多少段。测试退回时指出的正是「收工后查不了今晚丢没丢」。
   const [halfDuplex, setHalfDuplex] = useState<HalfDuplexSnapshot | null>(null)
   const [marks, setMarks] = useState<TranslationMarkSummary | null>(null)
+  // #112：探针清单只列不跑，跑请用命令行（探针要单实例锁且跑完自己退出应用）。
+  const [catalog, setCatalog] = useState<ProbeCatalog | null>(null)
 
   useEffect(() => {
     void window.api.appVersion().then(setVersion)
@@ -54,6 +57,7 @@ export function AboutPage(): React.ReactElement {
     void window.api.translationMarks().then(setMarks)
     // 半双工记账（#129）：跨对局累计，进页面读一次就够。
     void window.api.voiceHalfDuplex().then(setHalfDuplex)
+    void window.api.probeCatalog().then(setCatalog)
     return window.api.onUpdateStatus(setState)
   }, [])
 
@@ -135,6 +139,24 @@ export function AboutPage(): React.ReactElement {
             <StatusPill tone={halfDuplex.dropped === 0 ? 'ready' : 'warn'}>
               {halfDuplex.dropped === 0 ? '没丢过' : `丢了 ${halfDuplex.dropped} 段`}
             </StatusPill>
+          )}
+        </Row>
+        <Row
+          label="探针清单"
+          hint={
+            catalog === null
+              ? '正在读探针登记表'
+              : `${catalogLine(catalog)} · 面板里只列清单不跑：探针要拿单实例锁、跑完自己退出应用，命令在提示里`
+          }
+          stacked
+        >
+          {catalog === null ? null : (
+            <span className="text-xs text-muted-foreground">
+              {catalog.entries
+                .filter((entry) => entry.readOnly)
+                .map((entry) => entry.flag)
+                .join(' · ')}
+            </span>
           )}
         </Row>
         <Row

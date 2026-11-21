@@ -19,6 +19,7 @@
  * fail so the fallback warning row on 识别训练 is visible.
  */
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type VoiceChainSummary, type WindowApi } from '@shared/ipc'
+import { catalogOf } from '@shared/probe-catalog'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 import type { OverlayFontSize } from '@shared/overlay-a11y'
 import { ASR_ENGINE_LIST, type AsrEngineSpec } from '@shared/asr/engines'
@@ -568,6 +569,13 @@ const implemented = {
         ])
       : summarizeErrors([]),
   // 译文抽检（#87）：`?marks=1` 造三条样本，让「好评率」那一行在预览里看得见。
+  probeCatalog: async () =>
+    catalogOf([
+      { flag: '--gsi-dump-report', summary: '读对局摘要', readOnly: true },
+      { flag: '--match-report', summary: '折叠一局', readOnly: true },
+      { flag: '--hotkey-probe', summary: '热键表', readOnly: true },
+      { flag: '--gsi-dump', summary: '打印所有字段路径' }
+    ]),
   translationMarks: async () =>
     summarizeMarks(
       query.get('marks') === '1'

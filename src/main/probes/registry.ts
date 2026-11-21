@@ -78,6 +78,7 @@ import { runAsrRoutingProbe } from './asr-routing'
 import { runAsrSwitchProbe } from './asr-switch'
 import { runTranslationMarkProbe } from './translation-mark'
 import { runReplayStarProbe } from './replay-star'
+import { runProbeCatalogProbe } from './probe-catalog'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
 import { runSpeechQueueProbe } from './speech-queue'
@@ -113,6 +114,14 @@ export interface ProbeEntry {
    * 加一个进 CI 的探针只改这一行。
    */
   ci?: true
+  /**
+   * 只读探针：只读用户数据/临时目录，不写用户数据、不占端口与音频设备（#112）。
+   *
+   * 面板「关于 → 诊断」列出这些；**跑不了**——探针进程要拿单实例锁，而且跑完自己
+   * `app.exit()`，所以应用开着的时候只能在面板里看清单，跑请用 `npm run probe -- <flag>`。
+   * 没标这一位的（要独占端口/设备，或会写真实日志）连跑都不该想。
+   */
+  readOnly?: true
 }
 
 export const PROBES: readonly ProbeEntry[] = [
@@ -145,6 +154,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--tts-pipeline-probe',
     ci: true,
+    readOnly: true,
     summary: 'the synthesis→delivery pipeline behind `speakPipeline` with fake injected engines',
     run: runTtsPipelineProbe
   },
@@ -156,6 +166,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--chat-block-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the pure line rules: `renderChatLine`/`withChatBody` round trip, translate-or-not, and the nickname regression',
     run: runChatBlockProbe
@@ -179,12 +190,14 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--sovits-refs-probe',
     ci: true,
+    readOnly: true,
     summary: 'the sovits reference library reader (`listSovitsRefs`) against temp fixtures',
     run: runSovitsRefsProbe
   },
   {
     flag: '--sovits-voicepack-probe',
     ci: true,
+    readOnly: true,
     summary: 'the voice pack pipeline with zero network and zero engine: plan, install, state, delete',
     run: runSovitsVoicepackProbe
   },
@@ -198,23 +211,27 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--gsi-dump-report',
     summary: 'reads the summary the app writes while it plays (`logs/gsi-summary.json`)',
     realLogs: true,
+    readOnly: true,
     run: runGsiFramesReportProbe
   },
   {
     flag: '--match-report',
     summary: 'folds one match out of the GSI log: unique lines vs raw frames, channel mix, game time',
     realLogs: true,
+    readOnly: true,
     run: runMatchReportProbe
   },
   {
     flag: '--translate-cache-probe',
     ci: true,
+    readOnly: true,
     summary: 'the translation ledger stores one pair per translation and answers in both directions',
     run: runTranslateCacheProbe
   },
   {
     flag: '--translate-guard-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the fidelity guard telemetry: blocked / recovered / gaveUp counts, dirty jsonl lines, and one batched write',
     run: runTranslateGuardProbe
@@ -222,6 +239,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--minimap-probe',
     ci: true,
+    readOnly: true,
     summary:
       'minimap hero dots: cost per frame and correct clustering on a synthetic frame — accuracy stays unmeasured without labelled screenshots',
     realLogs: true,
@@ -230,30 +248,35 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--error-log-probe',
     ci: true,
+    readOnly: true,
     summary: 'the local error list: what counts as one, how repeats merge, and the line the panel reads',
     run: runErrorLogProbe
   },
   {
     flag: '--shadow-voice-probe',
     ci: true,
+    readOnly: true,
     summary: 'the first-match shadow: it never speaks, it records what would have been said, and it ends after one match',
     run: runShadowVoiceProbe
   },
   {
     flag: '--speech-split-probe',
     ci: true,
+    readOnly: true,
     summary: 'both split strategies on the same line, no character ever lost, and the panel preview is the same function the pipeline uses',
     run: runSpeechSplitProbe
   },
   {
     flag: '--speak-mute-probe',
     ci: true,
+    readOnly: true,
     summary: 'muting one speaker by hero or seat name, without silencing anybody else, and the list survives a restart',
     run: runSpeakMuteProbe
   },
   {
     flag: '--provider-failure-probe',
     ci: true,
+    readOnly: true,
     summary:
       'provider failures: timeout, rate limit, bad key and wrong model each get their own sentence and their own retry cadence',
     run: runProviderFailureProbe
@@ -261,12 +284,14 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--logs-isolation-probe',
     ci: true,
+    readOnly: true,
     summary: 'a probe process writes its logs to a temp dir, never into the user data directory',
     run: runLogsIsolationProbe
   },
   {
     flag: '--first-run-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the first-run checklist: six steps, what counts as evidence in each, and why the last one needs the real game',
     run: runFirstRunProbe
@@ -274,6 +299,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--match-attribution-probe',
     ci: true,
+    readOnly: true,
     summary:
       'which match a row belongs to: one archive per match, the live summary holding only the current one, null instead of a guessed id, and every synthetic row confined to a temp logs dir',
     run: runMatchAttributionProbe
@@ -281,6 +307,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--hotword-candidates-probe',
     ci: true,
+    readOnly: true,
     summary:
       'hotword candidates from corrections: only >=2-char diffs enter the pool, sorting by count, explicit merge, full table never silently drops',
     run: runHotwordCandidatesProbe
@@ -288,6 +315,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--build-info-probe',
     ci: true,
+    readOnly: true,
     summary:
       'build freshness (ticket 113): an unreadable artifact says so instead of claiming fresh, a packaged build only reports its time, and a source newer than the artifact by more than the 2 s slack is named stale with the one command that fixes it',
     run: runBuildInfoProbe
@@ -295,6 +323,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--settings-bundle-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the settings bundle (ticket 81): export writes settings plus the training index into one zip with every key field blanked out, import restores each setting but keeps the local API key and proxy, and a partial or mismatched archive is refused before a single field is written',
     run: runSettingsBundleProbe
@@ -302,6 +331,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--clause-plan-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the clause-stream plan (ticket 71): the transcript is split into clauses, the first clause is translated and spoken before the rest, delivery keeps the original order even when a later clause translates faster, and a clause that fails translation or synthesis is skipped without touching the others',
     run: runClausePlanProbe
@@ -309,6 +339,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--interpret-leg-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the interpretation leg (ticket 128): an empty recognition or translation never reaches the game mic, the chosen game-mic device wins over the output device, the leg never presses the talk key and never replays the translation locally, and with the mode off the recorded chain meta is unchanged',
     run: runInterpretLegProbe
@@ -328,12 +359,14 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--overlay-geometry-probe',
     ci: true,
+    readOnly: true,
     summary: "pure arithmetic of the overlay's geometry, hint priority, state reduction and unread counting",
     run: runOverlayGeometryProbe
   },
   {
     flag: '--overlay-a11y-probe',
     ci: true,
+    readOnly: true,
     summary: 'every overlay text pair clears AA against its own backdrop, the three font steps fit the minimum window, and no state is told apart by colour alone',
     run: runOverlayA11yProbe
   },
@@ -345,6 +378,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--download-probe',
     ci: true,
+    readOnly: true,
     summary: 'a download that drops mid-way resumes from the partial file, a source ignoring Range restarts clean, and a bad mirror falls through with the one actually used named in the log',
     run: runDownloadProbe
   },
@@ -361,18 +395,21 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--voice-out-probe',
     ci: true,
+    readOnly: true,
     summary: 'the pure 声出 decision seam (`src/shared/voice-out.ts`) plus readiness reasons',
     run: runVoiceOutProbe
   },
   {
     flag: '--voice-chain-probe',
     ci: true,
+    readOnly: true,
     summary: 'the 对讲 timing account (`src/shared/voice-timing.ts` + `chain-timing.ts`), zero network',
     run: runVoiceChainProbe
   },
   {
     flag: '--log-bundle-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the diagnostic bundle (`src/shared/log-bundle.ts` + `services/zip.ts`): masking, manifest, missing files, byte-stable archive',
     run: runLogBundleProbe
@@ -380,6 +417,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--dataset-health-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the pre-training dataset health check (`src/shared/train/dataset-health.ts` + `services/train/wav-facts.ts`): duplicate lines, takes that carry no speech, missing script lines, duration distribution',
     run: runDatasetHealthProbe
@@ -387,6 +425,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--glossary-pack-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the swappable glossary pack (`src/shared/glossary-pack.ts` + `services/glossary-pack.ts`): a pack with a new hero maps both directions, a malformed pack falls back to the bundled table with the reason kept, and the active pack name is visible',
     run: runGlossaryPackProbe
@@ -394,6 +433,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--overlay-digest-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the combat-digest line (`src/shared/overlay-digest.ts`): every fragment quoted from an existing chat row (nothing invented, no model call), intent-first pick in chronological order, and the setting that hides the rows',
     run: runOverlayDigestProbe
@@ -401,6 +441,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--asr-routing-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the short/long ASR routing (`src/shared/asr-routing.ts`): short clips go to the fast engine (paraformer), long ones to the accurate one (qwen3), the rule can be switched off, and every switch is logged with its reason',
     run: runAsrRoutingProbe
@@ -408,13 +449,23 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--translation-mark-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the translation spot-check account (`src/shared/translation-mark.ts`): unmarked or untranslated lines never become samples, a re-mark replaces the earlier verdict, tallies group by provider and model, and a failed mark still speaks (ticket 87)',
     run: runTranslationMarkProbe
   },
   {
+    flag: '--probe-catalog-probe',
+    ci: true,
+    readOnly: true,
+    summary:
+      'the probe list the panel may show (`src/shared/probe-catalog.ts`): it equals the registry, read-only and exclusive are split by the marker alone, every row carries the command that actually runs it, and none claims it runs in the panel (ticket 112)',
+    run: runProbeCatalogProbe
+  },
+  {
     flag: '--replay-star-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the in-game star for the replay (`src/shared/replay-star.ts`): stars carry the match they were made in, survive the match boundary, one line starred twice counts once, and a match nobody starred reads empty rather than everything (ticket 118)',
     run: runReplayStarProbe
@@ -428,6 +479,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--mic-health-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the microphone health gate (`src/shared/mic-health.ts`): a dead or muted device is judged before the voice chain starts, a take with no frames never reaches ASR, and the level bar is a monotone RMS mapping',
     run: runMicHealthProbe
@@ -435,6 +487,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--announce-probe',
     ci: true,
+    readOnly: true,
     summary:
       'game-state announcements (src/shared/dota-announce.ts + src/main/services/voice/announce.ts): wisdom rune / Roshan window / stack and pull windows each fire exactly once per occurrence from the game clock alone, a switched-off trigger stays silent, and with the master switch off the voice pipeline is never called',
     run: runAnnounceProbe
@@ -444,6 +497,7 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the patch watch (`src/shared/patch-watch.ts`): fields the game sends that we never read, declared fields that stopped arriving once the sample is big enough, heroes the glossary cannot translate, and event types without a branch — a healthy install writes nothing and the panel line names the field or hero',
     ci: true,
+    readOnly: true,
     run: runPatchWatchProbe
   },
   {
@@ -451,6 +505,7 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the pre-promotion audition (`src/shared/train/audition.ts` + `src/main/services/train/audition.ts`): both models transcribe the identical held-out recordings, the pairs and CER are graded by one pure seam, and skipping the audition is recorded on the run row',
     ci: true,
+    readOnly: true,
     run: runFtAuditionProbe
   },
   {
@@ -458,6 +513,7 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the dataset version (`src/shared/train/dataset-version.ts`): a set of recordings gets one content-derived version, the run row keeps the version it trained on even after later takes arrive, and a row that predates the column says so instead of guessing',
     ci: true,
+    readOnly: true,
     run: runDatasetVersionProbe
   },
   {
@@ -465,6 +521,7 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the speak-device hot switch (`src/shared/voice-device-switch.ts`): a device change takes effect between segments so the playing one is never truncated, and a device that fails hands the next segment to the one that actually worked, with one sentence said out loud',
     ci: true,
+    readOnly: true,
     run: runVoiceDeviceSwitchProbe
   },
   {
@@ -472,6 +529,7 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the long-line speed rule (`src/shared/speech-rate.ts`): a line past the length threshold speaks faster up to one ceiling, a short line keeps the user rate untouched, and no input can land outside the engine-accepted range',
     ci: true,
+    readOnly: true,
     run: runSpeechRateProbe
   },
   {
@@ -479,11 +537,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the half-duplex guard (`src/shared/half-duplex.ts` + `src/main/services/voice/half-duplex.ts`): while our own audio is playing, a captured utterance is dropped and counted instead of transcribed, so interpretation mode cannot feed its own output back into ASR',
     ci: true,
+    readOnly: true,
     run: runHalfDuplexProbe
   },
   {
     flag: '--key-noun-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the post-translation key-noun check (`src/shared/key-nouns.ts`): hero and item names extracted from the source once before translating, flagged when the translation drops one — the method never rewrites the delivered text',
     run: runKeyNounProbe
@@ -491,6 +551,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--translate-direction-probe',
     ci: true,
+    readOnly: true,
     summary:
       'per-line translation direction (`src/shared/translate-direction.ts`): Han share decides zh-en vs en-zh, digits and punctuation stay out of the denominator, and a manual correction applies to that one line for the rest of the session',
     run: runTranslateDirectionProbe
@@ -498,6 +559,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--quality-report-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the weekly quality card (`src/shared/quality-report.ts`): guard counts read line for line off `logs/translate-guard.jsonl`, cache snapshots off `logs/translate-cache.jsonl`, no invented miss rate, and a missing log file reads as zero instead of an error',
     run: runQualityReportProbe
@@ -505,6 +567,7 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--speech-queue-probe',
     ci: true,
+    readOnly: true,
     summary:
       'the speech queue and barge-in stop (#88): a stop ends delivery at the current segment boundary, no later segment starts, the queue snapshot drops to zero, and the stop flag never sticks to the next utterance',
     run: runSpeechQueueProbe
@@ -527,24 +590,28 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--train-probe',
     ci: true,
+    readOnly: true,
     summary: 'the pure training decision seam (`src/shared/train.ts`): mutexes, preflight, run state',
     run: runTrainProbe
   },
   {
     flag: '--train-queue-probe',
     ci: true,
+    readOnly: true,
     summary: 'the training queue (`src/shared/train/queue.ts`): three waiting runs execute in order, and cancelling a waiting entry never reaches the running run',
     run: runTrainQueueProbe
   },
   {
     flag: '--disk-budget-probe',
     ci: true,
+    readOnly: true,
     summary: 'the pre-run disk budget (`src/shared/train/disk-budget.ts`): a short volume refuses with the measured numbers, an unmeasurable one is let through, and the estimate stays inside the stated band',
     run: runDiskBudgetProbe
   },
   {
     flag: '--train-failure-probe',
     ci: true,
+    readOnly: true,
     summary: 'the training failure diagnosis (`src/shared/train/failure-diagnosis.ts`): every known shape maps to its stage, and an unknown one keeps the raw tail instead of guessing',
     run: runTrainFailureProbe
   },
@@ -583,6 +650,7 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--voice-pack-bundle-probe',
     summary: 'the single-file voice pack: export→import round trip, and a pack missing its reference audio or prompt text is refused by name with nothing written',
     ci: true,
+    readOnly: true,
     run: runVoicePackBundleProbe
   },
   {

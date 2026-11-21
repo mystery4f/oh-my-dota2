@@ -382,6 +382,10 @@ it and nothing happened". The overlay and the pause hint print key names from th
   line the panel reads (关于 → 诊断 → 最近的错误). The hooks never swallow: Electron's own dialog still
   appears. Never let the recorder throw — a logging failure that propagates is a second incident. Renderer
   errors are not forwarded yet; that needs its own channel, not a wider hook.
+- The panel shows the probe list, it does not run probes (#112): `src/shared/probe-catalog.ts` turns the
+  registry into rows, splitting them by the `readOnly` marker alone, and every row carries the exact
+  `npm run probe -- <flag>` command. A probe needs Electron's single-instance lock and calls `app.exit()`
+  when it finishes, so running one from inside the app is impossible — no row may claim otherwise.
 - Probes never write user data (default, not a habit): `src/main/index.ts` points `logsDir()` at a fresh
   `mkdtemp` dir whenever the process was started with a probe flag, so synthetic frames and fake matchids land in
   the temp dir and vanish. A probe that genuinely needs the user's own logs declares it in the registry row —
