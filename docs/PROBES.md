@@ -97,6 +97,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--endpoint-probe` the end-of-utterance window (`src/shared/endpoint.ts`): each preset cuts at its own silence window, a preset change applies on the next recording, and a breath shorter than the minimum voiced time never ends an utterance
   - `--voice-review-probe` the edited-transcript rule (`src/shared/voice-review.ts`): an edit is what gets translated and recorded as a correction pair, while an untouched or re-cleared line behaves exactly as before
   - `--latency-board-probe` the per-provider latency board (`src/shared/latency-board.ts`): P50/P95 recomputed from the recorded samples only, and a provider with no turns says so instead of showing 0 ms
+  - `--interpret-switch-probe` the interpretation switch (`src/shared/interpret.ts`): off on a fresh install, one sentence naming Chinese-in/English-out/cable/local-echo, no audio file in logs, and disabling returns to the reply leg on the next utterance
   - `--asr-check-live-probe` runs the real model over the ledger recordings and prints the CER ranking split into train / eval
   - `--voice-runtime-probe` the voice runtime installer state (`src/main/services/voice/runtime.ts`) with temp fixtures
   - `--voice-worker-probe` the NDJSON resident-worker protocol harness (`src/main/services/voice/worker.ts`), zero models

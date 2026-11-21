@@ -80,3 +80,36 @@ export function interpretFollowNote(label: string): string {
 export function interpretSinkOf(input: { sink: string; explicit: boolean }): string {
   return input.explicit ? input.sink : ''
 }
+
+/**
+ * #130：一句话说清「打开这个开关会发生什么」。
+ *
+ * 必须点名三件事，少一件就会有人在局中被打个措手不及：
+ * - 你说的是**中文**、队友听到的是**英文**；
+ * - 英文是从**游戏话筒（虚拟声卡）**进去的，不是从扬声器放出来；
+ * - 你自己耳朵里听到的是**刚才那段中文录音的本地回放**，录音本身不留存。
+ */
+export function interpretPrivacyLine(): string {
+  return '开启后：你说的中文会被翻译成英文，从游戏话筒（虚拟声卡）播给队友；你自己听到的是这段中文录音的本地回放；录音不留存，只留文字与耗时。'
+}
+
+/** 面板那一行状态：关着也要有一句，别让人猜。 */
+export function interpretStateLine(enabled: boolean): string {
+  return enabled ? '同声翻译：开 · 队友听到英文，你听到中文回放' : '同声翻译：关 · 说话照旧，只识别不灌入'
+}
+
+/** 这一回合走哪条腿：开关关掉就立刻回到普通回复腿（不必重启、不必等下一局）。 */
+export function interpretLegFor(enabled: boolean): 'interpret' | 'reply' {
+  return enabled ? 'interpret' : 'reply'
+}
+
+/**
+ * 哪些扩展名算「音频文件」。日志目录里出现任何一种都说明通传把原始音频落了盘——
+ * 验收要求 `logs/` 里没有任何音频文件。
+ */
+export const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.ogg', '.m4a', '.flac', '.opus'] as const
+
+/** 目录里的文件名中，哪些是音频。 */
+export function audioFiles(names: readonly string[]): string[] {
+  return names.filter((name) => AUDIO_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext)))
+}

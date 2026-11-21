@@ -4,7 +4,7 @@ import { IPC, type InPlaceResult, type VoiceReplyArgs, type VoiceReplyResult } f
 import type { VoiceStageProgress } from '@shared/voice-stage'
 import { broadcastToWindows } from '../../windows/broadcast'
 import { decideVoiceOutReply } from '@shared/voice-out'
-import { INTERPRET_STAGE, interpretPlanOf } from '@shared/interpret'
+import { INTERPRET_STAGE, interpretLegFor, interpretPlanOf } from '@shared/interpret'
 import { reviewOf } from '@shared/voice-review'
 import { clauseStreamPlan, runClauseStream } from '@shared/clause-plan'
 import { decideInPlaceDelivery, inplaceFailureLine, pickInPlaceDraft } from '@shared/inplace'
@@ -172,7 +172,8 @@ export async function voiceReply(args: VoiceReplyArgs): Promise<VoiceReplyResult
   clipboard.writeText(plan.text)
   // 同声腿（#128）：同一句译文，播的地方不一样——灌进游戏话筒，而不是念给本机听。
   // 判定走纯规则，开关关着时这一行与升级前逐字一致（spoken 仍来自 speakReply）。
-  const interpret = settings.interpretMode === true
+  // #130：这一回合走哪条腿只有这一个判据——关掉立刻回普通回复腿，不必等下一局。
+  const interpret = interpretLegFor(settings.interpretMode === true) === 'interpret'
   const gate = interpret ? interpretPlanOf({ recognized, translated: plan.text }) : null
   if (gate !== null && !gate.speak) {
     return finish({ translated: null, spoken: false, stage: 'translate', error: '这句没有可灌的内容' })

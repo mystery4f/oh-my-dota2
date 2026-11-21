@@ -54,6 +54,7 @@ import { runMomentumProbe } from './momentum'
 import { runEndpointProbe } from './endpoint'
 import { runVoiceReviewProbe } from './voice-review'
 import { runLatencyBoardProbe } from './latency-board'
+import { runInterpretSwitchProbe } from './interpret-switch'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -666,6 +667,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the per-provider latency board (`src/shared/latency-board.ts`): P50/P95 recomputed from the recorded samples only, and a provider with no turns says so instead of showing 0 ms',
     run: runLatencyBoardProbe
+  },
+  {
+    flag: '--interpret-switch-probe',
+    ci: true,
+    summary: 'the interpretation switch (`src/shared/interpret.ts`): off on a fresh install, one sentence naming Chinese-in/English-out/cable/local-echo, no audio file in logs, and disabling returns to the reply leg on the next utterance',
+    run: runInterpretSwitchProbe
   },
   {
     flag: '--asr-check-live-probe',
