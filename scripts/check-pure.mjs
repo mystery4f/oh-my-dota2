@@ -934,6 +934,15 @@ check(
   check('一行账空包也能说', settingsBundleLine({ files: 0, omitted: [] }) === '空包')
 }
 
+// —— 崩溃账本（#115）：诊断包里要带上 errors.jsonl，且声明走脱敏
+{
+  const { wantedLogFiles, LOG_BUNDLE_FILES } = await import('../src/shared/log-bundle.ts')
+  const wanted = wantedLogFiles(['errors.jsonl'])
+  check('诊断包声明收集 errors.jsonl', LOG_BUNDLE_FILES.some((file) => file.name === 'errors.jsonl'))
+  check('errors.jsonl 走脱敏', wanted.length === 1 && wanted[0].mask === true)
+  check('不在默认清单里的文件不会被塞进包', wantedLogFiles(['nope.jsonl']).length === 0)
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

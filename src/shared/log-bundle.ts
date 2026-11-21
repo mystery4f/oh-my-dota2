@@ -12,7 +12,9 @@ export const LOG_BUNDLE_FILES = [
   { name: 'gsi-chat.jsonl', mask: true },
   { name: 'gsi-summary.json', mask: true },
   { name: 'voice-chain.jsonl', mask: true },
-  { name: 'capture-ticks.jsonl', mask: true }
+  { name: 'capture-ticks.jsonl', mask: true },
+  // 崩溃账本（#115）：持久化的那份在 error-log.ts，这里把它也打进包，用户才拿得出来。
+  { name: 'errors.jsonl', mask: true }
 ] as const
 
 /** manifest 里的一个在场文件。 */

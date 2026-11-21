@@ -185,6 +185,18 @@ export async function runLogBundleProbe(): Promise<void> {
       `${result.files} 份 · 缺 ${result.missing.length}`
     )
 
+    // —— 崩溃账本（#115）：写进包，且在 manifest 里如实标已脱敏
+    writeFileSync(join(logs, 'errors.jsonl'), '{"at":"2026-01-01T00:00:00.000Z","kind":"uncaught","message":"boom","stack":"at x"}' + String.fromCharCode(10))
+    const withErrors = await exportLogBundle({ logsDir: logs, version: '9.9.9', buildStamp: 'STAMP-1', now: at })
+    const errorEntries = readZip(readFileSync(withErrors.path ?? ''))
+    const errorManifest = JSON.parse(errorEntries.get('manifest.json')?.toString('utf8') ?? '{}') as LogBundleManifest
+    push('崩溃账本进了诊断包', errorEntries.get('errors.jsonl')?.toString('utf8').includes('"kind":"uncaught"') === true)
+    push(
+      '崩溃账本在 manifest 的在场清单里（不是缺失）',
+      errorManifest.files.some((f) => f.name === 'errors.jsonl') &&
+        !errorManifest.missing.includes('errors.jsonl')
+    )
+
     // —— 不脱敏 + 同内容同时间同字节 ——
     const raw = await exportLogBundle({ logsDir: logs, version: '9.9.9', buildStamp: 'STAMP-1', mask: false, now: at })
     const rawManifest = JSON.parse(
