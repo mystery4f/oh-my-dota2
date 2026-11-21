@@ -42,6 +42,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--error-log-probe` the local error list: what counts as one, how repeats merge, and the line the panel reads
   - `--shadow-voice-probe` the first-match shadow: it never speaks, it records what would have been said, and it ends after one match
   - `--speech-split-probe` both split strategies on the same line, no character ever lost, and the panel preview is the same function the pipeline uses
+  - `--speak-skip-probe` the read-aloud skip reasons land in voice-chain.jsonl: four reasons verbatim, the body truncated like the console line, and nothing written outside the logs dir
   - `--speak-mute-probe` muting one speaker by hero or seat name, without silencing anybody else, and the list survives a restart
   - `--provider-failure-probe` provider failures: timeout, rate limit, bad key and wrong model each get their own sentence and their own retry cadence
   - `--logs-isolation-probe` a probe process writes its logs to a temp dir, never into the user data directory

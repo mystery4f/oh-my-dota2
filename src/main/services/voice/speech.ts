@@ -8,6 +8,8 @@ import { resolveSpeechPlan } from '@shared/speech-plan'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 import type { SpeechSplitStrategy } from '@shared/speech-split'
 import { EMPTY_MUTE_TABLE, identityOf, isMuted, muteTableOf, type MuteTable } from '@shared/speak-mute'
+import { speakDropLine, speakSkipLine } from '@shared/speak-log'
+import { appendVoiceChainLine } from './chain-log'
 
 /** 单句上限：再长就不念了——一整段口播会把后面的消息全挤到后面。 */
 export const SPEAK_MAX_CHARS = 60
@@ -200,15 +202,22 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
     if (isAnnounceStale(entry.ts, cutoff, settings.ttsDropBacklog === true)) {
       // 静默路径留痕：宣布时已被更新一拍顶掉——念它只会把队伍排反。
       console.log('TTS_SPEAK_DROP', JSON.stringify({ stage: 'announce', text: entry.original.slice(0, 30) }))
+      // #164：光进控制台等于没记——打包版没人看它，验收就只能靠耳朵猜是哪条规则拦的。
+      appendVoiceChainLine(speakDropLine({ text: entry.original, stage: 'announce' }))
       continue
     }
     if (!payload) {
       // 静默路径留痕：own / pending / 空正文三种跳过在浮层上都一样（没声音），
       // 没有 TTS_SPEAK_SKIP 的话「怎么没念」只能靠翻代码猜。
+      const skipReason = speakSkipReason(entry, options)
       console.log(
         'TTS_SPEAK_SKIP',
-        JSON.stringify({ reason: speakSkipReason(entry, options), own: entry.own === true, text: entry.original.slice(0, 30) })
+        JSON.stringify({ reason: skipReason, own: entry.own === true, text: entry.original.slice(0, 30) })
       )
+      // #164：同一行再落一份到 voice-chain.jsonl（reason 逐字保留），验收才分得清
+      // 「按人静音生效」与「总开关被关了」——两者耳朵听起来一样。
+      const skipLine = speakSkipLine({ reason: skipReason, own: entry.own === true, text: entry.original, stage: 'announce' })
+      if (skipLine !== null) appendVoiceChainLine(skipLine)
       continue
     }
     // 前缀来源留痕：speaker=英雄名（现实中只有自己的话有）；没有就是光念内容。

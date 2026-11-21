@@ -23,6 +23,7 @@ import { runDownloadProbe } from './download'
 import { runHoldWatchProbe } from './hold-watch'
 import { runSpeakerChannelProbe } from './speaker-channel'
 import { runHelmEmptyProbe } from './helm'
+import { runSpeakSkipProbe } from './speak-skip'
 import { runVisionProbe } from './vision'
 import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
@@ -283,6 +284,13 @@ export const PROBES: readonly ProbeEntry[] = [
     readOnly: true,
     summary: 'both split strategies on the same line, no character ever lost, and the panel preview is the same function the pipeline uses',
     run: runSpeechSplitProbe
+  },
+  {
+    flag: '--speak-skip-probe',
+    ci: true,
+    summary:
+      'the read-aloud skip reasons land in voice-chain.jsonl: four reasons verbatim, the body truncated like the console line, and nothing written outside the logs dir',
+    run: runSpeakSkipProbe
   },
   {
     flag: '--speak-mute-probe',
