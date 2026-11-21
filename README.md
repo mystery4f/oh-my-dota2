@@ -22,6 +22,29 @@
 - 零游戏注入（VAC 安全）：聊天走 GSI，回复只靠按键/剪贴板，不读游戏内存。
 - 供应商无关：任何 OpenAI 兼容端点（默认 DeepSeek，也自带 OpenAI / Ollama / MiMo / 智谱 GLM 预设，可自定义）；「要不要先思考」做成开关，默认关。
 
+## 我们碰什么，不碰什么
+
+这一节是承诺，也是验法：每条都写清「凭什么这么说」和「你自己怎么核对」，全部落在仓库里，五分钟能跑完一条。
+
+- **不读游戏内存、不注入 DLL、不挂钩子。** 源码里没有 `ReadProcessMemory` / `CreateRemoteThread` / `VirtualAllocEx` / `SetWindowsHookEx`：
+  `grep -rnE "ReadProcessMemory|CreateRemoteThread|VirtualAllocEx|SetWindowsHookEx" src/ resources/` 输出为空。
+  游戏开着内存完整性校验，所以这不是「顺手做的」，是唯一能长期活着的做法。
+- **聊天来自 Dota 2 自己的 Game State Integration。** 写进游戏目录的只有一份 `gamestate_integration_ohmydota2.cfg`，
+  Valve 给第三方工具留的官方接口，明文可读，面板「浮层与对局」里能看到它的完整路径与端口。
+  核对：`npm run probe -- --gsi-probe`（不需要开游戏），或对局中看 `data/logs/gsi-chat.jsonl`，一行一条消息。
+- **屏幕只在两种情况下被读：你把采集方式选成截图，或你按了一次抓取键。** 选 GSI 时整条链路不碰屏幕，
+  `data/logs/capture-ticks.jsonl` 也就根本不会出现——文件不在，就是没截过。
+- **回复只靠按键与剪贴板，不进游戏。** 面板里的「直发」把译文放进剪贴板、再按一次回车键；
+  每一步记在 `data/logs/inplace.log`，核对：`npm run probe -- --inplace-probe`。
+- **没有遥测，没有上报。** 日志全部写在本机便携数据目录（安装目录同级的 `<安装目录>-data`），每份 256 KB 滚动覆盖；
+  `npm run probe -- --logs-isolation-probe` 证明连探针自己都只写临时目录，不碰你的日志。
+- **密钥只在本机，导出也带不走。** API Key、各供应商 key 表、代理地址存在 `data/settings.json`；
+  「关于 → 导出设置包」把这三项换成空值并记进 manifest 的 `omitted`，核对：`npm run probe -- --settings-bundle-probe`。
+- **每个关键行为都有探针。** 目录见 [`docs/PROBES.md`](docs/PROBES.md)，一条命令一条：`npm run probe -- --<名字>`；
+  CI 跑的就是这张表里标了 `ci: true` 的那些。
+
+上面任何一条都可以被读代码的人当场否定——写在这里正是为了让否定变容易。哪条和代码对不上，请直接开 issue。
+
 ## 开发
 
 ```bash
