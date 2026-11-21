@@ -584,6 +584,31 @@ const implemented = {
     const mode = query.get('ch')
     if (mode === 'empty') return { matchid: null, channels: [], line: '这局还没人说话', selfSlot: null }
     const hero = mode === 'hero'
+    // `?chat=5`：驾驶室「最近几条」要量五行（#170）：三行看不出行高是不是被长句撑开。
+    if (query.get('chat') === '5') {
+      const lines: { slot: number; label: string; relation: 'self' | 'teammate' | 'opponent'; text: string; at: number }[] = [
+        { slot: 2, label: '我', relation: 'self', text: '我出跳刀了，开团喊我', at: now - 40_000 },
+        { slot: 3, label: '队友 2', relation: 'teammate', text: '先别急，等我吼到三个再上，这波我们要一波带走对面，别再送了', at: now - 31_000 },
+        { slot: 4, label: '队友 3', relation: 'teammate', text: '盾还有四十秒', at: now - 22_000 },
+        { slot: 7, label: '对手 3', relation: 'opponent', text: 'gg', at: now - 13_000 },
+        { slot: 8, label: '对手 4', relation: 'opponent', text: '中路推了', at: now - 4_000 }
+      ]
+      return {
+        matchid: '7600111222',
+        selfSlot: 2,
+        line: '5 个人说过话',
+        channels: lines.map((one) => ({
+          slot: one.slot,
+          label: one.label,
+          relation: one.relation,
+          hero: '',
+          spoken: 1,
+          lastAt: one.at,
+          lastText: one.text,
+          events: []
+        }))
+      }
+    }
     return {
       matchid: '7600111222',
       selfSlot: 2,

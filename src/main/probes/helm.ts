@@ -30,6 +30,9 @@ import {
 import {
   HELM_MUTE_NOTE,
   HELM_NO_CHANNELS,
+  HELM_NO_CHAT,
+  HELM_RECENT_MAX,
+  recentChatLines,
   HELM_NO_SNAPSHOT,
   helmChannelsView,
   helmHead,
@@ -230,6 +233,36 @@ export async function runHelmEmptyProbe(): Promise<void> {
   push('一句话链：失败时仍显示听到的那句（别把前半段也弄丢）', chainFail.heard.text === '对面中单不见了', chainFail.heard.text)
   const chainReadErr = helmChainLine({ latest: null, snapshotMatchId: null, readError: 'ipc 通道断了。后面的话不该出现' })
   push('一句话链：读口出错单独一句，只取第一句', chainReadErr.empty?.startsWith(HELM_CHAIN_UNREADABLE) === true && !chainReadErr.empty?.includes('后面的话'), String(chainReadErr.empty))
+
+  // ——— 第四片：最近几条聊天（#170）———
+  const chatNone = recentChatLines([])
+  push('最近几条：一句都没有时只剩那一句话，不摆五行空壳', chatNone.rows.length === 0 && chatNone.line === HELM_NO_CHAT, chatNone.line)
+  const chatSilent = recentChatLines([speaker({ lastText: '   ', lastAt: NOW })])
+  push('最近几条：只剩空白的席位不占位', chatSilent.rows.length === 0 && chatSilent.line === HELM_NO_CHAT, String(chatSilent.rows.length))
+  const chatThree = recentChatLines([
+    speaker({ slot: 3, label: '队友 2', lastAt: NOW - 30_000, lastText: '先打盾' }),
+    speaker({ slot: 7, label: '对手 3', relation: 'opponent', lastAt: NOW - 1_000, lastText: 'gg' }),
+    speaker({ slot: 0, label: '我', relation: 'self', lastAt: NOW - 10_000, lastText: '中单不见了' })
+  ])
+  push(
+    '最近几条：三句按 lastAt 倒序（最新那句在最上面）',
+    chatThree.rows.length === 3 &&
+      chatThree.rows[0]?.text === 'gg' &&
+      chatThree.rows[1]?.text === '中单不见了' &&
+      chatThree.rows[2]?.text === '先打盾' &&
+      chatThree.line === '',
+    chatThree.rows.map((one) => one.text).join(' | ')
+  )
+  const chatUnknown = recentChatLines([speaker({ label: '', lastText: '嗯' })])
+  push('最近几条：认不出座位时标签写「—」，不猜名字', chatUnknown.rows[0]?.label === '—', String(chatUnknown.rows[0]?.label))
+  const chatCapped = recentChatLines(
+    Array.from({ length: 8 }, (_, i) => speaker({ slot: i, label: `队友 ${i}`, lastAt: NOW - i * 1_000, lastText: `第 ${i} 句` })),
+    HELM_RECENT_MAX
+  )
+  push(`最近几条：最多 ${HELM_RECENT_MAX} 行`, chatCapped.rows.length === HELM_RECENT_MAX && chatCapped.rows[0]?.text === '第 0 句', String(chatCapped.rows.length))
+  const NL = String.fromCharCode(10)
+  const chatFlat = recentChatLines([speaker({ lastText: `第一行${NL}第二行` })])
+  push('最近几条：多行的话压成一行（换行会把行高撑开）', chatFlat.rows[0]?.text === '第一行 第二行', String(chatFlat.rows[0]?.text))
 
   const failed = cases.filter((one) => !one.ok)
   for (const one of cases) console.log(`${one.ok ? 'PASS' : 'FAIL'} | ${one.name} | ${one.detail}`)

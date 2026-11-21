@@ -13,7 +13,8 @@ import {
   helmChainLine,
   helmHotkeyHints,
   helmListenLine,
-  muteToggle
+  muteToggle,
+  recentChatLines
 } from '@shared/helm'
 import type { VoiceChainLast } from '@shared/ipc'
 import { Button } from '@/components/ui/button'
@@ -90,6 +91,8 @@ export function HelmPage(): React.ReactElement {
 
   const head = helmHead(snapshot, lastAt, now)
   const view = helmChannelsView(channels?.channels ?? [], settings?.ttsMuteHeroes ?? [])
+  // 最近几条聊天：只读 `voice:speaker-channels` 的现成字段，不新开通道（#170 裁决 Q2）。
+  const chat = recentChatLines(channels?.channels ?? [])
   const hints = settings === null ? [] : helmHotkeyHints(settings.hotkeys, formatAccelerator, UNBOUND_LABEL)
   const chain = helmChainLine({
     latest: chainLast === null ? null : { ...chainLast.summary, matchid: chainLast.matchid },
@@ -271,6 +274,22 @@ export function HelmPage(): React.ReactElement {
             </Row>
           ))
         )}
+      </Group>
+
+      <Group label="最近几条">
+        {chat.line === '' ? null : (
+          <Row label="聊天" stacked>
+            <span className="text-xs text-muted-foreground">{chat.line}</span>
+          </Row>
+        )}
+        {chat.rows.map((one) => (
+          <Row key={one.slot} label={one.label}>
+            {/* 字号只用 text-xs：面板不认浮层那张 px 表（#170 裁决 Q4）；截断不换行。 */}
+            <span className="block max-w-[36rem] truncate text-xs text-muted-foreground" title={one.text}>
+              {one.text}
+            </span>
+          </Row>
+        ))}
       </Group>
 
       {view.note === '' ? null : (

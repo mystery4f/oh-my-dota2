@@ -89,6 +89,12 @@ export interface HelmChannelRow {
   label: string
   /** 最近一句，**必定是单行**：换行会把行高撑开，一屏就看不见几个频道了。 */
   lastText: string
+  /**
+   * 这句是什么时候说的（#170）。`0` 表示这一席还没有人说过话。
+   *
+   * 放纯缝里而不是渲染时再取：「谁先谁后」是规则，`--helm-empty-probe` 才钉得住。
+   */
+  lastAt: number
   spoken: number
   /** 拿到英雄名才有静音可言；没名字时这一行连状态都不显示（不适用，不是「关」）。 */
   hero: string
@@ -119,6 +125,7 @@ export function helmChannelsView(
     slot: one.slot,
     label: one.label,
     lastText: oneLine(one.lastText),
+    lastAt: one.lastAt,
     spoken: one.spoken,
     hero: one.hero,
     muteable: one.hero.trim() !== '',
@@ -129,6 +136,53 @@ export function helmChannelsView(
     line: rows.length === 0 ? HELM_NO_CHANNELS : '',
     note: rows.some((row) => row.muteable) ? '' : HELM_MUTE_NOTE
   }
+}
+
+/* ——— 第四片（issue #170）：最近几条聊天 ——— */
+
+/** 「最近几条」最多画几行。有几行画几行——不是固定五个空位（#160 同一个口径）。 */
+export const HELM_RECENT_MAX = 5
+
+/** 一句都没有时的那一句话；有句子时页面不显示它（不摆五行空壳）。 */
+export const HELM_NO_CHAT = '这一局还没人说话'
+
+/** 一行聊天：座位标签是从座位推出来的（`我` / `队友 2` / `对手 3`），不是玩家名。 */
+export interface HelmChatLine {
+  slot: number
+  /** 座位标签；认不出座位时是 `—`，绝不猜名字（#160 同一条规则）。 */
+  label: string
+  /** 说了什么，已压成单行（换行会把行高撑开）。 */
+  text: string
+  /** 说这句的时间戳，倒序排的就是它。 */
+  at: number
+}
+
+export interface HelmRecentChatView {
+  rows: HelmChatLine[]
+  /** 空态那一句话；有句子时为空串。 */
+  line: string
+}
+
+/**
+ * 「最近几条聊天」：只取真的说过话的席位，按 `lastAt` 倒序，最多 `limit` 行。
+ *
+ * 三条都在这里说清楚，页面只管画：
+ * - 没说过话的席位不占位（`lastText` 为空 → 这一行根本不存在），否则一局开头就是五条空气。
+ * - 认不出座位时标签写 `—`，不拿英雄名或玩家名凑。
+ * - 对讲那句**不上墙**：同一句话在屏幕上出现两处，用户会以为是两件事（#170 裁决 Q2）。
+ */
+export function recentChatLines(channels: readonly SpeakerChannel[], limit = HELM_RECENT_MAX): HelmRecentChatView {
+  const rows = channels
+    .filter((one) => one.lastText.trim() !== '')
+    .map((one) => ({
+      slot: one.slot,
+      label: one.label.trim() === '' ? '—' : one.label,
+      text: oneLine(one.lastText),
+      at: one.lastAt
+    }))
+    .sort((a, b) => b.at - a.at)
+    .slice(0, Math.max(1, limit))
+  return { rows, line: rows.length === 0 ? HELM_NO_CHAT : '' }
 }
 
 export interface HelmHotkeyHint {
