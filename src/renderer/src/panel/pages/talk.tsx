@@ -21,6 +21,7 @@ import { queueLine, stopLine, type SpeechQueueSnapshot } from '@shared/speech-qu
 import type { MicHealthEvent } from '@shared/mic-health'
 import { interpretDeviceLine, interpretFollowNote } from '@shared/interpret'
 import type { ShadowView } from '@shared/shadow-voice'
+import { formatMuteList, muteLine, muteTableOf, parseMuteList } from '@shared/speak-mute'
 import {
   SPEECH_SPLIT_LABELS,
   SPEECH_SPLIT_STRATEGIES,
@@ -541,6 +542,22 @@ export function TalkPage({
                 ))}
               </select>
             )}
+          </Row>
+          <Row
+            label="不念谁"
+            hint={muteLine(muteTableOf({ muteHeroes: settings.ttsMuteHeroes ?? [], muteNames: settings.ttsMuteNames ?? [] })) + ' · 填英雄短名（影魔 nevermore）或昵称/座位名；逗号分隔。自己也照旧由「自己也念」管'}
+            htmlFor="v2-muteNames"
+          >
+            <Input
+              id="v2-muteNames"
+              defaultValue={formatMuteList([...(settings.ttsMuteNames ?? []), ...(settings.ttsMuteHeroes ?? [])])}
+              onBlur={(e) => {
+                // 一个词可能既是昵称又是英雄短名，两路都写进去；命中任一路就跳过这个人。
+                const list = parseMuteList(e.target.value)
+                void save.wrap(update({ ttsMuteNames: list, ttsMuteHeroes: list }))
+              }}
+              placeholder="例：玩家2、nevermore"
+            />
           </Row>
           <Row label="切段策略" hint={splitPreviewLine(previewSplit(SPLIT_SAMPLE, settings.speechSplitStrategy, settings.ttsSpeakSegmentChars ?? 30))}>
             <select

@@ -36,6 +36,7 @@ import { runLogsIsolationProbe } from './logs-isolation'
 import { runErrorLogProbe } from './error-log'
 import { runShadowVoiceProbe } from './shadow-voice'
 import { runSpeechSplitProbe } from './speech-split'
+import { runSpeakMuteProbe } from './speak-mute'
 import { runProviderFailureProbe } from './provider-failure'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runOverlayA11yProbe } from './overlay-a11y'
@@ -236,6 +237,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'both split strategies on the same line, no character ever lost, and the panel preview is the same function the pipeline uses',
     run: runSpeechSplitProbe
+  },
+  {
+    flag: '--speak-mute-probe',
+    ci: true,
+    summary: 'muting one speaker by hero or seat name, without silencing anybody else, and the list survives a restart',
+    run: runSpeakMuteProbe
   },
   {
     flag: '--provider-failure-probe',

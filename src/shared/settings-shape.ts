@@ -63,6 +63,10 @@ export interface AppSettings {
    * 的份数判断），不靠人记得回来关。
    */
   shadowFirstMatch: boolean
+  /** #93 逐人朗读开关：这些英雄短名不念（小写）。 */
+  ttsMuteHeroes: string[]
+  /** #93 逐人朗读开关：这些昵称 / 座位名不念（小写）。 */
+  ttsMuteNames: string[]
   /** #85 切段策略：punctuation = 按标点（默认，自然但长句起播慢）/ uniform = 按固定字数（起播均匀，可能断词）。 */
   speechSplitStrategy: SpeechSplitStrategy
   /**
@@ -305,6 +309,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsOutVoice: '',
   shadowFirstMatch: true,
   speechSplitStrategy: 'punctuation',
+  ttsMuteHeroes: [],
+  ttsMuteNames: [],
   autoStartCapture: true,
   quickPhrases: DEFAULT_QUICK_PHRASES,
   myNicknames: [],

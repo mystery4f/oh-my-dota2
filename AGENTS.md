@@ -180,6 +180,10 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
   `hotkey:hold-selftest`; the panel's 热键 → 按住检测 row is the only place a user can tell "按下真的被听见" from
   "按住已经失效、现在是敲一下". A fallback state must say 按住不生效 and how to use 敲一下 — never "已恢复".
 
+- Per-speaker muting (#93): `src/shared/speak-mute.ts` owns identity extraction (hero short name plus the
+  `[name]` segment of the display string), list normalisation and `isMuted()`. `speakSkipReason()` reports
+  `muted-player`, never the global `mute` — the log must tell "this person is muted" from "reading is off".
+  A missing identity is never a reason to mute; `own` lines are governed by `ttsReadOwn` alone.
 - Sentence splitting (#85): `src/shared/speech-split.ts` is the only splitter —
   `splitForSpeech(text, maxChars, strategy)` with `punctuation` (default, punctuation-first) and
   `uniform` (fixed length). The panel's preview calls the SAME function, so a preview can never

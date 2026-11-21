@@ -7,6 +7,7 @@ import { requestFromPlan, speakPipeline, type SpeechSegment } from './speech-pip
 import { resolveSpeechPlan } from '@shared/speech-plan'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
 import type { SpeechSplitStrategy } from '@shared/speech-split'
+import { EMPTY_MUTE_TABLE, identityOf, isMuted, muteTableOf, type MuteTable } from '@shared/speak-mute'
 
 /** 单句上限：再长就不念了——一整段口播会把后面的消息全挤到后面。 */
 export const SPEAK_MAX_CHARS = 60
@@ -55,6 +56,8 @@ export interface SpeakOptions {
   segmentChars?: number
   /** #85 切段策略；缺省按标点（AppSettings.speechSplitStrategy）。 */
   strategy?: SpeechSplitStrategy
+  /** #93 静音表：命中的说话人不念。缺省 = 谁都不静音（老调用点不必改）。 */
+  muteTable?: MuteTable
 }
 
 /**
@@ -65,12 +68,22 @@ export interface SpeakOptions {
  * 这条为什么不念。decideSpeak 只答 null，排查「怎么没出声」时五种静默路径在界面上长得
  * 一样——own/pending/empty 谁拦的要能从日志直接读出来，所以把判据单独抽成纯函数。
  */
-export function speakSkipReason(entry: CaptureEntry, options: SpeakOptions): 'mute' | 'own' | 'pending' | 'empty' | null {
+export function speakSkipReason(
+  entry: CaptureEntry,
+  options: SpeakOptions
+): 'mute' | 'own' | 'muted-player' | 'pending' | 'empty' | null {
   if (!options.readAloud) return 'mute'
   // 自己说的话不念：出声只为了听懂别人；真对局实测（2026-10-25, match 9060903477），
   // 自己那句「::」被念成「司夜刺客说，」、紧接着敌方的 BASE 译文「基地」到达，
   // 两句连听就成了「司夜刺客说基地」——own 正是为这个跳过而存在的字段。
   if (entry.own === true && options.readOwn !== true) return 'own'
+  // #93 逐人开关：命中的那个人不念，其他人照常念（不是全局静音）。
+  if (
+    entry.own !== true &&
+    isMuted(options.muteTable ?? EMPTY_MUTE_TABLE, identityOf({ speaker: entry.speaker, original: entry.original }))
+  ) {
+    return 'muted-player'
+  }
   // 还在翻译 / 翻译失败 / 没有译文的，都不念：念出来只是噪音。
   if (entry.pending) return 'pending'
   if (!speakText(entry.translated ?? '') && !speakText(entry.original)) return 'empty'
@@ -154,6 +167,8 @@ export function speakOptionsFromSettings(settings: {
   ttsSpeakFrontTpl: string
   ttsSpeakBackTpl: string
   speechSplitStrategy?: SpeechSplitStrategy
+  ttsMuteHeroes?: string[]
+  ttsMuteNames?: string[]
 }): SpeakOptions {
   return {
     engine: settings.ttsEngine,
@@ -162,6 +177,7 @@ export function speakOptionsFromSettings(settings: {
     prefix: settings.ttsSpeakPrefix,
     segmentChars: settings.ttsSpeakSegmentChars ?? 30,
     strategy: settings.speechSplitStrategy,
+    muteTable: muteTableOf({ muteHeroes: settings.ttsMuteHeroes ?? [], muteNames: settings.ttsMuteNames ?? [] }),
     frontTpl: settings.ttsSpeakFrontTpl,
     backTpl: settings.ttsSpeakBackTpl,
     rate: settings.ttsRate,
