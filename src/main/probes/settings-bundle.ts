@@ -25,7 +25,7 @@ import { exportSettingsBundle, importSettingsBundle } from '../services/settings
 import { buildZip } from '../services/zip'
 import { finishProbe, probeCases } from './harness'
 
-const SECRET_KEY = 'sk-probe-0123456789abcdef'
+const SECRET_KEY = 'PROBE-FAKE-KEY-0123456789'
 const SECRET_PROXY = 'http://user:pass@127.0.0.1:4444'
 
 function fakeSettings(patch: Partial<AppSettings> = {}): AppSettings {
