@@ -344,6 +344,12 @@ it and nothing happened". The overlay and the pause hint print key names from th
 - `eslint` allows exactly one warning (`--max-warnings 1`), so any non-component export in a `.tsx`
   file breaks the build: pure helpers (`runTone`, `formatDuration`, …) live in their own `.ts`
   module next to the component.
+- Main-process errors: `src/main/services/error-log.ts` installs `uncaughtException` / `unhandledRejection`
+  hooks before `app.whenReady()` and appends `{at, kind, message, stack, context}` to `logs/errors.jsonl`
+  (256 KB cap, ring of 50 in memory); `src/shared/error-log.ts` owns what counts as one error and the single
+  line the panel reads (关于 → 诊断 → 最近的错误). The hooks never swallow: Electron's own dialog still
+  appears. Never let the recorder throw — a logging failure that propagates is a second incident. Renderer
+  errors are not forwarded yet; that needs its own channel, not a wider hook.
 - Probes never write user data (default, not a habit): `src/main/index.ts` points `logsDir()` at a fresh
   `mkdtemp` dir whenever the process was started with a probe flag, so synthetic frames and fake matchids land in
   the temp dir and vanish. A probe that genuinely needs the user's own logs declares it in the registry row —

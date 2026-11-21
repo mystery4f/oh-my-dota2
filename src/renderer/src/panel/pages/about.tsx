@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { LogBundleResult, UpdateState } from '@shared/ipc'
 import type { BuildInfo } from '@shared/build-info'
+import { ERROR_KIND_LABEL, errorsLine, type ErrorSummary } from '@shared/error-log'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 
@@ -26,11 +27,14 @@ export function AboutPage(): React.ReactElement {
   const [bundle, setBundle] = useState<LogBundleResult | null>(null)
   const [build, setBuild] = useState<BuildInfo | null>(null)
   const [bundleBusy, setBundleBusy] = useState(false)
+  const [errors, setErrors] = useState<ErrorSummary | null>(null)
 
   useEffect(() => {
     void window.api.appVersion().then(setVersion)
     // 构建时间一次就够：产物 mtime 不会在自己跑着的时候改变（#113）。
     void window.api.buildInfo().then(setBuild)
+    // 异常清单一次就够：主进程没接住的错误不会在这里自己冒出来，刷新靠重新进页面（P3）。
+    void window.api.errorsView().then(setErrors)
     return window.api.onUpdateStatus(setState)
   }, [])
 
@@ -91,6 +95,29 @@ export function AboutPage(): React.ReactElement {
       </Group>
 
       <Group label="诊断">
+        <Row
+          label="最近的错误"
+          hint={errors === null ? '正在读本地异常清单（只在本机，不联网）' : errorsLine(errors)}
+        >
+          {errors === null ? null : (
+            <StatusPill tone={errors.total === 0 ? 'ready' : errors.byKind.uncaught > 0 ? 'bad' : 'warn'}>
+              {errors.total === 0 ? '没有' : `${errors.total} 条`}
+            </StatusPill>
+          )}
+        </Row>
+        {errors !== null && errors.groups.length > 0
+          ? errors.groups.map((group) => (
+              <Row
+                key={`${group.kind}:${group.message}`}
+                label={ERROR_KIND_LABEL[group.kind]}
+                hint={`${group.count} 次 · 最近 ${group.newest.slice(11, 19)}${group.sample.context === null ? '' : ` · ${group.sample.context}`}`}
+              >
+                <span className="max-w-[420px] truncate font-mono text-xs text-muted-foreground">
+                  {group.message}
+                </span>
+              </Row>
+            ))
+          : null}
         <Row label="导出诊断包" hint={bundleHint}>
           <Button variant="outline" size="sm" disabled={bundleBusy} onClick={() => void exportBundle()}>
             {bundleBusy ? '打包中…' : '导出'}

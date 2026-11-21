@@ -16,6 +16,7 @@ import { mkdtempSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { captureHint } from '@shared/overlay-hint'
+import { installErrorHandlers } from './services/error-log'
 import { warmEdge } from './services/voice/edge'
 import { ensureSovitsServer, stopSovitsServer } from './services/voice/sovits-server'
 import { autoVoicePackSetup } from './services/voice/sovits-voicepack'
@@ -47,6 +48,10 @@ import { setLogsDirForProbe } from './services/logs/base-dir'
 
 // 数据目录必须在任何 userData 读取之前定好：settings、会话库、日志、词库都挂在它下面。
 applyPortableUserData()
+
+// 主进程里没接住的错误先落一份证据再交给 Electron 的默认处理（backlog 第七节 P3）。
+// 装在这里而不是 whenReady：早于窗口的错误同样会弹框，那时用户手里什么都没有。
+installErrorHandlers()
 
 // 探针的日志落到临时目录（#126）：合成帧、假 matchid、假的对讲计时以前会留在真实的
 // `logs/` 里，下一局复盘把探针那局当成真对局；有一个探针还清空过真实 `voice-chain.jsonl`。

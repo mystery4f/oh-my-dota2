@@ -83,6 +83,7 @@ import {
 } from './services/train/asr-ft'
 import { patchWatchView } from './services/patch-watch'
 import { exportLogBundle } from './services/log-bundle'
+import { errorsSummary } from './services/error-log'
 import { correctLineDirection } from './services/session/direction-correction'
 import { readQualityReport } from './services/session/quality-report'
 import { readBuildInfo } from './services/build-info'
@@ -333,6 +334,7 @@ const handlers: MainHandlers = {
   ftAsrftRollback: () => rollbackAsrFtModel(),
   ftAsrftResetBase: () => resetAsrFtToBase(),
   logBundleExport: () => exportLogBundle(),
+  errorsView: () => errorsSummary(5),
   translateDirection: (request) => correctLineDirection(request),
   qualityReport: () => readQualityReport(),
   speechQueue: () => speechQueueSnapshot(),

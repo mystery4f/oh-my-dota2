@@ -28,6 +28,7 @@ import type { CerCohort } from '@shared/train/cer'
 import { judgeCorrectionSamples } from '@shared/train/corrections'
 import { mergePlan, rankCandidates, type HotwordCandidate, type HotwordSuggestions } from '@shared/asr-hotword-candidates'
 import { judgeFirstRun } from '@shared/first-run'
+import { summarizeErrors } from '@shared/error-log'
 import { judgeGsiStall, gsiStallWarning } from '@shared/gsi-stall'
 import { judgeEnv } from '@shared/env-report'
 import { resolveGsiRoot } from '@shared/gsi-lib'
@@ -539,6 +540,15 @@ const implemented = {
           note: '构建产物是最新的',
           behindMs: null
         },
+  // 异常清单（P3）：`?errors=1` 造两条样本（一条未捕获、一条未处理 promise），默认干净。
+  errorsView: async () =>
+    query.get('errors') === '1'
+      ? summarizeErrors([
+          { at: '2026-11-21T12:00:04.000Z', kind: 'uncaught', message: 'Cannot read properties of undefined (reading push)', stack: null, context: 'translate:session' },
+          { at: '2026-11-21T12:00:01.000Z', kind: 'uncaught', message: 'Cannot read properties of undefined (reading push)', stack: null, context: 'translate:session' },
+          { at: '2026-11-21T11:58:20.000Z', kind: 'rejection', message: 'fetch failed: ECONNRESET', stack: null, context: 'provider' }
+        ])
+      : summarizeErrors([]),
   logBundleExport: async () => ({
     ok: true,
     path: 'data/logs/export/log-bundle-20260101-000000.zip',

@@ -31,6 +31,7 @@ import { runInterpretListenProbe } from './interpret-listen'
 import { runInterpretLegProbe } from './interpret-leg'
 import { runBuildInfoProbe } from './build-info'
 import { runLogsIsolationProbe } from './logs-isolation'
+import { runErrorLogProbe } from './error-log'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runOverlayA11yProbe } from './overlay-a11y'
 import { runProviderReasoningProbe } from './provider-reasoning'
@@ -207,6 +208,12 @@ export const PROBES: readonly ProbeEntry[] = [
       'minimap hero dots: cost per frame and correct clustering on a synthetic frame — accuracy stays unmeasured without labelled screenshots',
     realLogs: true,
     run: runMinimapProbe
+  },
+  {
+    flag: '--error-log-probe',
+    ci: true,
+    summary: 'the local error list: what counts as one, how repeats merge, and the line the panel reads',
+    run: runErrorLogProbe
   },
   {
     flag: '--logs-isolation-probe',

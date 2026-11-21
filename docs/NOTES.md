@@ -287,6 +287,13 @@
 - 不能测的：**准确率**。需要带标注的真实小地图帧（英雄 / 小兵 / 幻象 / 肉山各多少、在哪），仓库里一张都没有；用合成帧算出来的数字只能证明代码不傻，不能证明它认得游戏。探针输出里显式写 `accuracy: "unmeasured"`，`autoLocate` 同样未测（多分辨率、HUD 缩放下小地图位置怎么找，需要真实截图）。
 - 补测条件（写在这里，免得下次重新想）：把带标注的截图放进 `<userData>/logs/minimap-frames/*.png`，探针就会从 `unmeasured` 转成按张计数；标注格式还没定，定之前不要写解析器。
 - 口径：不要因为「检测很快」就承诺英雄计数——快的是找红绿像素，难的是判断那个点是谁。真要上功能，先拿 20 张真实帧把准确率量出来，再谈。
+### 主进程崩了，用户手里只有一句截图不下来的英文框（P3）
+- 症状：主进程里一个没接住的错误，Electron 弹「A JavaScript error occurred in the main process」，用户看不懂、复制不出来，我们收到的是「刚才闪了一下」；进程直接没了的更彻底，什么都不留。
+- 根因：`process.on('uncaughtException' | 'unhandledRejection')` 一个都没装。这不是「没做界面」的问题，是先没有证据可展示。
+- 修法：`src/main/services/error-log.ts` 在 `app.whenReady()` **之前**装两个钩子（早于窗口的错误同样要留证据），把 `{at, kind, message, stack, context}` 追加进 `logs/errors.jsonl`（256 KB 上限、整批 `appendCappedJsonl`），内存里留最近 50 条；归类与「一句话摘要」放纯缝 `src/shared/error-log.ts`。钩子**不吞异常**：Electron 自己的框照旧弹，我们只多留一份。写日志失败就静默放过——记录异常的代码把异常抛出去是第二种事故。
+- 面板：关于页「诊断 → 最近的错误」念一行「N 条异常 · 最近 HH:MM:SS · 最常见：…（M 次）」，下面按类分组列次数与处境（`translate:session`、`provider`）。没有就说「没有记录到异常」，不写「一切正常」——没记录不等于没发生。
+- 怎么验：`--error-log-probe`（21 条）钉住「什么算一条」（`Error`/字符串/带 message 的对象/认不出退化成 JSON/空串不记）、同类同句合并计数、`top` 截断但 `distinct` 仍是实数、上限只留最近 50 条、以及探针自己那份日志落在临时目录。
+- 没做：渲染层错误还没有 IPC 回传（`window.onerror` → 主进程），需要时再加一条通道；也没有「按严重程度分级」，缝里判断不了一行代码正在干什么。
 ### 探针把假数据写进了真实日志（#126）
 - 症状：跑过 `--match-attribution-probe` 之后，`data/logs/gsi-summary.json` 里躺着 `matchid 9100000002`、`frames: 2`——下一局真对局开始时，代码看到「matchid 变了」就把这局**假对局**归档成上一场，复盘页从此多一局没打过的比赛；`--voice-chain-probe` 更直接：它先把真实的 `voice-chain.jsonl` 清空再写自己的两行，玩家的对讲计时记录就没了。
 - 根因：日志路径统一走 `logsDir()`（`src/main/services/logs/base-dir.ts`），但「探针要不要换根」这件事**没人负责**——每个探针自己记得 `setLogsDirForProbe()` 才行，而人总会忘。`resetFrameSummary()` 只清内存账本，注释写着「不影响已落盘的文件」，所以假 summary 会一直躺在盘上。
