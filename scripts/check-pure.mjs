@@ -969,6 +969,13 @@ const { judgeProviderFailure, failureLine, failuresDistinct, parseRetryAfter } =
   check('失败：Retry-After 认不出时返回 null', parseRetryAfter('later') === null)
   check('失败：三类节奏确实不同', new Set([auth.retry, limited.retry, timeout.retry]).size === 3)
   check('失败：那句话里带下一步动作', failureLine(auth).includes('重新填'))
+  // #172：引擎页把连通性失败那句话原样显示（不再 slice(0, 60)），所以「三句不同且都非空」必须钉住——
+  // 谁把措辞改写成同一条泛化错误，这条会红。
+  check(
+    '失败：鉴权 / 限流 / 超时是三句不同且都非空的话',
+    new Set([failureLine(auth), failureLine(limited), failureLine(timeout)]).size === 3 &&
+      [auth, limited, timeout].every((item) => failureLine(item).trim().length > 0)
+  )
 }
 // #109：录音集的版本号由内容决定，与文件名/顺序无关；老行没有版本号就说「早于版本号」，不猜。
 const { datasetVersionOf, datasetVersionFact, datasetVersionLine, datasetVersionDelta, datasetVersionDiffLine } =

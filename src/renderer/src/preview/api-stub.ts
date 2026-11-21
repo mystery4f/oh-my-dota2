@@ -22,6 +22,7 @@ import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type VoiceChain
 import { snapshotOf } from '@shared/match-snapshot'
 import { renderGroups } from '@shared/quick-phrases'
 import { summarizeProviderCalls } from '@shared/provider-metrics'
+import { failureLine, judgeProviderFailure } from '@shared/provider-failure'
 import { catalogOf } from '@shared/probe-catalog'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 import type { OverlayFontSize } from '@shared/overlay-a11y'
@@ -510,7 +511,13 @@ const implemented = {
     Object.assign(settings, patch)
     return { ...settings }
   },
-  testProvider: async () => ({ ok: true, message: 'stub ok', latencyMs: 321 }),
+  testProvider: async () => {
+    // ?probe=bad：连通性失败态要截图，而失败那句话必须是真的 `failureLine()` 输出——
+    // 桩自己编一句「失败了」就会让截图证明不了「页面用的是同一句话」。
+    if (query.get('probe') === 'bad')
+      return { ok: false, message: failureLine(judgeProviderFailure({ status: 401, message: 'HTTP 401 Invalid API key' })) }
+    return { ok: true, message: 'stub ok', latencyMs: 321 }
+  },
   translationCacheInspect: async () => cacheCounts(),
   translationCacheClear: async () => cacheCounts(),
   translate: async () => '（stub 译文）careful mid',

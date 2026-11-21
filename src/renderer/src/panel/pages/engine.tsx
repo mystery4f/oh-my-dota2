@@ -11,6 +11,7 @@ import {
   type TranslateDirection
 } from '@shared/ipc'
 import { reasoningForProvider } from '@shared/provider-reasoning'
+import { formatMs, type ProviderBoard } from '@shared/provider-metrics'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -18,9 +19,16 @@ import { Group, Panel, Row, SaveFlash, StatusPill } from '../components/primitiv
 import { useSaveFlash, useSettings } from '../use-settings'
 
 /**
- * 翻译引擎页：服务 / 输出 / 推理 / 缓存 四组 + 底部试验台。
- * 与旧版的行为差异只有一条：没有「保存」按钮——每个控件改完即存。
- * applyPreset 的注释级坑（authStyle 跟着预设盖、key 按家取回）原样搬过来。
+ * 翻译引擎页（#172）：按原型压成六组十五行 —— 服务 / 输出 / 缓存 / 质量 / 词表 / 试验台。
+ *
+ * 三条口径来自票面，改动前先读：
+ * - **代理 / 子句流水 / 保真守卫**收进「高级」一行，但那一行必须带「N 项已改」——只有折叠没有数字，等于藏。
+ * - **连通性失败的句子原样显示**：主进程 `testProvider()` 抛的是 `ProviderRequestError`，`message` 就是
+ *   `failureLine()` 的原文（#86）。这里既不改写也不 `slice()`——截掉后半句等于把「怎么办」丢掉。
+ * - **译文速度**只读 `provider:board` 的汇总（#114），页面不自己算中位；没有样本时写「还没人调过模型」，
+ *   绝不写 0 —— 0 毫秒会被读成「很快」。
+ *
+ * 其余行为与旧版一致：没有保存按钮（改完即存），`applyPreset` 的坑（authStyle 跟着预设盖、key 按家取回）原样保留。
  */
 
 type TestState = { status: 'idle' } | { status: 'running' } | { status: 'done'; result: TestResult }
@@ -32,6 +40,7 @@ export function EnginePage(): React.ReactElement {
   const save = useSaveFlash()
   const quality = useQualityCard()
   const glossary = useGlossaryCard()
+  const board = useProviderBoard()
 
   if (settings === null) {
     return (
@@ -44,6 +53,7 @@ export function EnginePage(): React.ReactElement {
   }
 
   const preset = PROVIDER_PRESETS.find((p) => p.id === settings.provider.id)
+  const advanced = advancedCount(settings)
 
   const applyPreset = (id: ProviderId): void => {
     const next = PROVIDER_PRESETS.find((p) => p.id === id)
@@ -65,156 +75,123 @@ export function EnginePage(): React.ReactElement {
   }
 
   return (
-    <>
-      <Panel>
-        <Group label="服务">
-          <Row label="预设" htmlFor="v2-preset">
-            <Select
-              id="v2-preset"
-              value={settings.provider.id}
-              onChange={(e) => applyPreset(e.target.value as ProviderId)}
-            >
-              {PROVIDER_PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </Select>
-            <SaveFlash flash={save.flash} error={save.error} />
-          </Row>
-          <Row
-            label="中文行译成"
-            htmlFor="v2-targetLang2"
-            hint={targetsLine({ targetLang: settings.targetLang, targetLang2: settings.targetLang2 })}
+    <Panel>
+      <Group label="服务">
+        <Row label="预设" htmlFor="v2-preset">
+          <Select
+            id="v2-preset"
+            value={settings.provider.id}
+            onChange={(e) => applyPreset(e.target.value as ProviderId)}
           >
-            <Select
-              id="v2-targetLang2"
-              value={settings.targetLang2}
-              onChange={(e) => void save.wrap(update({ targetLang2: e.target.value }))}
-            >
-              <option value="">英文（默认）</option>
-              {TARGET_LANGUAGES.filter((item) => item.code !== 'en').map((item) => (
-                <option key={item.code} value={item.code}>
-                  {item.label}
-                </option>
-              ))}
-            </Select>
-          </Row>
-          <Row
-            label="接口地址"
-            htmlFor="v2-baseUrl"
-            hint="任意 OpenAI 兼容接口；预设选好后一般不用改"
+            {PROVIDER_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </Select>
+          <SaveFlash flash={save.flash} error={save.error} />
+        </Row>
+        <Row
+          label="接口地址"
+          htmlFor="v2-baseUrl"
+          hint="任意 OpenAI 兼容接口；预设选好后一般不用改"
+        >
+          <Input
+            id="v2-baseUrl"
+            className="w-72"
+            value={settings.provider.baseUrl}
+            onChange={(e) => void update({ provider: { ...settings.provider, baseUrl: e.target.value } })}
+            placeholder="https://api.deepseek.com"
+          />
+        </Row>
+        <Row
+          label={`密钥${preset && !preset.needsKey ? '（可不填）' : ''}`}
+          htmlFor="v2-apiKey"
+          hint="一把钥匙两处记：当前生效 + 按家存档，切预设不丢"
+        >
+          <Input
+            id="v2-apiKey"
+            type="password"
+            className="w-72"
+            value={settings.provider.apiKey}
+            onChange={(e) =>
+              void save.wrap(
+                update({
+                  provider: { ...settings.provider, apiKey: e.target.value },
+                  providerKeys: { ...settings.providerKeys, [settings.provider.id]: e.target.value }
+                })
+              )
+            }
+            placeholder="sk-…"
+          />
+        </Row>
+        <Row label="模型" htmlFor="v2-model">
+          <Input
+            id="v2-model"
+            className="w-72"
+            value={settings.provider.model}
+            onChange={(e) => void update({ provider: { ...settings.provider, model: e.target.value } })}
+            placeholder="deepseek-chat"
+          />
+        </Row>
+        <Row
+          label="推理（先思考再翻）"
+          hint="默认关：翻译是短句任务，思考只加延迟（MiMo 实测 1.4s → 7.4s）"
+        >
+          <Button
+            variant={settings.provider.reasoning ? 'secondary' : 'outline'}
+            size="sm"
+            onClick={() => {
+              const reasoning = !settings.provider.reasoning
+              void save.wrap(
+                update({
+                  provider: { ...settings.provider, reasoning },
+                  providerReasoning: { ...settings.providerReasoning, [settings.provider.id]: reasoning }
+                })
+              )
+            }}
           >
-            <Input
-              id="v2-baseUrl"
-              className="w-72"
-              value={settings.provider.baseUrl}
-              onChange={(e) => void update({ provider: { ...settings.provider, baseUrl: e.target.value } })}
-              placeholder="https://api.deepseek.com"
-            />
-          </Row>
-          <Row
-            label={`API Key${preset && !preset.needsKey ? '（可不填）' : ''}`}
-            htmlFor="v2-apiKey"
-            hint="一把钥匙两处记：当前生效 + 按家存档，切预设不丢"
+            {settings.provider.reasoning ? '开' : '关'}
+          </Button>
+          <SaveFlash flash={save.flash} error={save.error} />
+        </Row>
+        <Row
+          label="连通性"
+          hint="翻译一句试试，立刻知道这家服务通不通"
+          note={test.done ? test.note : '还没测过：点一下才知道 key 与地址是不是真的能用。'}
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void test.run(settings.provider).then(() => board.reload())
+            }}
+            disabled={test.running}
           >
-            <Input
-              id="v2-apiKey"
-              type="password"
-              className="w-72"
-              value={settings.provider.apiKey}
-              onChange={(e) =>
-                void save.wrap(
-                  update({
-                    provider: { ...settings.provider, apiKey: e.target.value },
-                    providerKeys: { ...settings.providerKeys, [settings.provider.id]: e.target.value }
-                  })
-                )
-              }
-              placeholder="sk-…"
-            />
-          </Row>
-          <Row label="模型" htmlFor="v2-model">
-            <Input
-              id="v2-model"
-              className="w-72"
-              value={settings.provider.model}
-              onChange={(e) => void update({ provider: { ...settings.provider, model: e.target.value } })}
-              placeholder="deepseek-chat"
-            />
-          </Row>
-          <Row label="代理" htmlFor="v2-proxy" hint="留空直连">
+            {test.running ? '测试中…' : '测试连接'}
+          </Button>
+          <StatusPill tone={test.done ? (test.result.ok ? 'ready' : 'bad') : 'idle'}>
+            {test.done ? (test.result.ok ? '通' : '不通') : '未测'}
+          </StatusPill>
+        </Row>
+      <Row
+        label={advanced === 0 ? '高级' : `高级 · ${advanced} 项已改`}
+        stacked
+        hint="装机时定一次、整局不用碰的三项：代理地址、子句流水、保真守卫。改过的项会计在上面那行数字里。"
+      >
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">代理</span>
             <Input
               id="v2-proxy"
-              className="w-72"
+              className="w-64"
               value={settings.proxyUrl}
               onChange={(e) => void update({ proxyUrl: e.target.value })}
-              placeholder="http://127.0.0.1:7890"
+              placeholder="留空直连：http://127.0.0.1:7890"
             />
-          </Row>
-          <Row
-            label="推理（先思考再翻）"
-            hint="默认关：翻译是短句任务，思考只加延迟（MiMo 实测 1.4s → 7.4s）"
-          >
-            <Button
-              variant={settings.provider.reasoning ? 'secondary' : 'outline'}
-              size="sm"
-              onClick={() => {
-                const reasoning = !settings.provider.reasoning
-                void save.wrap(
-                  update({
-                    provider: { ...settings.provider, reasoning },
-                    providerReasoning: { ...settings.providerReasoning, [settings.provider.id]: reasoning }
-                  })
-                )
-              }}
-            >
-              {settings.provider.reasoning ? '开' : '关'}
-            </Button>
-            <SaveFlash flash={save.flash} error={save.error} />
-          </Row>
-          <Row label="连通性" hint={test.done ? test.text : '翻译一句试试，立刻知道这家服务通不通'}>
-            <Button variant="outline" size="sm" onClick={() => void test.run(settings.provider)} disabled={test.running}>
-              {test.running ? '测试中…' : '测试连接'}
-            </Button>
-            {test.done ? <StatusPill tone={test.result.ok ? 'ready' : 'bad'}>{test.text}</StatusPill> : null}
-          </Row>
-        </Group>
-
-        <Group label="输出">
-          <Row label="浮层译文语言" htmlFor="v2-targetLang">
-            <Select
-              id="v2-targetLang"
-              value={settings.targetLang}
-              onChange={(e) => void save.wrap(update({ targetLang: e.target.value }))}
-            >
-              <option value="zh-CN">简体中文</option>
-              <option value="zh-TW">繁體中文</option>
-              <option value="en">English</option>
-            </Select>
-            <SaveFlash flash={save.flash} error={save.error} />
-          </Row>
-          <Row
-            label="译文词数上限"
-            htmlFor="v2-maxWords"
-            hint="中文→英文译文最多几个词（4-32，默认 16）；改动会按新上限重建翻译会话"
-          >
-            <Input
-              id="v2-maxWords"
-              type="number"
-              min={4}
-              max={32}
-              className="w-20"
-              value={settings.translationMaxWords ?? 16}
-              onChange={(e) => void save.wrap(update({ translationMaxWords: Number(e.target.value) }))}
-            />
-            <SaveFlash flash={save.flash} error={save.error} />
-          </Row>
-          <Row
-            label="子句流水"
-            htmlFor="v2-clauseStream"
-            hint="对讲时按标点切成子句：第一句翻完就先出声，其余并行翻、仍按原顺序念。省一次整段往返，代价是丢跨句上下文——默认关"
-          >
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">子句流水</span>
             <input
               id="v2-clauseStream"
               type="checkbox"
@@ -225,91 +202,190 @@ export function EnginePage(): React.ReactElement {
             <StatusPill tone={settings.clauseStreamVoice === true ? 'ready' : 'idle'}>
               {settings.clauseStreamVoice === true ? '子句' : '整句'}
             </StatusPill>
-            <SaveFlash flash={save.flash} error={save.error} />
-          </Row>
-        </Group>
-
-        <Group label="缓存">
-          <Row
-            label="翻译缓存"
-            hint={cache.flash || '按模型隔离：翻译记忆 + 对话历史，清了别的模型不受影响'}
-          >
-            {cache.confirm ? null : (
-              <Button variant="outline" size="sm" onClick={() => void cache.inspect()} disabled={cache.busy}>
-                {cache.busy ? '读取中…' : '清空缓存'}
-              </Button>
-            )}
-            {cache.confirm ? (
-              <ConfirmClear
-                counts={cache.confirm}
-                onCancel={cache.cancel}
-                onConfirm={() => void cache.clear()}
-              />
-            ) : null}
-          </Row>
-        </Group>
-        <Group label="质量">
-          <Row
-            label="保真守卫"
-            hint={quality.report === null ? '读取日志中…' : guardLine(quality.report.guard)}
-          >
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">保真守卫</span>
             <Button variant="outline" size="sm" onClick={() => void quality.refresh()} disabled={quality.busy}>
               {quality.busy ? '读取中…' : '刷新'}
             </Button>
-          </Row>
-          <Row
-            label="翻译记账本"
-            hint={quality.report === null ? '读取日志中…' : cacheLine(quality.report.cache)}
-          />
-          <p className="px-4 pb-3 text-xs text-muted-foreground">
-            {quality.flash || (quality.report === null ? '' : qualityFootnote(quality.report.cache))}
-          </p>
-        </Group>
-        <Group label="词表">
-          <Row
-            label="现役词表"
-            hint={glossary.status === null ? '读取中…' : glossaryPackLine(glossary.status)}
-          >
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant={glossary.status?.source === 'bundled' ? 'default' : 'outline'}
-                size="sm"
-                disabled={glossary.busy || glossary.status === null}
-                onClick={() => void glossary.apply('')}
-              >
-                内置
-              </Button>
-              {(glossary.status?.available ?? []).map((name) => (
-                <Button
-                  key={name}
-                  variant={glossary.status?.source === 'pack' && glossary.status.name === name ? 'default' : 'outline'}
-                  size="sm"
-                  disabled={glossary.busy}
-                  onClick={() => void glossary.apply(name)}
-                >
-                  {name}
-                </Button>
-              ))}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={glossary.busy}
-                  onClick={() => void glossary.refresh()}
-                >
-                  扫描目录
-                </Button>
-            </div>
-          </Row>
-          <p className="px-4 pb-3 text-xs text-muted-foreground">
-            词表包放在数据目录的 glossary/ 下（一份 JSON：name + entries，字段 hero / item / jargon）。
-            放进去在面板点一下即可生效，不用重新打包；包坏了整包拒绝、回退内置，原因就写在上面那行。
-          </p>
-        </Group>
-      </Panel>
+            <span className="text-xs text-muted-foreground">
+              {quality.report === null ? '读取日志中…' : guardLine(quality.report.guard)}
+            </span>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          子句流水开着就按标点切成子句：第一句翻完先出声，其余并行翻、仍按顺序念。省一次整段往返，代价是丢跨句上下文——默认关。
+        </p>
+        <SaveFlash flash={save.flash} error={save.error} />
+      </Row>
+      </Group>
 
-      <TrialBench />
-    </>
+      <Group label="输出">
+        <Row
+          label="译文语言"
+          hint={targetsLine({ targetLang: settings.targetLang, targetLang2: settings.targetLang2 })}
+        >
+          <span className="text-xs text-muted-foreground">外来话 → 中文</span>
+          <Select
+            id="v2-targetLang"
+            value={settings.targetLang}
+            onChange={(e) => void save.wrap(update({ targetLang: e.target.value }))}
+          >
+            {TARGET_LANGUAGES.map((item) => (
+              <option key={item.code} value={item.code}>
+                {item.label}
+              </option>
+            ))}
+          </Select>
+          <span className="text-xs text-muted-foreground">中文 → 外文</span>
+          <Select
+            id="v2-targetLang2"
+            value={settings.targetLang2}
+            onChange={(e) => void save.wrap(update({ targetLang2: e.target.value }))}
+          >
+            <option value="">英文（默认）</option>
+            {TARGET_LANGUAGES.filter((item) => item.code !== 'en').map((item) => (
+              <option key={item.code} value={item.code}>
+                {item.label}
+              </option>
+            ))}
+          </Select>
+          <SaveFlash flash={save.flash} error={save.error} />
+        </Row>
+        <Row
+          label="译文词数上限"
+          htmlFor="v2-maxWords"
+          hint="中文→英文译文最多几个词（4-32，默认 16）；改动会按新上限重建翻译会话"
+        >
+          <Input
+            id="v2-maxWords"
+            type="number"
+            min={4}
+            max={32}
+            className="w-20"
+            value={settings.translationMaxWords ?? 16}
+            onChange={(e) => void save.wrap(update({ translationMaxWords: Number(e.target.value) }))}
+          />
+        </Row>
+        <Row label="译文速度" hint={speedLine(board.board, settings.provider)} />
+      </Group>
+
+      <Group label="缓存">
+        <Row
+          label="翻译缓存"
+          hint={cache.flash || '按模型隔离：翻译记忆 + 对话历史，清了别的模型不受影响'}
+        >
+          {cache.confirm ? null : (
+            <Button variant="outline" size="sm" onClick={() => void cache.inspect()} disabled={cache.busy}>
+              {cache.busy ? '读取中…' : '清空缓存'}
+            </Button>
+          )}
+          {cache.confirm ? (
+            <ConfirmClear
+              counts={cache.confirm}
+              onCancel={cache.cancel}
+              onConfirm={() => void cache.clear()}
+            />
+          ) : null}
+        </Row>
+      </Group>
+
+      <Group label="质量">
+        <Row
+          label="翻译记账本"
+          hint={quality.report === null ? '读取日志中…' : cacheLine(quality.report.cache)}
+        />
+        <p className="px-4 pb-3 text-xs text-muted-foreground">
+          {quality.flash || (quality.report === null ? '' : qualityFootnote(quality.report.cache))}
+        </p>
+      </Group>
+
+      <Group label="词表">
+        <Row
+          label="现役词表"
+          hint={glossary.status === null ? '读取中…' : glossaryPackLine(glossary.status)}
+        >
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={glossary.status?.source === 'bundled' ? 'default' : 'outline'}
+              size="sm"
+              disabled={glossary.busy || glossary.status === null}
+              onClick={() => void glossary.apply('')}
+            >
+              内置
+            </Button>
+            {(glossary.status?.available ?? []).map((name) => (
+              <Button
+                key={name}
+                variant={glossary.status?.source === 'pack' && glossary.status.name === name ? 'default' : 'outline'}
+                size="sm"
+                disabled={glossary.busy}
+                onClick={() => void glossary.apply(name)}
+              >
+                {name}
+              </Button>
+            ))}
+            <Button variant="outline" size="sm" disabled={glossary.busy} onClick={() => void glossary.refresh()}>
+              扫描目录
+            </Button>
+          </div>
+        </Row>
+        <p className="px-4 pb-3 text-xs text-muted-foreground">
+          词表包放在数据目录的 glossary/ 下（一份 JSON：name + entries，字段 hero / item / jargon）。
+          放进去在面板点一下即可生效，不用重新打包；包坏了整包拒绝、回退内置，原因就写在上面那行。
+        </p>
+      </Group>
+
+      <Group label="试验台">
+        <TrialRow direction="en-zh" label="队友发言 → 中文" initial="careful mid, they smoke rosh" />
+        <TrialRow direction="zh-en" label="我的回复 → 英文" initial="小心点，他们可能在打肉山" />
+      </Group>
+    </Panel>
   )
+}
+
+/**
+ * 「高级」里改过的项数：代理填了 + 子句流水开了。
+ *
+ * 保真守卫不计入——它不是一个设置项，是一份随时可刷新的日志读数；把它算进「已改」会让人以为改坏了什么。
+ */
+function advancedCount(settings: AppSettings2): number {
+  let count = 0
+  if (settings.proxyUrl.trim() !== '') count += 1
+  if (settings.clauseStreamVoice === true) count += 1
+  return count
+}
+
+/**
+ * 译文速度那一行的话（#172）。
+ *
+ * 取数只认 `provider:board` 的汇总（#114）：先按「当前供应商 + 当前模型」精确找，找不到就退到次数最多那条
+ * 并**点名是别家的样本**——把别家的中位挂在这家的名字下面是更坏的错。一条样本都没有时说「还没人调过模型」，
+ * 不说 0 毫秒。
+ */
+function speedLine(board: ProviderBoard | null, provider: { id: string; model: string }): string {
+  if (board === null) return '正在读调用记账'
+  if (board.total === 0) return '还没人调过模型'
+  const exact = board.rows.find((row) => row.providerId === provider.id && row.model === provider.model)
+  const row = exact ?? board.rows[0]
+  if (row === undefined) return '还没人调过模型'
+  const who = exact === undefined ? `（${row.providerId}/${row.model} 的样本）` : ''
+  return `中位 ${formatMs(row.p50Ms)} · ${row.calls} 次调用${who}`
+}
+
+/** 调用看板：进页面读一次；测完连通性再读一次（那一次调用会进记账）。 */
+function useProviderBoard(): { board: ProviderBoard | null; reload: () => void } {
+  const [board, setBoard] = useState<ProviderBoard | null>(null)
+  const reload = useCallback((): void => {
+    void window.api
+      .providerBoard()
+      .then(setBoard)
+      .catch(() => setBoard(null))
+  }, [])
+  useEffect(() => {
+    reload()
+  }, [reload])
+  return { board, reload }
 }
 
 /** 测试连接的小状态机：idle / running / done 三态，结果带一句人话。 */
@@ -318,6 +394,8 @@ function useTestState(): {
   done: boolean
   result: TestResult
   text: string
+  /** 给人看的那一句：成功带耗时，失败是 `failureLine()` 原文（不截断、不改写）。 */
+  note: string
   run: (provider: AppSettingsProvider) => Promise<void>
 } {
   const [state, setState] = useState<TestState>({ status: 'idle' })
@@ -334,8 +412,15 @@ function useTestState(): {
   }
   const done = state.status === 'done'
   const result = done ? (state as { status: 'done'; result: TestResult }).result : { ok: false, message: '' }
-  const text = result.ok ? `正常 ${result.latencyMs ?? '?'} ms` : `失败：${result.message.slice(0, 60)}`
-  return { running: state.status === 'running', done, result, text, run }
+  const text = result.ok ? `正常 ${result.latencyMs ?? '?'} ms` : `失败：${result.message}`
+  // 失败那句是主进程 `failureLine()` 的原文（#86，见 src/shared/provider-failure.ts）：原样显示。
+  // 这里曾经 `slice(0, 60)`，把「在对话页换一个模型」这类下一步建议切掉了半句（#172）。
+  const note = !done
+    ? '还没测过：点一下才知道 key 与地址是不是真的能用。'
+    : result.ok
+      ? `通 · 返回用了 ${result.latencyMs ?? '?'} 毫秒`
+      : result.message
+  return { running: state.status === 'running', done, result, text, note, run }
 }
 
 type AppSettingsProvider = AppSettings2['provider']
@@ -484,26 +569,6 @@ function ConfirmClear({
         </div>
       </div>
     </div>
-  )
-}
-
-/** 试验台：原「翻译试用」tab，双向各一个输入框，就地看结果。 */
-function TrialBench(): React.ReactElement {
-  return (
-    <Panel>
-      <Group label="试验台">
-        <TrialRow
-          direction="en-zh"
-          label="队友发言 → 中文"
-          initial="careful mid, they smoke rosh"
-        />
-        <TrialRow
-          direction="zh-en"
-          label="我的回复 → 英文"
-          initial="小心点，他们可能在打肉山"
-        />
-      </Group>
-    </Panel>
   )
 }
 
