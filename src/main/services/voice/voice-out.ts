@@ -137,6 +137,9 @@ class VoiceOutService {
       keyVk: speakKeyVk(settings.ttsSpeakKey),
       speakMode: settings.ttsSpeakMode,
       onHint: showHint,
+      // #91：每段起播前重读一次设置——面板里换设备，下一段就换，正在播的这段不动。
+      desiredDevice: () => loadSettings().ttsOutputDevice,
+      onDeviceNotice: showHint,
       onSpeak: ({ bytes, durationMs, sinkLabel, keyHeld, holdMs }) => {
         playedSink = sinkLabel || null
         console.log(
@@ -209,6 +212,9 @@ class VoiceOutService {
       keyVk: speakKeyVk(settings.ttsSpeakKey),
       speakMode: settings.ttsSpeakMode,
       onHint: showHint,
+      // #91：只有回复腿跟着设置换设备；同声腿的灌入设备由 interpretLegOf 定死（它跟的是游戏的麦克风，不是扬声器）。
+      desiredDevice: legPlan === null ? () => loadSettings().ttsOutputDevice : undefined,
+      onDeviceNotice: showHint,
       // 起播那一刻（键已按下、窗口开始播）才是计时的「起播」点，不是调用 play 的时刻。
       onSpeak: (info) => {
         // 播到哪台设备是渲染层回报的事实：同声腿靠它回答「队友那边听到的是这一台吗」。

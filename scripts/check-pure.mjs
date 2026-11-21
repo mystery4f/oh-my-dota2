@@ -987,6 +987,26 @@ check('数据集版本：空集合也有稳定前缀', datasetVersionOf([]).star
 check('数据集版本：一行带条数与大小', datasetVersionLine(datasetVersionFact(dvSet)).includes('2 条'))
 check('数据集版本：老行判 unknown 而不是 same', datasetVersionDelta(null, 'ds1-x') === 'unknown')
 check('数据集版本：unknown 的文案不伪造版本号', datasetVersionDiffLine(null, 'ds1-x').includes('早于版本号'))
+// #91：声出设备只在段与段之间换；坏了就退回真正工作的那台，并且要说一句。
+const { planDeviceSwitch, settleDeviceAfterPlay } = await import('../src/shared/voice-device-switch.ts')
+check('声出设备：没变就不换也不说话', planDeviceSwitch({ active: 'A', desired: 'A' }).line === null)
+check('声出设备：段边界换设备会说「下一段」', (planDeviceSwitch({ active: 'A', desired: 'B' }).line ?? '').includes('下一段'))
+check(
+  '声出设备：正在播时推迟，当前这段不换',
+  planDeviceSwitch({ active: 'A', desired: 'B', playing: true }).device === 'A'
+)
+check(
+  '声出设备：回落记下真正工作的设备',
+  settleDeviceAfterPlay({ requested: 'B', fallback: true, sinkId: 'C', sinkLabel: 'C', hint: null }).active === 'C'
+)
+check(
+  '声出设备：回落必须留一句',
+  (settleDeviceAfterPlay({ requested: 'B', fallback: true, sinkId: 'C', sinkLabel: 'C', hint: null }).line ?? '') !== ''
+)
+check(
+  '声出设备：回落没报出设备时不乱改',
+  settleDeviceAfterPlay({ requested: 'B', fallback: true, sinkId: '', sinkLabel: '', hint: null }).active === 'B'
+)
 
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)

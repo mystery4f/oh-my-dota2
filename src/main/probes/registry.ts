@@ -63,6 +63,7 @@ import { runOverlayDigestProbe } from './overlay-digest'
 import { runKeyNounProbe } from './key-nouns'
 import { runFtAuditionProbe } from './ft-audition'
 import { runDatasetVersionProbe } from './dataset-version'
+import { runVoiceDeviceSwitchProbe } from './voice-device-switch'
 import { runPatchWatchProbe } from './patch-watch'
 import { runAsrRoutingProbe } from './asr-routing'
 import { runAsrSwitchProbe } from './asr-switch'
@@ -429,6 +430,13 @@ export const PROBES: readonly ProbeEntry[] = [
       'the dataset version (`src/shared/train/dataset-version.ts`): a set of recordings gets one content-derived version, the run row keeps the version it trained on even after later takes arrive, and a row that predates the column says so instead of guessing',
     ci: true,
     run: runDatasetVersionProbe
+  },
+  {
+    flag: '--voice-device-switch-probe',
+    summary:
+      'the speak-device hot switch (`src/shared/voice-device-switch.ts`): a device change takes effect between segments so the playing one is never truncated, and a device that fails hands the next segment to the one that actually worked, with one sentence said out loud',
+    ci: true,
+    run: runVoiceDeviceSwitchProbe
   },
   {
     flag: '--key-noun-probe',

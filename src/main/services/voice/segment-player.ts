@@ -1,5 +1,6 @@
 import type { VoiceOutEndedReport, VoiceOutReadyReport } from '@shared/ipc'
 import { MIN_SPEAK_MS, PTT_MARGIN_MS, pttWatchdogMs, pttWindow, type SpeakMode } from '@shared/voice-out'
+import { planDeviceSwitch, settleDeviceAfterPlay } from '@shared/voice-device-switch'
 import { getPttKeySender } from '../input/ptt-key'
 import { getVoiceOutWindow } from '../../windows/voice-out'
 
@@ -42,6 +43,13 @@ export interface SegmentPlayerOptions {
   onKeyError?: (error: string, requestId: number) => void
   /** 起播拆账（窗口准备 / 按键 / 首段余量）：只落日志，不改播放时序。 */
   onPrep?: (prep: { readyMs: number; keyMs: number; leadMs: number }) => void
+  /**
+   * #91：每一段起播前问一次「现在该用哪台设备」。播放器只在段与段之间读它，
+   * 正在播的那一段永远不会因为设置变了而被截断。
+   */
+  desiredDevice?: () => string
+  /** 换设备 / 回落设备的提示；两条腿共用一个回调（面板与浮层各自展示）。 */
+  onDeviceNotice?: (text: string) => void
 }
 
 /** 一次「敲一下」的结果：down 成功但 up 失败时键还按着，收尾必须再试一次。 */
@@ -107,8 +115,14 @@ export class SegmentPlayer {
   private keyError: string | null = null
   private startedAny = false
   private releaseMs = PTT_MARGIN_MS
+  /** #91：这一段该请求的设备。段边界才更新，正在播的那一段不受影响。 */
+  private activeDevice: string
+  /** #91：刚没起来的设备——设置还指着它，也不必每段再试。 */
+  private badDevice = ''
 
-  constructor(private readonly options: SegmentPlayerOptions) {}
+  constructor(private readonly options: SegmentPlayerOptions) {
+    this.activeDevice = options.device
+  }
 
   /** 说话键这条链路上的失败原因（按下或松开）；null = 键一直正常。 */
   get error(): string | null {
@@ -117,20 +131,50 @@ export class SegmentPlayer {
 
   async play(requestId: number, audio: Buffer, mime: string): Promise<SegmentOutcome> {
     const window = getVoiceOutWindow()
+    // #91：设备只在段与段之间换；play() 本身就是段边界，所以这里不传 playing。
+    const plan = planDeviceSwitch({
+      active: this.activeDevice,
+      desired: this.options.desiredDevice?.() ?? this.activeDevice,
+      bad: this.badDevice
+    })
+    if (plan.switched) {
+      console.log('VOICE_OUT_DEVICE_SWITCH', JSON.stringify({ from: this.activeDevice, to: plan.device, requestId }))
+      this.activeDevice = plan.device
+      // 设置换到另一台（不是刚才坏的那台）就算一次新的尝试：bad 清掉。
+      this.badDevice = ''
+      if (plan.line !== null) this.options.onDeviceNotice?.(plan.line)
+    }
     const readyPromise = waitReady(requestId, READY_TIMEOUT_MS)
     const queuedAt = Date.now()
     await window.play({
       requestId,
       audioBase64: audio.toString('base64'),
       audioMime: mime,
-      requestedDevice: this.options.device,
+      requestedDevice: this.activeDevice,
       monitorLocal: this.options.monitorLocal
     })
     const ready = await readyPromise
     if (!ready || !ready.ok) {
       return { kind: 'not-ready', error: ready?.error ?? '声出窗口没有就绪（超时）', hint: ready?.hint ?? null }
     }
-    if (ready.fallback && ready.hint) this.options.onHint?.(ready.hint)
+    // #91：回落要留话，并且把回落到的设备记成新的 active——否则每一段都重演一次失败。
+    const settled = settleDeviceAfterPlay({
+      requested: this.activeDevice,
+      fallback: ready.fallback,
+      sinkId: ready.sinkId,
+      sinkLabel: ready.sinkLabel,
+      hint: ready.hint
+    })
+    if (settled.fellBack) {
+      this.badDevice = plan.device
+      this.activeDevice = settled.active
+      console.log(
+        'VOICE_OUT_DEVICE_FALLBACK',
+        JSON.stringify({ to: settled.active, sinkLabel: ready.sinkLabel, requestId })
+      )
+    }
+    if (settled.line !== null) this.options.onDeviceNotice?.(settled.line)
+    else if (ready.fallback && ready.hint) this.options.onHint?.(ready.hint)
 
     const hold = pttWindow(ready.durationMs ?? MIN_SPEAK_MS)
     this.releaseMs = hold.releaseMs
