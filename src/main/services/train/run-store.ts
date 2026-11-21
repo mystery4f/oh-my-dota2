@@ -144,6 +144,12 @@ export function useTrainDatabase(file: string): void {
   overrideFile = file
   failedFile = null
 }
+/** 探针收尾：把存储层还给生产路径，免得临时库被删掉之后还有别处往里写。 */
+export function releaseTrainDatabaseForProbe(): void {
+  closeTrainStore()
+  overrideFile = null
+  failedFile = null
+}
 
 /** 关掉句柄，只为探针验证「落盘后重新打开还在」。 */
 export function closeTrainStore(): void {

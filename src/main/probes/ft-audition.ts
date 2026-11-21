@@ -13,6 +13,13 @@ import {
 import { buildTrainRun, finishTrainRun } from '@shared/train/run'
 import type { FtLedgerEntry } from '@shared/train/asr-ft'
 import { auditionEntriesOf, collectAuditionPairs, type AuditionTranscribe } from '../services/train/audition'
+import {
+  closeTrainStore,
+  loadTrainRun,
+  releaseTrainDatabaseForProbe,
+  saveTrainRun,
+  useTrainDatabase
+} from '../services/train/run-store'
 
 /**
  * 试听对比（#105）的验收探针。
@@ -184,6 +191,41 @@ export async function runFtAuditionProbe(): Promise<void> {
       })(),
       'expect empty'
     )
+
+    // —— #143：试听结论必须过得了 runs.db，否则面板永远等不到那个决定 ——
+    useTrainDatabase(join(dir, 'runs.db'))
+    const stored = finishTrainRun(
+      buildTrainRun({ kind: 'asr-ft', experiment: 'audition-db', startedAt: 1_700_000_000_000 }),
+      {
+        status: 'trained',
+        audition: judgeAudition(
+          [{ key: 'G14-L01', expected: '中路不见了', before: '中路不见', after: '中路不见了' }],
+          1_700_000_100_000
+        ),
+        auditionSkip: { at: 1_700_000_200_000, auto: true, reason: '没有留出集可听' }
+      }
+    )
+    saveTrainRun(stored)
+    closeTrainStore()
+    const reloaded = loadTrainRun(stored.id)
+    push(
+      '试听结论过了 runs.db：关库重开后逐句对比还在',
+      reloaded?.audition?.count === 1 &&
+        reloaded.audition.rows[0]?.key === 'G14-L01' &&
+        reloaded.audition.verdict === 'better',
+      JSON.stringify(reloaded?.audition ?? null).slice(0, 120)
+    )
+    push(
+      '跳过记录也过了 runs.db（自动跳过的原因读得回来）',
+      reloaded?.auditionSkip?.reason === '没有留出集可听' && reloaded.auditionSkip.auto === true,
+      JSON.stringify(reloaded?.auditionSkip ?? null)
+    )
+    push(
+      '库里的那条 run 仍然是「训练完了但没换上」',
+      reloaded?.status === 'trained' && reloaded.applied === false,
+      `${reloaded?.status}/${String(reloaded?.applied)}`
+    )
+    releaseTrainDatabaseForProbe()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
