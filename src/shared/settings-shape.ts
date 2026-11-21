@@ -42,6 +42,8 @@ export interface AppSettings {
    * 选错的表现是队友听不到：设备 id 在人耳看来是一串盐值，所以面板按名字选（见 talk.tsx）。
    */
   interpretInDevice: string
+  /** #97 停口窗口的预设：`short`（短促呼叫）/ `slow`（慢句子）。每次开麦现读，换档不需要重启。 */
+  captureSilencePreset: string
   /**
    * 讲话设备（声音输入）：'' = 自动挑（跳过虚拟声卡与蓝牙通话端点，见 pickCaptureDevice）。
    * 选蓝牙耳机的麦克风会让 Windows 把耳机从音乐模式切到通话模式：游戏声音断一两秒、之后变单声道闷音。
@@ -286,6 +288,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsOutputDevice: '',
   interpretMode: false,
   interpretInDevice: '',
+  captureSilencePreset: 'short',
   micDevice: '',
   ttsMonitorLocal: false,
   ttsSpeakKey: 'F5',

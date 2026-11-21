@@ -6,6 +6,8 @@ import { spokenStatusLine, type SpokenStatus } from '@shared/voice-out'
 import { formatChainOverlay } from '@shared/voice-timing'
 import { encodeWav16k } from '@shared/wav'
 import { describeCaptureDevice } from '../lib/mic'
+import { SILENCE_PRESETS, judgeUtteranceEnd, presetWindowMs } from '@shared/endpoint'
+import { SILENCE_RMS } from '@shared/voice-capture-gate'
 import { levelPercent, micDead, micDeadNotice, shouldRunChain, type MicDeadReason } from '@shared/mic-health'
 import { startPcmRecorder, type PcmRecorder } from '../lib/pcm-recorder'
 import { playInterpretEcho, stopInterpretEcho } from './interpret-echo'
@@ -150,6 +152,11 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
   let recordTimer: ReturnType<typeof setTimeout> | null = null
   /** 电平广播节流：每块都发（~85ms）会把 IPC 塞满，150ms 一条够画条了。 */
   let levelSentAt = 0
+  /** #97 停口判定：这一句里的累计有声、当前连续沉默，以及开麦时现读的窗口。 */
+  let voicedMs = 0
+  let silentMs = 0
+  let silenceWindowMs = SILENCE_PRESETS.short
+  let chunkSampleRate = 48_000
   /** 设备在录音中断开：这条录音不进链，提示已经由 dropDevice 落过。 */
   let deadAbort = false
   let deadReason: MicDeadReason = 'ended'
@@ -194,6 +201,20 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     for (let i = 0; i < chunk.length; i += 1) energy += chunk[i] * chunk[i]
     const rms = chunk.length > 0 ? Math.sqrt(energy / chunk.length) : 0
     const level = levelPercent(rms)
+    // 停口判定：这块算「有声」还是「沉默」，然后问一句该不该收（窗口来自本次开麦读到的预设）。
+    const chunkMs = chunkSampleRate > 0 ? (chunk.length / chunkSampleRate) * 1000 : 0
+    if (rms >= SILENCE_RMS) {
+      voicedMs += chunkMs
+      silentMs = 0
+    } else {
+      silentMs += chunkMs
+      const verdict = judgeUtteranceEnd({ voicedMs, silentMs, windowMs: silenceWindowMs })
+      if (verdict.end) {
+        console.log('VOICE_ENDPOINT', JSON.stringify({ reason: verdict.reason, voicedMs: Math.round(voicedMs), silentMs: Math.round(silentMs), windowMs: silenceWindowMs }))
+        void stop()
+        return
+      }
+    }
     sink.level?.(level)
     const track = trackHook?.track
     if (track && track.readyState !== 'live') {
@@ -247,6 +268,13 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
       fail('🎤 ' + micDeadNotice(label), micDeadNotice(label), 3000)
       return
     }
+    chunkSampleRate = opened.stream.getAudioTracks()[0]?.getSettings().sampleRate ?? 48_000
+    voicedMs = 0
+    silentMs = 0
+    // 开麦现读设置：换档立刻生效，不需要重启（票面「a preset change needs no restart」）。
+    void window.api.getSettings().then((settings) => {
+      silenceWindowMs = presetWindowMs(settings.captureSilencePreset)
+    }).catch(() => undefined)
     opened.setChunkListener(feedLevel)
     if (track) {
       const onLost = (): void => dropDevice(track.readyState === 'live' ? 'muted' : 'ended')
@@ -268,6 +296,8 @@ export function createVoiceCapture(sink: VoiceCaptureSink) {
     setRingRecording(true)
     window.api.reportVoiceState(true)
     levelSentAt = 0
+    voicedMs = 0
+    silentMs = 0
     // 上一句的中文回放可能还在响：开新一句先掐掉，否则两句叠在一起听不清。
     stopInterpretEcho()
     reportHealth({ recording: true, level: 0, dead: false, reason: null, label: '' })

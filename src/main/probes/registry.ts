@@ -51,6 +51,7 @@ import { runDiskBudgetProbe } from './disk-budget'
 import { runTrainFailureProbe } from './train-failure'
 import { runCompanionProfileProbe } from './companion-profile'
 import { runMomentumProbe } from './momentum'
+import { runEndpointProbe } from './endpoint'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -636,6 +637,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the momentum band (`src/shared/momentum.ts`): no wording reads as a probability, the hover row carries both inputs, and a frame without net worth renders nothing',
     run: runMomentumProbe
+  },
+  {
+    flag: '--endpoint-probe',
+    ci: true,
+    summary: 'the end-of-utterance window (`src/shared/endpoint.ts`): each preset cuts at its own silence window, a preset change applies on the next recording, and a breath shorter than the minimum voiced time never ends an utterance',
+    run: runEndpointProbe
   },
   {
     flag: '--asr-check-live-probe',
