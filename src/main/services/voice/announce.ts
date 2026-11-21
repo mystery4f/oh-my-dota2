@@ -76,7 +76,12 @@ export function speakAnnouncement(event: DotaAnnounceEvent): void {
         rate: settings.ttsRate,
         pitch: settings.ttsPitch
       },
-      { lane: 'announce', split: true, segmentChars: settings.ttsSpeakSegmentChars ?? 30 }
+      {
+        lane: 'announce',
+        split: true,
+        segmentChars: settings.ttsSpeakSegmentChars ?? 30,
+        strategy: settings.speechSplitStrategy
+      }
     ),
     (segment) => {
       const payload: SpeakPayload = {

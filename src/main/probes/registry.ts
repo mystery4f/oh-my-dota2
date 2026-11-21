@@ -35,6 +35,7 @@ import { runBuildInfoProbe } from './build-info'
 import { runLogsIsolationProbe } from './logs-isolation'
 import { runErrorLogProbe } from './error-log'
 import { runShadowVoiceProbe } from './shadow-voice'
+import { runSpeechSplitProbe } from './speech-split'
 import { runProviderFailureProbe } from './provider-failure'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runOverlayA11yProbe } from './overlay-a11y'
@@ -228,6 +229,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the first-match shadow: it never speaks, it records what would have been said, and it ends after one match',
     run: runShadowVoiceProbe
+  },
+  {
+    flag: '--speech-split-probe',
+    ci: true,
+    summary: 'both split strategies on the same line, no character ever lost, and the panel preview is the same function the pipeline uses',
+    run: runSpeechSplitProbe
   },
   {
     flag: '--provider-failure-probe',

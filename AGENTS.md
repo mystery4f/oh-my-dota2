@@ -180,6 +180,11 @@ happens in `src/main/services/hotkeys.ts`, which unregisters everything and re-r
   `hotkey:hold-selftest`; the panel's 热键 → 按住检测 row is the only place a user can tell "按下真的被听见" from
   "按住已经失效、现在是敲一下". A fallback state must say 按住不生效 and how to use 敲一下 — never "已恢复".
 
+- Sentence splitting (#85): `src/shared/speech-split.ts` is the only splitter —
+  `splitForSpeech(text, maxChars, strategy)` with `punctuation` (default, punctuation-first) and
+  `uniform` (fixed length). The panel's preview calls the SAME function, so a preview can never
+  disagree with what the pipeline does; never re-implement the split at a call site. Both strategies
+  must join back to the input byte for byte (a dropped punctuation mark is a different sentence).
 - Shadow mode (#80): `src/shared/shadow-voice.ts` owns the three states and the one line the panel shows;
   `src/main/services/voice/shadow.ts` owns the ledger (`logs/shadow-voice.jsonl`) and the "has a match ended"
   question. `speakReply()` / `interpretSpeak()` return BEFORE queueing or synthesising while it is active —

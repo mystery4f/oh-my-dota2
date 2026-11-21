@@ -6,6 +6,7 @@ import { warmEdge } from './edge'
 import { requestFromPlan, speakPipeline, type SpeechSegment } from './speech-pipeline'
 import { resolveSpeechPlan } from '@shared/speech-plan'
 import { DEFAULT_EDGE_VOICE, EDGE_VOICES } from '@shared/tts-voices'
+import type { SpeechSplitStrategy } from '@shared/speech-split'
 
 /** 单句上限：再长就不念了——一整段口播会把后面的消息全挤到后面。 */
 export const SPEAK_MAX_CHARS = 60
@@ -52,6 +53,8 @@ export interface SpeakOptions {
   voice: string
   /** 长句切段上限（字）：edge / sovits 切段用；缺省 30（AppSettings.ttsSpeakSegmentChars）。 */
   segmentChars?: number
+  /** #85 切段策略；缺省按标点（AppSettings.speechSplitStrategy）。 */
+  strategy?: SpeechSplitStrategy
 }
 
 /**
@@ -150,6 +153,7 @@ export function speakOptionsFromSettings(settings: {
   ttsSpeakSegmentChars?: number
   ttsSpeakFrontTpl: string
   ttsSpeakBackTpl: string
+  speechSplitStrategy?: SpeechSplitStrategy
 }): SpeakOptions {
   return {
     engine: settings.ttsEngine,
@@ -157,6 +161,7 @@ export function speakOptionsFromSettings(settings: {
     readOwn: settings.ttsReadOwn,
     prefix: settings.ttsSpeakPrefix,
     segmentChars: settings.ttsSpeakSegmentChars ?? 30,
+    strategy: settings.speechSplitStrategy,
     frontTpl: settings.ttsSpeakFrontTpl,
     backTpl: settings.ttsSpeakBackTpl,
     rate: settings.ttsRate,
@@ -209,6 +214,7 @@ export function announceEntries(entries: CaptureEntry[], cutoff?: number): void 
         dropStale: settings.ttsDropBacklog === true,
         split: true,
         segmentChars: options.segmentChars,
+        strategy: options.strategy,
         lane: 'announce'
       }),
       (segment) => broadcast(payload, segment)

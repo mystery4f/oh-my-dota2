@@ -10,6 +10,7 @@ import type { OverlayTextMode, ReplyTone } from './ipc'
 import type { DotaAnnounceTriggers } from './dota-announce'
 import type { OverlayFontSize } from './overlay-a11y'
 import type { BoundsMemory } from './display-geometry'
+import type { SpeechSplitStrategy } from './speech-split'
 
 export interface AppSettings {
   provider: ProviderConfig
@@ -62,6 +63,8 @@ export interface AppSettings {
    * 的份数判断），不靠人记得回来关。
    */
   shadowFirstMatch: boolean
+  /** #85 切段策略：punctuation = 按标点（默认，自然但长句起播慢）/ uniform = 按固定字数（起播均匀，可能断词）。 */
+  speechSplitStrategy: SpeechSplitStrategy
   /**
    * 说话键（push-to-talk）：游戏内按住才发言的按键，F1–F12 或单个字母/数字。
    * 声出期间由应用自动按下/松开（合成成功才按，头尾各留 200ms 余量）；乱填打回 F5。
@@ -301,6 +304,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsOutEngine: 'edge',
   ttsOutVoice: '',
   shadowFirstMatch: true,
+  speechSplitStrategy: 'punctuation',
   autoStartCapture: true,
   quickPhrases: DEFAULT_QUICK_PHRASES,
   myNicknames: [],

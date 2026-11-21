@@ -4,6 +4,11 @@ import { synthesizeEdge } from './edge'
 import { synthesizeOffline } from './offline'
 import { synthesizeSovits } from './sovits'
 import { SPEECH_MIME, speechLang, type SpeechMime } from '@shared/speech-plan'
+import {
+  SEGMENT_CHARS_DEFAULT,
+  splitForSpeech,
+  type SpeechSplitStrategy
+} from '@shared/speech-split'
 import type { SpeechEngine } from '@shared/speech-plan'
 import type { SpeechQueueLane, SpeechQueueSnapshot, SpeechStopResult } from '@shared/speech-queue'
 
@@ -29,37 +34,11 @@ export const realSpeechSynthAdapters: SpeechSynthAdapters = {
   sovits: (text, rate, lang) => synthesizeSovits(text, rate, lang)
 }
 
-/** 长句切段：先前几十个字先出声，剩下的在播放时合成。
- * 为什么不是排版问题：Edge 每段都要一次跨境往返（实测整句 0.7–1.6 s），
- * 一句话 40 个字等一次往返，听众会以为「朗读坏了」。按标点切成小段后（上限面板可配，默认 30），
- * 只切标点，不动字面：切完拼回来必须和原文一模一样（探针会断言）。 */
-export function splitForSpeech(text: string, maxChars = 20): string[] {
-  const raw = text.trim()
-  if (!raw) return []
-  if (raw.length <= maxChars) return [raw]
-  // 标点跟着前一段走，拼回来才不会丢符号。
-  const parts = raw.match(/[^，。！？；、,!?;]+[，。！？；、,!?;]?/gu) ?? [raw]
-  const pieces: string[] = []
-  let current = ''
-  for (const part of parts) {
-    if (current && current.length + part.length > maxChars) {
-      pieces.push(current)
-      current = part
-    } else {
-      current += part
-    }
-  }
-  if (current) pieces.push(current)
-  // 极端输入（一句 60 字不带标点）：硬切，宁可断在词中间也不要整句等一次往返。
-  const out: string[] = []
-  for (const piece of pieces) {
-    if (piece.length <= maxChars) {
-      out.push(piece)
-      continue
-    }
-    for (let index = 0; index < piece.length; index += maxChars) out.push(piece.slice(index, index + maxChars))
-  }
-  return out
+/** 切段委托给 `@shared/speech-split`：面板的「试切」与这里必须是同一份实现。 */
+export { splitForSpeech } from '@shared/speech-split'
+
+function splitSegments(text: string, maxChars?: number, strategy?: SpeechSplitStrategy): string[] {
+  return splitForSpeech(text, maxChars ?? SEGMENT_CHARS_DEFAULT, strategy)
 }
 
 export interface SpeechRequest {
@@ -76,6 +55,8 @@ export interface SpeechRequest {
   split?: boolean
   /** 切段上限（字），缺省 30。 */
   segmentChars?: number
+  /** #85 切段策略：按标点（默认）/ 按字数。 */
+  strategy?: SpeechSplitStrategy
   /** edge 嗓音。 */
   voice?: string
   /** edge 允许的嗓音白名单：朗读走默认中文嗓清单，声出传 VOICE_OUT_VOICES 放英文嗓进来。 */
@@ -224,7 +205,7 @@ function resolveFor(
 /** 切段计划：split 只对 edge/sovits 生效；offline/system 永远整句一段。 */
 function planSegments(request: SpeechRequest): string[] {
   if (!ENGINE_DRIVERS[request.engine].split) return [request.text]
-  return request.split === true ? splitForSpeech(request.text, request.segmentChars ?? 30) : [request.text]
+  return request.split === true ? splitSegments(request.text, request.segmentChars, request.strategy) : [request.text]
 }
 
 function logDrop(stage: string, text: string, extra: Record<string, unknown> = {}): void {

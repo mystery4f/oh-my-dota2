@@ -238,6 +238,7 @@ class VoiceOutService {
           pitch: settings.ttsPitch,
           split: true,
           segmentChars: settings.ttsSpeakSegmentChars,
+          strategy: settings.speechSplitStrategy,
           edgeVoices: VOICE_OUT_VOICES,
           resolveSegment: (segment) => {
             const synth = resolveVoiceOutSynth(settings.ttsOutEngine, settings.ttsOutVoice, segment)

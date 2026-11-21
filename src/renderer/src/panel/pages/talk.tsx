@@ -21,6 +21,13 @@ import { queueLine, stopLine, type SpeechQueueSnapshot } from '@shared/speech-qu
 import type { MicHealthEvent } from '@shared/mic-health'
 import { interpretDeviceLine, interpretFollowNote } from '@shared/interpret'
 import type { ShadowView } from '@shared/shadow-voice'
+import {
+  SPEECH_SPLIT_LABELS,
+  SPEECH_SPLIT_STRATEGIES,
+  SPLIT_SAMPLE,
+  previewSplit,
+  splitPreviewLine
+} from '@shared/speech-split'
 import { machineCheckOffer } from '@shared/env-report'
 import { ASR_ENGINES } from '@shared/asr/engines'
 import type { AsrState } from '@shared/asr/models'
@@ -534,6 +541,22 @@ export function TalkPage({
                 ))}
               </select>
             )}
+          </Row>
+          <Row label="切段策略" hint={splitPreviewLine(previewSplit(SPLIT_SAMPLE, settings.speechSplitStrategy, settings.ttsSpeakSegmentChars ?? 30))}>
+            <select
+              id="v2-splitStrategy"
+              value={settings.speechSplitStrategy}
+              onChange={(e) =>
+                void save.wrap(update({ speechSplitStrategy: e.target.value as (typeof SPEECH_SPLIT_STRATEGIES)[number] }))
+              }
+              className={selectClass}
+            >
+              {SPEECH_SPLIT_STRATEGIES.map((one) => (
+                <option key={one} value={one}>
+                  {SPEECH_SPLIT_LABELS[one]}
+                </option>
+              ))}
+            </select>
           </Row>
           {shadow ? (
             <Row label="影子模式" hint="第一局先不出声：照常翻译、记账，但不合成、不按说话键">

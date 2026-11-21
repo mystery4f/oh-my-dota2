@@ -439,6 +439,37 @@
 - 代价与口径：两块 int8 模型同时常驻内存，这是换速度要付的钱；票面另两个选项（给规则加粘滞、或只改文案保持默认关）没做——分流的两台引擎本来就都会被用到，留两图才是根上的解法。文案同步改了实话：`asr-routing.ts` 与 `settings-shape.ts` 原本写「每次换引擎要重载识别器」，现在写「两台各自只加载一次，之后换引擎只是换个指针」。
 - 验收：`--asr-switch-probe`（**不进 CI**，要本机装齐两台模型，缺件时 SKIP 并写明缺谁）跑真 worker：同引擎第二次命中、换引擎各加载一次、来回切不再重建、第三个键挤掉最久没用到的那个、挤掉后仍能答。墙钟数字只进 JSON 不当门槛（并发跑必抖）。
 
+## 切段策略：按标点还是按字数（#85）
+
+### 症状
+
+同一句译文，有人说「第一句半天不响」，有人说「听着像被切断的机器人在念」——其实调的是同一个
+旋钮：Edge 每段都要一次跨境往返，段切得少就是等、切得碎就是断。改动前只有「每段最多几个字」，
+没有「在哪切」的选择。
+
+### 根因
+
+切段函数 `splitForSpeech()` 写在 `src/main/services/voice/speech-pipeline.ts` 里，只会在标点处
+切；面板想预览「现在这句会切成几段」，只能自己再写一遍逻辑——两份实现迟早不一致，预览就会撒谎。
+
+### 修法
+
+判据搬到 `src/shared/speech-split.ts`（`splitForSpeech(text, maxChars, strategy)`、`previewSplit()`、
+`splitPreviewLine()`、`SPEECH_SPLIT_LABELS/HINTS`、`SEGMENT_CHARS_MIN/MAX/DEFAULT` = 10/60/30）：
+
+- `punctuation`（默认）与改动前逐字等价：标点跟着前一段走，超长段再硬切；
+- `uniform` 忽略标点按固定字数切，段长整齐、起播更可预测，代价是可能断在词中间；
+- 两条策略都遵守「切完拼回来与原文逐字相同」，探针逐条断言（丢一个标点就是另一句话）。
+
+设置新增 `speechSplitStrategy`；三条出声腿（朗读 `speech.ts`、声出 `voice-out.ts`、对局播报
+`announce.ts`）都把它与 `ttsSpeakSegmentChars` 一起传进管线。面板只在「说给谁听」组**加了一行**
+（下拉 + hint 用 `splitPreviewLine(SPLIT_SAMPLE…)` 现场试切），不重排。
+
+### 边界
+
+面板预览与真实切法共用同一个函数（探针钉「逐段相同」）；`offline`/`system` 引擎永远整句一段，
+策略对它们无效——这一点写在 `ENGINE_DRIVERS` 里，不靠文档口头约定。
+
 ## 影子模式：第一局先记账、不出声（#80）
 
 ### 症状
