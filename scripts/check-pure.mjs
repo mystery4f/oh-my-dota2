@@ -1021,6 +1021,41 @@ const { judgeHalfDuplex, halfDuplexLine } = await import('../src/shared/half-dup
 check('半双工：播放窗口内丢弃', judgeHalfDuplex({ playingUntil: 2000, now: 1500 }).drop === true)
 check('半双工：窗口过后放行', judgeHalfDuplex({ playingUntil: 1000, now: 5000 }).drop === false)
 check('半双工：丢弃与否的文案不同', halfDuplexLine(0, 3) !== halfDuplexLine(2, 3))
+// #89：音色包单文件——清单验门指名到件，缺参考音频/参考文本都拒收。
+const { judgeVoicePackBundle, voicePackCheckLine, voicePackBundleEntries, VOICE_PACK_BUNDLE_VERSION } = await import(
+  '../src/shared/voice-pack-bundle.ts'
+)
+const packBase = {
+  version: VOICE_PACK_BUNDLE_VERSION,
+  id: 'mina',
+  name: '米拉娜',
+  promptText: '这是一句参考文本。',
+  promptLang: 'zh',
+  refAudio: 'ref.wav',
+  gptWeights: 'mina-e15.ckpt',
+  sovitsWeights: 'mina_e15.pth'
+}
+const packNames = ['ref.wav', 'mina-e15.ckpt', 'mina_e15.pth']
+check('音色包：完整的包判 ok', judgeVoicePackBundle({ manifest: packBase, names: packNames }).ok === true)
+check(
+  '音色包：缺参考音频时指名「参考音频」',
+  (() => {
+    const check89 = judgeVoicePackBundle({ manifest: packBase, names: packNames.filter((name) => name !== 'ref.wav') })
+    return check89.ok === false && voicePackCheckLine(check89).includes('参考音频')
+  })()
+)
+check(
+  '音色包：参考文本为空也拒',
+  judgeVoicePackBundle({ manifest: { ...packBase, promptText: '  ' }, names: packNames }).errors.some((item) => item.part === 'promptText')
+)
+check(
+  '音色包：版本不认识就拒收',
+  judgeVoicePackBundle({ manifest: { ...packBase, version: 99 }, names: packNames }).errors[0].detail.includes('99')
+)
+check(
+  '音色包：清单驱动的三件顺序固定',
+  voicePackBundleEntries(packBase).map((item) => item.part).join(',') === 'refAudio,gptWeights,sovitsWeights'
+)
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

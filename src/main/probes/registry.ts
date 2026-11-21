@@ -24,6 +24,7 @@ import { runHoldWatchProbe } from './hold-watch'
 import { runVisionProbe } from './vision'
 import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
+import { runVoicePackBundleProbe } from './voice-pack-bundle'
 import { runMatchReportProbe } from './match-report'
 import { runMatchAttributionProbe } from './match-attribution'
 import { runHotwordCandidatesProbe } from './hotword-candidates'
@@ -541,6 +542,12 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--inplace-guard-probe',
     summary: 'the in-place send guards: composition text, empty draft, stale session',
     run: runInPlaceGuardProbe
+  },
+  {
+    flag: '--voice-pack-bundle-probe',
+    summary: 'the single-file voice pack: export→import round trip, and a pack missing its reference audio or prompt text is refused by name with nothing written',
+    ci: true,
+    run: runVoicePackBundleProbe
   },
   {
     flag: '--asr-swap-probe',

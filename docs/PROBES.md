@@ -90,6 +90,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--voice-worker-probe` the NDJSON resident-worker protocol harness (`src/main/services/voice/worker.ts`), zero models
   - `--asr-engines-probe` the ASR engine table plus the model registry: each row is self-consistent with the files on disk
   - `--inplace-guard-probe` the in-place send guards: composition text, empty draft, stale session
+  - `--voice-pack-bundle-probe` the single-file voice pack: export→import round trip, and a pack missing its reference audio or prompt text is refused by name with nothing written
   - `--asr-swap-probe` diagnostic: prints the swap states and the steps a promote would take (`--asr-swap-apply` runs it)
 <!-- probes:end -->
 
