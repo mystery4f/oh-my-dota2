@@ -287,6 +287,12 @@
 - 不能测的：**准确率**。需要带标注的真实小地图帧（英雄 / 小兵 / 幻象 / 肉山各多少、在哪），仓库里一张都没有；用合成帧算出来的数字只能证明代码不傻，不能证明它认得游戏。探针输出里显式写 `accuracy: "unmeasured"`，`autoLocate` 同样未测（多分辨率、HUD 缩放下小地图位置怎么找，需要真实截图）。
 - 补测条件（写在这里，免得下次重新想）：把带标注的截图放进 `<userData>/logs/minimap-frames/*.png`，探针就会从 `unmeasured` 转成按张计数；标注格式还没定，定之前不要写解析器。
 - 口径：不要因为「检测很快」就承诺英雄计数——快的是找红绿像素，难的是判断那个点是谁。真要上功能，先拿 20 张真实帧把准确率量出来，再谈。
+### 探针把假数据写进了真实日志（#126）
+- 症状：跑过 `--match-attribution-probe` 之后，`data/logs/gsi-summary.json` 里躺着 `matchid 9100000002`、`frames: 2`——下一局真对局开始时，代码看到「matchid 变了」就把这局**假对局**归档成上一场，复盘页从此多一局没打过的比赛；`--voice-chain-probe` 更直接：它先把真实的 `voice-chain.jsonl` 清空再写自己的两行，玩家的对讲计时记录就没了。
+- 根因：日志路径统一走 `logsDir()`（`src/main/services/logs/base-dir.ts`），但「探针要不要换根」这件事**没人负责**——每个探针自己记得 `setLogsDirForProbe()` 才行，而人总会忘。`resetFrameSummary()` 只清内存账本，注释写着「不影响已落盘的文件」，所以假 summary 会一直躺在盘上。
+- 修法：把「探针不碰用户数据」变成进程级的默认值——`src/main/index.ts` 在 `applyPortableUserData()` 之后立刻判断：如果本次是以某个探针标志启动的，`setLogsDirForProbe(mkdtempSync(tmpdir/'omd2-probe-logs-<flag>-'))`。想用真目录必须在那张表里显式标 `realLogs: true`（现在只有 5 条：读上一局真日志的 `--gsi-dump-report`/`--match-report`、产出给人回放产物的 `--gsi-dump`/`--interpret-listen`、读人手工放素材的 `--minimap-probe`），而且它们只读不写。同时把 `gsi.ts` 里四处直接拼 `<userData>/logs/...` 的写法（`gsi-chat`/`gsi-player`/`gsi-draft`/`gsi-stall`）收进 `logsDir()`，否则这一层缝漏掉一半。
+- 怎么验：新探针 `--logs-isolation-probe`（ci）断言 `logsDir()` 不在 userData 下、summary 活文件与归档目录都跟着临时根走、写两帧之后真实 `gsi-summary.json` 逐字节不变、白名单少于总数一半；另外把 31 条 CI 探针串起来跑一遍，跑前跑后 `sha1sum data/logs/*` 完全一致——后者是唯一能证明「不漏」的证据，单看某条探针的断言不算。
+- 教训：这类「默认值靠记性」的缝要用框架层兜住，不是给每个调用点加一句记得改；而且改完必须有一份**跑完整套之后仍然成立**的证据，因为漏的那一条往往就是你忘了改的那条。
 ### 浮层字小、灰度下分不清已播未播（#100）
 - 症状：浮层文字只有一套大小（原文 12px / 译文 13px），想看清只能坐近一点；已播行与未播行只靠绿色和灰色区分，灰度截图、色弱用户、甚至投影仪偏色时看着一模一样。
 - 根因：字号与颜色全是 `src/renderer/src/overlay/overlay.css` 里的字面量，26 处 `font-size` 只有 10/11/12/13 四个数，没有任何地方能检查「对比度够不够」「状态有没有非颜色标记」——它既不在类型里，也不在探针里。

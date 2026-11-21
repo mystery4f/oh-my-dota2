@@ -12,7 +12,8 @@ app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer')
 // 朗读是「程序自己放音频」：Chromium 默认要求先有用户手势，否则 play() 直接被拒。
 // 表现为「朗读开了但一点声音都没有」，日志里只有一条被吞掉的 NotAllowedError。
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
-import { statSync } from 'node:fs'
+import { mkdtempSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { captureHint } from '@shared/overlay-hint'
 import { warmEdge } from './services/voice/edge'
@@ -42,9 +43,19 @@ import { getCaptureService } from './services/capture/capturer'
 import { getInPlaceSender } from './services/input/chat-inplace'
 import { createTray, destroyTray } from './windows/tray'
 import { applyPortableUserData } from './services/data-dir'
+import { setLogsDirForProbe } from './services/logs/base-dir'
 
 // 数据目录必须在任何 userData 读取之前定好：settings、会话库、日志、词库都挂在它下面。
 applyPortableUserData()
+
+// 探针的日志落到临时目录（#126）：合成帧、假 matchid、假的对讲计时以前会留在真实的
+// `logs/` 里，下一局复盘把探针那局当成真对局；有一个探针还清空过真实 `voice-chain.jsonl`。
+// 只有标了 `realLogs` 的探针（读上一局真日志、产出给人回放的产物）才继续用真目录，
+// 它们只读不写。下面是唯一一处换根的地方，业务代码永远拿默认值。
+const probeForLogs = PROBES.find((probe) => process.argv.includes(probe.flag))
+if (probeForLogs !== undefined && probeForLogs.realLogs !== true) {
+  setLogsDirForProbe(mkdtempSync(join(tmpdir(), `omd2-probe-logs-${probeForLogs.flag.replace(/^--/, '')}-`)))
+}
 
 // 诊断用：强制渲染进程暴露无障碍树，让 UI 自动化能看到网页层焦点（长期开着无副作用）。
 app.commandLine.appendSwitch('force-renderer-accessibility')

@@ -1,6 +1,5 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { join } from 'node:path'
-import { app } from 'electron'
 import { getCaptureService } from './capture/capturer'
 import { loadSettings, saveSettings } from './settings'
 import { appendCappedJsonl } from './logs/jsonl'
@@ -8,6 +7,7 @@ import { announceFrameOf, feedLiveAnnouncement } from './voice/announce'
 import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
 import { noteLiveMatch } from './gsi-match'
+import { logsDir } from './logs/base-dir'
 import type { GsiStatusView } from '../../shared/ipc'
 import { judgeGsiStall, type GsiStallView } from '../../shared/gsi-stall'
 import { errorMessage } from '@shared/errors'
@@ -50,7 +50,7 @@ export interface GsiEvent {
 
 /** 验证期证据文件：chat_message 原样落盘，方便和屏幕上那一行逐字对账。 */
 export function gsiChatLogPath(): string {
-  return join(app.getPath('userData'), 'logs', 'gsi-chat.jsonl')
+  return join(logsDir(), 'gsi-chat.jsonl')
 }
 
 const CHAT_LOG_MAX_BYTES = 256_000
@@ -103,7 +103,7 @@ function recordPlayer(payload: GsiPayload): void {
   const key = JSON.stringify(fields)
   if (key === lastPlayerLine) return
   lastPlayerLine = key
-  appendCappedJsonl(join(app.getPath('userData'), 'logs', 'gsi-player.jsonl'), { at: new Date().toISOString(), ...fields }, PLAYER_LOG_MAX_BYTES)
+  appendCappedJsonl(join(logsDir(), 'gsi-player.jsonl'), { at: new Date().toISOString(), ...fields }, PLAYER_LOG_MAX_BYTES)
 }
 
 /**
@@ -127,7 +127,7 @@ function recordDraft(payload: GsiPayload): void {
   }
   const line = JSON.stringify(record)
   boundedRemember(seenDraft, line, SEEN_DRAFT_MAX)
-  appendCappedJsonl(join(app.getPath('userData'), 'logs', 'gsi-draft.jsonl'), record, DRAFT_LOG_MAX_BYTES)
+  appendCappedJsonl(join(logsDir(), 'gsi-draft.jsonl'), record, DRAFT_LOG_MAX_BYTES)
 }
 
 /** 一帧里的聊天事件都落盘；自己说的那几条用 own 标出来，对账时好区分。 */
@@ -633,7 +633,7 @@ async function diagnoseStall(view: GsiStallView, now: number): Promise<void> {
   // 探针里两样都不落：不写 Dota 目录，也不往真实 logs 里塞一条合成事故。
   if (!runtime.writeConfig) return
   console.log('GSI_STALL_DIAG', JSON.stringify(line))
-  appendCappedJsonl(join(app.getPath('userData'), 'logs', 'gsi-stall.jsonl'), { ...line })
+  appendCappedJsonl(join(logsDir(), 'gsi-stall.jsonl'), { ...line })
 }
 
 export interface StartGsiOptions {

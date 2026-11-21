@@ -30,6 +30,7 @@ import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
 import { runInterpretLegProbe } from './interpret-leg'
 import { runBuildInfoProbe } from './build-info'
+import { runLogsIsolationProbe } from './logs-isolation'
 import { runOverlayGeometryProbe } from './overlay-geometry'
 import { runOverlayA11yProbe } from './overlay-a11y'
 import { runProviderReasoningProbe } from './provider-reasoning'
@@ -72,6 +73,19 @@ export interface ProbeEntry {
   /** 目录里的那一行说明（写进 `docs/PROBES.md`，英文与那份文档一致）。 */
   summary: string
   run: () => void | Promise<void>
+  /**
+   * 这个探针**必须碰用户的真日志/真数据**，所以 `probeRun` 不为它换临时目录。
+   *
+   * 默认（没有这一行）所有探针的 `logsDir()` 指向 `mkdtemp` 出来的临时目录：合成帧、
+   * 假 matchid、假的对讲计时只落在临时目录里，跑完随进程消失。这条默认值是 #126 的
+   * 结论——那之前探针真的把假 `gsi-summary.json` 留在用户数据里、把真实
+   * `voice-chain.jsonl` 清空，下一局复盘读到的是探针的假局。
+   *
+   * 标这一位的只有三类：读上一局真日志（`--gsi-dump-report`、`--match-report`）、
+   * 产出给人回放的产物（`--gsi-dump`、`--interpret-listen`）、读人手工放进去的素材
+   * （`--minimap-probe`）。它们只读不写；写的那部分各自用 `mkdtemp`。
+   */
+  realLogs?: true
   /**
    * 进 CI：标在「便宜、不碰硬件、不读用户数据」的探针上。
    *
@@ -158,16 +172,19 @@ export const PROBES: readonly ProbeEntry[] = [
   {
     flag: '--gsi-dump',
     summary: 'prints every field path Dota actually pushes (type/hits/sample) into `logs/gsi-frames.json`',
+    realLogs: true,
     run: runGsiDumpProbe
   },
   {
     flag: '--gsi-dump-report',
     summary: 'reads the summary the app writes while it plays (`logs/gsi-summary.json`)',
+    realLogs: true,
     run: runGsiFramesReportProbe
   },
   {
     flag: '--match-report',
     summary: 'folds one match out of the GSI log: unique lines vs raw frames, channel mix, game time',
+    realLogs: true,
     run: runMatchReportProbe
   },
   {
@@ -188,7 +205,14 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary:
       'minimap hero dots: cost per frame and correct clustering on a synthetic frame — accuracy stays unmeasured without labelled screenshots',
+    realLogs: true,
     run: runMinimapProbe
+  },
+  {
+    flag: '--logs-isolation-probe',
+    ci: true,
+    summary: 'a probe process writes its logs to a temp dir, never into the user data directory',
+    run: runLogsIsolationProbe
   },
   {
     flag: '--first-run-probe',
@@ -229,6 +253,7 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--interpret-listen-probe',
     summary:
       'can we hear the machine at all: loopback opens at 48 kHz, the track really carries sound, and GTCRN+VAD carve speech-sized segments',
+    realLogs: true,
     run: runInterpretListenProbe
   },
   {

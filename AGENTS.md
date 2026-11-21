@@ -344,6 +344,14 @@ it and nothing happened". The overlay and the pause hint print key names from th
 - `eslint` allows exactly one warning (`--max-warnings 1`), so any non-component export in a `.tsx`
   file breaks the build: pure helpers (`runTone`, `formatDuration`, …) live in their own `.ts`
   module next to the component.
+- Probes never write user data (default, not a habit): `src/main/index.ts` points `logsDir()` at a fresh
+  `mkdtemp` dir whenever the process was started with a probe flag, so synthetic frames and fake matchids land in
+  the temp dir and vanish. A probe that genuinely needs the user's own logs declares it in the registry row —
+  `realLogs: true`, currently only the ones that read a finished match or produce something a human replays
+  (`--gsi-dump-report`, `--match-report`, `--gsi-dump`, `--interpret-listen`, `--minimap-probe`) — and those must
+  only read. Everything log-shaped therefore has to be derived from `logsDir()`, never from
+  `join(app.getPath('userData'), 'logs', …)`; `--logs-isolation-probe` fails when that breaks, and the only real
+  proof is a full CI-probe sweep leaving `sha1sum data/logs/*` unchanged.
 - Overlay readability (#100): font sizes and every text colour live in ONE table, `src/shared/overlay-a11y.ts`
   (`FONT_SCALE`, `OVERLAY_TEXT_PAIRS`, `OVERLAY_STATE_MARKS`); `src/renderer/src/overlay/overlay.css` may only use the four
   `--ov-fs-mini/small/body/title` variables switched by the root's `data-font` — `check:pure` fails on a literal `font-size` or on
