@@ -40,6 +40,7 @@ import { finetuneEngine } from './target-engine'
 import { errorMessage } from '@shared/errors'
 import type { AsrFtSwapResult } from '@shared/train/asr-ft'
 import { appendTrainLog } from './log-file'
+import { diagnoseTrainFailure, failureLine, TRAIN_FAILURE_STAGE_LABELS } from '@shared/train/failure-diagnosis'
 import { checkDiskBudgetForRun, datasetBytesOfLedger, diskGate } from './disk-budget'
 import { portableDataDir } from '../data-dir'
 
@@ -53,10 +54,6 @@ import { portableDataDir } from '../data-dir'
 const LOG_RING_LIMIT = 500
 /** 进度广播节流：真训练栈一秒几十行日志，不节流会把窗口渲染按住。 */
 const BROADCAST_MIN_MS = 250
-/** 训练栈 OOM 的原文标记：torch 抛 `torch.OutOfMemoryError: CUDA out of memory`，也有 RuntimeError 包装的写法。 */
-const OOM_RE = /CUDA out of memory|OutOfMemoryError|out of memory/i
-/** Python 收场那行：`RuntimeError: …` / `some.module.Error: …`，用来把 exit code 变成一句人话。 */
-const ERROR_LINE_RE = /(?:^|\s)(?:[A-Za-z_][\w.]*Error|Exception):\s*\S/
 
 /** 请求 → run 参数：ASR 的轮数/lr/续训点与 GV 的版本/批大小/轮数都在这里定案。 */
 function runParamsOf(kind: TrainTaskKind, request: TrainStartRequest): TrainRunParams {
@@ -462,25 +459,6 @@ export class TrainManager {
     this.io.holdInference(false)
   }
 
-  /** 日志环最近一段有没有 OOM 原文：失败收场要说人话，别只丢一个 exit code。 */
-  private sawOom(): boolean {
-    return this.logs.slice(-60).some((line) => OOM_RE.test(line.text))
-  }
-
-  /**
-   * 退场原因只写 exit code 等于没说：Python 那边已经把 traceback 打进日志了，
-   * 这里捞最后一条真错误（`XxxError: …` / `Exception: …`）附在收场文案后面。
-   */
-  private lastErrorLine(): string | null {
-    const tail = this.logs.slice(-80)
-    for (let index = tail.length - 1; index >= 0; index--) {
-      const text = tail[index].text.trim()
-      if (!ERROR_LINE_RE.test(text)) continue
-      return text.length > 160 ? `${text.slice(0, 157)}…` : text
-    }
-    return null
-  }
-
   /** 这一轮该记什么指标：识别读训练目录，音色读 GV 日志；读不到就记 null，不编。 */
   private runMetrics(run: TrainRunRecord) {
     return run.kind === 'asr-ft'
@@ -557,14 +535,9 @@ export class TrainManager {
   private finish(status: Extract<TrainTaskStatus, 'done' | 'failed' | 'stopped'>, code: number | null): void {
     // asr-ft 失败收场回写 run.json（成功标 trained 走链回调、转正标 applied 走 apply）；缺账本就跳过。
     if (status === 'failed' && this.request?.asrFt) markRunStatus(this.request.asrFt.data.runDir, 'failed')
-    const failure =
-      status === 'failed'
-        ? this.sawOom()
-          ? '失败：显存不足（CUDA OOM），关掉占卡程序再点一次'
-          : this.lastErrorLine() === null
-            ? `失败 (exit ${code ?? '?'})`
-            : `失败 (exit ${code ?? '?'})：${this.lastErrorLine()}`
-        : null
+    // #106：失败形状映射成「阶段 + 一句人话」，原文当证据进日志；未知形状保留原始尾巴，绝不猜。
+    const diagnosis = status === 'failed' ? diagnoseTrainFailure(this.logs.map((line) => line.text)) : null
+    const failure = diagnosis === null ? null : failureLine(diagnosis, code)
     // 先落库再换模：applyAsrFtModel 是按导出目录回库里找回这一轮记 applied 的，行还没写就翻不到牌。
     let saved: TrainRunRecord | null = null
     if (this.run) {
@@ -594,6 +567,7 @@ export class TrainManager {
     if (this.task) this.task = { ...this.task, status, endedAt: Date.now(), stage }
     // 收场结论也进日志文件：换模失败、权重平均兜底这类只有一行的判断，事后只能靠这一句复盘。
     this.record(stage)
+    if (diagnosis?.line) this.record(`失败阶段 ${TRAIN_FAILURE_STAGE_LABELS[diagnosis.stage]}：${diagnosis.evidence}`)
     if (saved) {
       // 换模成功才清盘：只留当前这轮与下一轮的增量起点（见 docs/adr/asr-ft-run-retention.md）。
       // 异步做，不占收场这一步；清不掉也只是多占点盘，不影响已经换上的模型。

@@ -87,6 +87,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--train-probe` the pure training decision seam (`src/shared/train.ts`): mutexes, preflight, run state
   - `--train-queue-probe` the training queue (`src/shared/train/queue.ts`): three waiting runs execute in order, and cancelling a waiting entry never reaches the running run
   - `--disk-budget-probe` the pre-run disk budget (`src/shared/train/disk-budget.ts`): a short volume refuses with the measured numbers, an unmeasurable one is let through, and the estimate stays inside the stated band
+  - `--train-failure-probe` the training failure diagnosis (`src/shared/train/failure-diagnosis.ts`): every known shape maps to its stage, and an unknown one keeps the raw tail instead of guessing
   - `--asr-check-live-probe` runs the real model over the ledger recordings and prints the CER ranking split into train / eval
   - `--voice-runtime-probe` the voice runtime installer state (`src/main/services/voice/runtime.ts`) with temp fixtures
   - `--voice-worker-probe` the NDJSON resident-worker protocol harness (`src/main/services/voice/worker.ts`), zero models

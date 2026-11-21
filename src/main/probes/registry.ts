@@ -48,6 +48,7 @@ import { runSovitsVoicepackProbe } from './sovits-voicepack'
 import { runTrainProbe } from './train'
 import { runTrainQueueProbe } from './train-queue'
 import { runDiskBudgetProbe } from './disk-budget'
+import { runTrainFailureProbe } from './train-failure'
 import { runAsrCheckLiveProbe } from './asr-check-live'
 import { runTranslateAccuracyProbe } from './translate-accuracy'
 import { runTranslateCacheProbe } from './translate-cache'
@@ -531,6 +532,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the pre-run disk budget (`src/shared/train/disk-budget.ts`): a short volume refuses with the measured numbers, an unmeasurable one is let through, and the estimate stays inside the stated band',
     run: runDiskBudgetProbe
+  },
+  {
+    flag: '--train-failure-probe',
+    ci: true,
+    summary: 'the training failure diagnosis (`src/shared/train/failure-diagnosis.ts`): every known shape maps to its stage, and an unknown one keeps the raw tail instead of guessing',
+    run: runTrainFailureProbe
   },
   {
     flag: '--asr-check-live-probe',
