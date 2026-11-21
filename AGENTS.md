@@ -71,6 +71,14 @@ guessing the fields costs a rework round.
   Enable once per clone: `git config core.hooksPath .githooks`; skip once with `git commit --no-verify`.
   Other worktrees live under `.dev-flow/` inside this repo, and eslint now ignores that path — a hook that
   fails on someone else's build output is a hook everybody skips.
+- A probe must not assert a tight wall-clock number: the CI job runs every `ci: true` probe back to
+  back on a shared runner, and two such probes here were green alone and red under load (the minimap
+  frame budget measured 18.5 ms solo and 33.2 ms with 25 probes running; the download probe's
+  truncated response sometimes rejected inside `fetch()` before a single byte reached `.part`).
+  Assert the order of magnitude (10–200 ms, not 30 ms) and put the measured number in the JSON
+  payload where a human reads it; make a flaky input deterministic instead of tolerating it — the
+  download probe now stalls the response and relies on `stallMs` instead of lying about
+  `content-length`, because Chromium sometimes rejects the latter outright.
 - Probes: the catalogue (one line per probe, what it pins) lives in `docs/PROBES.md` — read the matching line before touching that seam.
   Run one with `npm run probe -- --<probe>`: the wrapper kills the leftover electron that would otherwise hold the single-instance lock and make the probe exit silently (the tell is exit 0 after ~3 s with no `PASS` lines), refuses a flag that is not in the registry, and hands back the probe's own exit code (`npm run probe:raw` is the bare `electron out/main/index.js`). `cmd /c "taskkill …"` is unreliable from bash (the quoting collapses and cmd just prints its banner); `powershell -NoProfile -Command "Stop-Process -Name electron -Force"` always works.
   The list is generated: `src/main/probes/registry.ts` holds one row per probe (flag, summary, run fn) and `index.ts`

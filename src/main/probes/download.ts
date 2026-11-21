@@ -40,7 +40,11 @@ function rangeStart(header: string | null): number | null {
 
 /**
  * 一个「只认 Range、但第一次会断流」的服务端。
- * `/cut/…` 首次无 Range 请求写 CUT_AT 字节后 destroy；带 Range 的请求正常 206。
+ * `/cut/…` 首次无 Range 请求写 CUT_AT 字节后就**不再发任何字节、也不收尾**（模拟真实的
+ * 断流：对端还在，但没数据了），靠调用方的 `stallMs` 看门狗判失败；带 Range 的请求正常 206。
+ * 这里刻意不再用「宣告全长却写不满」的手法：Chromium 的网络栈有时在 fetch() 阶段就整体
+ * 拒绝（`net::ERR_CONTENT_LENGTH_MISMATCH`），那时连一个字节都没落盘，`.part` 续传这条
+ * 断言就变成了看运气——同一个探针在同一台机器上时绿时红（#79 交付时绿、三次后红）。
  * `/norange/…` 一律 200 全量（模拟不认 Range 的源）。
  * `/bad/…` 一律 500（模拟坏镜像）。
  * `/proxy/<原始 URL 的路径>` 原样转给内部处理器（模拟加速前缀）。
@@ -64,11 +68,12 @@ function makeServer(seen: Seen[]): Server {
     if (pathname.startsWith('/cut/') || pathname.startsWith('/plain/')) {
       const start = rangeStart(req.headers.range ?? null)
       if (pathname.startsWith('/cut/') && start === null) {
-        // 第一次：宣告全长但只写 CUT_AT 字节就收尾（Connection: close 保证对端立刻读到 EOF）。
-        // 不用 res.destroy()：Electron 的 fetch 走 Chromium 网络服务，RST 会把它内部
-        // loader 的 promise 变成无人接的 rejection，整个探针挂住（实测）。
-        res.writeHead(200, { 'content-length': String(TOTAL), 'connection': 'close' })
-        res.end(PAYLOAD.subarray(0, CUT_AT))
+        // 第一次：写 CUT_AT 字节，然后**停住**——既不 end 也不 destroy。
+        //   - res.end() 少写字节：Chromium 可能在 fetch() 就整体拒绝，残片一个字节都没有（见上）；
+        //   - res.destroy()：RST 会让 Electron 那个 fetch 的 promise 变成无人接的 rejection，探针挂死。
+        // 停住 + 调用方 stallMs 看门狗，是这条链上唯一确定的两面：既落了字节，也一定判失败。
+        res.writeHead(200, { 'content-length': String(TOTAL) })
+        res.write(PAYLOAD.subarray(0, CUT_AT))
         return
       }
       const from = start ?? 0
@@ -129,6 +134,8 @@ async function main(base: string, dir: string, seen: Seen[], check: Check, finis
       url: `${base}/cut/file.bin`,
       dest,
       expectedBytes: TOTAL,
+      // 断流由服务端「停住不发」制造，所以这里必须给看门狗一个上限，否则会一直等下去。
+      stallMs: 400,
       minParallelBytes: Number.MAX_SAFE_INTEGER,
       onLog: (tag, detail) => logs.push(`${tag}:${JSON.stringify(detail)}`)
     })
@@ -141,6 +148,8 @@ async function main(base: string, dir: string, seen: Seen[], check: Check, finis
       url: `${base}/cut/file.bin`,
       dest,
       expectedBytes: TOTAL,
+      // 断流由服务端「停住不发」制造，所以这里必须给看门狗一个上限，否则会一直等下去。
+      stallMs: 400,
       minParallelBytes: Number.MAX_SAFE_INTEGER,
       onLog: (tag, detail) => logs.push(`${tag}:${JSON.stringify(detail)}`)
     })
