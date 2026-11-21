@@ -83,7 +83,6 @@ const MULTI_WRITE_NOTES = {
     '有意：面板选模型（`src/main/services/voice/asr-model.ts:170`）+ 训练成功后自动提为现役（`src/main/services/train/asr-ft.ts:410,525`）；两条都是「切现役」，不是两处改同一个值的冲突',
   myNicknames: '有意：GSI 从聊天里认出的昵称自动追加（`src/main/services/gsi.ts:486`，只留最近 8 个）+ 浮层页手改名单',
   ttsMuteHeroes: '有意：对讲页、朗读页与驾驶室都能改同一个名单（#93 + #168 + #161，用户在哪页都能加人）',
-  ttsMuteNames: '同上，按昵称的那半张表（对讲页与朗读页）',
   ttsSovitsRefAudio:
     '有意：音色包页选一个参考音频时三件一起写（`src/renderer/src/panel/pages/packs.tsx:170`），服务端应用整套参考时也写同一组（`src/main/services/voice/sovits-server.ts:233`）',
   ttsSovitsPromptText: '同上：选参考音频时整套写入，音色包页也能单独改这一格',

@@ -128,23 +128,16 @@ git log -S " <键名>:" --format=%ct -- src/shared/settings-shape.ts
 
 ## 多写口（只列不判）
 
-脚本不替你决定哪一处该删；每一条都要一句「是不是有意」，否则下一个人看到的就是一堆误报。
+这一节**不手抄清单**：字段会增加、写口会搬，抄一份在这里就一定会有一次是旧的（本文件第一版抄过七条，其中一条 `ttsMuteNames` 在 #93 之后只剩一个写者，成了僵尸条目）。
 
-- `ttsMuteHeroes` → `src/renderer/src/panel/pages/helm.tsx` / `src/renderer/src/panel/pages/talk.tsx`
-- `asrActiveModel` → `src/main/services/train/asr-ft.ts` / `src/main/services/voice/asr-model.ts`
-- `myNicknames` → `src/main/services/gsi.ts` / `src/renderer/src/panel/pages/overlay.tsx`
-- `ttsDropBacklog` → `src/renderer/src/panel/pages/read.tsx` / `src/renderer/src/panel/pages/talk.tsx`
-- `ttsSovitsRefAudio` → `src/main/services/voice/sovits-server.ts` / `src/renderer/src/panel/pages/packs.tsx`
-- `ttsSovitsPromptText` → `src/main/services/voice/sovits-server.ts` / `src/renderer/src/panel/pages/packs.tsx`
-- `ttsSovitsPromptLang` → `src/main/services/voice/sovits-server.ts` / `src/renderer/src/panel/pages/packs.tsx`
+现问现答，跑：
 
-注记（写在检查器的 `MULTI_WRITE_NOTES` 里，报告里逐条带出来）：
+```
+node scripts/check-settings.mjs --report | sed -n '/多处写/,/^$/p'
+node scripts/check-settings.mjs --json            # 机器可读：rows[].writes[].path
+```
 
-- `asrActiveModel`：面板选模型 + 训练成功后自动提为现役，两条都是「切现役」，不是两处改同一个值的冲突。
-- `myNicknames`：GSI 从聊天里认出的昵称自动追加（只留最近 8 个）+ 浮层页手改名单。
-- `ttsMuteHeroes` / `ttsMuteNames`：对讲页、朗读页与驾驶室都能改同一个名单，用户在哪页都能加人。
-- `ttsSovitsRefAudio` / `ttsSovitsPromptText` / `ttsSovitsPromptLang`：音色包页选一个参考音频时三件一起写，服务端应用整套参考时也写同一组。
-- `ttsDropBacklog`：**未注记**。朗读页与对讲页的设置抽屉各有一个「刷屏积压」开关，两处写的是同一个布尔，改哪边都生效，但用户会看到两个开关。收不收归一处由产品定。
+脚本对每条多写口都给一句「是不是有意」（`src/renderer/src/panel/pages/*` 的一次性写与主进程的整组写分开列），`--strict` 在「有多写口但没注记」时非零。
 
 ## 改了要重启
 
