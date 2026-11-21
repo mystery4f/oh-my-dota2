@@ -19,6 +19,7 @@
  * fail so the fallback warning row on 识别训练 is visible.
  */
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type VoiceChainSummary, type WindowApi } from '@shared/ipc'
+import { summarizeProviderCalls } from '@shared/provider-metrics'
 import { catalogOf } from '@shared/probe-catalog'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
 import type { OverlayFontSize } from '@shared/overlay-a11y'
@@ -569,6 +570,13 @@ const implemented = {
         ])
       : summarizeErrors([]),
   // 译文抽检（#87）：`?marks=1` 造三条样本，让「好评率」那一行在预览里看得见。
+  providerBoard: async () =>
+    summarizeProviderCalls([
+      { at: '2026-11-21T12:00:00.000Z', providerId: 'deepseek', model: 'deepseek-chat', ok: true, ms: 820, kind: null },
+      { at: '2026-11-21T12:00:01.000Z', providerId: 'deepseek', model: 'deepseek-chat', ok: false, ms: 30_000, kind: 'timeout' },
+      { at: '2026-11-21T12:00:02.000Z', providerId: 'deepseek', model: 'deepseek-chat', ok: true, ms: 940, kind: null },
+      { at: '2026-11-21T12:00:03.000Z', providerId: 'zhipu', model: 'glm-4-flash', ok: true, ms: 1230, kind: null }
+    ]),
   probeCatalog: async () =>
     catalogOf([
       { flag: '--gsi-dump-report', summary: '读对局摘要', readOnly: true },

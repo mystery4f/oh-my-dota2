@@ -16,6 +16,7 @@ import type { ErrorSummary } from './error-log'
 import type { TranslationMarkSummary } from './translation-mark'
 import type { ReplayStarSummary } from './replay-star'
 import type { ProbeCatalog } from './probe-catalog'
+import type { ProviderBoard } from './provider-metrics'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { GlossaryPackStatus } from './glossary-pack'
 import type { SettingsBundleExportResult, SettingsBundleImportResult } from './settings-bundle'
@@ -644,6 +645,7 @@ export const IPC = {
   TRANSLATION_MARKS: 'translation:marks',
   REPLAY_STARS: 'replay:stars',
   PROBE_CATALOG: 'probes:catalog',
+  PROVIDER_BOARD: 'providers:board',
   // 方向更正（#84）：浮层点一下方向标，改的是「这一句该往哪翻」，只记在这一局里。
   TRANSLATE_DIRECTION: 'translate:direction-override',
   // 周度质量卡（#110）：守卫计数 + 记账本命中，主进程现读两份 jsonl 现算。
@@ -964,6 +966,7 @@ export const ipcContract = {
   translationMarks: invoke<[], TranslationMarkSummary>(IPC.TRANSLATION_MARKS),
   replayStars: invoke<[string | null], ReplayStarSummary>(IPC.REPLAY_STARS),
   probeCatalog: invoke<[], ProbeCatalog>(IPC.PROBE_CATALOG),
+  providerBoard: invoke<[], ProviderBoard>(IPC.PROVIDER_BOARD),
   /**
    * 方向更正（#84）：把「这一句」改判成另一个方向并记住，返回重新翻出来的译文。
    * 失败时 `translated` 为 null 且 `error` 说明原因，但更正本身已经记住了。

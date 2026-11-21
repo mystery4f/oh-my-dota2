@@ -80,6 +80,7 @@ import { runAsrSwitchProbe } from './asr-switch'
 import { runTranslationMarkProbe } from './translation-mark'
 import { runReplayStarProbe } from './replay-star'
 import { runProbeCatalogProbe } from './probe-catalog'
+import { runProviderBoardProbe } from './provider-board'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
 import { runSpeechQueueProbe } from './speech-queue'
@@ -454,6 +455,14 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the translation spot-check account (`src/shared/translation-mark.ts`): unmarked or untranslated lines never become samples, a re-mark replaces the earlier verdict, tallies group by provider and model, and a failed mark still speaks (ticket 87)',
     run: runTranslationMarkProbe
+  },
+  {
+    flag: '--provider-board-probe',
+    ci: true,
+    readOnly: true,
+    summary:
+      'the provider board (`src/shared/provider-metrics.ts`): one row per call, median latency rather than mean, failure kinds counted separately instead of merged, and an empty board says "nobody called a model" instead of 0% (ticket 114)',
+    run: runProviderBoardProbe
   },
   {
     flag: '--probe-catalog-probe',

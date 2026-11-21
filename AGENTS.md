@@ -382,6 +382,11 @@ it and nothing happened". The overlay and the pause hint print key names from th
   line the panel reads (关于 → 诊断 → 最近的错误). The hooks never swallow: Electron's own dialog still
   appears. Never let the recorder throw — a logging failure that propagates is a second incident. Renderer
   errors are not forwarded yet; that needs its own channel, not a wider hook.
+- Provider board (#114): `chatCompletion()` records one line per call into `logs/provider-metrics.jsonl`
+  (through `chatCompletionInner`, so the wrapper times the whole thing and classifies failures with
+  `provider-failure.ts` — never a second classifier). `src/shared/provider-metrics.ts` owns the summary:
+  median latency (a single timeout must not move it), failure kinds counted separately, and an empty
+  board reads "nobody called a model" rather than 0% success, which looks like total outage.
 - The panel shows the probe list, it does not run probes (#112): `src/shared/probe-catalog.ts` turns the
   registry into rows, splitting them by the `readOnly` marker alone, and every row carries the exact
   `npm run probe -- <flag>` command. A probe needs Electron's single-instance lock and calls `app.exit()`

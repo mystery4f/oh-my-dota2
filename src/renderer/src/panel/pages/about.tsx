@@ -3,6 +3,7 @@ import type { LogBundleResult, UpdateState } from '@shared/ipc'
 import type { BuildInfo } from '@shared/build-info'
 import { ERROR_KIND_LABEL, errorsLine, type ErrorSummary } from '@shared/error-log'
 import { catalogLine, type ProbeCatalog } from '@shared/probe-catalog'
+import { formatMs, providerBoardLine, providerKindsLine, type ProviderBoard } from '@shared/provider-metrics'
 import type { HalfDuplexSnapshot } from '@shared/half-duplex'
 import { marksLine, type TranslationMarkSummary } from '@shared/translation-mark'
 import {
@@ -46,6 +47,8 @@ export function AboutPage(): React.ReactElement {
   const [marks, setMarks] = useState<TranslationMarkSummary | null>(null)
   // #112：探针清单只列不跑，跑请用命令行（探针要单实例锁且跑完自己退出应用）。
   const [catalog, setCatalog] = useState<ProbeCatalog | null>(null)
+  // #114：供应商看板只读汇总，明细在 logs/provider-metrics.jsonl。
+  const [board, setBoard] = useState<ProviderBoard | null>(null)
 
   useEffect(() => {
     void window.api.appVersion().then(setVersion)
@@ -58,6 +61,7 @@ export function AboutPage(): React.ReactElement {
     // 半双工记账（#129）：跨对局累计，进页面读一次就够。
     void window.api.voiceHalfDuplex().then(setHalfDuplex)
     void window.api.probeCatalog().then(setCatalog)
+    void window.api.providerBoard().then(setBoard)
     return window.api.onUpdateStatus(setState)
   }, [])
 
@@ -139,6 +143,24 @@ export function AboutPage(): React.ReactElement {
             <StatusPill tone={halfDuplex.dropped === 0 ? 'ready' : 'warn'}>
               {halfDuplex.dropped === 0 ? '没丢过' : `丢了 ${halfDuplex.dropped} 段`}
             </StatusPill>
+          )}
+        </Row>
+        <Row
+          label="模型调用"
+          hint={
+            board === null
+              ? '正在读调用记账'
+              : `${providerBoardLine(board)}${board.rows[0] === undefined ? '' : ` · ${board.rows[0].providerId}/${board.rows[0].model} 中位 ${formatMs(board.rows[0].p50Ms)}：${providerKindsLine(board.rows[0])}`}`
+          }
+          stacked
+        >
+          {board === null ? null : (
+            <span className="text-xs text-muted-foreground">
+              {board.rows
+                .slice(0, 3)
+                .map((row) => `${row.providerId}/${row.model} ${row.calls} 次 · 中位 ${formatMs(row.p50Ms)}`)
+                .join(' · ')}
+            </span>
           )}
         </Row>
         <Row

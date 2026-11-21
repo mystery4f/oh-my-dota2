@@ -2,6 +2,8 @@ import { net } from 'electron'
 import type { ProviderConfig } from '@shared/ipc'
 import { directReasoningParams } from '@shared/provider-reasoning'
 import { failureLine, judgeProviderFailure, type ProviderFailure } from '@shared/provider-failure'
+import { errorMessage } from '@shared/errors'
+import { recordProviderCall } from './metrics'
 
 /**
  * 带分类的请求失败（#86）：`failure` 里放着「哪一类 + 下一步干什么」。
@@ -45,6 +47,31 @@ function endpoint(baseUrl: string): string {
 
 /** Minimal OpenAI-compatible chat completion via Electron net (honors session proxy). */
 export async function chatCompletion(opts: ChatOptions): Promise<string> {
+  // 看板记账（#114）：成功与失败各记一行，失败带上 #86 的分类。记账失败不影响这次调用。
+  const started = Date.now()
+  try {
+    const text = await chatCompletionInner(opts)
+    recordProviderCall({
+      providerId: opts.provider.id,
+      model: opts.provider.model,
+      ok: true,
+      ms: Date.now() - started
+    })
+    return text
+  } catch (err) {
+    const failure = err instanceof ProviderRequestError ? err.failure : null
+    recordProviderCall({
+      providerId: opts.provider.id,
+      model: opts.provider.model,
+      ok: false,
+      ms: Date.now() - started,
+      kind: failure === null ? judgeProviderFailure({ message: errorMessage(err) }).kind : failure.kind
+    })
+    throw err
+  }
+}
+
+async function chatCompletionInner(opts: ChatOptions): Promise<string> {
   const { provider, messages, temperature = 0.3, maxTokens = 512, timeoutMs = 30_000 } = opts
   if (!provider.apiKey && provider.id !== 'ollama') {
     throw new Error('provider "' + provider.id + '" requires an API key')
