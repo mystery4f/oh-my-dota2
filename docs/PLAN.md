@@ -97,6 +97,8 @@ Dota 2 跨语言沟通工具（Electron，零注入、VAC 安全）：
 先纠正一个流传下来的误读：代码里的默认值一直是 `auto`（`DEFAULT_SETTINGS.captureMode`，自 `b69b475` 起），被记成 `manual` 的是**本机 `settings.json` 里持久化的那个值**——起因只是 2026-10-23 一句「自动轮询在实机不稳定」，没有根因、没有数据。「默认值」和「上次选的」是两件事：默认只在没有 `settings.json` 时生效，选过之后一律以持久值为准。M9 先把「不稳定」变成可读的数字，再修。
 
 - [x] #35 M9a 逐拍遥测（已完成，2026-11）：新增 `src/main/services/capture/telemetry.ts` + 探针 `--capture-telemetry-probe [秒数]`。自动模式每一拍往 `logs/capture-ticks.jsonl` 写一行（`at/mode/act/grabMs/src/chg/need/ocrMs/lines/msgs/fresh/dup/own/streak/err`），单文件上限 1 MB、超限清空重写，所以磁盘占用恒定（回应用户「日志太多伤磁盘」的顾虑）；`act` 把每一拍归类成 `ocr | same | gap | idle | error | busy`，`src` 记下这一帧是常驻流还是 `desktopCapturer` 兜底。桌面实测：40 拍里 cadence p50 = 809 ms（目标 800）、抓屏 p50 72 ms、`busy` 0 次、静止画面 34 拍全被指纹判掉，唯一短板是 OCR 单次中位 2.2 s。
+
+> **已退役（2026-11）**：抓屏 OCR 车道已撤掉，聊天改走 GSI，`logs/capture-ticks.jsonl` 现在**没有任何生产者**。下面引用它的段落与数字保留为历史，不要据此判断今天的自动模式是否在工作。
 - [x] #36 M9b 真对局定位（已完成，2026-11）：用户真实对局采到 383 拍 / 15.6 分钟（面板「自动捕获」）。`src=stream` 383/383（常驻流没掉）、`cadence p50 801`、抓屏 p50 185 ms、OCR p50 216 ms、新消息 29 条、`dup` 0、`own` 0、`brk` 从未触发、`err` 0 —— 「自动轮询在实机不稳定」这句话到此为止是**没有据实**的：真正坏的是 `busy`（75 次，两条定时器链），已单独记账进 #37。顺带纠正了桌面上那个「OCR 中位 2.2 s」的悲观结论：对局里 OCR 只要 216 ms，慢的是捕获区里的字有多少。数字进 `docs/BENCH.md`「真对局」节，根因写进 `docs/NOTES.md`。
 - ~~#1 M9b' 真对局补测~~ **已关闭（2026-10-25）**：抓屏 OCR 链路已整条移除，`src=stream` / `same` / `brk` / `fresh` 这些指标失去对象。编号 `#1` 已在 `docs/TODO.md` 重新定义为「GSI 正文可靠性真对局复核」，见 M13 待办。
 - ~~#2 M9c 按数据修~~ **已关闭（2026-10-25）**：`busy` 修复已实装；其余候选（间隔跟 OCR 耗时走、`sources` 兜底退避、滚出/裁半区分）全部是 OCR 时代指标，随 OCR 链路移除失去对象。编号 `#2` 已在 `docs/TODO.md` 重新定义为「账本覆盖率口径复核」，见 M13 待办。

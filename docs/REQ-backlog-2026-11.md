@@ -75,6 +75,8 @@
 
 - **面板「本周质量」卡片**（P1）——证据：`logs/translate-guard.jsonl`、`logs/translate-cache.jsonl` 已落盘，面板不展示。期望：抓到多少次违例、救回多少、命中率多少，一个卡片看完。
 - **日志一键打包导出**（P1）——证据：`logs/` 下 `inplace.log`、`gsi-chat.jsonl`、`gsi-summary.json`、`voice-chain.jsonl`、`capture-ticks.jsonl` 五个来源。期望：一次导出成一个带清单的压缩包，含版本号与 BUILD_STAMP，敏感字段（昵称、设备 id）默认脱敏。
+
+> **已退役（2026-11）**：抓屏 OCR 车道已撤掉，聊天改走 GSI，`logs/capture-ticks.jsonl` 现在**没有任何生产者**。下面引用它的段落与数字保留为历史，不要据此判断今天的自动模式是否在工作。
 - **探针结果面板化**（P2）——证据：`src/main/probes/registry.ts` 33 个探针。期望：面板能跑只读探针并显示结果，省掉「贴命令给我」这一轮。
 - **版本漂移提示**（P2）——证据：`BUILD_STAMP` 每次主进程构建打印。期望：`out/main/index.js` 比源码旧时提示「改的代码没生效」，这是最容易误判的一类假 bug。
 - **provider 延迟与失败率看板**（P2）——证据：`src/main/services/session/translator-latency.ts`。期望：按 provider 展示 P50/P95 与失败分类，帮用户自己选 provider。

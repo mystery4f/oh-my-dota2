@@ -712,6 +712,8 @@
 - 症状：`captureMode` 默认被改成 `manual`，理由是「自动轮询在实机不稳定」，但日志里什么都没有——自动模式原来只在出错时写一行，正常跑和「根本没在跑」在外部完全分不出来。
 - 根因：捕获循环没有热路径遥测。`status()` 只有累计计数（`ocrRuns`、`emptyTicks`），看不出「第 37 拍抓了 900ms、判成 `sources`、OCR 又花 4 秒」。所以任何「不稳定」都只能靠猜。
 - 修法：`src/main/services/capture/telemetry.ts` 在 `tick()` 的 `finally` 里落一行 JSONL（`logs/capture-ticks.jsonl`，单文件 ≤1 MB，超限直接清空重写，磁盘占用恒定）。字段刻意选成能直接分辨失败模式的：`act`（`ocr|same|gap|idle|error|busy`）、`src`（`stream|sources`）、`chg`（变化比例）、`need`（这一拍所需的阈值）、`grabMs`/`ocrMs`、`lines/msgs/fresh/dup/own`（新行还是全旧）、`streak`（空转了几拍）。探针 `--capture-telemetry-probe [秒数]` 跑自动模式并断言「每拍都有 `grabMs`、没有 `error`、文件 <1 MB」。
+
+> **已退役（2026-11）**：抓屏 OCR 车道已撤掉，聊天改走 GSI，`logs/capture-ticks.jsonl` 现在**没有任何生产者**。下面引用它的段落与数字保留为历史，不要据此判断今天的自动模式是否在工作。
 - 读法：`src=sources` 连续出现＝常驻流掉了（全屏独占的老问题）；`act=gap` 密集＝退避把消息让过去了；`act=ocr` 但 `chg` 高、`fresh=0`＝区域里有动的东西在骗指纹；`at` 的相邻差值远大于 `intervalMs`＝那一拍卡在 OCR 或抓屏里。
 - 别忘了：`start()` 的 `mode` 可以被探针覆盖（`start(region, { mode: 'auto' })`），否则会跟着设置里的 `manual` 跑，白跑一趟。
 

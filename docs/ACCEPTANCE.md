@@ -101,6 +101,8 @@ set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" && npm install --r
 ## M9 自动捕获与对局闸门
 
 - [ ] 模式「自动轮询」下，Alt+Tab 到桌面后 `logs/capture-ticks.jsonl` 出现 `"act":"idle"` 且不再有 `ocr` 行；切回游戏后立刻恢复 `ocr`
+
+> **已退役（2026-11）**：抓屏 OCR 车道已撤掉，聊天改走 GSI，`logs/capture-ticks.jsonl` 现在**没有任何生产者**。下面引用它的段落与数字保留为历史，不要据此判断今天的自动模式是否在工作。
 - [ ] 捕获只在 Dota 2 是前台窗口时跑（浮层、面板、终端在前台都算「不在前台」）
 - [ ] 一局结束（GSI 推 `POST_GAME`）自动停捕获，下一局开局自动起；手动模式下局末不接管
 - [ ] 真实对局里连续两局之间不留上一局消息（去重窗口与阵容都清空）

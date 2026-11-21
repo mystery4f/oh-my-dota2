@@ -13,7 +13,7 @@ tags: [docs, index]
 | 我想知道 | 读这个 |
 | --- | --- |
 | 现在做到哪一步、下一步是什么 | `docs/PLAN.md`（计划真相源）、`docs/TODO.md`（跨会话交接） |
-| 这个功能为什么这么设计 | `docs/DESIGN.md`；浮层看 `docs/DESIGN-overlay-v2.md`，面板看 `docs/DESIGN-panel-v2.md`，语音素材看 `docs/DESIGN-voice-corpus.md` |
+| 这个功能为什么这么设计 | `docs/DESIGN.md`；浮层看 `docs/DESIGN-overlay-v2.md`，面板看 `docs/DESIGN-panel-v3.md`（新形态）与 `docs/DESIGN-panel-v2.md`（旧稿），语音素材看 `docs/DESIGN-voice-corpus.md` |
 | 某个决定是怎么定下来的、能不能改 | `docs/adr/`（一个决定一个文件，含数据、决定、后果） |
 | 怎么手工验收一遍 | `docs/ACCEPTANCE.md`（中文清单 + 排错表） |
 | 某个数字（延迟、耗时、内存）从哪来 | `docs/BENCH.md`；探针清单 `docs/PROBES.md` |
@@ -47,7 +47,8 @@ tags: [docs, index]
 | --- | --- | --- |
 | `docs/DESIGN.md` | 路线决定（零注入）、M1–M4 范围 | 现行 |
 | `docs/DESIGN-overlay-v2.md` | 浮层 v2 设计 | 现行 |
-| `docs/DESIGN-panel-v2.md` | 面板 v2 设计 | 待签字 |
+| `docs/DESIGN-panel-v2.md` | 面板 v2 设计 | 历史稿 |
+| `docs/DESIGN-panel-v3.md` | 面板 v3 新形态：一屏驾驶室 + 三个热键 | 待签字 |
 | `docs/DESIGN-voice-corpus.md` | 语音素材：Dota2 语音 → 训练集，含四引擎实测与选型结论 | 草稿（待签字） |
 | `docs/DESIGN-asr-engine-table.md` | ASR 引擎表：换模型 / 接新引擎不再破坏性，四层结构、迁移规则、探针断言与 paraformer 第二行（含 FunASR 微调腿） | 已落地（识别 + 微调双引擎） |
 | `docs/DESIGN-asr-script-editor.md` | 读稿编辑器：面板里改组与句子、编号与删除策略、以及「改了稿只能从底模重训」的谱系判据 | 已落地 |

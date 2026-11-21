@@ -78,6 +78,8 @@ OCR（1935x937，6 行聊天）
 
 每一拍都往 `logs/capture-ticks.jsonl` 写一行（单文件上限 1 MB，超限清空重写），所以数字不用再靠猜。`--capture-telemetry-probe` 在桌面上实跑的结果：
 
+> **已退役（2026-11）**：抓屏 OCR 车道已撤掉，聊天改走 GSI，`logs/capture-ticks.jsonl` 现在**没有任何生产者**。下面引用它的段落与数字保留为历史，不要据此判断今天的自动模式是否在工作。
+
 ```
 12 拍（11.6 s 预算）      拍数 10 · actions {ocr:6, gap:3, same:1} · 全部 src=stream
   grabMs                  p50 70 / p90 183 / max 548
