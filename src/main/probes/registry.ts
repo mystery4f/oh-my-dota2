@@ -30,6 +30,7 @@ import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
 import { runInterpretLegProbe } from './interpret-leg'
 import { runClausePlanProbe } from './clause-plan'
+import { runSettingsBundleProbe } from './settings-bundle'
 import { runBuildInfoProbe } from './build-info'
 import { runLogsIsolationProbe } from './logs-isolation'
 import { runErrorLogProbe } from './error-log'
@@ -251,6 +252,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'build freshness (ticket 113): an unreadable artifact says so instead of claiming fresh, a packaged build only reports its time, and a source newer than the artifact by more than the 2 s slack is named stale with the one command that fixes it',
     run: runBuildInfoProbe
+  },
+  {
+    flag: '--settings-bundle-probe',
+    ci: true,
+    summary:
+      'the settings bundle (ticket 81): export writes settings plus the training index into one zip with every key field blanked out, import restores each setting but keeps the local API key and proxy, and a partial or mismatched archive is refused before a single field is written',
+    run: runSettingsBundleProbe
   },
   {
     flag: '--clause-plan-probe',

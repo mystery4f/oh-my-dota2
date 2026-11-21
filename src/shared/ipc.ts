@@ -13,6 +13,7 @@ import type { ErrorSummary } from './error-log'
 import type { TranslationMarkSummary } from './translation-mark'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { GlossaryPackStatus } from './glossary-pack'
+import type { SettingsBundleExportResult, SettingsBundleImportResult } from './settings-bundle'
 import type { QualityReport } from './quality-report'
 import type { SpeechQueueSnapshot, SpeechStopResult } from './speech-queue'
 import type { BuildInfo } from './build-info'
@@ -642,7 +643,10 @@ export const IPC = {
   // 麦克风健康（#96）：浮层边录边报电平和掉线，主进程转广播给面板。
   MIC_HEALTH: 'mic:health',
   GLOSSARY_PACKS: 'glossary:packs',
-  GLOSSARY_APPLY: 'glossary:apply'
+  GLOSSARY_APPLY: 'glossary:apply',
+  // 设置包（#81）：换机器搬设置。导入由主进程弹文件框，渲染层只收结果。
+  SETTINGS_BUNDLE_EXPORT: 'settings-bundle:export',
+  SETTINGS_BUNDLE_IMPORT: 'settings-bundle:import'
 } as const
 
 /** 所有主进程 → 渲染进程的频道名，广播函数用它拒掉拼错的频道。 */
@@ -955,7 +959,10 @@ export const ipcContract = {
   reportMicHealth: send<[MicHealthEvent]>(IPC.MIC_HEALTH),
   onMicHealth: listen<MicHealthEvent>(IPC.MIC_HEALTH),
   glossaryPacks: invoke<[], GlossaryPackStatus>(IPC.GLOSSARY_PACKS),
-  glossaryApply: invoke<[string], GlossaryPackStatus>(IPC.GLOSSARY_APPLY)
+  glossaryApply: invoke<[string], GlossaryPackStatus>(IPC.GLOSSARY_APPLY),
+  /** 设置包（#81）：导出写进数据目录 export/，导入弹框选文件；两条都只回结果与一句话。 */
+  settingsBundleExport: invoke<[], SettingsBundleExportResult>(IPC.SETTINGS_BUNDLE_EXPORT),
+  settingsBundleImport: invoke<[], SettingsBundleImportResult>(IPC.SETTINGS_BUNDLE_IMPORT)
 }
 
 /** 声出隐藏窗口专用桥（面板用不到）：与主契约同构，各自绑定。 */

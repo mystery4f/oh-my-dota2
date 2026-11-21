@@ -3,6 +3,12 @@ import type { LogBundleResult, UpdateState } from '@shared/ipc'
 import type { BuildInfo } from '@shared/build-info'
 import { ERROR_KIND_LABEL, errorsLine, type ErrorSummary } from '@shared/error-log'
 import { marksLine, type TranslationMarkSummary } from '@shared/translation-mark'
+import {
+  settingsExportLine,
+  settingsImportLine,
+  type SettingsBundleExportResult,
+  type SettingsBundleImportResult
+} from '@shared/settings-bundle'
 import { Button } from '@/components/ui/button'
 import { Group, Panel, Row, StatusPill } from '../components/primitives'
 
@@ -28,6 +34,10 @@ export function AboutPage(): React.ReactElement {
   const [bundle, setBundle] = useState<LogBundleResult | null>(null)
   const [build, setBuild] = useState<BuildInfo | null>(null)
   const [bundleBusy, setBundleBusy] = useState(false)
+  // 设置包：换机器搬设置。密钥不进包，导入时一律保留本机那把。
+  const [settingsBundle, setSettingsBundle] = useState<SettingsBundleExportResult | null>(null)
+  const [settingsImport, setSettingsImport] = useState<SettingsBundleImportResult | null>(null)
+  const [settingsBusy, setSettingsBusy] = useState(false)
   const [errors, setErrors] = useState<ErrorSummary | null>(null)
   const [marks, setMarks] = useState<TranslationMarkSummary | null>(null)
 
@@ -59,6 +69,18 @@ export function AboutPage(): React.ReactElement {
     setBundleBusy(true)
     setBundle(await window.api.logBundleExport())
     setBundleBusy(false)
+  }
+
+  const exportSettings = async (): Promise<void> => {
+    setSettingsBusy(true)
+    setSettingsBundle(await window.api.settingsBundleExport())
+    setSettingsBusy(false)
+  }
+
+  const importSettings = async (): Promise<void> => {
+    setSettingsBusy(true)
+    setSettingsImport(await window.api.settingsBundleImport())
+    setSettingsBusy(false)
   }
 
   const bundleHint = ((): string => {
@@ -142,6 +164,18 @@ export function AboutPage(): React.ReactElement {
             {bundleBusy ? '打包中…' : '导出'}
           </Button>
           {bundle ? <StatusPill tone={bundle.ok ? (bundle.missing.length > 0 ? 'warn' : 'ready') : 'bad'}>{bundle.ok ? '已导出' : '失败'}</StatusPill> : null}
+        </Row>
+        <Row label="导出设置包" hint={settingsBundle === null ? '把设置和训练产物索引打成一个 zip，换机器时带走；API Key 与代理账号不进包' : settingsExportLine(settingsBundle)}>
+          <Button variant="outline" size="sm" disabled={settingsBusy} onClick={() => void exportSettings()}>
+            {settingsBusy ? '打包中…' : '导出'}
+          </Button>
+          {settingsBundle ? <StatusPill tone={settingsBundle.ok ? 'ready' : 'bad'}>{settingsBundle.ok ? '已导出' : '失败'}</StatusPill> : null}
+        </Row>
+        <Row label="导入设置包" hint={settingsImport === null ? '选一个设置包写回本机；缺文件或版本不符时整包拒绝，一个字段都不改' : settingsImportLine(settingsImport)}>
+          <Button variant="outline" size="sm" disabled={settingsBusy} onClick={() => void importSettings()}>
+            导入
+          </Button>
+          {settingsImport ? <StatusPill tone={settingsImport.ok ? 'ready' : 'bad'}>{settingsImport.ok ? '已导入' : '拒绝'}</StatusPill> : null}
         </Row>
       </Group>
       <Group label="文档">

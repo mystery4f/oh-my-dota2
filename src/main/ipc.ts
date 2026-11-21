@@ -1,10 +1,11 @@
-import { app, clipboard, ipcMain, shell } from 'electron'
+import { app, clipboard, dialog, ipcMain, shell } from 'electron'
 import { dotaDisplayWarning } from '@shared/dota-video'
 import { errorMessage } from '@shared/errors'
 import { IPC, ipcContract, type MainHandlers, type OpenExternalResult } from '@shared/ipc'
 import { translateInPlace, voiceReply } from './services/reply/reply-service'
 import { generatePanelSuggestions } from './services/reply/panel-suggestions'
 import { askScreen, visionReadiness } from './services/vision'
+import { exportSettingsBundle, importSettingsBundle } from './services/settings-bundle'
 import { chooseGlossaryPack, glossaryPackStatus } from './services/glossary-pack'
 import { loadSettings, saveSettings } from './services/settings'
 import { hotkeysState, saveHotkeysState } from './services/hotkeys'
@@ -208,6 +209,18 @@ const handlers: MainHandlers = {
   },
   // #82：词表包的现役状态与切换。装上就立刻生效（现役表整体换掉），面板只读这个结果。
   glossaryPacks: () => glossaryPackStatus(),
+  settingsBundleExport: () => exportSettingsBundle(),
+  settingsBundleImport: async () => {
+    const picked = await dialog.showOpenDialog({
+      title: "选择设置包",
+      filters: [{ name: "设置包", extensions: ["zip"] }],
+      properties: ["openFile"]
+    })
+    if (picked.canceled || picked.filePaths.length === 0) {
+      return { ok: false, applied: 0, kept: [], error: "没有选择文件" }
+    }
+    return importSettingsBundle(picked.filePaths[0])
+  },
   glossaryApply: (name) => chooseGlossaryPack(String(name ?? '')),
   reportVoiceChain: (result) => {
     broadcast(IPC.VOICE_CHAIN_RESULT, result)

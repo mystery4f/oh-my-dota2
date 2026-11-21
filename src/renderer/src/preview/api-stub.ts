@@ -622,6 +622,18 @@ const implemented = {
   speechStop: async () => ({ cleared: 2, interrupted: true }),
   // #82：?pack=坏包 演示回退 + 警告，默认演示装好的一份包；点「内置」等于 apply('')。
   glossaryPacks: async () => glossaryStub(),
+  // #81：设置包。默认演示「导出成功、导入成功」；?bundlePoor=1 演示整包被拒。
+  settingsBundleExport: async () => ({
+    ok: true,
+    path: query.get('bundlePoor') === '1' ? null : 'data/export/settings-20260101-000000.zip',
+    files: query.get('bundlePoor') === '1' ? 0 : 3,
+    omitted: query.get('bundlePoor') === '1' ? [] : ['供应商 API Key', '各供应商 key 表', '代理地址'],
+    error: query.get('bundlePoor') === '1' ? '写不进数据目录' : null
+  }),
+  settingsBundleImport: async () =>
+    query.get('bundlePoor') === '1'
+      ? { ok: false, applied: 0, kept: [], error: '这个包里没有 settings.json' }
+      : { ok: true, applied: 12, kept: ['供应商 API Key'], error: null },
   glossaryApply: async (name: string) => glossaryStub(name),
   onUpdateStatus: (callback) => {
     callback({ channel: 'stable', status: 'dev', version: '0.0.0' })

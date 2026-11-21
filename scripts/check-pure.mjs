@@ -906,6 +906,34 @@ check(
   )
 }
 
+// —— 设置包（#81）：密钥抹掉、本机密钥顶回来、半包被拒
+{
+  const { stripSecrets, keepLocalSecrets, judgeSettingsBundle, settingsBundleLine } = await import('../src/shared/settings-bundle.ts')
+  const { DEFAULT_SETTINGS } = await import('../src/shared/settings-shape.ts')
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    provider: { ...DEFAULT_SETTINGS.provider, apiKey: 'sk-live' },
+    providerKeys: { deepseek: 'sk-live' },
+    proxyUrl: 'http://u:p@127.0.0.1:4444'
+  }
+  const stripped = stripSecrets(settings)
+  check('导出抹掉 API key', stripped.exported.provider.apiKey === '')
+  check('导出抹掉 key 表', Object.keys(stripped.exported.providerKeys ?? {}).length === 0)
+  check('导出抹掉代理地址', stripped.exported.proxyUrl === '')
+  check('被抹的字段记下来', stripped.omitted.length === 3)
+  check('非密钥字段原样带走', stripped.exported.targetLang === settings.targetLang)
+  const back = keepLocalSecrets(stripped.exported, settings)
+  check('导入用本机 key 顶回来', back.settings.provider.apiKey === 'sk-live')
+  check('导入用本机代理顶回来', back.settings.proxyUrl === 'http://u:p@127.0.0.1:4444')
+  check('报出保留了哪几项', back.kept.length === 3)
+  const clean = keepLocalSecrets(stripped.exported, { ...settings, provider: { ...settings.provider, apiKey: '' }, providerKeys: {}, proxyUrl: '' })
+  check('干净机器上不说保留本机', clean.kept.length === 0)
+  check('缺 settings.json 直接拒', judgeSettingsBundle([{ name: 'manifest.json', bytes: 10 }]).ok === false)
+  check('版本不符直接拒', judgeSettingsBundle([{ name: 'manifest.json', bytes: 1 }, { name: 'settings.json', bytes: 1 }], 99).ok === false)
+  check('完整的包通过', judgeSettingsBundle([{ name: 'manifest.json', bytes: 1 }, { name: 'settings.json', bytes: 1 }], 1).ok === true)
+  check('一行账空包也能说', settingsBundleLine({ files: 0, omitted: [] }) === '空包')
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
