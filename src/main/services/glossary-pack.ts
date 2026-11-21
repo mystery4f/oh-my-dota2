@@ -20,11 +20,23 @@ import {
 } from '@shared/glossary-pack'
 import { loadSettings, saveSettings } from './settings'
 
-function packDir(): string {
-  return join(app.getPath('userData'), 'glossary')
+/** 探针用的目录覆盖（#141）：探针只许在自己 mkdtemp 出来的目录里造包，绝不碰真数据目录。 */
+let dirOverride: string | null = null
+
+export function setGlossaryDirForProbe(dir: string | null): void {
+  dirOverride = dir
 }
 
-/** 数据目录里能用的包名（文件名去掉 .json），面板据此列选项。 */
+function packDir(): string {
+  return dirOverride ?? join(app.getPath('userData'), 'glossary')
+}
+
+/**
+ * 数据目录里能用的包名（文件名去掉 .json），面板据此列选项。
+ *
+ * 每次都重新扫目录（#141）：开机那次缓存曾经让「运行中丢一个包进去」永远看不见。
+ * 目录里就那么几个文件，读一次比维护一份会过期的缓存便宜。
+ */
 function packNames(): string[] {
   try {
     return readdirSync(packDir())
@@ -38,8 +50,12 @@ function packNames(): string[] {
 
 let status: GlossaryPackStatus = bundledGlossaryStatus()
 
+/** 面板读取：现役词表 + 目录里现在有哪些包。清单永远现扫，不做启动时缓存。 */
 export function glossaryPackStatus(): GlossaryPackStatus {
-  if (status.available.length === 0) status = { ...status, available: packNames() }
+  const available = packNames()
+  const changed =
+    available.length !== status.available.length || available.some((name, index) => name !== status.available[index])
+  if (changed) status = { ...status, available }
   return status
 }
 

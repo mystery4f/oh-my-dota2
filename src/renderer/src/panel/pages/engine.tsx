@@ -254,6 +254,14 @@ export function EnginePage(): React.ReactElement {
                   {name}
                 </Button>
               ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={glossary.busy}
+                  onClick={() => void glossary.refresh()}
+                >
+                  扫描目录
+                </Button>
             </div>
           </Row>
           <p className="px-4 pb-3 text-xs text-muted-foreground">
@@ -378,6 +386,7 @@ function useGlossaryCard(): {
   busy: boolean
   flash: string
   apply: (name: string) => Promise<void>
+  refresh: () => Promise<void>
 } {
   const [status, setStatus] = useState<GlossaryPackStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -406,7 +415,7 @@ function useGlossaryCard(): {
     setBusy(false)
   }, [])
 
-  return { status, busy, flash, apply }
+  return { status, busy, flash, apply, refresh }
 }
 
 function ConfirmClear({

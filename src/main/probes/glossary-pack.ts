@@ -7,6 +7,9 @@
  *
  * 只用纯缝与内存装配：探针不往真实数据目录写词表包（#126 的教训——探针不许碰真文件）。
  */
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { KEEP_VERBATIM_TOKENS, glossaryFor, setGlossaryEntries } from '@shared/dota-glossary'
 import {
   bundledGlossaryStatus,
@@ -15,7 +18,7 @@ import {
   parseGlossaryPack
 } from '@shared/glossary-pack'
 import { flagKeyNouns, keyNounsOf } from '@shared/key-nouns'
-import { applyGlossaryPackName } from '../services/glossary-pack'
+import { applyGlossaryPackName, glossaryPackStatus, setGlossaryDirForProbe } from '../services/glossary-pack'
 import { finishProbe, probeCases } from './harness'
 
 const PACK = {
@@ -117,6 +120,26 @@ export async function runGlossaryPackProbe(): Promise<void> {
     emptyLine.includes('内置') && emptyLine.includes('还没有词表包'),
     emptyLine
   )
+
+  // —— 运行中丢一个包进目录（#141）：清单必须现扫，不能是开机那次的缓存 ——
+  const tmpDir = mkdtempSync(join(tmpdir(), 'glossary-pack-'))
+  setGlossaryDirForProbe(tmpDir)
+  const empty = glossaryPackStatus()
+  check('空目录：一个包都没有', empty.available.length === 0, JSON.stringify(empty.available))
+  writeFileSync(join(tmpDir, '我的词表.json'), JSON.stringify({ name: '我的词表', entries: [{ en: 'aa', zh: '啊啊', kind: 'item' }] }))
+  const afterDrop = glossaryPackStatus()
+  check('放进目录后立刻出现在清单里（不重启）', afterDrop.available.join(',') === '我的词表', JSON.stringify(afterDrop.available))
+  const installed = applyGlossaryPackName('我的词表')
+  check(
+    '现扫到的包真能装上',
+    installed.source === 'pack' && installed.name === '我的词表' && installed.entries === 1,
+    JSON.stringify(installed)
+  )
+  rmSync(join(tmpDir, '我的词表.json'))
+  const afterRemove = glossaryPackStatus()
+  check('删掉之后从清单里消失', afterRemove.available.length === 0, JSON.stringify(afterRemove.available))
+  setGlossaryDirForProbe(null)
+  rmSync(tmpDir, { recursive: true, force: true })
 
   setGlossaryEntries(null)
   finishProbe('GLOSSARY_PACK_PROBE', cases)
