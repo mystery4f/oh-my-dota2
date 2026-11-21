@@ -475,7 +475,17 @@ const stubAsrModels = [
   { id: 'qwen3:asr-models/qwen3-asr.bak', engineId: 'qwen3', label: 'Qwen3-ASR 0.6B（备份）', rel: 'asr-models/qwen3-asr.bak', ready: true, bytes: 986491745, origin: 'backup' },
   { id: 'paraformer:asr-models/paraformer-zh', engineId: 'paraformer', label: 'Paraformer 中文', rel: 'asr-models/paraformer-zh', ready: true, bytes: 895000000, origin: 'download' }
 ] as const
-let stubAsrActiveId = query.get('asrModel') === 'paraformer' ? 'paraformer:asr-models/paraformer-zh' : 'qwen3:asr-models/qwen3-asr'
+// `?asrModel=missing`（一个模型都没有）与 `?asrModel=notready`（有模型但没装齐）是 #174 验收时够不着的两条分支：
+// 对讲页摘要里的「没有现成模型」与「未就绪」各有各的句子，没有桩就只能读代码判断界面上写什么。
+const stubAsrMode = query.get('asrModel')
+const stubAsrRows =
+  stubAsrMode === 'missing'
+    ? []
+    : stubAsrMode === 'notready'
+      ? stubAsrModels.map((m, i) => (i === 0 ? { ...m, ready: false } : m))
+      : [...stubAsrModels]
+let stubAsrActiveId =
+  stubAsrMode === 'missing' ? '' : stubAsrMode === 'paraformer' ? 'paraformer:asr-models/paraformer-zh' : 'qwen3:asr-models/qwen3-asr'
 // 设置里的现役 id 是页面判断「训练目标和现役不是同一个引擎」的唯一来源，stub 也要跟着走这条。
 settings.asrActiveModel = stubAsrActiveId
 
@@ -853,6 +863,18 @@ const implemented = {
     if (mode === 'empty') return { ok: false, draft: null, translated: null, grabMs: 60, error: '聊天框里没有可翻译的内容', restored: false }
     if (mode === 'nofocus')
       return { ok: false, draft: null, translated: null, error: '游戏不在前台：先把 Dota 2 切到前台再按热键', restored: false }
+    // 「没翻成」：模型服务不通 / 超时 / 被保真守卫拦下都落到这一支（`translated === null`，草稿还在）。
+    // 错误句由 `failureLine()` 现算，跟主进程抛出来的逐字一致，页面不自己编文案。
+    if (mode === 'notranslated')
+      return {
+        ok: false,
+        draft: '稳住，我们能赢',
+        translated: null,
+        grabMs: 120,
+        translateMs: 1_900,
+        error: failureLine(judgeProviderFailure({ message: 'fetch failed: ETIMEDOUT' })),
+        restored: true
+      }
     if (mode === 'write')
       return { ok: false, draft: '稳住，我们能赢', translated: 'hold mid, we can win', grabMs: 120, translateMs: 640, sendMs: 90, error: '写回聊天框并发送失败', restored: true }
     if (mode === 'keystroke')
@@ -1012,11 +1034,11 @@ const implemented = {
   }),
   asrStatus: async () => asrState(),
   asrDownload: async () => asrState(),
-  asrModels: async () => ({ activeId: stubAsrActiveId, pinned: true, models: [...stubAsrModels] }),
+  asrModels: async () => ({ activeId: stubAsrActiveId, pinned: true, models: [...stubAsrRows] }),
   asrActiveSet: async (id) => {
     stubAsrActiveId = id
     settings.asrActiveModel = id
-    return { activeId: id, pinned: true, models: [...stubAsrModels] }
+    return { activeId: id, pinned: true, models: [...stubAsrRows] }
   },
   hotwordSuggestions: async () => stubHotwordView(),
   hotwordApply: async (words) => {
