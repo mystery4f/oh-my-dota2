@@ -35,7 +35,7 @@
 
 | 差集项 | 真面板位置 | settings 键 | 已有探针 | 落地要动什么 |
 | --- | --- | --- | --- | --- |
-| 短语分组 | `chatout.tsx:128` | `quickPhraseGroups`（默认 `[]`） | `--quick-phrases-probe`（`renderGroups`/`renderPhrase`） | 变量用 placeholder 提示，见 #156 |
+| 短语分组 | `chatout.tsx:128` | 无设置键（#159 已删 `quickPhraseGroups`） | `--quick-phrases-probe`（`renderGroups`/`renderPhrase`） | 变量用 placeholder 提示，见 #156 |
 
 ## E 它怎么听·说（`src/renderer/src/panel/pages/talk.tsx`）
 

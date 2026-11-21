@@ -112,7 +112,8 @@ class OverlayManager {
         overlayPanel: formatAccelerator(settings.hotkeys.overlayPanel),
         voiceCapture: formatAccelerator(settings.hotkeys.voiceCapture)
       },
-      quickPhrases: renderGroups(settings.quickPhrases, settings.quickPhraseGroups, phraseVars()).flatMap(
+      // #159：分组没有编辑器，恒为空——见 `src/main/ipc.ts` 的同一处说明。
+      quickPhrases: renderGroups(settings.quickPhrases, [], phraseVars()).flatMap(
         (group) => group.phrases
       ),
       voiceCaptureMode: settings.voiceCaptureMode

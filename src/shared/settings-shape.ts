@@ -3,7 +3,6 @@
  * 从 ipc.ts 迁出（架构扫描 C2）：契约文件只留通道映射，设置长什么样归这里。
  * 依赖只进不来出得去：对 ipc.ts 只有类型边（编译期擦除），运行时仅依赖 hotkeys 的默认表。
  */
-import type { QuickPhraseGroup } from './quick-phrases'
 import { DEFAULT_CAPTURE_MODE, DEFAULT_HOTKEYS, type CaptureMode, type HotkeyActionId } from './hotkeys'
 import type { ProviderConfig, ProviderId } from './providers'
 import type { OfflineVoiceId, SpeakMode, VoiceOutEngine } from './voices'
@@ -135,11 +134,6 @@ export interface AppSettings {
   autoStartCapture: boolean
   /** 快捷短语表：呼出面板「短语」标签的内容，方向键选、Enter 复制进剪贴板。 */
   quickPhrases: string[]
-  /**
-   * #117：快捷短语的分组。`quickPhrases` 保持原样当「未分组」用——老用户的顺序不该被分组改动。
-   * 空组不显示（`visibleGroups` 会丢掉），所以这里允许存半成品。
-   */
-  quickPhraseGroups: QuickPhraseGroup[]
   /** In-game nicknames that should never be translated (your own messages). */
   myNicknames: string[]
   replyTone: ReplyTone
@@ -338,7 +332,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsMuteNames: [],
   autoStartCapture: true,
   quickPhrases: DEFAULT_QUICK_PHRASES,
-  quickPhraseGroups: [],
   myNicknames: [],
   replyTone: 'terse',
   overlayText: 'translated',

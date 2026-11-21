@@ -260,6 +260,8 @@
 
 修法：`src/shared/quick-phrases.ts` 加分组与 `{hero}`/`{time}`/`{matchid}` 变量；`quickPhrases` 仍然当「未分组」用（老用户的顺序不变），新的 `quickPhraseGroups` 只装分组。变量值来自最近一帧 GSI（`src/main/services/voice/phrase-context.ts`，90 秒内有效），超时就一律留占位符——**上一局的英雄填进这一局的话，比空着更糟**。
 
+2026-11-21 补（#159）：`quickPhraseGroups` 这个设置从来没有写入者（面板里没有分组编辑器），已按「死配置」删掉类型行与默认值；两个读点改成恒传空数组，`renderGroups` / `visibleGroups` / `flattenGroups` 的分组能力保留，`--quick-phrases-probe` 仍逐条验它。老 `settings.json` 里遗留的键按未知键忽略，不加迁移分支。
+
 两条容易写错：认不出的占位符（`{heor}` 这种打错字）必须原样留着，静默吞掉会让人永远不知道写错了；没有短语的组直接不显示，显示一个只有标题的空框会被当成「这里能填吗」。
 
 验收：`--quick-phrases-probe` 19 条。

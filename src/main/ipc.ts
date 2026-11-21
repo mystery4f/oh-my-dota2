@@ -376,7 +376,9 @@ const handlers: MainHandlers = {
   providerBoard: () => providerBoard(),
   phraseGroups: () => {
     const settings = loadSettings()
-    return renderGroups(settings.quickPhrases, settings.quickPhraseGroups, phraseVars())
+    // #159：分组没有编辑器（`quickPhraseGroups` 从来没被写过），这里恒为空；
+    // 分组的渲染能力留在 `renderGroups`，以后真做了编辑器只需把第二个参数换成 settings。
+    return renderGroups(settings.quickPhrases, [], phraseVars())
   },
   translateDirection: (request) => correctLineDirection(request),
   qualityReport: () => readQualityReport(),
