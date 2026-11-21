@@ -48,3 +48,11 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (see **Count open blockers**, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me`, the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
+
+## 这台机器上的三个环境事实（2026-11 实测）
+
+三条都不是「偶尔慢一下」，是每次都会撞的固定形状；撞了就走括号里的替代路径，别重试原路径。
+
+- **`gh` 的 GraphQL 一半概率 TLS 超时**（`read tcp … wsarecv: An existing connection was forcibly closed`、`EOF`）。写操作（评论、改标签、关票）尤其容易中。替代：评论用 REST `gh api -X POST repos/O/R/issues/<n>/comments -F body=@file`，关票 `gh api -X PATCH repos/O/R/issues/<n> -f state=closed`，摘标签 `gh api -X DELETE repos/O/R/issues/<n>/labels/<name>`。读操作用 `gh issue list --json …`（REST 路径）通常还能过；连续失败两次就整体切 REST。
+- **`git push` 走 SSH 常常 `Connection reset by 20.205.243.160 port 443`**，与代理无关（SSH 不吃 `HTTPS_PROXY`）。替代：`git -c http.proxy=http://mcr:4444 push "https://x-access-token:$(gh auth token)@github.com/O/R.git" main:main`，成功后再 `git update-ref refs/remotes/origin/main HEAD` 让本地跟踪引用跟上（否则 `status` 一直显示 ahead）。
+- **`.dev-flow/` 下的 worktree 没有 `node_modules`**，直接跑 `npm run build` / `npm run probe` 会失败在没有依赖。替代：给 worktree 做 junction（`cmd /c mklink /J <worktree>\node_modules <主树>\node_modules`），或者只在主树跑门禁、代码改动留在 worktree 里推分支。
