@@ -26,6 +26,7 @@ import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
 import { runVoicePackBundleProbe } from './voice-pack-bundle'
 import { runMatchReportProbe } from './match-report'
+import { runReportImageProbe } from './report-image'
 import { runMatchAttributionProbe } from './match-attribution'
 import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
@@ -667,6 +668,12 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'the per-provider latency board (`src/shared/latency-board.ts`): P50/P95 recomputed from the recorded samples only, and a provider with no turns says so instead of showing 0 ms',
     run: runLatencyBoardProbe
+  },
+  {
+    flag: '--report-image-probe',
+    ci: true,
+    summary: 'the per-match report image (`src/shared/match-report.ts` + `src/main/services/report/match-report.ts`): every number comes from logs/voice-chain.jsonl, and a match with no voice activity still renders a report that says so',
+    run: runReportImageProbe
   },
   {
     flag: '--interpret-switch-probe',

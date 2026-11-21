@@ -1056,6 +1056,24 @@ check(
   '音色包：清单驱动的三件顺序固定',
   voicePackBundleEntries(packBase).map((item) => item.part).join(',') === 'refAudio,gptWeights,sovitsWeights'
 )
+
+// —— 战绩图（match-report）：只数记下来的数字 ——
+{
+  const { matchReportNumbers, matchReportOf, matchReportSvg } = await import('../src/shared/match-report.ts')
+  const rows = [
+    { spoken: true, firstAudioMs: 900, totalMs: 2600 },
+    { spoken: true, stage: 'voice-out', firstAudioMs: 1300, totalMs: 3400 },
+    { spoken: false, stage: 'mic' },
+  ]
+  const n = matchReportNumbers(rows)
+  check('战绩图：听懂只数 spoken 为真', n.understood === 2, String(n.understood))
+  check('战绩图：标出只数失败 stage', n.flagged === 2, String(n.flagged))
+  check('战绩图：首音中位按记录算', n.firstAudioMs === 1100, String(n.firstAudioMs))
+  const empty = matchReportOf([], { matchId: '1', generatedAt: 'x' })
+  check('战绩图：没有语音活动时正文直接说没有', empty.headline === '这一局没有语音活动', empty.headline)
+  check('战绩图：空图也画得出来', matchReportSvg(empty).includes('这一局没有语音活动'))
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
