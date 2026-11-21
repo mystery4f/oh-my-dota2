@@ -219,6 +219,11 @@ nightly.yml → version: 1.0.0-nightly.20261024-191754
 > 2026-10-25 定调：GSI 四路（allplayers/minimap/draft/hero.Teams）全灭 + OpenDota 仅赛后有数（进行中 match 返回 `players: []` 实测），实时拿 10 人 `座位→英雄` 只剩 Steam 官方 `IDOTA2Match_570/GetRealTimeStats`（dotabod SourceTV 路线）。
 > **2026-10-25 否决：用户拍板不接这条路线**——要申请 key、按 server id 查、还得验证 pub 局是否真返回数据，成本高于收益；运行时维持纯 GSI。他人英雄名拿不到时朗读改念座位标签「玩家2说，」（见 `src/main/services/voice/speech.ts` decideSpeak 前缀规则），本组整体关闭。
 
+- **2026-11-21 复核（#125）：上一条「draft 全灭」是错的，应当撤回。**
+  - 原始证据：`data/logs/gsi-draft.jsonl`（`src/main/services/gsi.ts` 的 `recordDraft()` 落盘，只在 draft 块非空时写、同内容去重、封顶 256 KB）。盘上 6 行全部来自同一局：`matchId 9069952836`、`gameState DOTA_GAMERULES_STATE_GAME_IN_PROGRESS`、时间 `2026-10-31T14:07:24Z`–`14:07:25Z`。每行 `draft` 有 7 个键（`activeteam / pick / activeteam_time_remaining / radiant_bonus_time / dire_bonus_time / team2 / team3`），`team2` 与 `team3` 各带 5 个 `pickN_id` + `pickN_class` 与 7 个 `banN_id` + `banN_class`；6 行内容完全一致（同一帧连推），即**这一局 draft 块确实到达、而且带完整阵容与 ban**。取样时 `pick: false`、`activeteam: 0`（选人已结束，处于对局中）。
+  - 但结论只撤回一半：draft 给的是 **team2 / team3 两个阵营的英雄**（这是观战/联赛形态的字段命名），**不带你自己的 `player_slot`**；同一时间的 `data/logs/gsi-player.jsonl` 里 `player` 块只有 `name: "Mystery"`，`playerSlot / teamSlot / steamid` 全是 `null`——`allplayers` 依旧 0 帧。所以「实时座位→英雄」仍然拿不到，可用的只是「本局双方各五个英雄是谁」，要把它接到人说「谁说了什么」还必须另找座位归属（本机唯一可行的是让用户自己在面板里指认一次，或放弃逐人前缀）。
+  - 还没测到的部分（别当已知）：只有一局、一次取样，且是观战形态；自打排位/普通局是否同样推 `draft`、`HERO_SELECTION` 阶段（而不是对局中）里 `pick` 为 `true` 时字段是否变化、turbo 是否不同，都还没证据。下一局真打的时候把 `data/logs/gsi-draft.jsonl` 留着（每次开房前可先删空），按「`matchId` 是否变化」区分局数即可重测；`logs/gsi-summary.json` 的 `event_type` 表可作交叉印证。
+
 - `#25` Steam Web API key 加密存储（接 GetRealTimeStats 的前置条件）
   - 背景：用户已认可走这条路线并接受 key 的风险边界（只读数据 key，不能交易/赠送饰品），但明确要求**不要明文落盘**。
   - 现状：`settings.json` 里 provider 的 apiKey、以及将来的 `steamApiKey` 都是明文 JSON；本机磁盘可读的人/程序都能拿走。
