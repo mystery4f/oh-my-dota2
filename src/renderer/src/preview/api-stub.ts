@@ -406,7 +406,32 @@ if (query.get('audition') === '1') {
 type AsrStubState = 'env' | 'nodata' | 'no-base' | 'ready' | 'running' | 'failed' | 'live'
 const asrStub: AsrStubState = (query.get('asr') as AsrStubState | null) ?? 'ready'
 
-const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
+/**
+ * 音色训练（#178）的六态旋钮：一屏一态，四张验收截图在同一次会话里拍。
+ * `ready` 能开训 / `nodata` 没有实验 / `noenv` 引擎包没装 / `running` 训练中 / `noprogress` 训练中但这版脚本不报进度 / `failed` 上次训练段失败。
+ */
+type GvStubState = 'ready' | 'nodata' | 'noenv' | 'running' | 'noprogress' | 'failed'
+/** 不带 `?gv=` 时保持旧预览不变：别的页面的桩仍然用那条正在跑的 ASR 任务。 */
+const gvRaw = query.get('gv')
+const gvStub: GvStubState | null = gvRaw === null ? null : (gvRaw as GvStubState)
+
+/** 音色训练跑着的样子（#178）：一条走 GPT 腿的任务，进度可能是 45%，也可能是 -1（这版脚本不报进度）。 */
+const gvStubSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
+  task: {
+    id: 'gv-stub',
+    kind: 'gv-gpt',
+    dataset: 'mirana',
+    status: 'running',
+    progress: gvStub === 'noprogress' ? -1 : 45,
+    stage: gvStub === 'noprogress' ? 'SoVITS 训练脚本输出（这版不报 epoch）' : 'epoch 3/15',
+    startedAt: stubNow - 6 * 60 * 1000,
+    endedAt: null,
+    inference: 'kept-off'
+  },
+  logs: []
+}
+
+const asrStubSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
   task: {
     id: 'train-stub',
     kind: 'asr-ft',
@@ -423,6 +448,13 @@ const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> = {
     { at: stubNow - 30_000, text: 'stub: epoch 22/66 loss=0.398' }
   ]
 }
+
+const stubTrainSnapshot: Awaited<ReturnType<WindowApi['trainSnapshot']>> =
+  gvStub === 'running' || gvStub === 'noprogress'
+    ? gvStubSnapshot
+    : gvStub === null
+      ? asrStubSnapshot
+      : { task: null, logs: [] }
 // `?train=idle` 时训练不占着：比对按钮平时被「正在训练」挡着，没有这个开关就看不到弹层。
 if (query.get('train') === 'idle') {
   stubTrainSnapshot.task = {
@@ -463,10 +495,29 @@ const stubRecs: FtRecInfo[] = [
 ]
 /** 预览里的纠错样本（#66）：只记字节数，够 judgeCorrectionSamples 算出条数/字节/到顶。 */
 const stubCorrections: { bytes: number }[] = [{ bytes: 96_000 }, { bytes: 88_000 }]
-const stubGvDatasets = [
-  { expName: 'mirana', ready: true, missing: [] },
-  { expName: 'windranger', ready: false, missing: ['语义表 6-name2semantic.tsv'] }
-]
+/** 预览里的 GV 实验：一个备料齐、一个缺语义表；`?gv=nodata` 直接空盘。 */
+const stubGvDatasets =
+  gvStub === 'nodata'
+    ? []
+    : [
+        { expName: 'mirana', ready: true, missing: [] },
+        { expName: 'windranger', ready: false, missing: ['语义表 6-name2semantic.tsv'] }
+      ]
+/** `?gv=failed` 用的那条失败记录：GV 没有导出步，失败就落在训练段（#178 的 Q7）。 */
+const stubGvFailedRun: Awaited<ReturnType<WindowApi['trainRuns']>>[number] = {
+  id: 'gv-stub-failed',
+  kind: 'gv-gpt',
+  experiment: 'mirana',
+  params: { version: 'v2ProPlus' },
+  data: { files: 0, durationMs: 0, bytes: 0 },
+  status: 'failed',
+  startedAt: stubNow - 3 * 60 * 60 * 1000,
+  endedAt: stubNow - 3 * 60 * 60 * 1000 + 9 * 60 * 1000,
+  artifacts: { runDir: 'logs/mirana', ckptDir: 'logs/mirana' },
+  metrics: null,
+  applied: false,
+  error: 'CUDA out of memory（batch 4 / 12GB）'
+}
 let stubWebuiRunning = false
 
 /** 预览里的 ASR 模型表：两条微调腿各一个，`?asrModel=paraformer` 让识别训练直接落在 FunASR 腿上。 */
@@ -1090,7 +1141,7 @@ const implemented = {
   },
   voiceOutCableInstall: async () => ({ ok: true, launched: true, dir: 'C:\\data\\vb-cable', step: null, error: null }),
   overlayVoiceToggle: async () => ({ ok: true }),
-  trainRuns: async () => stubTrainRuns,
+  trainRuns: async () => (gvStub === 'failed' ? [stubGvFailedRun, ...stubTrainRuns] : stubTrainRuns),
   trainRun: async (id) => stubTrainRuns.find((run) => run.id === id) ?? null,
   trainSnapshot: async () => stubTrainSnapshot,
   // 训练日志：预览里给一段真格式的样例，只有当天的行会被压成 HH:mm:ss。
@@ -1115,7 +1166,28 @@ const implemented = {
     stubWebuiRunning = open
     return { ok: true, running: stubWebuiRunning }
   },
-  trainGvRegister: async ({ name }) => ({ ok: true, entry: { name } }),
+  // 真机上注册会把条目写进 refs.json，音色包清单里就多一行；桩里照着长，预览才看得到「非现役」那一态。
+  trainGvRegister: async ({ name }) => {
+    if (!sovitsPacks.some((pack) => pack.name === name)) {
+      sovitsPacks.push({
+        id: 'gv-' + name,
+        name,
+        version: '',
+        note: '由音色训练注册',
+        defaultPack: false,
+        bytes: 0,
+        haveBytes: 0,
+        installed: true,
+        installedVersion: null,
+        upgradable: false,
+        downloading: false,
+        progress: 1,
+        active: false,
+        error: null
+      })
+    }
+    return { ok: true, entry: { name } }
+  },
   ftScriptRead: async () => stubScript,
   // 预览里的编辑保存只改内存：真写盘只有 Electron 里才有，但抽屉的往返能照着看。
   ftScriptSave: async (groups) => {
@@ -1258,7 +1330,10 @@ const implemented = {
   ftAsrftRollback: async () => ({ ok: true, error: null, model: null }),
   ftAsrftResetBase: async () => ({ ok: true, error: null, model: null }),
   ftAsrftFacts: async () => ({ vramNote: null, incremental: asrStub !== 'no-base' && asrStub !== 'nodata' }),
-  sovitsStatus: async () => sovitsStatus,
+  sovitsStatus: async () =>
+    gvStub === 'noenv'
+      ? { ...sovitsStatus, installed: false, home: '', install: { ...sovitsStatus.install, phase: 'idle' as const, progress: 0 } }
+      : sovitsStatus,
   sovitsInstall: async () => sovitsStatus,
   sovitsRefs: async () => sovitsRefs,
   sovitsVoicepacks: async () =>
