@@ -44,7 +44,7 @@ const HEADLINE: Record<
   data: {
     title: '数据不足',
     tone: 'warn',
-    note: '账本里只有 12 条可用，开训至少要 40 条；先去「数据」把那 8 句补录完。',
+    note: '账本里只有 12 条可用：少于 10 条会提醒，0 条才不让开训；先把那 8 句补录完更稳。',
     action: '去录音'
   },
   ready: {
