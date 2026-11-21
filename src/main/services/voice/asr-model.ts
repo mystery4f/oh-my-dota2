@@ -151,9 +151,8 @@ export function engineSpecOf(model: AsrModel): AsrEngineSpec {
 
 /** 盘上哪些引擎有 ready 模型（#154 的探针用；也是面板「两副都在不在」的唯一来源）。 */
 export function readyEngineIds(): string[] {
-  return collectAsrModels(dirFacts())
-    .filter((model) => model.ready)
-    .map((model) => model.engineId)
+  // 同一副引擎可能有多个目录都 ready（原版 + 转正副本），这里只回引擎——重复不算两副。
+  return [...new Set(collectAsrModels(dirFacts()).filter((model) => model.ready).map((model) => model.engineId))]
 }
 
 export function asrModelDir(model: AsrModel): string {
