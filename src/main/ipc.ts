@@ -4,6 +4,7 @@ import { errorMessage } from '@shared/errors'
 import { IPC, ipcContract, type MainHandlers, type OpenExternalResult } from '@shared/ipc'
 import { translateInPlace, voiceReply } from './services/reply/reply-service'
 import { generatePanelSuggestions } from './services/reply/panel-suggestions'
+import { askScreen, visionReadiness } from './services/vision'
 import { chooseGlossaryPack, glossaryPackStatus } from './services/glossary-pack'
 import { loadSettings, saveSettings } from './services/settings'
 import { hotkeysState, saveHotkeysState } from './services/hotkeys'
@@ -135,6 +136,9 @@ const handlers: MainHandlers = {
     ),
   translateInPlace: () => translateInPlace(),
   panelSuggestions: () => generatePanelSuggestions(),
+  // #135 看图：用户主动触发的一次请求，主进程截当前一帧问模型。
+  visionAsk: () => askScreen(),
+  visionState: () => visionReadiness(),
   translatorStatus: () => sessionStatus(),
   cacheStats: () => translationInsights(),
   // 清空缓存两步走：inspect 数数给确认框，clear 才真删（都只对当前 provider）。

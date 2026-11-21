@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CaptureEntry, OverlayStatus, PanelSuggestionsResult } from '@shared/ipc'
+import { visionLine, visionShotLine, type VisionAnswer, type VisionReadiness } from '@shared/vision'
 import { filterHistory, historyCopyText, pickPhrase } from '@shared/overlay-ledger'
 import { directionLabel } from '@shared/translate-direction'
 
-type Tab = 'history' | 'phrases' | 'suggest'
+type Tab = 'history' | 'phrases' | 'suggest' | 'look'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'history', label: '历史' },
   { id: 'phrases', label: '快捷短语' },
-  { id: 'suggest', label: 'AI 建议' }
+  { id: 'suggest', label: 'AI 建议' },
+  // 看一眼（#135）：用户主动按一次才截屏，绝不后台轮询——每一次都是真的模型调用。
+  { id: 'look', label: '看一眼' }
 ]
 
 /**
@@ -56,6 +59,7 @@ export function SummonPanel(props: { status: OverlayStatus; onStatus: (s: Overla
         {tab === 'history' && <HistoryTab />}
         {tab === 'phrases' && <PhrasesTab phrases={status.quickPhrases} />}
         {tab === 'suggest' && <SuggestTab />}
+        {tab === 'look' && <LookTab />}
       </div>
     </div>
   )
@@ -270,6 +274,67 @@ function SuggestTab(): JSX.Element {
         />
       ))}
       <div className="panel-note kbd-note">点一条复制 · 再按热键或 Esc 回到游戏</div>
+    </div>
+  )
+}
+
+/**
+ * 看一眼（#135）：按一次才截一帧，问模型，答案只显示在这里。
+ * 三种失败要说成三句不同的话——不能看图 / 截不到画面 / 模型没答上来，
+ * 混成「失败」的话用户不知道该去改模型、改窗口模式还是重试。
+ */
+function LookTab(): JSX.Element {
+  const { copiedId, copy } = useCopy()
+  const [ready, setReady] = useState<VisionReadiness | null>(null)
+  const [answer, setAnswer] = useState<VisionAnswer | null>(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    void window.api.visionState().then(setReady)
+    // 热键（看一眼）在主进程里就截了帧：结果广播回来，这里只管显示。
+    return window.api.onVisionResult(setAnswer)
+  }, [])
+  const ask = useCallback((): void => {
+    setLoading(true)
+    void window.api
+      .visionAsk()
+      .then(setAnswer)
+      .finally(() => setLoading(false))
+  }, [])
+  if (ready === null) return <div className="panel-note">正在看当前模型能不能收图…</div>
+  if (!ready.ready) {
+    return (
+      <div className="panel-note">
+        {ready.reason}
+        <div className="kbd-note">当前模型：{ready.model || '（没选）'}</div>
+      </div>
+    )
+  }
+  return (
+    <div className="scroll">
+      <div className="panel-note">
+        截当前画面问一次模型 · {ready.model}
+        <button type="button" className="retry" onClick={ask} disabled={loading}>
+          {loading ? '正在看…' : answer === null ? '看一眼' : '再看一次'}
+        </button>
+      </div>
+      {answer === null && !loading && (
+        <div className="panel-note kbd-note">点「看一眼」才截屏：不按就不花钱，也不会上传任何画面。</div>
+      )}
+      {answer !== null && (
+        <>
+          <div className={answer.ok ? 'panel-note' : 'panel-note err'}>{visionLine(answer)}</div>
+          {answer.shot !== null && <div className="panel-note kbd-note">{visionShotLine(answer.shot)}</div>}
+          {answer.ok && answer.text.split('\n').map((line, i) => (
+            <CopyRow
+              key={'look-' + i}
+              id={'look-' + i}
+              primary={line}
+              copied={copiedId === 'look-' + i}
+              onCopy={() => copy('look-' + i, line)}
+            />
+          ))}
+        </>
+      )}
     </div>
   )
 }

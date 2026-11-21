@@ -2,9 +2,17 @@ import { net } from 'electron'
 import type { ProviderConfig } from '@shared/ipc'
 import { directReasoningParams } from '@shared/provider-reasoning'
 
+/**
+ * 一条消息的内容：纯文本，或按顺序排的几块（#135 的看图就是「文字 + 一张图」两块）。
+ * 图片用 data URL 内联，绝不引用磁盘路径——模型侧只认 data URL，磁盘路径还会把本机路径发出去。
+ */
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | ChatContentPart[]
 }
 
 export interface ChatOptions {

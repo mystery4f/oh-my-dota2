@@ -344,6 +344,12 @@ it and nothing happened". The overlay and the pause hint print key names from th
   computed offscreen, so never quote the ratio as proof of the latter. Any state a colour expresses must also carry a
   non-colour marker (`.spoken.ok` → `✓ `, `.spoken.err` → `✕ `, a hint → `⚠ `) — adding a colour without adding its pair to
   the table leaves that pair unchecked.
+- Look-at-the-screen (#135): one hotkey, one frame, one answer in the summon panel's 看一眼 tab. Images travel as
+  `data:image/png;base64,...` inside `ChatMessage.content` parts and never touch the disk or `logs/` — the probe asserts the
+  logs listing is unchanged. Vision capability is a NAME heuristic (`isVisionModel` in `src/shared/vision.ts`), so the
+  refusal text must be "换一个能看图的模型", never "this model can't take images". Three failures stay three sentences:
+  model can't see / frame is empty / model didn't answer. Never poll or pre-capture: every shot is a billed call the
+  user asked for by pressing the key.
 - Overlay diagnostics: a locked overlay is click-through *and* content-protected, so it is absent from
   every screenshot and ignores the mouse. Never conclude "the overlay is not showing" from a desktop
   capture — read the panel badge or the `overlay:status` payload instead. Both rules are pure seams in

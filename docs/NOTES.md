@@ -275,6 +275,12 @@
 - 需求（2026-10-28）：「记忆收起、锁定、隐藏，在下一次启动的时候按这个来」。
 - 修法：锁定本来就有 `overlayLocked` 持久化；补 `overlayCollapsed`（toggleCollapse 两个分支各自 saveSettings）和 `overlayVisible`（toggle 藏时写 false；show() 亮出后写 true）。启动时 `whenReady` 里 `startup.overlayVisible` 为真才 `show()`——浮层从不自动弹出，只还原用户上次的选择。收起态下 show() 先 reposition 再套 `miniGeometry`，重启见面也是小图标不是整块。
 - 教训：显示状态要在「用户动作发生的当下」持久化（toggle/show 里），而不是退出时快照——强制退出（dev:stop 的 Stop-Process）不走 will-quit，退出时快照必丢。
+### 「看一眼画面」按下去要能说出为什么不行（#135）
+- 症状：想看「现在这波该怎么打」，只能自己截屏、开网页、贴图；应用里没有任何入口。
+- 根因：`ChatMessage.content` 是字符串，provider 这层根本发不出图；截屏链路（OCR）早被移除，`desktopCapturer` 一处都没用上，所以票面写的「已经能截屏」是过期的。
+- 修法：`content` 扩成 `string | ChatContentPart[]`；`src/main/services/vision.ts` 用 `desktopCapturer` 一次取一帧（第一帧为空重试一次），调 `chatCompletion`，答案广播回呼出面板的「看一眼」页；热键 `visionAsk`（默认 `Alt+Shift+G`）先开面板再截图。
+- 三个不许含糊的地方：图片只走 data URL（不写盘、不进 `logs/`，探针用目录前后一致钉住）；模型名不像视觉模型时说的是「去对话页换一个能看图的」，不是「不支持」；截不到画面时说的是「这一帧是空的（受保护窗口、桌面锁着，或这个会话拿不到桌面）」——三句不同的话，用户才知道该改哪。
+- 实测：`--vision-probe` 15/15；本机那个 bash 会话里 `desktopCapturer` 拿到的帧是空的（与「`keybd_event` 注入被拒」同一类现象：那个会话不是真正的交互桌面），所以截图那一步记 `skipped` 并把原因打出来，而不是假装通过。
 ### 浮层字小、灰度下分不清已播未播（#100）
 - 症状：浮层文字只有一套大小（原文 12px / 译文 13px），想看清只能坐近一点；已播行与未播行只靠绿色和灰色区分，灰度截图、色弱用户、甚至投影仪偏色时看着一模一样。
 - 根因：字号与颜色全是 `src/renderer/src/overlay/overlay.css` 里的字面量，26 处 `font-size` 只有 10/11/12/13 四个数，没有任何地方能检查「对比度够不够」「状态有没有非颜色标记」——它既不在类型里，也不在探针里。

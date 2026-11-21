@@ -21,6 +21,7 @@ import { runGsiProbe } from './gsi'
 import { runGsiFramesReportProbe } from './gsi-frames-report'
 import { runDownloadProbe } from './download'
 import { runHoldWatchProbe } from './hold-watch'
+import { runVisionProbe } from './vision'
 import { runHotkeyProbe } from './hotkeys'
 import { runInPlaceGuardProbe } from './inplace-guard'
 import { runMatchReportProbe } from './match-report'
@@ -233,6 +234,11 @@ export const PROBES: readonly ProbeEntry[] = [
     ci: true,
     summary: 'a download that drops mid-way resumes from the partial file, a source ignoring Range restarts clean, and a bad mirror falls through with the one actually used named in the log',
     run: runDownloadProbe
+  },
+  {
+    flag: '--vision-probe',
+    summary: 'look at the screen once: the payload is one message with the prompt and a data URL, a text-only model is refused with words, and no frame reaches the disk',
+    run: runVisionProbe
   },
   {
     flag: '--hold-watch-probe',

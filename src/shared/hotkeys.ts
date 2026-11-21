@@ -15,6 +15,7 @@ export type HotkeyActionId =
   | 'inplaceSend'
   | 'overlayPanel'
   | 'voiceCapture'
+  | 'visionAsk'
 
 export interface HotkeyAction {
   id: HotkeyActionId
@@ -57,6 +58,12 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
     label: '呼出面板',
     hint: '把浮层临时变成可交互面板：历史、快捷短语、AI 建议回复；再按或 Esc 关闭',
     defaultAccelerator: 'Alt+Shift+H'
+  },
+  {
+    id: 'visionAsk',
+    label: '看一眼画面',
+    hint: '截当前这一帧问视觉模型，答案在呼出面板的「看一眼」页；只在你按的时候截图',
+    defaultAccelerator: 'Alt+Shift+G'
   },
   {
     id: 'voiceCapture',

@@ -7,6 +7,7 @@ import type { VoiceChainTiming } from './voice-timing'
 import type { VoiceStageEvent } from './voice-stage'
 import type { GsiStallView } from './gsi-stall'
 import type { CaptureMode, HotkeyActionId, HotkeyState, HotkeyVerdict } from './hotkeys'
+import type { VisionAnswer, VisionReadiness } from './vision'
 import type { HoldSelfTest } from './hold-selftest'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { GlossaryPackStatus } from './glossary-pack'
@@ -520,6 +521,10 @@ export const IPC = {
   /** 呼出面板数据：账本历史、AI 建议、点行复制。 */
   CHAT_HISTORY: 'chat:history',
   PANEL_SUGGESTIONS: 'panel:suggestions',
+  /** #135 看图：截一帧问视觉模型，答案只回面板。 */
+  VISION_ASK: 'vision:ask',
+  VISION_STATE: 'vision:state',
+  VISION_RESULT: 'vision:result',
   COPY_TEXT: 'clipboard:copy',
   OVERLAY_TEXT: 'overlay:text',
   VOICE_SPEAK: 'voice:speak',
@@ -820,6 +825,9 @@ export const ipcContract = {
   overlayStatus: invoke<[], OverlayStatus>(IPC.OVERLAY_STATUS),
   chatHistory: invoke<[], CaptureEntry[]>(IPC.CHAT_HISTORY),
   panelSuggestions: invoke<[], PanelSuggestionsResult>(IPC.PANEL_SUGGESTIONS),
+  visionAsk: invoke<[], VisionAnswer>(IPC.VISION_ASK),
+  visionState: invoke<[], VisionReadiness>(IPC.VISION_STATE),
+  onVisionResult: listen<VisionAnswer>(IPC.VISION_RESULT),
   copyText: invoke<[string], boolean>(IPC.COPY_TEXT),
   onOverlayState: listen<OverlayStatus>(IPC.OVERLAY_STATE),
   onVoiceSpeak: listen<SpeakPayload>(IPC.VOICE_SPEAK),

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, session } from 'electron'
 import { errorMessage } from '@shared/errors'
+import { IPC } from '@shared/ipc'
 
 // 隐藏抓屏窗口必须持续出帧：Chromium 默认会节流被遮挡/后台的渲染进程，视频流会冻住。
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
@@ -35,6 +36,8 @@ import { snapshotTranslationStats } from './services/session/translate-cache'
 import { translateInPlace } from './services/reply/reply-service'
 import { suppressExperimentalSqliteWarning } from './services/session/warnings'
 import { getOverlayManager } from './windows/overlay'
+import { broadcastToWindows as broadcast } from './windows/broadcast'
+import { askScreen } from './services/vision'
 import { getCaptureService } from './services/capture/capturer'
 import { getInPlaceSender } from './services/input/chat-inplace'
 import { createTray, destroyTray } from './windows/tray'
@@ -256,6 +259,17 @@ app.whenReady().then(() => {
     },
     voiceCapture: () => {
       getOverlayManager().toggleVoiceCapture()
+    },
+    // 看一眼（#135）：先打开呼出面板让答案有地方落，再截帧问模型。
+    // 热键这条路没人接返回值，所以结果广播回渲染层，失败也必须是条消息而不是静默。
+    visionAsk: () => {
+      const overlay = getOverlayManager()
+      if (!overlay.status().visible) return
+      if (!overlay.status().panelOpen) overlay.togglePanel()
+      void askScreen().then((answer) => {
+        broadcast(IPC.VISION_RESULT, answer)
+        if (!answer.ok) overlay.flashHint(answer.error ?? '看图失败')
+      })
     },
     // 按住模式：按下开录、松开触发，两次按键之间没有 toggle 的去抖窗口。
     voiceCaptureStart: () => {
