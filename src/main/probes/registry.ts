@@ -76,6 +76,7 @@ import { runPatchWatchProbe } from './patch-watch'
 import { runAsrRoutingProbe } from './asr-routing'
 import { runAsrSwitchProbe } from './asr-switch'
 import { runTranslationMarkProbe } from './translation-mark'
+import { runReplayStarProbe } from './replay-star'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
 import { runSpeechQueueProbe } from './speech-queue'
@@ -409,6 +410,13 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the translation spot-check account (`src/shared/translation-mark.ts`): unmarked or untranslated lines never become samples, a re-mark replaces the earlier verdict, tallies group by provider and model, and a failed mark still speaks (ticket 87)',
     run: runTranslationMarkProbe
+  },
+  {
+    flag: '--replay-star-probe',
+    ci: true,
+    summary:
+      'the in-game star for the replay (`src/shared/replay-star.ts`): stars carry the match they were made in, survive the match boundary, one line starred twice counts once, and a match nobody starred reads empty rather than everything (ticket 118)',
+    run: runReplayStarProbe
   },
   {
     flag: '--asr-switch-probe',

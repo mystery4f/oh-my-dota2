@@ -41,6 +41,8 @@ import { getOverlayManager } from './windows/overlay'
 import { broadcastToWindows as broadcast } from './windows/broadcast'
 import { askScreen } from './services/vision'
 import { noteTranslationMark } from './services/session/translation-marks'
+import { noteReplayStar } from './services/session/replay-stars'
+import { starFeedback } from '@shared/replay-star'
 import { markFeedback } from '@shared/translation-mark'
 import { getCaptureService } from './services/capture/capturer'
 import { getInPlaceSender } from './services/input/chat-inplace'
@@ -286,6 +288,10 @@ app.whenReady().then(() => {
     markBad: () => {
       const mark = noteTranslationMark('bad')
       getOverlayManager().flashHint(markFeedback('bad', mark))
+    },
+    // 复盘星标（#118）：标浮层上最后一条已翻好的行。同样不许静默。
+    starLine: () => {
+      getOverlayManager().flashHint(starFeedback(noteReplayStar()))
     },
     // 看一眼（#135）：先打开呼出面板让答案有地方落，再截帧问模型。
     // 热键这条路没人接返回值，所以结果广播回渲染层，失败也必须是条消息而不是静默。

@@ -14,6 +14,7 @@ import type { HoldSelfTest } from './hold-selftest'
 import type { HalfDuplexSnapshot } from './half-duplex'
 import type { ErrorSummary } from './error-log'
 import type { TranslationMarkSummary } from './translation-mark'
+import type { ReplayStarSummary } from './replay-star'
 import type { EnvDeviceCounts, EnvReport } from './env-report'
 import type { GlossaryPackStatus } from './glossary-pack'
 import type { SettingsBundleExportResult, SettingsBundleImportResult } from './settings-bundle'
@@ -640,6 +641,7 @@ export const IPC = {
   ERRORS_VIEW: 'errors:view',
   /** 译文抽检（#87）：被标记过的译文对（供应商 × 模型的好评率），只读汇总。 */
   TRANSLATION_MARKS: 'translation:marks',
+  REPLAY_STARS: 'replay:stars',
   // 方向更正（#84）：浮层点一下方向标，改的是「这一句该往哪翻」，只记在这一局里。
   TRANSLATE_DIRECTION: 'translate:direction-override',
   // 周度质量卡（#110）：守卫计数 + 记账本命中，主进程现读两份 jsonl 现算。
@@ -958,6 +960,7 @@ export const ipcContract = {
   errorsView: invoke<[], ErrorSummary>(IPC.ERRORS_VIEW),
   /** 译文抽检（#87）：面板只读一句话与分组统计，明细在 `logs/translation-marks.jsonl`。 */
   translationMarks: invoke<[], TranslationMarkSummary>(IPC.TRANSLATION_MARKS),
+  replayStars: invoke<[string | null], ReplayStarSummary>(IPC.REPLAY_STARS),
   /**
    * 方向更正（#84）：把「这一句」改判成另一个方向并记住，返回重新翻出来的译文。
    * 失败时 `translated` 为 null 且 `error` 说明原因，但更正本身已经记住了。

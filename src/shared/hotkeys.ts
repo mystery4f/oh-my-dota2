@@ -18,6 +18,7 @@ export type HotkeyActionId =
   | 'visionAsk'
   | 'markGood'
   | 'markBad'
+  | 'starLine'
 
 export interface HotkeyAction {
   id: HotkeyActionId
@@ -78,6 +79,12 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
     label: '标记最近一句译文：差',
     hint: '同上，记成「译错了」。没标记过的行不会进这份记录',
     defaultAccelerator: 'Alt+Shift+N'
+  },
+  {
+    id: 'starLine',
+    label: '标记这一句：复盘优先看',
+    hint: '把浮层上最后一条已翻译的行标进这一局的复盘（星标跨对局还读得到，没标过的局是空的）',
+    defaultAccelerator: 'Alt+Shift+K'
   },
   {
     id: 'voiceCapture',

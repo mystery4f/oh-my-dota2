@@ -89,6 +89,7 @@ import { patchWatchView } from './services/patch-watch'
 import { exportLogBundle } from './services/log-bundle'
 import { errorsSummary } from './services/error-log'
 import { translationMarkSummary } from './services/session/translation-marks'
+import { replayStarSummary } from './services/session/replay-stars'
 import { correctLineDirection } from './services/session/direction-correction'
 import { readQualityReport } from './services/session/quality-report'
 import { readBuildInfo } from './services/build-info'
@@ -358,6 +359,7 @@ const handlers: MainHandlers = {
   halfDuplex: () => halfDuplexSnapshot(),
   errorsView: () => errorsSummary(5),
   translationMarks: () => translationMarkSummary(),
+  replayStars: (matchid) => replayStarSummary(typeof matchid === 'string' && matchid !== '' ? matchid : null),
   translateDirection: (request) => correctLineDirection(request),
   qualityReport: () => readQualityReport(),
   speechQueue: () => speechQueueSnapshot(),

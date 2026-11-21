@@ -390,6 +390,12 @@ it and nothing happened". The overlay and the pause hint print key names from th
   only read. Everything log-shaped therefore has to be derived from `logsDir()`, never from
   `join(app.getPath('userData'), 'logs', …)`; `--logs-isolation-probe` fails when that breaks, and the only real
   proof is a full CI-probe sweep leaving `sha1sum data/logs/*` unchanged.
+- Replay stars (#118): `src/shared/replay-star.ts` is the one place that decides what a star is —
+  a line with source and translation, stamped with `liveMatchId()` (null when no frame is live, never the
+  previous match). `starsOf(stars, matchid)` reads ONE match and returns empty for a match nobody starred;
+  never widen it to "all" for convenience. Repeat starring the same line counts once (later note wins).
+  Storage: `logs/replay-stars.jsonl` through `appendCappedJsonl`; the hotkey `starLine` must always flash a
+  sentence (a silent no-op reads as a broken key).
 - Overlay readability (#100): font sizes and every text colour live in ONE table, `src/shared/overlay-a11y.ts`
   (`FONT_SCALE`, `OVERLAY_TEXT_PAIRS`, `OVERLAY_STATE_MARKS`); `src/renderer/src/overlay/overlay.css` may only use the four
   `--ov-fs-mini/small/body/title` variables switched by the root's `data-font` — `check:pure` fails on a literal `font-size` or on
