@@ -7,6 +7,7 @@ import { announceFrameOf, feedLiveAnnouncement } from './voice/announce'
 import { ensureGsiConfig, type GsiConfigResult } from './gsi-config'
 import { flushFrameSummary, recordFrameSummary } from './gsi-frames-summary'
 import { noteLiveMatch } from './gsi-match'
+import { notePhraseFrame } from './voice/phrase-context'
 import { logsDir } from './logs/base-dir'
 import type { GsiStatusView } from '../../shared/ipc'
 import { judgeGsiStall, type GsiStallView } from '../../shared/gsi-stall'
@@ -536,6 +537,7 @@ export function handleGsiPayload(payload: GsiPayload, effects: GsiEffects): GsiD
   noteLiveMatch(decision.matchId)
   // 每一帧都记进小结账本：真对局时不可能去抢 32123 端口，只能在应用里攒。
   recordFrameSummary(payload)
+  notePhraseFrame(payload)
   recordDraft(payload)
   recordPlayer(payload)
   // 对局播报（#123）：总闸关着时是空调用，状态机也跟着走——打开那一刻才不会把整局补报出来。

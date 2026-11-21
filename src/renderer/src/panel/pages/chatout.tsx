@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Group, Row, StatusPill, CollapsibleGroup, Panel, SaveFlash } from '../components/primitives'
 import { selectClass } from '../components/select-class'
 import { useSaveFlash, useSettings } from '../use-settings'
+import { phrasesLine, type RenderedPhraseGroup } from '@shared/quick-phrases'
 
 const REPLY_TONES: { value: ReplyTone; label: string }[] = [
   { value: 'terse', label: '简短（默认）' },
@@ -27,6 +28,13 @@ export function ChatoutPage(): React.ReactElement {
   const [direct, setDirect] = useState<InPlaceResult | null>(null)
   const [latency, setLatency] = useState('')
   const [history, setHistory] = useState<DirectItem[]>([])
+  // #117：分组与变量渲染后的样子（含未分组），只读。
+  const [groups, setGroups] = useState<RenderedPhraseGroup[] | null>(null)
+
+  // 只在进页面时读一次：分组改了要重新进页面才刷新，比每帧问一次主进程便宜。
+  useEffect(() => {
+    void window.api.phraseGroups().then(setGroups)
+  }, [])
 
   if (settings === null)
     return (
@@ -116,6 +124,23 @@ export function ChatoutPage(): React.ReactElement {
 
       <Group label="快捷短语">
         <Row label="浮层呼出面板用" stacked hint="方向键选择、回车复制；一行一条，存进设置立即生效">
+          <Row
+            label="短语分组"
+            hint={
+              groups === null
+                ? '正在读分组'
+                : `${phrasesLine(groups)} · 变量写 {hero} / {time} / {matchid}，发出去前会换成当前对局的值`
+            }
+            stacked
+          >
+            {groups === null ? null : (
+              <span className="text-xs text-muted-foreground">
+                {groups
+                  .map((group) => `${group.name}：${group.phrases.slice(0, 2).join(' / ')}`)
+                  .join(' · ')}
+              </span>
+            )}
+          </Row>
           <PhrasesEditor phrases={phrases} onChange={(next) => update({ quickPhrases: next })} />
         </Row>
       </Group>

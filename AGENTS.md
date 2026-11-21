@@ -387,6 +387,11 @@ it and nothing happened". The overlay and the pause hint print key names from th
   `provider-failure.ts` — never a second classifier). `src/shared/provider-metrics.ts` owns the summary:
   median latency (a single timeout must not move it), failure kinds counted separately, and an empty
   board reads "nobody called a model" rather than 0% success, which looks like total outage.
+- Quick phrases (#117): `src/shared/quick-phrases.ts` owns groups, `{hero}`/`{time}`/`{matchid}`
+  substitution and the rule that an empty group is hidden — not rendered as an empty shell. Placeholders
+  it does not recognise (a typo like `{heor}`) stay verbatim, so the mistake is visible instead of being
+  swallowed. Values come from the latest GSI frame (`src/main/services/voice/phrase-context.ts`, 90 s of
+  staleness) — the previous match's hero must never fill this match's line.
 - The panel shows the probe list, it does not run probes (#112): `src/shared/probe-catalog.ts` turns the
   registry into rows, splitting them by the `readOnly` marker alone, and every row carries the exact
   `npm run probe -- <flag>` command. A probe needs Electron's single-instance lock and calls `app.exit()`

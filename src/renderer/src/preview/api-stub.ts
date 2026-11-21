@@ -19,6 +19,7 @@
  * fail so the fallback warning row on 识别训练 is visible.
  */
 import { DEFAULT_SETTINGS, type FtRecInfo, type OverlayTextMode, type VoiceChainSummary, type WindowApi } from '@shared/ipc'
+import { renderGroups } from '@shared/quick-phrases'
 import { summarizeProviderCalls } from '@shared/provider-metrics'
 import { catalogOf } from '@shared/probe-catalog'
 import { DEFAULT_HOTKEYS, describeHotkeys } from '@shared/hotkeys'
@@ -570,6 +571,12 @@ const implemented = {
         ])
       : summarizeErrors([]),
   // 译文抽检（#87）：`?marks=1` 造三条样本，让「好评率」那一行在预览里看得见。
+  phraseGroups: async () =>
+    renderGroups(
+      settings.quickPhrases,
+      [{ name: '对线期', phrases: ['{hero} 别推线', '对面 {hero} 在哪'] }, { name: '空组', phrases: [] }],
+      { hero: '影魔', time: '12:34', matchid: '7512345678' }
+    ),
   providerBoard: async () =>
     summarizeProviderCalls([
       { at: '2026-11-21T12:00:00.000Z', providerId: 'deepseek', model: 'deepseek-chat', ok: true, ms: 820, kind: null },

@@ -83,6 +83,7 @@ import { runTranslationMarkProbe } from './translation-mark'
 import { runReplayStarProbe } from './replay-star'
 import { runProbeCatalogProbe } from './probe-catalog'
 import { runProviderBoardProbe } from './provider-board'
+import { runQuickPhrasesProbe } from './quick-phrases'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
 import { runSpeechQueueProbe } from './speech-queue'
@@ -457,6 +458,14 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the translation spot-check account (`src/shared/translation-mark.ts`): unmarked or untranslated lines never become samples, a re-mark replaces the earlier verdict, tallies group by provider and model, and a failed mark still speaks (ticket 87)',
     run: runTranslationMarkProbe
+  },
+  {
+    flag: '--quick-phrases-probe',
+    ci: true,
+    readOnly: true,
+    summary:
+      'quick-phrase groups and variables (`src/shared/quick-phrases.ts`): a phrase with {hero}/{time}/{matchid} renders with the live match values, an empty group is hidden rather than shown as a shell, and an unknown placeholder is left alone so a typo stays visible (ticket 117)',
+    run: runQuickPhrasesProbe
   },
   {
     flag: '--provider-board-probe',

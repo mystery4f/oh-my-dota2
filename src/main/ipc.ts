@@ -92,6 +92,8 @@ import { translationMarkSummary } from './services/session/translation-marks'
 import { replayStarSummary } from './services/session/replay-stars'
 import { probeCatalog } from './services/probes-catalog'
 import { providerBoard } from './services/providers/metrics'
+import { renderGroups } from '@shared/quick-phrases'
+import { phraseVars } from './services/voice/phrase-context'
 import { correctLineDirection } from './services/session/direction-correction'
 import { readQualityReport } from './services/session/quality-report'
 import { readBuildInfo } from './services/build-info'
@@ -364,6 +366,10 @@ const handlers: MainHandlers = {
   replayStars: (matchid) => replayStarSummary(typeof matchid === 'string' && matchid !== '' ? matchid : null),
   probeCatalog: () => probeCatalog(),
   providerBoard: () => providerBoard(),
+  phraseGroups: () => {
+    const settings = loadSettings()
+    return renderGroups(settings.quickPhrases, settings.quickPhraseGroups, phraseVars())
+  },
   translateDirection: (request) => correctLineDirection(request),
   qualityReport: () => readQualityReport(),
   speechQueue: () => speechQueueSnapshot(),

@@ -9,6 +9,8 @@ import {
 import type { OverlayFontSize } from '@shared/overlay-a11y'
 import { broadcastToWindows } from './broadcast'
 import { loadSettings, saveSettings } from '../services/settings'
+import { renderGroups } from '@shared/quick-phrases'
+import { phraseVars } from '../services/voice/phrase-context'
 import {
   clampGeometry,
   shouldIgnoreMouse,
@@ -110,7 +112,9 @@ class OverlayManager {
         overlayPanel: formatAccelerator(settings.hotkeys.overlayPanel),
         voiceCapture: formatAccelerator(settings.hotkeys.voiceCapture)
       },
-      quickPhrases: settings.quickPhrases,
+      quickPhrases: renderGroups(settings.quickPhrases, settings.quickPhraseGroups, phraseVars()).flatMap(
+        (group) => group.phrases
+      ),
       voiceCaptureMode: settings.voiceCaptureMode
     }
   }
