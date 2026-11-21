@@ -32,6 +32,7 @@ import { runHotwordCandidatesProbe } from './hotword-candidates'
 import { runInterpretListenProbe } from './interpret-listen'
 import { runInterpretLegProbe } from './interpret-leg'
 import { runClausePlanProbe } from './clause-plan'
+import { runOverlayFocusProbe } from './overlay-focus'
 import { runClauseStreamBench } from './clause-stream-bench'
 import { runSettingsBundleProbe } from './settings-bundle'
 import { runBuildInfoProbe } from './build-info'
@@ -361,6 +362,14 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the clause-stream plan (ticket 71): the transcript is split into clauses, the first clause is translated and spoken before the rest, delivery keeps the original order even when a later clause translates faster, and a clause that fails translation or synthesis is skipped without touching the others',
     run: runClausePlanProbe
+  },
+  {
+    flag: '--overlay-focus-probe',
+    ci: true,
+    readOnly: true,
+    summary:
+      'the summon panel keyboard focus (ticket 103): Tab/Shift+Tab only ever move between the tab ring (four tabs + close) and the current row ring — last row Tab returns to the first tab and the first row Shift+Tab returns to close — rows page ten at a time, Home/End reach the ends, and no input ever receives an out-of-range slot',
+    run: runOverlayFocusProbe
   },
   {
     flag: '--interpret-leg-probe',

@@ -134,7 +134,8 @@ const overlay = {
   textMode: 'translated' as OverlayTextMode,
   // 真机默认关（settings.overlayDigest=false）：预览照同一口径，?digest=1 才开。
   digest: query.get('digest') === '1',
-  panelOpen: false,
+  // ?panel=1 直接以呼出面板的样子开预览（#103 焦点验收用）。
+  panelOpen: query.has('panel'),
   quickPhrases: ['Push mid', 'Fall back', 'Nice play'],
   // ?unlocked=1 才能点工具条与「展开」——锁定时浮层整块点击穿透，预览也照这个规则来。
   locked: query.get('unlocked') !== '1',
@@ -1094,6 +1095,19 @@ const implemented = {
           : { count: 0, chars: 0, newest: null, sample: [] }
     return shadowView(state, report)
   },
+  // 看一眼（#135）：桩要返回「不是函数的清理器」会被 React 当成 destroy，
+  // 整个面板因此白屏（TypeError: destroy is not a function）——这里一次补齐三条。
+  visionState: async () => ({ ready: false, model: '预览桩', reason: '预览里没有真实模型' }),
+  visionAsk: async () => ({
+    ok: false,
+    text: '',
+    model: '预览桩',
+    providerId: 'stub',
+    ms: null,
+    shot: null,
+    error: '预览桩：不真截屏，也不调用模型'
+  }),
+  onVisionResult: () => () => {},
   overlayStatus: async () => overlaySnap(),
   overlayPanelToggle: async () => {
     overlay.panelOpen = !overlay.panelOpen

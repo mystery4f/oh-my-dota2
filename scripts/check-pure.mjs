@@ -1096,6 +1096,20 @@ check(
   check('减少动态效果：一条媒体查询管住两处入场', reduced.includes('#stage') && reduced.includes('.row'))
 }
 
+// —— 呼出面板的键盘焦点（#103）：焦点只在 tab 环与行环之间走 ——
+{
+  const { PANEL_PAGE_ROWS, rowNextIndex, tabHandoff } = await import('../src/shared/panel-focus.ts')
+  const TABS = 5
+  const close = tabHandoff({ zone: 'tabs', index: TABS - 1, tabs: TABS, shift: false })
+  const last = tabHandoff({ zone: 'rows', index: 8, tabs: TABS, shift: false })
+  const first = tabHandoff({ zone: 'rows', index: 0, tabs: TABS, shift: true })
+  check('面板焦点：关闭之后 Tab 进行环首项', close.zone === 'rows' && close.index === 0)
+  check('面板焦点：末行 Tab 回第一个 tab', last.zone === 'tabs' && last.index === 0)
+  check('面板焦点：首行 Shift+Tab 回关闭', first.zone === 'tabs' && first.index === TABS - 1)
+  check('面板焦点：翻页一次 10 行', rowNextIndex(0, 200, 'PageDown') === PANEL_PAGE_ROWS)
+  check('面板焦点：Home/End 走首末', rowNextIndex(50, 200, 'Home') === 0 && rowNextIndex(50, 200, 'End') === 199)
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)

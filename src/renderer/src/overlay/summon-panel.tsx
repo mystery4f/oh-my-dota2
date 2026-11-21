@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CaptureEntry, OverlayStatus, PanelSuggestionsResult } from '@shared/ipc'
 import { visionLine, visionShotLine, type VisionAnswer, type VisionReadiness } from '@shared/vision'
-import { filterHistory, historyCopyText, pickPhrase } from '@shared/overlay-ledger'
+import { filterHistory, historyCopyText } from '@shared/overlay-ledger'
 import { directionLabel } from '@shared/translate-direction'
+import { rowNextIndex, tabHandoff, tabNextIndex } from '@shared/panel-focus'
 
 type Tab = 'history' | 'phrases' | 'suggest' | 'look'
 
@@ -22,6 +23,9 @@ const TABS: { id: Tab; label: string }[] = [
 export function SummonPanel(props: { status: OverlayStatus; onStatus: (s: OverlayStatus) => void }): JSX.Element {
   const { status } = props
   const [tab, setTab] = useState<Tab>('history')
+  // 行环的当前位置（#103）：Tab 进组、方向键换行都落在这一个下标上，选中态也只看它。
+  const [rowIndex, setRowIndex] = useState(0)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   // 按钮上写着「关闭（Esc）」，这里就得真的能关。主进程 togglePanel 管状态与穿透恢复。
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -32,8 +36,66 @@ export function SummonPanel(props: { status: OverlayStatus; onStatus: (s: Overla
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [props.onStatus])
+  /** 行环里现在渲染出来的可寻址项（历史页的搜索框排第一）。 */
+  const rowSlots = (): HTMLElement[] =>
+    Array.from(panelRef.current?.querySelectorAll<HTMLElement>('[data-focus-row]') ?? [])
+  /** tab 环：四个 tab + 关闭，关闭永远在最后。 */
+  const tabSlots = (): HTMLElement[] =>
+    Array.from(panelRef.current?.querySelectorAll<HTMLElement>('[data-focus-tab]') ?? [])
+
+  const moveFocus = (zone: 'tabs' | 'rows', index: number): void => {
+    const list = zone === 'tabs' ? tabSlots() : rowSlots()
+    if (list.length === 0) return
+    const at = Math.min(Math.max(index, 0), list.length - 1)
+    const target = list[at]
+    target.focus({ preventScroll: true })
+    // 两百行里焦点跑到屏幕外等于没焦点：滚到「最近可见」就够，不把整块扯动。
+    target.scrollIntoView({ block: 'nearest' })
+    if (zone === 'rows') setRowIndex(at)
+  }
+
+  useEffect(() => {
+    setRowIndex(0)
+    moveFocus('rows', 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
+  const onPanelKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    const active = document.activeElement as HTMLElement | null
+    const tabs = tabSlots()
+    const rows = rowSlots()
+    const inTabs = active === null ? -1 : tabs.indexOf(active)
+    const inRows = active === null ? -1 : rows.indexOf(active)
+    // 输入框里方向键是移光标，不许被行环抢走。
+    const typing = active !== null && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      const slot = tabHandoff({
+        zone: inRows >= 0 ? 'rows' : 'tabs',
+        index: inRows >= 0 ? inRows : Math.max(inTabs, 0),
+        tabs: Math.max(tabs.length, 1),
+        shift: event.shiftKey
+      })
+      moveFocus(slot.zone, slot.index)
+      return
+    }
+    if (inTabs >= 0) {
+      const next = tabNextIndex(inTabs, Math.max(tabs.length, 1), event.key)
+      if (next === null) return
+      event.preventDefault()
+      setTab(TABS[Math.min(next, TABS.length - 1)].id)
+      moveFocus('tabs', next)
+      return
+    }
+    if (typing) return
+    const next = rowNextIndex(inRows >= 0 ? inRows : rowIndex, rows.length, event.key)
+    if (next === null) return
+    event.preventDefault()
+    moveFocus('rows', next)
+  }
+
   return (
-    <div id="panel">
+    <div id="panel" ref={panelRef} onKeyDown={onPanelKeyDown}>
       <div id="panel-head">
         <div className="tabs">
           {TABS.map((item) => (
@@ -41,6 +103,8 @@ export function SummonPanel(props: { status: OverlayStatus; onStatus: (s: Overla
               key={item.id}
               type="button"
               className={tab === item.id ? 'tab on' : 'tab'}
+              data-focus-tab=""
+              tabIndex={tab === item.id ? 0 : -1}
               onClick={() => setTab(item.id)}
             >
               {item.label}
@@ -50,15 +114,17 @@ export function SummonPanel(props: { status: OverlayStatus; onStatus: (s: Overla
         <button
           type="button"
           className="panel-close"
+          data-focus-tab=""
+          tabIndex={0}
           onClick={() => void window.api.overlayPanelToggle().then(props.onStatus)}
         >
           关闭（Esc）
         </button>
       </div>
       <div id="panel-body">
-        {tab === 'history' && <HistoryTab />}
-        {tab === 'phrases' && <PhrasesTab phrases={status.quickPhrases} />}
-        {tab === 'suggest' && <SuggestTab />}
+        {tab === 'history' && <HistoryTab rowIndex={rowIndex} />}
+        {tab === 'phrases' && <PhrasesTab phrases={status.quickPhrases} rowIndex={rowIndex} />}
+        {tab === 'suggest' && <SuggestTab rowIndex={rowIndex} />}
         {tab === 'look' && <LookTab />}
       </div>
     </div>
@@ -90,12 +156,25 @@ function CopyRow(props: {
   secondary?: string
   copied: boolean
   selected?: boolean
+  /** 行环里的槽位（#103）：渲染出来的第几行，Tab / 方向键照着它搬焦点。 */
+  slot?: number
   onCopy: () => void
   /** 行尾的小按钮（方向标）：点了不算复制，所以自己拦掉事件冒泡。 */
   badge?: { label: string; title: string; onClick: () => void }
 }): JSX.Element {
   return (
-    <div className={props.selected ? 'copy-row selected' : 'copy-row'} onClick={props.onCopy}>
+    <div
+      className={props.selected ? 'copy-row selected' : 'copy-row'}
+      data-focus-row={props.slot === undefined ? undefined : props.slot}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        // 行不是按钮：回车/空格要自己接，否则键盘用户只看得到「选中」却复制不了。
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        props.onCopy()
+      }}
+      onClick={props.onCopy}
+    >
       <span className="copy-primary">{props.primary}</span>
       {props.secondary && <span className="copy-secondary">{props.secondary}</span>}
       {props.badge !== undefined && (
@@ -118,7 +197,7 @@ function CopyRow(props: {
 /** 手工改过方向的行：这一行显示改判后的方向与重翻出来的译文，只记在这次面板打开期间。 */
 type DirectionFix = { direction: 'zh-en' | 'en-zh'; translated: string | null }
 
-function HistoryTab(): JSX.Element {
+function HistoryTab(props: { rowIndex: number }): JSX.Element {
   const [rows, setRows] = useState<CaptureEntry[] | null>(null)
   const [query, setQuery] = useState('')
   const [fixed, setFixed] = useState<Record<string, DirectionFix>>({})
@@ -160,6 +239,8 @@ function HistoryTab(): JSX.Element {
           onChange={(event) => setQuery(event.target.value)}
           placeholder="搜玩家或关键词 · 空格分词"
           aria-label="搜索聊天记录"
+          data-focus-row=""
+          // 行环首项是它：Tab 从「关闭」进来先落这里，打字就能缩小列表（#103）。
           autoFocus
         />
         {query.trim().length > 0 && (
@@ -172,13 +253,15 @@ function HistoryTab(): JSX.Element {
         <div className="panel-note">没有命中「{query.trim()}」的记录 · 换个词再试</div>
       ) : (
         <div className="scroll">
-          {hits.map((entry) => (
+          {hits.map((entry, i) => (
             <CopyRow
               key={entry.id}
               id={entry.id}
               primary={fixed[entry.id]?.translated ?? historyCopyText(entry)}
               secondary={entry.translated !== null ? entry.original : undefined}
               copied={copiedId === entry.id}
+              slot={i + 1}
+              selected={props.rowIndex === i + 1}
               badge={
                 entry.direction === undefined
                   ? undefined
@@ -197,20 +280,15 @@ function HistoryTab(): JSX.Element {
   )
 }
 
-function PhrasesTab(props: { phrases: string[] }): JSX.Element {
+function PhrasesTab(props: { phrases: string[]; rowIndex: number }): JSX.Element {
   const { phrases } = props
-  const [index, setIndex] = useState(-1)
+  const index = props.rowIndex
   const { copiedId, copy } = useCopy()
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (phrases.length === 0) return
-      if (event.key === 'ArrowDown') {
-        event.preventDefault()
-        setIndex((current) => pickPhrase(phrases.length, current + 1))
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault()
-        setIndex((current) => pickPhrase(phrases.length, current - 1))
-      } else if (event.key === 'Enter' && index >= 0) {
+      // 方向键由面板的行环统一搬（#103），这里只管回车：选中哪条就复制哪条。
+      if (event.key === 'Enter' && index >= 0 && index < phrases.length) {
         event.preventDefault()
         copy(`phrase-${index}`, phrases[index])
       }
@@ -227,6 +305,7 @@ function PhrasesTab(props: { phrases: string[] }): JSX.Element {
           id={`phrase-${i}`}
           primary={phrase}
           copied={copiedId === `phrase-${i}`}
+          slot={i}
           selected={i === index}
           onCopy={() => copy(`phrase-${i}`, phrase)}
         />
@@ -236,7 +315,7 @@ function PhrasesTab(props: { phrases: string[] }): JSX.Element {
   )
 }
 
-function SuggestTab(): JSX.Element {
+function SuggestTab(props: { rowIndex: number }): JSX.Element {
   const [result, setResult] = useState<PanelSuggestionsResult | null>(null)
   const [loading, setLoading] = useState(false)
   const { copiedId, copy } = useCopy()
@@ -255,7 +334,7 @@ function SuggestTab(): JSX.Element {
     return (
       <div className="panel-note">
         {result.error ?? '生成失败'}
-        <button type="button" className="retry" onClick={load}>
+        <button type="button" className="retry" data-focus-row="" tabIndex={-1} onClick={load}>
           重试
         </button>
       </div>
@@ -270,6 +349,8 @@ function SuggestTab(): JSX.Element {
           id={`sug-${i}`}
           primary={item}
           copied={copiedId === `sug-${i}`}
+          slot={i}
+          selected={props.rowIndex === i}
           onCopy={() => copy(`sug-${i}`, item)}
         />
       ))}
@@ -313,7 +394,7 @@ function LookTab(): JSX.Element {
     <div className="scroll">
       <div className="panel-note">
         截当前画面问一次模型 · {ready.model}
-        <button type="button" className="retry" onClick={ask} disabled={loading}>
+        <button type="button" className="retry" data-focus-row="" tabIndex={-1} onClick={ask} disabled={loading}>
           {loading ? '正在看…' : answer === null ? '看一眼' : '再看一次'}
         </button>
       </div>
