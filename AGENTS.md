@@ -405,6 +405,13 @@ it and nothing happened". The overlay and the pause hint print key names from th
   (`resources/asr-sherpa-worker.cjs`, request `{id, kind, wav, dir, hotwords}`) for the same
   sherpa reason as the TTS worker; the worker logs `ASR_SHERPA_*` markers, and `kind` comes from the
   engine table — the probe cross-checks the table against the worker's `ASR_KINDS` keys both ways.
+  The worker keeps **two** recognisers (`MAX_RECOGNIZERS = 2`, an LRU `Map`, #142), because short/long
+  routing switches engines per clip and one slot meant rebuilding the graph on every switch (measured
+  13.2 s to qwen3, 6.5 s back). Two entries, not unlimited: the hotword string is part of the cache key,
+  so editing hotwords mints a new graph each time. `ASR_SHERPA_LOAD|HIT|EVICT` shows who was rebuilt,
+  served from cache, and dropped; the switch cost is memory for two int8 models, so any user-facing hint
+  must say that instead of "a bit slower". `--asr-switch-probe` runs the real worker and is not in CI
+  (needs both models on disk; SKIPs with the missing engine named).
   Qwen3 needs all three onnx files plus `tokenizer/` (vocab.json + merges.txt); paraformer needs
   `model.int8.onnx` + `tokens.txt`, emits no punctuation, and ignores hotwords (sherpa only does
   hotwords for transducer models).

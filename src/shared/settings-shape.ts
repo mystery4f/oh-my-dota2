@@ -94,7 +94,7 @@ export interface AppSettings {
   asrCorrectionsToDataset: boolean
   /**
    * 短句/长句分流（#122）：短句走 paraformer（快、不带标点），长句走 qwen3（准）。
-   * 默认关——两副模型都在场才有意义，而且每次换引擎要重载识别器。
+   * 默认关——两副模型都在场才有意义，而且开着就要把两份模型都留在内存里（#142 之后换引擎不重建，但第一句仍要各加载一次）。
    */
   asrRouteShortLong: boolean
   /** 训练窗口记住的任务类型：demo 演示任务；gv-gpt/gv-sovits/asr-ft 在 T3/T5 接入。 */

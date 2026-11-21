@@ -9,8 +9,8 @@
  * - 规则关着：一律用现役引擎，连理由都不换（票面第二条验收）。
  * - 现役引擎不在这一对里（用户钉了别的、或钉了备份）：不插手，原生行为不变。
  * - 目标引擎没装好：留在现役引擎，reason 写明 target-missing —— 分流只能在
- *   两副模型都在场时发生，否则每次切引擎都要重载 worker（resources/asr-sherpa-worker.cjs
- *   的识别器缓存按引擎 + 热词做键），用户会听见「变慢了」而不是「变准了」。
+ *   两副模型都在场时发生。worker 现在留两份图（#142，`MAX_RECOGNIZERS = 2`），
+ *   但第一句换引擎仍要付一次加载，而错的目标只会让人听见「变慢了」而不是「变准了」。
  */
 import type { AsrEngineId } from './asr/engines'
 
@@ -101,5 +101,5 @@ export function routingHint(activeEngine: AsrEngineId, shortReady: boolean, long
   if (!shortReady) missing.push(`${ASR_ROUTE_SHORT_ENGINE} 没装`)
   if (!longReady) missing.push(`${ASR_ROUTE_LONG_ENGINE} 没装`)
   if (missing.length > 0) return `分流要两副模型都在场（${missing.join('、')}），缺的那档会留在现役 ${activeEngine}`
-  return `短句（≤${ASR_ROUTE_SHORT_MS / 1000} 秒）走 ${ASR_ROUTE_SHORT_ENGINE}，长句走 ${ASR_ROUTE_LONG_ENGINE}；每次换引擎要重载识别器，一句话会慢一点`
+  return `短句（≤${ASR_ROUTE_SHORT_MS / 1000} 秒）走 ${ASR_ROUTE_SHORT_ENGINE}，长句走 ${ASR_ROUTE_LONG_ENGINE}；两台各自只加载一次（两份模型常驻内存），之后换引擎只是换个指针`
 }

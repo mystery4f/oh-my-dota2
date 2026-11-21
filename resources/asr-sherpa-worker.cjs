@@ -13,8 +13,19 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 let sherpa = null
-let recognizer = null
-let recognizerKey = null
+/**
+ * 已加载的识别器，按 `kind|dir|hotwords` 存，最多留 MAX_RECOGNIZERS 个（#142）。
+ *
+ * 以前只留一个槽：短句/长句分流开着时，每换一次引擎就把图重建一遍——实测 6.5–15 秒，
+ * 而且这正好发生在「一句话刚说完要听回答」的那一刻。分流的两台引擎本来就都会被用到，
+ * 代价是两份常驻内存（int8 权重），换来的是换引擎只挪一个指针。
+ *
+ * 上限 2 而不是无限：热词表串也在这个键里，而热词是会被人改的——每改一次就是一份新图，
+ * 不设上限的话，反复改几次热词就把内存吃满了。
+ */
+const MAX_RECOGNIZERS = 2
+const recognizers = new Map()
+let loadedCount = 0
 
 /**
  * 解析 16k 单声道 PCM16 WAV（编码端 @shared/wav encodeWav16k 产出）。
@@ -81,16 +92,31 @@ function loadRecognizer(request) {
   const kind = request.kind || 'qwen3Asr'
   // 缓存键带上引擎与热词：换引擎、换目录或词表变了都要重载（sherpa 的 hotwords 是构造期配置）。
   const key = `${kind}|${request.dir}|${request.hotwords ?? ''}`
-  if (recognizer && recognizerKey === key) return recognizer
+  const cached = recognizers.get(key)
+  if (cached) {
+    // 命中就挪到队尾：Map 的插入顺序就是 LRU 顺序。
+    recognizers.delete(key)
+    recognizers.set(key, cached)
+    console.log('ASR_SHERPA_HIT', JSON.stringify({ key, resident: recognizers.size }))
+    return cached
+  }
   const build = ASR_KINDS[kind]
   if (!build) throw new Error(`unknown asr kind: ${kind}`)
   if (!sherpa) sherpa = require('sherpa-onnx-node')
-  recognizer = new sherpa.OfflineRecognizer({
+  const started = Date.now()
+  const built = new sherpa.OfflineRecognizer({
     modelConfig: { ...build(request), numThreads: 2, debug: 0, provider: 'cpu' },
     decodingMethod: 'greedy_search'
   })
-  recognizerKey = key
-  return recognizer
+  loadedCount += 1
+  console.log('ASR_SHERPA_LOAD', JSON.stringify({ key, loadMs: Date.now() - started, count: loadedCount }))
+  recognizers.set(key, built)
+  while (recognizers.size > MAX_RECOGNIZERS) {
+    const oldest = recognizers.keys().next().value
+    recognizers.delete(oldest)
+    console.log('ASR_SHERPA_EVICT', JSON.stringify({ key: oldest, resident: recognizers.size }))
+  }
+  return built
 }
 
 function transcribe(request) {

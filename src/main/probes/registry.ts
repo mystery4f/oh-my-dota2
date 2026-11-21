@@ -60,6 +60,7 @@ import { runKeyNounProbe } from './key-nouns'
 import { runFtAuditionProbe } from './ft-audition'
 import { runPatchWatchProbe } from './patch-watch'
 import { runAsrRoutingProbe } from './asr-routing'
+import { runAsrSwitchProbe } from './asr-switch'
 import { runTranslateDirectionProbe } from './translate-direction'
 import { runQualityReportProbe } from './quality-report'
 import { runSpeechQueueProbe } from './speech-queue'
@@ -347,6 +348,12 @@ export const PROBES: readonly ProbeEntry[] = [
     summary:
       'the short/long ASR routing (`src/shared/asr-routing.ts`): short clips go to the fast engine (paraformer), long ones to the accurate one (qwen3), the rule can be switched off, and every switch is logged with its reason',
     run: runAsrRoutingProbe
+  },
+  {
+    flag: '--asr-switch-probe',
+    summary:
+      'switching the ASR engine does not rebuild the graph (`resources/asr-sherpa-worker.cjs` keeps two recognisers, #142): the first switch loads the second model once, every switch after that is a cache hit, and a third key evicts the least recently used one',
+    run: runAsrSwitchProbe
   },
   {
     flag: '--mic-health-probe',
