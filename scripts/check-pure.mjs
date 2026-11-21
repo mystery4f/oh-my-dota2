@@ -1309,6 +1309,24 @@ check(
   check('页面抬头：还有阻断时「开始训练」是 disabled（点了也白跑就不许给可点的按钮）', headlineOf(facts({ blocks: [block('pack')] }), 'ready', handlers).action?.disabled === true, 'disabled')
 }
 
+// —— 虚拟声卡自动选中（#183）：已有值就一个字都不写
+{
+  const { planCableAutoSelect } = await import('../src/shared/cable-autoselect.ts')
+  const base = { chosen: '', cableId: 'cable-0', error: null, installed: true, driverOnly: false }
+  const empty = planCableAutoSelect(base)
+  check('自动选中：用户没表过态（空串）时写一次', empty.write === true && empty.to === 'cable-0' && empty.reason === 'auto', '')
+  const speaker = planCableAutoSelect({ ...base, chosen: 'speaker-0' })
+  check('自动选中：已有扬声器就零次写（#183 的核心）', speaker.write === false && speaker.reason === 'already-chosen', '')
+  const notInstalled = planCableAutoSelect({ ...base, installed: false })
+  check('自动选中：没装驱动不写', notInstalled.write === false && notInstalled.reason === 'not-installed', '')
+  const errored = planCableAutoSelect({ ...base, error: 'timeout' })
+  check('自动选中：检测失败不写', errored.write === false && errored.reason === 'not-installed', '')
+  const noEndpoint = planCableAutoSelect({ ...base, cableId: null })
+  check('自动选中：清单里还没有端点不写', noEndpoint.write === false && noEndpoint.reason === 'no-endpoint', '')
+  const driverOnly = planCableAutoSelect({ ...base, driverOnly: true })
+  check('自动选中：驱动在端点没出现不写', driverOnly.write === false && driverOnly.reason === 'no-endpoint', '')
+}
+
 if (failed > 0) {
   console.log(`${failed} 条纯逻辑断言失败`)
   process.exit(1)
