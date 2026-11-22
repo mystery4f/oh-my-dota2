@@ -18,6 +18,7 @@ import {
   type GvVersionInfo
 } from '@shared/train/gv'
 import type { TrainStartRequest } from '@shared/train/task'
+import { GV_LINE_CAP, GV_WAV_SAMPLE, summarizeGvDataset, type GvDatasetStats } from '@shared/train/gv-stats'
 import { discoverSovitsHome } from '../voice/sovits-server'
 import { readRefsRaw, sovitsRefsRoot, sovitsWeightsRoot, writeRefsRaw } from '../voice/sovits-refs'
 import { listTrainRuns, patchTrainRun } from './run-store'
@@ -93,16 +94,88 @@ function missingEnvFiles(home: string, info: GvVersionInfo, leg: GvLeg): string 
   return `引擎包缺 ${leg.label} 训练所需文件：${missing.join('、')}（换底模齐的版本，或补装引擎包）`
 }
 
+/** 读一个 wav 的头算时长（毫秒）；RIFF/fmt/data 三段里任何一个缺失就返回 null，不猜。 */
+function wavMs(path: string): number | null {
+  try {
+    const head = readFileSync(path).subarray(0, 4096)
+    if (head.length < 44 || head.toString('ascii', 0, 4) !== 'RIFF' || head.toString('ascii', 8, 12) !== 'WAVE') return null
+    let offset = 12
+    let byteRate: number | null = null
+    let dataSize: number | null = null
+    while (offset + 8 <= head.length) {
+      const id = head.toString('ascii', offset, offset + 4)
+      const size = head.readUInt32LE(offset + 4)
+      if (id === 'fmt ' && offset + 16 <= head.length) byteRate = head.readUInt32LE(offset + 16)
+      if (id === 'data') {
+        // data 段可能比我们读到的 4 KB 长得多：用它在文件头里声明的大小。
+        dataSize = size
+        break
+      }
+      offset += 8 + size + (size % 2)
+    }
+    if (byteRate === null || dataSize === null || byteRate <= 0) return null
+    return Math.round((dataSize / byteRate) * 1000)
+  } catch {
+    return null
+  }
+}
+
+/** 数据量（#180）：只读四个数，读不到就留 null 交给纯缝说「测不到」。 */
+export function readGvDatasetStats(home: string, expName: string): GvDatasetStats {
+  const dir = join(home, 'logs', expName)
+  const phonemes = join(dir, '2-name2text.txt')
+  let lines: number | null = null
+  let capped = false
+  if (existsSync(phonemes)) {
+    const text = readFileSync(phonemes, 'utf8')
+    const normalized = text.split(String.fromCharCode(10)).join(' ')
+    const all = normalized.split(' ').filter((one) => one.trim() !== '')
+    capped = all.length > GV_LINE_CAP
+    lines = capped ? GV_LINE_CAP : all.length
+  }
+  const wavDir = join(dir, '5-wav32k')
+  let wavs: string[] = []
+  try {
+    wavs = readdirSync(wavDir).filter((one) => extname(one).toLowerCase() === '.wav').sort()
+  } catch {
+    wavs = []
+  }
+  const wavCount = existsSync(wavDir) ? wavs.length : null
+  const sampledMs: number[] = []
+  let skipped = 0
+  let newestAt: number | null = null
+  for (const [index, name] of wavs.entries()) {
+    const full = join(wavDir, name)
+    try {
+      const at = statSync(full).mtimeMs
+      if (newestAt === null || at > newestAt) newestAt = at
+    } catch {
+      // stat 失败不影响别的数：它只是「最近一条」缺一个候选。
+    }
+    if (index >= GV_WAV_SAMPLE) continue
+    const ms = wavMs(full)
+    if (ms === null) skipped += 1
+    else sampledMs.push(ms)
+  }
+  return summarizeGvDataset({ lines, capped, wavCount, sampledMs, skipped, newestAt })
+}
+
 /** 数据集四件套验收（复用纯缝判定，主进程只探存在性）。 */
 function judgeDatasetAt(home: string, expName: string): GvDatasetJudgement {
   const dir = join(home, 'logs', expName)
-  return judgeGvDataset({
+  const judged = judgeGvDataset({
     expName,
     phonemes: existsSync(join(dir, '2-name2text.txt')),
     semantic: existsSync(join(dir, '6-name2semantic.tsv')),
     hubert: existsSync(join(dir, '4-cnhubert')),
     wav32k: existsSync(join(dir, '5-wav32k'))
   })
+  // 数据量读不到不该让整份验收失败：缺件那一路照样要报。「重算一次」就是再读一遍目录。
+  try {
+    return { ...judged, stats: readGvDatasetStats(home, expName) }
+  } catch {
+    return { ...judged, stats: null }
+  }
 }
 
 /** 列出引擎包 logs/ 下的实验并逐个验收备料；ready 的排前，同状态按名字排。 */

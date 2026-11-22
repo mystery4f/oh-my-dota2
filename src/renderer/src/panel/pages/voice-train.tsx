@@ -1,6 +1,7 @@
 import * as React from 'react'
 import type { TrainSnapshot } from '@shared/train/task'
 import { judgeGvPreflight, preflightSummary } from '@shared/train/preflight'
+import { judgeGvSize, type GvDatasetStats } from '@shared/train/gv-stats'
 import type { TrainRunRecord } from '@shared/train/run'
 import {
   GV_LEGS,
@@ -97,6 +98,13 @@ export function VoiceTrainPage(): React.ReactElement {
     () => datasets.find((item) => item.expName === targetExp) ?? datasets[0] ?? null,
     [datasets, targetExp]
   )
+  const gvStats: GvDatasetStats | null = dataset?.stats ?? null
+  const size = gvStats === null ? null : judgeGvSize(gvStats)
+  const sizeLine = {
+    pill: size === null ? '没数据' : size.state === 'ok' ? '够' : size.state === 'thin' ? '偏少' : '测不到',
+    tone: size === null ? ('idle' as const) : size.state === 'ok' ? ('ready' as const) : size.state === 'thin' ? ('warn' as const) : ('idle' as const),
+    hint: size?.line ?? '没扫到实验'
+  }
   const expName = dataset?.expName ?? ''
   const leg = GV_LEGS[legKind]
 
@@ -239,6 +247,10 @@ export function VoiceTrainPage(): React.ReactElement {
                 </select>
               </>
             )}
+          </Row>
+          {/* 数据量（#180）：判据在纯缝里，这里只显示一句话，不再自己算一次。 */}
+          <Row label="数据量" stacked hint={sizeLine.hint}>
+            <StatusPill tone={sizeLine.tone}>{sizeLine.pill}</StatusPill>
           </Row>
           <Row label="webui" hint={note || '打标注 / 降噪 / 切音频都在 webui 里做，做完回这里刷新'}>
             <StatusPill tone={webui ? 'ready' : 'idle'}>{webui ? '已开' : '未开'}</StatusPill>

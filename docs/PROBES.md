@@ -100,6 +100,7 @@ The wrapper kills a leftover electron first (such a process holds the single-ins
   - `--asr-hotwords-probe` the pure hotword seam (`src/shared/asr-hotwords.ts`): parse, diff, merge, cap
   - `--provider-reasoning-probe` the pure 推理 toggle seam (`src/shared/provider-reasoning.ts`), zero network and zero model
   - `--zhipu-live-probe` runs the real wrapped pipeline (warm-up → durable session + ledger) against zhipu
+  - `--gv-stats-probe` the voice data a training run will see: sentences, total length with its "about" marker, and the one line that says enough or thin
   - `--train-probe` the pure training decision seam (`src/shared/train.ts`): mutexes, preflight, run state
   - `--train-queue-probe` the training queue (`src/shared/train/queue.ts`): three waiting runs execute in order, and cancelling a waiting entry never reaches the running run
   - `--disk-budget-probe` the pre-run disk budget (`src/shared/train/disk-budget.ts`): a short volume refuses with the measured numbers, an unmeasurable one is let through, and the estimate stays inside the stated band

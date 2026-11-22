@@ -23,6 +23,7 @@ import { runDownloadProbe } from './download'
 import { runHoldWatchProbe } from './hold-watch'
 import { runSpeakerChannelProbe } from './speaker-channel'
 import { runHelmEmptyProbe } from './helm'
+import { runGvStatsProbe } from './gv-stats'
 import { runSpeakSkipProbe } from './speak-skip'
 import { runVisionProbe } from './vision'
 import { runHotkeyProbe } from './hotkeys'
@@ -703,6 +704,12 @@ export const PROBES: readonly ProbeEntry[] = [
     flag: '--zhipu-live-probe',
     summary: 'runs the real wrapped pipeline (warm-up → durable session + ledger) against zhipu',
     run: runZhipuLiveProbe
+  },
+  {
+    flag: '--gv-stats-probe',
+    ci: true,
+    summary: 'the voice data a training run will see: sentences, total length with its "about" marker, and the one line that says enough or thin',
+    run: runGvStatsProbe
   },
   {
     flag: '--train-probe',

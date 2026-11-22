@@ -1,5 +1,7 @@
 /** GV（GPT-SoVITS）微调纯缝（T3）：版本映射、备料验收、s1/s2 训练配置拼装、注册载荷。 */
 
+import type { GvDatasetStats } from './gv-stats'
+
 export type GvVersion = 'v1' | 'v2' | 'v3' | 'v4' | 'v2Pro' | 'v2ProPlus'
 
 /** 引擎包默认 v2ProPlus（v2pro 分发包就是这套底模），下拉也把它排最前。 */
@@ -192,6 +194,8 @@ export interface GvDatasetJudgement {
   expName: string
   ready: boolean
   missing: string[]
+  /** 数据量（#180）：几条录音、总共多长、最近一条什么时候收的；读不到就是 null。 */
+  stats?: GvDatasetStats | null
 }
 
 /** 备料齐全 = webui 三步（1abc）留下的四件套都在；打标注/降噪仍走 webui，这里只验收。 */

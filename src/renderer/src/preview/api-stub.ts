@@ -503,12 +503,20 @@ const stubRecs: FtRecInfo[] = [
 /** 预览里的纠错样本（#66）：只记字节数，够 judgeCorrectionSamples 算出条数/字节/到顶。 */
 const stubCorrections: { bytes: number }[] = [{ bytes: 96_000 }, { bytes: 88_000 }]
 /** 预览里的 GV 实验：一个备料齐、一个缺语义表；`?gv=nodata` 直接空盘。 */
+// #180：数据量那一行要能看到「够 / 偏少 / 测不到」三态，`?gvSize=thin|unknown` 切换。
+const gvSizeStub = query.get('gvSize')
+const stubGvStats =
+  gvSizeStub === 'thin'
+    ? { sentences: 10, sentencesText: '10', wavCount: 10, totalMs: 40_000, estimated: true, newestAt: Date.now() - 2 * 86_400_000, basis: '读前 10/10 个 wav 头的平均 4000 ms × 10 条（实测）' }
+    : gvSizeStub === 'unknown'
+      ? { sentences: 40, sentencesText: '40', wavCount: null, totalMs: null, estimated: false, newestAt: null, basis: '没读到 wav 头（跳过 0 个）' }
+      : { sentences: 40, sentencesText: '40', wavCount: 40, totalMs: 372_000, estimated: true, newestAt: Date.now() - 3 * 86_400_000, basis: '读前 40/40 个 wav 头的平均 9300 ms × 40 条（估）' }
 const stubGvDatasets =
   gvStub === 'nodata'
     ? []
     : [
-        { expName: 'mirana', ready: true, missing: [] },
-        { expName: 'windranger', ready: false, missing: ['语义表 6-name2semantic.tsv'] }
+        { expName: 'mirana', ready: true, missing: [], stats: stubGvStats },
+        { expName: 'windranger', ready: false, missing: ['语义表 6-name2semantic.tsv'], stats: stubGvStats }
       ]
 /** `?gv=failed` 用的那条失败记录：GV 没有导出步，失败就落在训练段（#178 的 Q7）。 */
 const stubGvFailedRun: Awaited<ReturnType<WindowApi['trainRuns']>>[number] = {
