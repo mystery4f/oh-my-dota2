@@ -1,5 +1,8 @@
 import type { AsrFtStatusResult } from '@shared/train/asr-ft'
-// check:pure 直接用 node 加载这个文件，别名 @shared 在那里解析不了，所以走相对路径。
+// 这里必须是**相对路径**，别改成 `@shared/train/preflight`（#184）：
+// `scripts/check-pure.mjs` 用裸 node 加载本文件，node 不认 tsconfig 的 `@shared` 别名，
+// 别名一进来 pre-commit 的 `check:pure` 就报 ERR_MODULE_NOT_FOUND: Cannot find package '@shared/train'。
+// 同仓两种 import 风格不是不一致，是这个文件被两种运行器加载。
 import { progressText, type PreflightItem } from '../../../../shared/train/preflight'
 import type { TrainRunRecord } from '@shared/train/run'
 

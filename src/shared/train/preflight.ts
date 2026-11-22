@@ -133,6 +133,9 @@ export function judgeGvPreflight(input: GvPreflightInput): PreflightItem[] {
  * 它被当状态读，加上标点读起来像句子，人就去找「下面还有什么」。
  * 写法只有这一份——行内 pill、音色页、识别页左栏摘要都走 {@link progressText}。
  */
+// 为什么落在这里、不在 `./task.ts`（#184）：`task.ts` 顶层 `import … from 'node:path'`，
+// 渲染进程价值导入它，vite 会报「Module "node:path" has been externalized」并**整页白屏**。
+// 本文件是纯的、且两个训练页本来就以价值导入引用它，所以这句话放这里最稳。
 export const TRAIN_PROGRESS_UNKNOWN = '这版脚本不报进度'
 
 /** 进度怎么念：正常时是百分比，脚本不报时是这句话。 */

@@ -139,6 +139,8 @@ node scripts/check-settings.mjs --json            # 机器可读：rows[].writes
 
 脚本对每条多写口都给一句「是不是有意」（`src/renderer/src/panel/pages/*` 的一次性写与主进程的整组写分开列），`--strict` 在「有多写口但没注记」时非零。
 
+**判据不锁条数**：`--strict` exit 0 + 每条多写口都带注记，就够了；条数随代码走（写口被合并时少一条是好消息）。把「仍是 N 条」当判据是坏判据——它会把「写者变少了」也判成回归，本文档第一版就这么锁过一次（写 7 条，实际 6 条）。
+
 ## 改了要重启
 
 - `gsiLibraryRoot`：Dota 只在启动时读 GSI 配置，换库后写的新 cfg 要等游戏重启才被读到。提示原文在 `src/renderer/src/panel/pages/overview.tsx`，检查器会核对那句话还在不在（不在了就报「提示丢了」）。
