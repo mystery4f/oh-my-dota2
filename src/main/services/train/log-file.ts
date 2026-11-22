@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { app } from 'electron'
 import type { TrainLogPage } from '@shared/train/task'
+import { logsDir } from '../logs/base-dir'
 
 /**
  * 训练日志文件（`<userData>/logs/train.log`）的唯一读写口。
@@ -19,7 +19,9 @@ const DEFAULT_TAIL_LINES = 400
 let trainLogSize = -1
 
 export function trainLogPath(): string {
-  return join(app.getPath('userData'), 'logs', 'train.log')
+  // 探针进程的 `logsDir()` 指向临时目录（#185）：这条日志也必须走同一条缝，
+  // 否则跑一次 `--train-probe` 就往玩家的真实训练历史里塞几行假 epoch。
+  return join(logsDir(), 'train.log')
 }
 
 export function appendTrainLog(text: string): void {

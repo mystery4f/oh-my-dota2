@@ -4,6 +4,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PROBES } from './registry'
 import { logsDir } from '../services/logs/base-dir'
+import { appendTrainLog, trainLogPath } from '../services/train/log-file'
+import { guardLogPath } from '../services/session/guard-telemetry'
 import {
   gsiSummaryArchiveDir,
   gsiSummaryPath,
@@ -46,6 +48,33 @@ export async function runLogsIsolationProbe(): Promise<void> {
   )
 
   // 真写一次：如果这一层缝破了，下面这条断言会看到真实文件被改动。
+  // #185：`train.log` 曾经绕过这条缝（探针跑一次就往真实训练历史里塞假 epoch）。
+  // 覆盖它的方式不是「看一眼代码」，而是真写一次、再核真实文件逐字节没变。
+  push(
+    'train.log 从 logsDir() 派生',
+    trainLogPath() === join(dir, 'train.log'),
+    trainLogPath()
+  )
+  push(
+    'translate-guard.jsonl 也从 logsDir() 派生',
+    guardLogPath() === join(dir, 'translate-guard.jsonl'),
+    guardLogPath()
+  )
+  const realTrain = trainLogPath().replace(dir, realLogs)
+  const trainBefore = existsSync(realTrain) ? readFileSync(realTrain).length : -1
+  appendTrainLog('epoch 9/10 · logs-isolation-probe')
+  const trainAfter = existsSync(realTrain) ? readFileSync(realTrain).length : -1
+  const tempTrain = existsSync(trainLogPath()) ? readFileSync(trainLogPath(), 'utf8') : ''
+  push(
+    '训练日志写进了临时目录（否则下一条是空转）',
+    tempTrain.includes('logs-isolation-probe'),
+    `${tempTrain.length} bytes`
+  )
+  push(
+    '真实 train.log 逐字节没变（探针不再往用户训练历史里追加）',
+    trainBefore === trainAfter,
+    `${trainBefore} → ${trainAfter} bytes`
+  )
   const realSummary = join(realLogs, 'gsi-summary.json')
   const before = existsSync(realSummary) ? readFileSync(realSummary, 'utf8') : null
   const fakeFrame = { map: { matchid: '9999000001', game_time: 120, clock_time: 120 } }

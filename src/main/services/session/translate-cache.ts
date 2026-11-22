@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { hasHan, normalizeLine } from '@shared/chat-line'
 import { appendCappedJsonl } from '../logs/jsonl'
+import { logsDir } from '../logs/base-dir'
 
 /**
  * 翻译记账本：一次翻译同时记下「你好 ↔ hello」这对，两个方向都能直接命中。
@@ -651,7 +652,7 @@ export function snapshotTranslationStats(): void {
   const counters = translationCacheStats()
   const insights = translationInsights(0)
   appendCappedJsonl(
-    join(app.getPath('userData'), 'logs', 'translate-cache.jsonl'),
+    join(logsDir(), 'translate-cache.jsonl'),
     {
       at: new Date().toISOString(),
       pairs: insights.pairs,

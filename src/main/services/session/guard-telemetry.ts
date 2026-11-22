@@ -9,8 +9,8 @@
  * `summarizeGuardLog`（shared/guard-telemetry）算三段：judged / recovered / gaveUp。
  */
 import { join } from 'node:path'
-import { app } from 'electron'
 import { appendCappedJsonlMany } from '../logs/jsonl'
+import { logsDir } from '../logs/base-dir'
 import type { GuardEvent } from '@shared/guard-telemetry'
 
 /** 攒够这么多条就落盘。守卫事件稀疏，20 条大约是一天的量级。 */
@@ -21,7 +21,7 @@ const MAX_BYTES = 256 * 1024
 let buffer: GuardEvent[] = []
 
 export function guardLogPath(): string {
-  return join(app.getPath('userData'), 'logs', 'translate-guard.jsonl')
+  return join(logsDir(), 'translate-guard.jsonl')
 }
 
 /** 一条违例事件的唯一入口：`guardedTranslate` 的 reporter 直接指向它。 */

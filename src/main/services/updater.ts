@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { errorMessage } from '@shared/errors'
+import { logsDir } from './logs/base-dir'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { autoUpdater } from 'electron-updater'
@@ -26,7 +27,7 @@ import { broadcastToWindows } from '../windows/broadcast'
  */
 function logUpdate(event: string, detail: unknown = ''): void {
   try {
-    const dir = join(app.getPath('userData'), 'logs')
+    const dir = logsDir()
     mkdirSync(dir, { recursive: true })
     const line = JSON.stringify({ at: new Date().toISOString(), event, detail })
     appendFileSync(join(dir, 'updater.log'), line + String.fromCharCode(10))

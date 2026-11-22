@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFil
 import { join } from 'node:path'
 import { app } from 'electron'
 import script from './chat-inplace.ps1?raw'
+import { logsDir } from '../logs/base-dir'
 
 const READY_TIMEOUT_MS = 20_000
 const REQUEST_TIMEOUT_MS = 15_000
@@ -21,7 +22,7 @@ const LOG_MAX_BYTES = 200_000
 /** 逐段计时落盘：用户只说「等好久」时总耗时无法定位，必须知道慢在查进程、写剪贴板还是按键。 */
 function appendLog(line: string): void {
   try {
-    const dir = join(app.getPath('userData'), 'logs')
+    const dir = logsDir()
     mkdirSync(dir, { recursive: true })
     const file = join(dir, 'inplace.log')
     try {
