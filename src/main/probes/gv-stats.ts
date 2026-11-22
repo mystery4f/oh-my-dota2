@@ -67,7 +67,7 @@ export function runGvStatsProbe(): void {
 
   // —— 空目录与「只有 wav、没有音素表」——
   const empty = summarizeGvDataset({ lines: null, capped: false, wavCount: null, sampledMs: [], skipped: 0, newestAt: null })
-  push('两个都没有 → 还没有备料', judgeGvSize(empty, NOW).line.includes('还没有备料'), judgeGvSize(empty, NOW).line)
+  push('两个都没有 → 点名 5-wav32k 不在', judgeGvSize(empty, NOW).line.includes('5-wav32k/ 不在'), judgeGvSize(empty, NOW).line)
   const zero = summarizeGvDataset({ ...healthy, lines: 0, wavCount: 0, sampledMs: [], newestAt: null })
   push('音素表 0 行 → 说是空的、判偏少', judgeGvSize(zero, NOW).state === 'thin' && judgeGvSize(zero, NOW).line.includes('空的'), judgeGvSize(zero, NOW).line)
   const wavOnly = summarizeGvDataset({ ...healthy, lines: null, wavCount: 27, newestAt: NOW })
@@ -78,10 +78,26 @@ export function runGvStatsProbe(): void {
     wavOnlyVerdict.line
   )
 
+  // —— 三种「没有数据」必须是三句话（#180，pm 的前置要求）——
+  const noWavDir = judgeGvSize(summarizeGvDataset({ ...healthy, lines: null, wavCount: null, sampledMs: [], skipped: 0, newestAt: null }), NOW)
+  const emptyDir = judgeGvSize(summarizeGvDataset({ ...healthy, lines: null, wavCount: 0, sampledMs: [], skipped: 0, newestAt: null }), NOW)
+  const wavNoTable = judgeGvSize(summarizeGvDataset({ ...healthy, lines: null, wavCount: 27, newestAt: NOW }), NOW)
+  push(
+    '三种没有数据是三句话，不是一句「还没有备料」',
+    noWavDir.line !== emptyDir.line && emptyDir.line !== wavNoTable.line && noWavDir.line !== wavNoTable.line,
+    [noWavDir.line, emptyDir.line, wavNoTable.line].join(" || ")
+  )
+  push('目录不在 → 点名 5-wav32k 与 1-get-text', noWavDir.line.includes('5-wav32k') && noWavDir.line.includes('1-get-text'), noWavDir.line)
+  push('目录在但没录音 → 说「空的」并指出缺录音', emptyDir.line.includes('空') && emptyDir.line.includes('录音'), emptyDir.line)
+
   // —— 读不出来的头：跳过超过一半就不许再给「约」——
   const skipped = summarizeGvDataset({ ...healthy, sampledMs: [12_000], skipped: 30 })
   push('跳过 30 / 读到 1 → 时长测不到', skipped.totalMs === null, `totalMs=${skipped.totalMs} basis=${skipped.basis}`)
   push('算法自述里写清跳过几个', skipped.basis.includes('跳过 30'), skipped.basis)
+  // 估出来的数不许无条件当成事实：跳过过半时那句话里不能出现「约」。
+  const skippedVerdict = judgeGvSize(skipped, NOW)
+  push('跳过过半 → 那句话里不许有「约」', skippedVerdict.line.includes('约') === false, skippedVerdict.line)
+  push('跳过过半 → 说清跳过了几个', skippedVerdict.line.includes('跳过 30') || skippedVerdict.line.includes('30 个'), skippedVerdict.line)
 
   // —— 行数到顶 ——
   const capped = summarizeGvDataset({ ...healthy, lines: GV_LINE_CAP, capped: true })
@@ -93,6 +109,12 @@ export function runGvStatsProbe(): void {
   const mismatch = summarizeGvDataset({ ...healthy, lines: 40, wavCount: 25, sampledMs: [15_000] })
   const mismatchVerdict = judgeGvSize(mismatch, NOW)
   push('句数与 wav 数差得多 → 提醒对名单', mismatchVerdict.line.includes('差得多'), mismatchVerdict.line)
+  // 只说「对不上」没用：两个方向要给不同的下一步（pm 的前置要求）。
+  const moreLabels = judgeGvSize(summarizeGvDataset({ ...healthy, lines: 140, wavCount: 60, sampledMs: [15_000] }), NOW)
+  const moreWavs = judgeGvSize(summarizeGvDataset({ ...healthy, lines: 60, wavCount: 140, sampledMs: [15_000] }), NOW)
+  push('标注更多 → 说重跑 1-get-text（或删多余标注行）', moreLabels.line.includes('1-get-text') && moreLabels.line.includes('标注比录音多'), moreLabels.line)
+  push('录音更多 → 说重跑 1-get-text 补标注（或删多余 wav）', moreWavs.line.includes('1-get-text') && moreWavs.line.includes('录音比标注多'), moreWavs.line)
+  push("两个方向的下一步不是同一句", moreLabels.line !== moreWavs.line, moreLabels.line)
 
   // —— 真目录：CI 上不存在就 SKIP 并点名 ——
   const asrFt = process.env.OMD2_GV_HOME ?? ''

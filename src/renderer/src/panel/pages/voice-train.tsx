@@ -98,6 +98,8 @@ export function VoiceTrainPage(): React.ReactElement {
     () => datasets.find((item) => item.expName === targetExp) ?? datasets[0] ?? null,
     [datasets, targetExp]
   )
+  // 这几行必须排在 dataset 的 useMemo **之后**（#180）：它们读的是 dataset，
+  // 挪到前面就是读未初始化的 `targetExp`，TDZ 直接白屏（牛马那版踩过一次）。
   const gvStats: GvDatasetStats | null = dataset?.stats ?? null
   const size = gvStats === null ? null : judgeGvSize(gvStats)
   const sizeLine = {
@@ -223,15 +225,19 @@ export function VoiceTrainPage(): React.ReactElement {
             htmlFor="v2-gv-exp"
             hint={
               dataset === null
-                ? '没扫到实验：先跑 webui 的 1abc 三步'
-                : dataset.ready
-                  ? `备料齐全 · 已训 ${runs.filter((run) => run.experiment === dataset.expName).length} 次`
-                  : `缺 ${dataset.missing.join('、')}`
+                ? sizeLine.hint
+                : `${sizeLine.hint} · ${
+                    dataset.ready
+                      ? `备料齐全，已训 ${runs.filter((run) => run.experiment === dataset.expName).length} 次`
+                      : `缺 ${dataset.missing.join('、')}`
+                  }`
             }
           >
             {dataset === null ? null : (
               <>
                 <StatusPill tone={dataset.ready ? 'ready' : 'warn'}>{dataset.ready ? '可开训' : '缺备料'}</StatusPill>
+                {/* 数据量（#180）：判据在纯缝里，这里只显示，不再自己算一次。 */}
+                <StatusPill tone={sizeLine.tone}>{sizeLine.pill}</StatusPill>
                 <select
                   id="v2-gv-exp"
                   className={selectClass}
@@ -247,10 +253,6 @@ export function VoiceTrainPage(): React.ReactElement {
                 </select>
               </>
             )}
-          </Row>
-          {/* 数据量（#180）：判据在纯缝里，这里只显示一句话，不再自己算一次。 */}
-          <Row label="数据量" stacked hint={sizeLine.hint}>
-            <StatusPill tone={sizeLine.tone}>{sizeLine.pill}</StatusPill>
           </Row>
           <Row label="webui" hint={note || '打标注 / 降噪 / 切音频都在 webui 里做，做完回这里刷新'}>
             <StatusPill tone={webui ? 'ready' : 'idle'}>{webui ? '已开' : '未开'}</StatusPill>

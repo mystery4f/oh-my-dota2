@@ -16,13 +16,27 @@
 export const GV_THIN_SENTENCES = 40
 export const GV_THIN_SECONDS = 300
 
-/** 行数上界：几万行的音素表数到底也不会改变结论。 */
+/**
+ * 行数上界 = 20000。为什么是这个数：判定线只有 40 句，20000 是它的 500 倍余量——
+ * 数到这个量级时结论早已是「够」，再往下数只烧时间不改结论；而 20000 行以上的音素表
+ * 本身已经是几十 MB 的异常文件，真遇到了也该先查数据而不是等这里数完。到顶就写「N+」，
+ * 说清这只是下界。
+ */
 export const GV_LINE_CAP = 20_000
 
-/** 时长采样上界：读这么多个 wav 头算平均。 */
+/**
+ * 时长采样上界 = 40 个 wav 头。为什么是这个数：判定线是「40 句 / 5 分钟」这种粗线，
+ * 40 个样本的均值标准误约 1/√40 ≈ 16%，16% 的抖动翻不动「够不够」的结论；再往上读，
+ * 每个样本还要一次开文件读 44 字节，几百条录音时收益立刻变成启动耗时。读不出的头会计数，
+ * 跳过超过一半就不给估算值（见 `summarizeGvDataset`）。
+ */
 export const GV_WAV_SAMPLE = 40
 
-/** 句数与 wav 个数差到这个比例就说「标签和录音对不上」（0.1 = 10%）。 */
+/**
+ * 句数与 wav 个数差到 10% 就说「标签和录音对不上」。为什么 10%：
+ * 正常流程里两者是同一批文件一一对应的，差一两条是手抖，差到十分之一就是流程断了一截
+ * （录了没标注、或标注了录音被删）。给结论时必须一并给下一步，见 `mismatchText`。
+ */
 export const GV_MISMATCH_RATIO = 0.1
 
 /** 主进程读到的事实（纯缝只折叠，不读盘）。 */
@@ -113,12 +127,29 @@ function mismatchText(stats: GvDatasetStats): string | null {
   if (sentences === null || wavCount === null || wavCount === 0) return null
   const diff = Math.abs(sentences - wavCount) / Math.max(sentences, wavCount)
   if (diff <= GV_MISMATCH_RATIO) return null
-  return `标签 ${stats.sentencesText} 句和录音 ${wavCount} 个差得多：先对一遍名单再训`
+  // 只说「对不上」没用，要说是哪一边多、下一步跑哪一步（#180，pm 的前置要求）。
+  const more = Math.abs(sentences - wavCount)
+  const next =
+    sentences > wavCount
+      ? `标注比录音多 ${more} 条：重跑 1-get-text 重新生成标注（或删掉多出来的标注行）再训`
+      : `录音比标注多 ${more} 个：重跑 1-get-text 给漏掉的录音补标注（或删掉多余 wav）再训`
+  return `标签 ${stats.sentencesText} 句和录音 ${wavCount} 个差得多：${next}`
 }
 
 /** 「够不够」的结论。页面只显示，不许再判一次。 */
 export function judgeGvSize(stats: GvDatasetStats, now = Date.now()): GvSizeVerdict {
   if (stats.sentences === null) {
+    // 三种「没有数据」是三句话（#180）：目录不在 / 目录在没录音 / 有录音没标注。
+    // 合并成一句「还没有备料」等于让人猜自己卡在哪一步。
+    if (stats.wavCount === null) {
+      return {
+        state: 'unknown',
+        line: '5-wav32k/ 不在：文本侧还没跑（先跑 1-get-text，它才会切出 32k 录音）'
+      }
+    }
+    if (stats.wavCount === 0) {
+      return { state: 'unknown', line: '5-wav32k/ 是空的：文本侧跑过了，但还没录过音（先去 webui 录音）' }
+    }
     // 只有 wav、没有音素表：知道一半，就说这一半。
     if (stats.wavCount !== null && stats.wavCount > 0) {
       return {
@@ -126,7 +157,7 @@ export function judgeGvSize(stats: GvDatasetStats, now = Date.now()): GvSizeVerd
         line: `有 ${stats.wavCount} 个录音但还没有音素表（2-name2text.txt）：先打标注 · ${recentText(stats.newestAt, now)}`
       }
     }
-    return { state: 'unknown', line: '还没有备料：先让 webui 生成 2-name2text.txt' }
+    return { state: 'unknown', line: '还没有备料：先让 webui 生成 2-name2text.txt' } // 到不了，上面三条已覆盖
   }
   if (stats.sentences === 0) {
     return { state: 'thin', line: '音素表是空的（0 句）：先补录音再打标注' }
@@ -134,9 +165,11 @@ export function judgeGvSize(stats: GvDatasetStats, now = Date.now()): GvSizeVerd
   const tail = recentText(stats.newestAt, now)
   const mismatch = mismatchText(stats)
   if (stats.totalMs === null) {
+    // 采样读不出来时**不许**出现「约」：估不出来的数就是没有数（#180，pm 的前置要求），
+    // 同时要说清跳过了几个，否则「测不到」和「文件坏了」分不开。
     return {
       state: 'unknown',
-      line: `${stats.sentencesText} 句 · 时长测不到（5-wav32k/ 里的 wav 头读不出来）· ${tail}`
+      line: `${stats.sentencesText} 句 · 时长测不到（${stats.basis}）· ${tail}`
     }
   }
   const head = `${stats.sentencesText} 句 · ${stats.estimated ? '约 ' : ''}${minutes(stats.totalMs)} 分钟 · ${tail}`
