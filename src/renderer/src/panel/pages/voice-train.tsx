@@ -225,19 +225,15 @@ export function VoiceTrainPage(): React.ReactElement {
             htmlFor="v2-gv-exp"
             hint={
               dataset === null
-                ? sizeLine.hint
-                : `${sizeLine.hint} · ${
-                    dataset.ready
-                      ? `备料齐全，已训 ${runs.filter((run) => run.experiment === dataset.expName).length} 次`
-                      : `缺 ${dataset.missing.join('、')}`
-                  }`
+                ? '没扫到实验：先跑 webui 的 1abc 三步'
+                : dataset.ready
+                  ? `备料齐全 · 已训 ${runs.filter((run) => run.experiment === dataset.expName).length} 次`
+                  : `缺 ${dataset.missing.join('、')}`
             }
           >
             {dataset === null ? null : (
               <>
                 <StatusPill tone={dataset.ready ? 'ready' : 'warn'}>{dataset.ready ? '可开训' : '缺备料'}</StatusPill>
-                {/* 数据量（#180）：判据在纯缝里，这里只显示，不再自己算一次。 */}
-                <StatusPill tone={sizeLine.tone}>{sizeLine.pill}</StatusPill>
                 <select
                   id="v2-gv-exp"
                   className={selectClass}
@@ -253,6 +249,11 @@ export function VoiceTrainPage(): React.ReactElement {
                 </select>
               </>
             )}
+          </Row>
+          {/* 数据量（#180）：一行答一个问题——上面那行答「用哪份数据训」，这行答「够不够训」。
+              判据在纯缝里（judgeGvSize），这里只显示，不再自己算一次。 */}
+          <Row label="数据量" stacked hint={sizeLine.hint}>
+            <StatusPill tone={sizeLine.tone}>{sizeLine.pill}</StatusPill>
           </Row>
           <Row label="webui" hint={note || '打标注 / 降噪 / 切音频都在 webui 里做，做完回这里刷新'}>
             <StatusPill tone={webui ? 'ready' : 'idle'}>{webui ? '已开' : '未开'}</StatusPill>
